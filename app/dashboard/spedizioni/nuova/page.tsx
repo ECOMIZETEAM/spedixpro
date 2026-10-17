@@ -684,7 +684,7 @@ export default function NuovaSpedizionePage() {
                   </TendinaSugg>
                 </div>
                 <div><label style={lbl}>Paese</label>
-                  <select value={dest.paese} onChange={e=>{ const paese=e.target.value; setDest(d=>({...d, paese, provincia: paese==='IT' ? (d.paese==='IT'?d.provincia:'') : paese})); setTariffe([]); setSelected(null) }} style={inp}>
+                  <select value={dest.paese} onChange={e=>{ const paese=e.target.value; setDest(d=>({...d, paese, provincia: paese==='IT' ? (d.paese==='IT'?d.provincia:'') : paese})); setSuggComuni([]); setShowSugg(false); setTariffe([]); setSelected(null) }} style={inp}>
                     {PAESI_MONDO.map(p => <option key={p.code} value={p.code}>{p.nome}</option>)}
                   </select>
                 </div>
@@ -699,19 +699,29 @@ export default function NuovaSpedizionePage() {
                       const v=e.target.value
                       setDest(d=>({...d,citta:v}))
                       if(v.trim().length>=2){
-                        try{ const r=await fetch('/api/comuni?q='+encodeURIComponent(v)); const j=await r.json(); setSuggComuni(Array.isArray(j)?j:[]); setShowSugg(true) }catch{ setSuggComuni([]) }
+                        try{ const r=await fetch('/api/comuni?q='+encodeURIComponent(v)+'&paese='+encodeURIComponent(dest.paese)); const j=await r.json(); setSuggComuni(Array.isArray(j)?j:[]); setShowSugg(true) }catch{ setSuggComuni([]) }
                       } else { setSuggComuni([]); setShowSugg(false) }
                     }}
                     onFocus={()=>{ if(suggComuni.length) setShowSugg(true) }}
                     onBlur={()=>setTimeout(()=>setShowSugg(false),200)}
                     placeholder="Roma" style={inp}/>
-                  <TendinaSugg anchorRef={cittaDestRef} aperto={showSugg && suggComuni.length>0}>
-                      {suggComuni.map((c:any,i:number)=>(
-                        <div key={i} onMouseDown={()=>{ setDest(d=>({...d,citta:c.nome,provincia:c.sigla,cap:c.cap})); setShowSugg(false) }}
+                  {/* Solo le voci del paese scelto ADESSO: una risposta partita prima di cambiare paese
+                      (o la tendina rimasta aperta) non deve rimettere citta' italiane su un pacco tedesco.
+                      All'estero la provincia resta la sigla del paese, come la mette il cambio di paese; dove
+                      l'archivio ha solo la prima parte del CAP (Paesi Bassi, Regno Unito, Irlanda, Malta) un CAP
+                      gia' scritto per intero che comincia cosi' non si accorcia. */}
+                  <TendinaSugg anchorRef={cittaDestRef} aperto={showSugg && suggComuni.some((c:any)=>(c.paese||'IT')===dest.paese)}>
+                      {suggComuni.filter((c:any)=>(c.paese||'IT')===dest.paese).map((c:any,i:number)=>(
+                        <div key={i} onMouseDown={()=>{
+                            if ((c.paese||'IT')!=='IT') {
+                              const gia=(d:any)=>c.parziale && String(d.cap||'').toUpperCase().replace(/\s/g,'').startsWith(String(c.cap).toUpperCase().replace(/\s/g,''))
+                              setDest(d=>({...d,citta:c.nome,cap:gia(d)?d.cap:c.cap}))
+                            } else setDest(d=>({...d,citta:c.nome,provincia:c.sigla,cap:c.cap}))
+                            setShowSugg(false) }}
                           style={{padding:'7px 10px',fontSize:'12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',color:'#1a1a1a'}}
                           onMouseEnter={e=>(e.currentTarget.style.background='#f9fafb')}
                           onMouseLeave={e=>(e.currentTarget.style.background='#fff')}>
-                          {c.nome} <span style={{color:'#999'}}>({c.sigla}) - {c.cap}</span>
+                          {c.nome} <span style={{color:'#999'}}>({(c.paese||'IT')!=='IT' ? c.provincia : c.sigla}) - {c.cap}{c.parziale ? ' … da completare' : ''}</span>
                         </div>
                       ))}
                   </TendinaSugg>

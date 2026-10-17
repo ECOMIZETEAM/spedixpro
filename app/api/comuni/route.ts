@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import comuni from '@/lib/data/comuni.json'
 import frazioni from '@/lib/data/frazioni.json'
+import { cercaLocalitaEstere } from '@/lib/localita-estere'
 
 type Comune = { nome: string; sigla: string; provincia: string; cap: string[] }
 type Loc = { nome: string; sigla: string; provincia: string; cap: string }
 const COMUNI = comuni as Comune[]
 const FRAZIONI = frazioni as Loc[]   // frazioni/località (GeoNames) non già presenti come comuni
 
-type Voce = { nome: string; sigla: string; provincia: string; cap: string }
+type Voce = { nome: string; sigla: string; provincia: string; cap: string; paese?: string }
 
 // COME SI CONFRONTANO I NOMI: senza apostrofi, senza accenti, senza spazi.
 //
@@ -34,17 +35,25 @@ const FRAZIONI_K = FRAZIONI.map((f) => ({ f, k: norm(f.nome) }))
 // Autocomplete comune/frazione/CAP per Nuova Spedizione.
 // - NOME  -> comuni + frazioni corrispondenti (comuni prima), coi loro CAP.
 // - CAP (solo cifre) -> ricerca inversa dal CAP a comune/frazione + provincia.
+// - `paese` diverso da IT -> l'archivio di QUEL paese (lib/localita-estere.ts), mai l'Italia.
 export async function GET(req: NextRequest) {
   const raw = (req.nextUrl.searchParams.get('q') || '').trim()
+
+  // IL PAESE DECIDE L'ARCHIVIO. Prima la rotta non lo riceveva: con destinatario in Germania,
+  // "Ber" proponeva Bergamo, e sceglierlo metteva citta', provincia e CAP italiani su un pacco
+  // tedesco. Un paese senza archivio (la Grecia, l'extra-Europa) non riceve suggerimenti: meglio
+  // nessuno che quelli di un altro paese. Senza `paese` resta l'Italia, come per il mittente.
+  const paese = (req.nextUrl.searchParams.get('paese') || 'IT').trim().toUpperCase()
+  if (paese !== 'IT') return NextResponse.json(await cercaLocalitaEstere(paese, raw))
 
   // ── Ricerca inversa per CAP (solo cifre) ─────────────────────────────
   if (/^\d{2,5}$/.test(raw)) {
     const voci: Voce[] = []
     for (const c of COMUNI) for (const cap of c.cap) {
-      if (cap.startsWith(raw)) voci.push({ nome: c.nome, sigla: c.sigla, provincia: c.provincia, cap })
+      if (cap.startsWith(raw)) voci.push({ nome: c.nome, sigla: c.sigla, provincia: c.provincia, cap, paese: 'IT' })
     }
     for (const f of FRAZIONI) {
-      if (f.cap.startsWith(raw)) voci.push({ nome: f.nome, sigla: f.sigla, provincia: f.provincia, cap: f.cap })
+      if (f.cap.startsWith(raw)) voci.push({ nome: f.nome, sigla: f.sigla, provincia: f.provincia, cap: f.cap, paese: 'IT' })
     }
     voci.sort((a, b) => a.cap.localeCompare(b.cap) || a.nome.localeCompare(b.nome))
     return NextResponse.json(voci.slice(0, 80))
@@ -69,10 +78,10 @@ export async function GET(req: NextRequest) {
   const voci: Voce[] = []
   const pushComune = (c: Comune) => {
     // TUTTI i CAP del comune (prima erano troncati a 6 -> mancavano quelli delle città grandi)
-    if (c.cap.length <= 1) voci.push({ nome: c.nome, sigla: c.sigla, provincia: c.provincia, cap: c.cap[0] || '' })
-    else for (const cap of c.cap) voci.push({ nome: c.nome, sigla: c.sigla, provincia: c.provincia, cap })
+    if (c.cap.length <= 1) voci.push({ nome: c.nome, sigla: c.sigla, provincia: c.provincia, cap: c.cap[0] || '', paese: 'IT' })
+    else for (const cap of c.cap) voci.push({ nome: c.nome, sigla: c.sigla, provincia: c.provincia, cap, paese: 'IT' })
   }
-  const pushLoc = (f: Loc) => voci.push({ nome: f.nome, sigla: f.sigla, provincia: f.provincia, cap: f.cap })
+  const pushLoc = (f: Loc) => voci.push({ nome: f.nome, sigla: f.sigla, provincia: f.provincia, cap: f.cap, paese: 'IT' })
 
   // Ordine: comuni "inizia con" -> frazioni "inizia con" -> comuni "contiene" -> frazioni "contiene"
   for (const c of cSW.slice(0, 40)) pushComune(c)
