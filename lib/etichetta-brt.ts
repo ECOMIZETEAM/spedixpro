@@ -24,7 +24,7 @@ function escPdf(s: string): string {
 // Il testo del PDF e' latin1 con Helvetica standard: accenti tolti, il resto fuori tabella scartato
 // (stesso motivo di lib/etichetta-spedisci).
 function soloLatin1(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '')
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '')
 }
 function chiave(s: string): string {
   return soloLatin1(s).toUpperCase().replace(/[^A-Z0-9]/g, '')

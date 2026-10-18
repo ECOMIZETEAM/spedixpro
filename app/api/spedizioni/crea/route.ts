@@ -20,6 +20,7 @@ import { EMAIL_PER_CORRIERE,
 // Il sanificatore dei messaggi del corriere ora sta in lib/errore-corriere.ts: lo usano anche
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
+import { stampaMittenteSpedizione } from '@/lib/etichetta-mittente'
 // Con quale citta' si prezza e quanto paga il cliente: due decisioni che stavano scritte qui dentro
 // e che ora condivide l'anteprima dei prezzi (import e ordini dei negozi). Una regola, due porte.
 import { cittaPerLaSpedizione } from '@/lib/citta-spedizione'
@@ -2091,12 +2092,18 @@ export async function POST(req: NextRequest) {
       const numeroBare = ris.numeroSpedizione
       const numeroFinale = ris.tracking || ris.numeroSpedizione
 
+      // MITTENTE STAMPATO: GLS mette in alto l'intestatario del conto ("Waveship Llc" sui contratti di
+      // Wave) anche sul pacco di un cliente. Dove il contratto lo chiede (lib/etichetta-mittente) ci va il
+      // mittente vero; la sostituzione la fa etichetteGls, da cui passa ogni etichetta GLS. Mai bloccante.
+      const mittenteGls = (await stampaMittenteSpedizione(adminCrea, corriereRecord).catch(() => false))
+        ? { nome: body.shipFrom?.name, destinatario: body.shipTo?.name } : null
+
       // Etichette: una PER COLLO (GetPdfBySped NumeroCollo 1..N; col vuoto non torna nulla).
       // L'etichetta "della spedizione" è l'unione (una pagina per collo, come easyparcel).
       let etichettePerCollo: string[] = []
       let etichettaUrl: string | null = null
       try {
-        const et = await etichetteGls(credGls, numeroBare, ris.numeroColli, { bda })
+        const et = await etichetteGls(credGls, numeroBare, ris.numeroColli, { bda, mittente: mittenteGls })
         etichettePerCollo = et.etichette.map(b => `data:application/pdf;base64,${b}`)
         if (et.etichette.length) {
           const { unisciEtichette } = await import('@/lib/easyparcel')
@@ -2186,7 +2193,7 @@ export async function POST(req: NextRequest) {
           try {
             const { etichetteGls } = await import('@/lib/gls')
             const { unisciEtichette } = await import('@/lib/easyparcel')
-            const et = await etichetteGls(credGls, numeroBare, numColliBg, { bda })
+            const et = await etichetteGls(credGls, numeroBare, numColliBg, { bda, mittente: mittenteGls })
             if (et.etichette.length) {
               const merged = await unisciEtichette(et.etichette)
               const upd: any = {}
@@ -2304,18 +2311,12 @@ export async function POST(req: NextRequest) {
 
       // MITTENTE STAMPATO. BRT scrive nella casella mittente l'intestatario del CONTO, non il mittente
       // della spedizione: sul BRT di Wave ship ogni pacco usciva "WAVESHIP LLC EIN", anche quello di un
-      // suo cliente. Solo sui contratti con settings.etichetta_mittente_spedizione (oggi solo quello di
-      // Wave) la riga diventa il mittente vero, collo per collo prima di unire le etichette. L'impostazione
-      // si legge dal contratto del DETENTORE (contratto_id): le copie dei sotto-master non la portano, ma
-      // il conto BRT è lo stesso. Mai bloccante: la spedizione esiste già su BRT, qualunque intoppo qui
-      // lascia l'etichetta di BRT com'è.
+      // suo cliente. Dove il contratto lo chiede (lib/etichetta-mittente, letto dal detentore) la riga
+      // diventa il mittente vero, collo per collo prima di unire le etichette. Mai bloccante: la
+      // spedizione esiste già su BRT, qualunque intoppo qui lascia l'etichetta di BRT com'è.
       let etichetteBrt = ris.etichette
       try {
-        const { data: ccBrt } = await adminCrea.from('corrieri').select('contratto_id').eq('id', corriereRecord.id).maybeSingle()
-        const radiceBrt = (ccBrt as any)?.contratto_id || corriereRecord.id
-        const settRadiceBrt = radiceBrt === corriereRecord.id ? corriereRecord.settings
-          : (await adminCrea.from('corrieri').select('settings').eq('id', radiceBrt).maybeSingle()).data?.settings
-        if ((settRadiceBrt as any)?.etichetta_mittente_spedizione === true && etichetteBrt.length) {
+        if (etichetteBrt.length && await stampaMittenteSpedizione(adminCrea, corriereRecord)) {
           const { mittenteEtichettaBrt } = await import('@/lib/etichetta-brt')
           const opzMitt = { nome: body.shipFrom?.name, provincia: body.shipFrom?.state, destinatario: body.shipTo?.name }
           etichetteBrt = await Promise.all(etichetteBrt.map(b => mittenteEtichettaBrt(b, opzMitt)))

@@ -391,15 +391,27 @@ export async function etichettaGls(
 
 // Etichette di TUTTI i colli (uno per collo: GetPdfBySped NumeroCollo 1..N). Torna il base64 per
 // collo nell'ordine (indice 0 = collo 1). Best-effort: salta i colli che non tornano.
+// `mittente`: SOLO dove il contratto lo chiede (lib/etichetta-mittente), il nome dell'intestatario del
+// conto GLS stampato in alto si sostituisce col mittente della spedizione. E' qui perche' da qui passa
+// OGNI etichetta GLS: creazione, ripresa in background e recupero all'apertura.
 export async function etichetteGls(
-  cred: CredenzialiGls, numeroSpedizione: string, numeroColli: number, opts?: { bda?: string; tipoPorto?: string }
+  cred: CredenzialiGls, numeroSpedizione: string, numeroColli: number,
+  opts?: { bda?: string; tipoPorto?: string; mittente?: { nome?: string | null; destinatario?: string | null } | null }
 ): Promise<{ etichette: string[]; errore: string | null }> {
   const n = Math.max(1, Math.round(numeroColli || 1))
+  const { mittente, ...optsGls } = opts || {}
   const etichette: string[] = []
   for (let i = 1; i <= n; i++) {
     try {
-      const et = await etichettaGls(cred, numeroSpedizione, { ...opts, numeroCollo: String(i) })
-      if (et.pdfBase64) etichette.push(et.pdfBase64)
+      const et = await etichettaGls(cred, numeroSpedizione, { ...optsGls, numeroCollo: String(i) })
+      if (et.pdfBase64) {
+        let pdf = et.pdfBase64
+        if (mittente?.nome) {
+          const { mittenteEtichettaGls } = await import('@/lib/etichetta-gls')
+          pdf = await mittenteEtichettaGls(pdf, mittente)
+        }
+        etichette.push(pdf)
+      }
     } catch { /* la riprende il recupero in background */ }
   }
   return { etichette, errore: etichette.length ? null : 'nessuna etichetta disponibile' }
@@ -523,9 +535,18 @@ export async function recuperaEtichettaGlsSalvando(
   if (!cred.sigla_sede || !cred.user_webservice || !cred.password_webservice) return null
 
   const nColli = Math.max(1, Math.round(Number(sped.colli) || 1))
+  // Mittente vero al posto dell'intestatario del conto, se il contratto lo chiede (come alla creazione).
+  let mittente: { nome: string | null; destinatario: string | null } | null = null
+  try {
+    const { stampaMittenteSpedizione } = await import('@/lib/etichetta-mittente')
+    if (await stampaMittenteSpedizione(admin, { id: sped.corriere_id })) {
+      const { data: sm } = await admin.from('spedizioni').select('mitt_nome, dest_nome').eq('id', sped.id).maybeSingle()
+      if (sm?.mitt_nome) mittente = { nome: sm.mitt_nome, destinatario: sm.dest_nome }
+    }
+  } catch { /* senza mittente si serve l'etichetta di GLS com'e' */ }
   // Sul Parcel l'etichetta si e' presa (prova del 14/10/2026) passando anche il riferimento Bda, che
   // la creazione salva in raw_response.bda solo per le Parcel: le nazionali restano come prima.
-  const et = await etichetteGls(cred, numeroBare, nColli, raw.parcel && raw.bda ? { bda: String(raw.bda) } : undefined)
+  const et = await etichetteGls(cred, numeroBare, nColli, { ...(raw.parcel && raw.bda ? { bda: String(raw.bda) } : {}), mittente })
   if (!et.etichette.length) return null
 
   // Unione multicollo (una pagina per collo), come alla creazione; mono-collo = diretta.
