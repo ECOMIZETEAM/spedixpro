@@ -18,21 +18,25 @@ import crypto from 'crypto'
 
 type Chiave = { id: string; k: Buffer }
 
+// Una voce scritta male NON si salta: si ferma tutto. Saltarla in silenzio vorrebbe dire, a una
+// rotazione sbagliata, continuare a cifrare con la chiave vecchia credendo di usare la nuova; o,
+// se la voce sbagliata e' l'unica, cifrare con nessuna.
 function chiavi(): Chiave[] {
   const voci = (process.env.INTEGRAZIONI_CHIAVI_CIFRATURA || '').split(',').map(s => s.trim()).filter(Boolean)
   const out: Chiave[] = []
-  for (const v of voci) {
+  voci.forEach((v, n) => {
     const i = v.indexOf(':')
-    if (i <= 0) continue
-    const id = v.slice(0, i)
-    const k = Buffer.from(v.slice(i + 1), 'base64')
-    if (/^[a-z0-9]+$/i.test(id) && k.length === 32) out.push({ id, k })
-  }
+    const id = i > 0 ? v.slice(0, i) : ''
+    const k = i > 0 ? Buffer.from(v.slice(i + 1), 'base64') : Buffer.alloc(0)
+    if (!/^[a-z0-9]+$/i.test(id) || k.length !== 32) throw new Error(`INTEGRAZIONI_CHIAVI_CIFRATURA: la voce ${n + 1} non e' "id:chiave base64 di 32 byte"`)
+    if (out.some(x => x.id === id)) throw new Error(`INTEGRAZIONI_CHIAVI_CIFRATURA: l'id "${id}" compare due volte`)
+    out.push({ id, k })
+  })
   return out
 }
 
 export function cifraturaConfigurata(): boolean {
-  return chiavi().length > 0
+  try { return chiavi().length > 0 } catch (e: any) { console.error('[CIFRATURA] ' + e.message); return false }
 }
 
 export function cifra(testo: string): string {

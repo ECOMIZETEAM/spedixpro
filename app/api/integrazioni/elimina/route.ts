@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   // Adesso il dominio del negozio resta scritto sull'ordine (colonna `shop`), quindi il redact li
   // trova comunque; ma la cosa giusta e' non crearli proprio.
   const { data: daEliminare } = await supabase
-    .from('integrazioni').select('identificativo')
+    .from('integrazioni').select('identificativo, piattaforma')
     .eq('id', id).eq('cliente_id', utente.cliente_id).maybeSingle()
 
   const { error } = await supabase
@@ -45,6 +45,21 @@ export async function POST(req: NextRequest) {
         .update({ shop: (daEliminare as any).identificativo })
         .eq('integrazione_id', id).is('shop', null)
     } catch { /* il redact ha comunque il ripiego per integrazione_id */ }
+  }
+
+  // AMAZON: i dati di un account scollegato si cancellano subito (Data Protection Policy §1.7,
+  // lib/amazon cancellaDatiAmazon). Solo se la riga e' davvero sparita: una cancellazione respinta
+  // non deve portarsi via gli ordini di un collegamento ancora attivo.
+  if ((daEliminare as any)?.piattaforma === 'amazon') {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const adm = createAdminSupabase()
+      const { data: ancora } = await adm.from('integrazioni').select('id').eq('id', id).maybeSingle()
+      if (!ancora) {
+        const { cancellaDatiAmazon } = await import('@/lib/amazon')
+        await cancellaDatiAmazon(adm, id)
+      }
+    } catch (e: any) { console.error('[ELIMINA] dati Amazon non cancellati:', e?.message || e) }
   }
   return NextResponse.json({ ok: true })
 }

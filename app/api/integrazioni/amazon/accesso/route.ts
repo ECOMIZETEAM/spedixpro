@@ -7,10 +7,11 @@ import crypto from 'crypto'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// "OAuth Login URI" dell'app Amazon: e' la pagina che Amazon apre quando il venditore autorizza
-// partendo dall'APPSTORE (non dal nostro portale). Amazon passa `amazon_callback_uri` e
-// `amazon_state`; noi riconosciamo il cliente dalla sessione, gli diamo uno `state` nostro e lo
-// rimandiamo ad Amazon, che poi chiude il giro sul callback come per il collegamento dal portale.
+// "OAuth Login URI" dell'app Amazon: la pagina che Amazon apre quando il venditore autorizza
+// partendo dall'APPSTORE (o rinnova l'autorizzazione). Amazon passa `amazon_callback_uri` e
+// `amazon_state` (piu' `version=beta` finche' l'app e' in bozza); noi riconosciamo il cliente dalla
+// sessione, gli diamo uno `state` nostro e lo rimandiamo ad Amazon, che chiude il giro sul
+// callback come per il collegamento dal portale.
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const callbackAmazon = url.searchParams.get('amazon_callback_uri') || ''
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
   if (utente?.ruolo !== 'cliente' || !utente?.cliente_id) return NextResponse.redirect(new URL('/cliente?error=amazon_accedi', req.url))
 
   const state = crypto.randomBytes(24).toString('hex')
-  const ritorno = amazonCallbackAppstore(callbackAmazon, statoAmazon, state)
+  const ritorno = amazonCallbackAppstore(callbackAmazon, statoAmazon, state, url.searchParams.get('version'))
   if (!ritorno) return NextResponse.redirect(new URL('/cliente/integrazioni?error=collegamento+Amazon+non+valido', req.url))
   await createAdminSupabase().from('shopify_oauth_state').insert({ state, cliente_id: utente.cliente_id, master_id: utente.master_id, shop: 'amazon' })
   return NextResponse.redirect(ritorno)

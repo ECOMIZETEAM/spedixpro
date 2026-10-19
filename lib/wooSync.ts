@@ -156,7 +156,7 @@ async function righeEsistenti(db: any, integrazioneId: string, ids: string[]): P
   return m
 }
 
-async function capofilaDiUnioni(db: any, ids: string[]): Promise<Set<string>> {
+export async function capofilaDiUnioni(db: any, ids: string[]): Promise<Set<string>> {
   const s = new Set<string>()
   for (let i = 0; i < ids.length; i += 200) {
     const { data, error } = await db.from('ordini_ecommerce').select('unito_in').in('unito_in', ids.slice(i, i + 200))

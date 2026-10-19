@@ -159,8 +159,12 @@ export default function IntegrazioniPage() {
     }
   }
 
-  async function rimuovi(id: string, nome: string) {
-    if (!await dialog.confirm({ title: `Scollegare "${nome || 'questo negozio'}"?`, danger: true, confirmText: 'Scollega' })) return
+  async function rimuovi(id: string, nome: string, piattaforma?: string) {
+    // Amazon: le sue regole sui dati vogliono cancellati gli ordini di un account scollegato.
+    const message = piattaforma === 'amazon'
+      ? 'Gli ordini Amazon non ancora spediti spariscono dal portale; quelli spediti restano, senza i dati del compratore. Ricollegando l\'account tornano gli ordini ancora da spedire.'
+      : undefined
+    if (!await dialog.confirm({ title: `Scollegare "${nome || 'questo negozio'}"?`, message, danger: true, confirmText: 'Scollega' })) return
     try {
       const res = await fetch('/api/integrazioni/elimina', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -275,7 +279,7 @@ export default function IntegrazioniPage() {
                     Sincronizza
                   </button>
                   <button
-                    onClick={() => rimuovi(it.id, it.nome_negozio || '')}
+                    onClick={() => rimuovi(it.id, it.nome_negozio || '', it.piattaforma)}
                     style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '7px', padding: '7px 12px', fontSize: '12.5px', cursor: 'pointer', color: '#b91c1c' }}
                   >
                     Scollega

@@ -9,53 +9,67 @@ import { vettoreAmazon } from '@/lib/amazon-vettore'
 // di aggiungere un secondo pacco. Amazon risponde 204 senza corpo.
 //
 // Gli ordini UNITI in un solo pacco (lib/ordini-uniti) si confermano col tracking del pacco del
-// capofila: se restano non confermati, per Amazon il venditore non li ha spediti (ritardi e
-// reclami sul suo account), come gia' si fa nel file di conferma per gli ordini da file.
+// capofila, subito dopo di lui: se restano non confermati, per Amazon il venditore non li ha
+// spediti (ritardi e reclami sul suo account), come gia' si fa nel file di conferma per gli ordini
+// da file. Il cron fulfill-retry li rimette in giro se restano indietro.
 //
-// Amazon concede 2 conferme al secondo (raffica di 10): oltre TEMPO_MAX_MS ci si ferma, e il cron
+// Si salta (stato terminale 'annullato_store') un ordine che Amazon da' annullato: nel pacco non
+// c'e' (lib/ordini-uniti lo lascia fuori) e confermarlo darebbe solo un errore.
+//
+// Amazon concede 2 conferme al secondo (raffica di 10), e questa funzione gira dentro la
+// creazione della distinta, che l'utente aspetta: oltre TEMPO_MAX_MS ci si ferma, e il cron
 // fulfill-retry riprende gli ordini rimasti senza esito.
-const TEMPO_MAX_MS = 60000
+const TEMPO_MAX_MS = 30000
 
 export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[]) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  const colonne = 'id,integrazione_id,ordine_esterno_id,numero_ordine,articoli,spedizione_id,unito_in,fulfillment_stato'
+  const colonne = 'id,integrazione_id,ordine_esterno_id,numero_ordine,articoli,spedizione_id,unito_in,stato_pagamento,fulfillment_stato'
   const { data: diretti } = await db.from('ordini_ecommerce').select(colonne)
     .in('spedizione_id', spedizioneIds).eq('piattaforma', 'amazon')
   if (!diretti?.length) return esiti
 
-  // Gli assorbiti dei capofila qui sopra: viaggiano nel pacco del capofila.
-  const { data: assorbiti } = await db.from('ordini_ecommerce').select(colonne)
+  // Gli uniti dei capofila qui sopra: viaggiano nel pacco del capofila e si confermano subito dopo
+  // di lui, cosi' il limite di tempo non taglia sempre loro.
+  const { data: uniti } = await db.from('ordini_ecommerce').select(colonne)
     .in('unito_in', diretti.map((o: any) => o.id)).eq('piattaforma', 'amazon')
-  const spedDi = new Map<string, string>(diretti.map((o: any) => [String(o.id), String(o.spedizione_id)]))
-  const daConfermare = [
-    ...diretti.map((o: any) => ({ o, spedId: String(o.spedizione_id) })),
-    ...(assorbiti || []).map((o: any) => ({ o, spedId: spedDi.get(String(o.unito_in)) || '' })),
-  ].filter(x => x.spedId && x.o.fulfillment_stato !== 'ok')
-  if (!daConfermare.length) return esiti
+  const unitiDi = new Map<string, any[]>()
+  for (const u of uniti || []) {
+    const k = String(u.unito_in)
+    if (!unitiDi.has(k)) unitiDi.set(k, [])
+    unitiDi.get(k)!.push(u)
+  }
+  const daConfermare: { o: any; spedId: string }[] = []
+  for (const capo of diretti) {
+    daConfermare.push({ o: capo, spedId: String(capo.spedizione_id) })
+    for (const u of unitiDi.get(String(capo.id)) || []) daConfermare.push({ o: u, spedId: String(capo.spedizione_id) })
+  }
+  const restanti = daConfermare.filter(x => x.o.fulfillment_stato !== 'ok' && x.o.fulfillment_stato !== 'annullato_store')
+  if (!restanti.length) return esiti
 
   const { data: sped } = await db.from('spedizioni')
     .select('id, tracking_number, created_at, corrieri(nome_contratto, tipo, settings)')
-    .in('id', Array.from(new Set(daConfermare.map(x => x.spedId))))
+    .in('id', Array.from(new Set(restanti.map(x => x.spedId))))
   const spedizioni = new Map<string, any>((sped || []).map((s: any) => [String(s.id), s]))
 
   const token = new Map<string, string>()
   const integrazioni = new Map<string, any>()
   const avvio = Date.now()
 
-  for (const { o: ordine, spedId } of daConfermare) {
+  for (const { o: ordine, spedId } of restanti) {
     if (Date.now() - avvio > TEMPO_MAX_MS) break
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
     }
     try {
+      if (String(ordine.stato_pagamento || '').toUpperCase() === 'CANCELLED') { await segna('annullato_store', 'annullato su Amazon'); continue }
       const s = spedizioni.get(spedId)
       const tracking = s?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
       const righe = (Array.isArray(ordine.articoli) ? ordine.articoli : [])
-        .filter((a: any) => a?.order_item_id)
-        .map((a: any) => ({ orderItemId: String(a.order_item_id), quantity: Number(a.quantita) || 1 }))
+        .filter((a: any) => a?.order_item_id && Number(a?.quantita) > 0)
+        .map((a: any) => ({ orderItemId: String(a.order_item_id), quantity: Number(a.quantita) }))
       if (!righe.length) { await segna('errore', 'articoli dell\'ordine Amazon mancanti'); continue }
 
       const iid = String(ordine.integrazione_id)

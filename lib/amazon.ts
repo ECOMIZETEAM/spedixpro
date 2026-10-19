@@ -34,26 +34,30 @@ export function amazonRedirectUri(): string {
   return `${process.env.SHOPIFY_APP_URL || 'https://moovexpress.com'}/api/integrazioni/amazon/callback`
 }
 
-const bozza = () => process.env.AMAZON_SPAPI_BETA === '1'
-
 // Autorizzazione partita DAL NOSTRO PORTALE (pagina Integrazioni → Amazon).
 export function amazonAuthorizeUrl(state: string): string {
   const p = new URLSearchParams({ application_id: process.env.AMAZON_SPAPI_APP_ID || '', state })
-  if (bozza()) p.set('version', 'beta')
+  if (process.env.AMAZON_SPAPI_BETA === '1') p.set('version', 'beta')
   return `${CONSENSO_EU}?${p.toString()}`
 }
 
-// Autorizzazione partita DALL'APPSTORE: Amazon chiama la nostra pagina di accesso con
-// `amazon_callback_uri` e `amazon_state`; noi, riconosciuto il cliente, gli rimandiamo lo stato
-// suo e il nostro. Si accetta solo un indirizzo di Amazon: e' il punto da cui passa il ritorno,
-// e un parametro qualunque lo trasformerebbe in un rimando verso siti terzi.
-export function amazonCallbackAppstore(amazonCallbackUri: string, amazonState: string, state: string): string | null {
+// I domini di Amazon, ancorati alla fine del nome: "amazon." da solo non basta, perche'
+// amazon.attacker.example o sellercentral.amazon.it.evil.com lo contengono anche loro.
+const DOMINIO_AMAZON = /^(?:[a-z0-9-]+\.)*amazon\.(?:com|it|de|fr|es|co\.uk|nl|se|pl|com\.be|ie|com\.tr)$/i
+
+// Autorizzazione partita DALL'APPSTORE (o rinnovo): Amazon chiama la nostra pagina di accesso con
+// `amazon_callback_uri` e `amazon_state`; noi, riconosciuto il cliente, rimandiamo ad Amazon lo
+// stato suo e il nostro. Si accetta SOLO la pagina di conferma di Amazon: quel parametro arriva
+// da fuori, e accettarne uno qualunque farebbe del nostro dominio un rimando verso siti terzi con
+// in mano uno `state` valido. `version=beta` si rimanda se e solo se l'ha mandato Amazon.
+export function amazonCallbackAppstore(amazonCallbackUri: string, amazonState: string, state: string, versione: string | null): string | null {
   let u: URL
   try { u = new URL(amazonCallbackUri) } catch { return null }
-  if (u.protocol !== 'https:' || !/(^|\.)amazon\.[a-z.]+$/i.test(u.hostname)) return null
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null
+  if (!DOMINIO_AMAZON.test(u.hostname) || !u.pathname.startsWith('/apps/authorize/confirm/')) return null
   u.searchParams.set('amazon_state', amazonState)
   u.searchParams.set('state', state)
-  if (bozza()) u.searchParams.set('version', 'beta')
+  if (versione === 'beta') u.searchParams.set('version', 'beta')
   return u.toString()
 }
 
@@ -75,8 +79,8 @@ async function lwa(campi: Record<string, string>): Promise<any> {
 }
 
 // Il venditore ha tolto l'autorizzazione da Seller Central (o e' scaduta: si rinnova ogni 365
-// giorni). Non e' un guasto passeggero: l'integrazione va chiusa, e i dati dei suoi ordini
-// cancellati entro 30 giorni (Data Protection Policy §1.7) — lo fa il cron purge-pii.
+// giorni). Non e' un guasto passeggero: l'integrazione va chiusa e i dati dei suoi ordini
+// cancellati (Data Protection Policy §1.7) — lo fa cancellaDatiAmazon.
 export class AutorizzazioneAmazonRevocata extends Error {
   constructor() { super('Amazon: autorizzazione revocata o scaduta, ricollega l\'account') }
 }
@@ -89,14 +93,35 @@ export async function amazonScambiaCodice(codice: string): Promise<{ access_toke
 }
 
 // Le credenziali come si salvano su integrazioni.credenziali: i due token cifrati, mai in chiaro.
-export function credenzialiAmazon(x: { sellerId: string; refreshToken: string; accessToken: string; expiresIn: number }) {
+// `sync` (cursore degli aggiornamenti, lettura da riprendere) si conserva a un ricollegamento: senza,
+// il primo giro dopo il rinnovo annuale non vedrebbe gli annulli e le spedizioni del frattempo.
+export function credenzialiAmazon(x: { sellerId: string; refreshToken: string; accessToken: string; expiresIn: number; syncPrecedente?: any }) {
   return {
     selling_partner_id: x.sellerId,
     marketplace_id: MARKETPLACE_IT,
     refresh_token_cifrato: cifra(x.refreshToken),
     access_token_cifrato: cifra(x.accessToken),
     expires_at: Date.now() + x.expiresIn * 1000,
+    ...(x.syncPrecedente ? { sync: x.syncPrecedente } : {}),
   }
+}
+
+// SCRITTURA CONFRONTATA delle credenziali. Le scrivono in tre (rinnovo del token, fine di una
+// sincronizzazione, ricollegamento) e ognuno parte da una copia letta prima: chi scrive per ultimo
+// riscriverebbe tutto da una copia vecchia. Qui si rilegge la riga, si applica la sola modifica, e
+// si scrive solo se il refresh token e' ancora quello (non cambia ai rinnovi, cambia solo a un
+// ricollegamento): se nel frattempo il venditore ha ricollegato l'account, non si tocca niente.
+export async function aggiornaCredenzialiAmazon(admin: any, integr: any, modifica: (cred: any) => any): Promise<boolean> {
+  const { data: riga } = await admin.from('integrazioni').select('credenziali').eq('id', integr.id).maybeSingle()
+  const attuali = (riga?.credenziali || {}) as any
+  const atteso = (integr.credenziali || {}).refresh_token_cifrato
+  if (!attuali.refresh_token_cifrato || attuali.refresh_token_cifrato !== atteso) return false
+  const nuove = modifica(attuali)
+  const { data, error } = await admin.from('integrazioni').update({ credenziali: nuove })
+    .eq('id', integr.id).eq('credenziali->>refresh_token_cifrato', atteso).select('id')
+  if (error || !(data || []).length) return false
+  integr.credenziali = nuove
+  return true
 }
 
 // Token d'accesso valido per l'integrazione: quello salvato se ha ancora piu' di 5 minuti, se no
@@ -111,15 +136,43 @@ export async function tokenAmazon(db: any, integr: any): Promise<string> {
   }
   const refresh = decifra(cred.refresh_token_cifrato)
   const d = await lwa({ grant_type: 'refresh_token', refresh_token: refresh })
-  const nuove = {
-    ...cred,
-    refresh_token_cifrato: cifrataConChiaveAttuale(cred.refresh_token_cifrato) ? cred.refresh_token_cifrato : cifra(refresh),
-    access_token_cifrato: cifra(d.access_token),
-    expires_at: ora + (Number(d.expires_in) || 3600) * 1000,
-  }
-  await db.from('integrazioni').update({ credenziali: nuove }).eq('id', integr.id)
-  integr.credenziali = nuove
+  const accesso = cifra(d.access_token)
+  const scade = ora + (Number(d.expires_in) || 3600) * 1000
+  const scritto = await aggiornaCredenzialiAmazon(db, integr, attuali => ({
+    ...attuali,
+    refresh_token_cifrato: cifrataConChiaveAttuale(attuali.refresh_token_cifrato) ? attuali.refresh_token_cifrato : cifra(refresh),
+    access_token_cifrato: accesso,
+    expires_at: scade,
+  }))
+  // Non scritto = il venditore ha ricollegato nel frattempo: il token appena avuto e' comunque
+  // valido per questo giro; il prossimo leggera' le credenziali nuove.
+  if (!scritto) integr.credenziali = { ...cred, access_token_cifrato: accesso, expires_at: scade }
   return d.access_token
+}
+
+// L'autorizzazione e' stata revocata: si chiude l'integrazione (solo se il token che ha fallito e'
+// ancora quello salvato: un ricollegamento appena fatto non si chiude) e si cancellano i dati.
+export async function chiudiIntegrazioneAmazon(admin: any, integr: any, motivo: string): Promise<void> {
+  const atteso = (integr.credenziali || {}).refresh_token_cifrato
+  if (!atteso) return
+  const { data } = await admin.from('integrazioni').update({ stato: 'disconnesso', errore: motivo })
+    .eq('id', integr.id).eq('credenziali->>refresh_token_cifrato', atteso).select('id')
+  if ((data || []).length) await cancellaDatiAmazon(admin, integr.id)
+}
+
+// CANCELLAZIONE DEI DATI DI UN ACCOUNT AMAZON che non e' piu' collegato (scollegato dal cliente o
+// autorizzazione revocata). La Data Protection Policy (§1.7) vuole cancellate le informazioni
+// Amazon entro 30 giorni: qui si fa subito.
+//  - Gli ordini MAI spediti da noi si eliminano: sono solo una copia dei dati di Amazon, e senza
+//    collegamento nessuno li spedira' piu' da qui (al ricollegamento tornano quelli ancora aperti).
+//  - Gli ordini spediti da noi restano agganciati alla loro spedizione (lo storico non si
+//    cancella), ma senza dati del compratore e senza la copia di Amazon.
+export async function cancellaDatiAmazon(admin: any, integrazioneId: string): Promise<void> {
+  const { error: e1 } = await admin.from('ordini_ecommerce').delete()
+    .eq('integrazione_id', integrazioneId).eq('piattaforma', 'amazon').is('spedizione_id', null)
+  const { error: e2 } = await admin.from('ordini_ecommerce').update({ destinatario: null, raw: null, cliente_nome: null })
+    .eq('integrazione_id', integrazioneId).eq('piattaforma', 'amazon').not('spedizione_id', 'is', null)
+  if (e1 || e2) console.error('[AMAZON] cancellazione dati account non riuscita:', (e1 || e2).message)
 }
 
 const attesa = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -163,14 +216,4 @@ export async function spapi(token: string, metodo: 'GET' | 'POST', percorso: str
     }
     return d
   }
-}
-
-// Nome del negozio del venditore, per riconoscere l'account nella lista. Best-effort.
-export async function amazonNomeNegozio(accessToken: string): Promise<string | null> {
-  try {
-    const d = await spapi(accessToken, 'GET', '/sellers/v1/marketplaceParticipations', { tentativi: 1 })
-    const voci: any[] = d?.payload || []
-    const it = voci.find(v => v?.marketplace?.id === MARKETPLACE_IT) || voci[0]
-    return it?.storeName || null
-  } catch { return null }
 }

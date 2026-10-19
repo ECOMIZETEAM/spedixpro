@@ -21,9 +21,12 @@ export const maxDuration = 120
 // Nello stesso giro: pulizia del log di audit oltre i 13 mesi (retention dichiarata: 12+ mesi).
 //
 // AMAZON: 30 GIORNI DALL'IMPORTAZIONE. La Data Protection Policy di Amazon chiede di non tenere i
-// dati personali oltre 30 giorni dalla CONSEGNA; l'importazione viene sempre prima della consegna,
-// quindi 30 giorni dall'importazione stanno dentro la regola. Vale per gli ordini Amazon da file e
-// per quelli che arriveranno dal collegamento diretto (ordini_ecommerce, piattaforma 'amazon').
+// dati personali oltre 30 giorni dalla CONSEGNA. Un ordine Amazon entra da noi coi dati del
+// compratore solo quando e' ancora da spedire — dal file "ordini da spedire", o dal collegamento
+// diretto, che per gli ordini gia' spediti aggiorna solo lo stato (lib/amazonSync) — quindi
+// l'importazione viene prima della consegna e 30 giorni dall'importazione stanno dentro la regola.
+// Per il collegamento c'e' anche il conto sulla data dell'ordine di Amazon (raw.createdTime), che
+// non dipende da quando la riga e' stata scritta.
 
 // Anonimizza A BLOCCHI finche' ce ne sono, entro una scadenza.
 //
@@ -73,7 +76,8 @@ export async function GET(req: NextRequest) {
   const scadenza = Date.now() + 80_000
   const errori: string[] = []
 
-  // Ordini Amazon DA FILE spediti oltre la soglia e non ancora anonimizzati
+  // Ordini Amazon DA FILE spediti oltre la soglia e non ancora anonimizzati. Anche il riferimento
+  // destinatario e la nota: alcuni clienti ci scrivono il nome di chi riceve.
   const anonimizzati = await anonimizzaABlocchi('ordini Amazon da file',
     () => admin.from('ordini_importati')
       .select('id')
@@ -83,7 +87,7 @@ export async function GET(req: NextRequest) {
       .filter('order_id', 'match', '^\\d{3}-\\d{7}-\\d{7}$')
       .limit(BLOCCO),
     ids => admin.from('ordini_importati')
-      .update({ destinatario: '[dati rimossi]', indirizzo: '[dati rimossi]', telefono: null, email_destinatario: null, raw: null })
+      .update({ destinatario: '[dati rimossi]', indirizzo: '[dati rimossi]', telefono: null, email_destinatario: null, raw: null, rif_destinatario: null, note: null })
       .in('id', ids),
     scadenza, errori)
 
@@ -92,6 +96,11 @@ export async function GET(req: NextRequest) {
   // ordine Amazon aperto da 30 giorni non si spedisce piu' (Amazon lo annulla oltre la data di
   // spedizione): togliere lo stato dal filtro copre tutti e due i casi con la stessa regola.
   // Anche `cliente_nome`: li' le librerie dei negozi copiano il nome del compratore.
+  // Due conti, stessa cancellazione: dall'importazione della riga, e dalla data dell'ordine su
+  // Amazon (raw.createdTime) — il secondo vale anche se la riga fosse stata riscritta dopo.
+  const pulisciCollegato = (ids: string[]) => admin.from('ordini_ecommerce')
+    .update({ destinatario: null, raw: null, cliente_nome: null })
+    .in('id', ids)
   const amazonCollegato = await anonimizzaABlocchi('ordini Amazon collegati',
     () => admin.from('ordini_ecommerce')
       .select('id')
@@ -99,10 +108,15 @@ export async function GET(req: NextRequest) {
       .not('destinatario', 'is', null)
       .lt('created_at', sogliaAmazon)
       .limit(BLOCCO),
-    ids => admin.from('ordini_ecommerce')
-      .update({ destinatario: null, raw: null, cliente_nome: null })
-      .in('id', ids),
-    scadenza, errori)
+    pulisciCollegato, scadenza, errori)
+    + await anonimizzaABlocchi('ordini Amazon collegati (data ordine)',
+    () => admin.from('ordini_ecommerce')
+      .select('id')
+      .eq('piattaforma', 'amazon')
+      .not('destinatario', 'is', null)
+      .lt('raw->>createdTime', sogliaAmazon)
+      .limit(BLOCCO),
+    pulisciCollegato, scadenza, errori)
 
   // Ordini degli STORE COLLEGATI, gia' spediti e piu' vecchi della soglia.
   //

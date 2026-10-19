@@ -8,7 +8,7 @@ export const maxDuration = 120
 
 // RIEVASIONE DEGLI ORDINI MARKETPLACE RIMASTI INDIETRO.
 //
-// Il write-back verso lo store (Shopify/Woo/PrestaShop/eBay/TikTok/Temu) parte alla CHIUSURA DISTINTA,
+// Il write-back verso lo store (Shopify/Woo/PrestaShop/eBay/TikTok/Temu/Amazon) parte alla CHIUSURA DISTINTA,
 // ma di proposito SALTA chi ha ancora la LDV provvisoria (fulfillMarketplace: non si manda al compratore
 // un tracking finto) e resta 'errore' su un fallimento transitorio (store giù/lento, chiave read-only).
 // Senza questo giro quegli ordini non verrebbero MAI evasi sullo store. Qui, ogni 20 min, si ripescano
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     .order('created_at', { ascending: true })   // i PIÙ VECCHI prima: si svuota la coda, non si perdono gli arretrati
     .limit(1000)
 
-  const candidati = (ordini || []).filter((o: any) => o.fulfillment_stato !== 'ok')
+  const candidati: any[] = [...(ordini || []).filter((o: any) => o.fulfillment_stato !== 'ok'), ...await unitiAmazonDaConfermare(admin)]
   const TERMINALI = ['ok', 'annullato', 'annullato_store', 'esterno']
   const spedIds = Array.from(new Set(candidati.map((o: any) => o.spedizione_id)))
   if (!spedIds.length) return NextResponse.json({ ok: true, candidate: 0, evase: 0 })
@@ -113,4 +113,31 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, candidate: spedIds.length, esiti: esiti.length, evase_ok: ok, esauriti, recuperati })
+}
+
+// ORDINI AMAZON UNITI IN UN PACCO. Viaggiano nel pacco del capofila e non hanno una spedizione loro,
+// quindi la selezione qui sopra (spedizione_id non vuoto) non li vede: se il capofila e' gia' 'ok'
+// e un ordine unito no, per Amazon quell'ordine resterebbe non spedito (ritardi, reclami sul conto
+// del venditore). Si rimettono in giro con la spedizione DEL CAPOFILA, che lib/amazonFulfill conferma
+// insieme ai suoi uniti; contano i tentativi come gli altri. Solo Amazon: gli altri negozi
+// non confermano gli ordini uniti.
+async function unitiAmazonDaConfermare(admin: any): Promise<any[]> {
+  const { data: uniti } = await admin.from('ordini_ecommerce')
+    .select('id,unito_in,fulfillment_stato,fulfillment_tentativi,shop')
+    .eq('piattaforma', 'amazon').eq('stato', 'unito').not('unito_in', 'is', null)
+    .or('fulfillment_stato.is.null,and(fulfillment_stato.neq.ok,fulfillment_stato.neq.annullato,fulfillment_stato.neq.annullato_store,fulfillment_stato.neq.esterno)')
+    .lt('fulfillment_tentativi', MAX_TENTATIVI)
+    .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
+    .limit(300)
+  if (!uniti?.length) return []
+  const capoIds = Array.from(new Set(uniti.map((u: any) => String(u.unito_in))))
+  const spedDelCapo = new Map<string, string>()
+  for (let i = 0; i < capoIds.length; i += 200) {
+    const { data } = await admin.from('ordini_ecommerce').select('id,spedizione_id')
+      .in('id', capoIds.slice(i, i + 200)).not('spedizione_id', 'is', null)
+    for (const c of data || []) spedDelCapo.set(String(c.id), String(c.spedizione_id))
+  }
+  // Senza spedizione del capofila il pacco non e' ancora partito: niente da confermare.
+  return uniti.filter((u: any) => spedDelCapo.has(String(u.unito_in)))
+    .map((u: any) => ({ ...u, spedizione_id: spedDelCapo.get(String(u.unito_in)) }))
 }
