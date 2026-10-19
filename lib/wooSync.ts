@@ -52,20 +52,14 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
   // spedire, anche se l'import con 'any' lo prenderebbe.
   const statiDaSpedire = new Set(tuttiStati ? ['processing', 'on-hold'] : stati.split(','))
 
-  // Le righe che abbiamo gia' per questi ordini: servono ai pesi (quelli gia' letti) e alle unioni.
+  // Le righe che abbiamo gia' per questi ordini: i pesi gia' letti stanno li'.
   const esistenti = await righeEsistenti(db, integr.id, daImportare.map((o: any) => String(o.id)))
-  // CAPOFILA DI UN'UNIONE: i suoi articoli e il totale sono quelli di tutti gli ordini uniti nel pacco
-  // (app/api/ordini/unisci). Riscriverli con le sole righe del suo ordine, a ogni sync, faceva pesare il
-  // pacco quanto il capofila e riportava il contrassegno al totale del solo capofila.
-  const capofila = await capofilaDiUnioni(db, [...esistenti.values()].map(r => r.id))
 
   // Pesi e stati sono due letture indipendenti dal negozio: insieme, non una dopo l'altra (su un
   // negozio lento ogni chiamata costa secondi). Tutte e due sono un di piu': se si rompono, gli ordini
   // entrano lo stesso.
-  // I capofila non riscrivono gli articoli: leggerne i pesi sarebbe una lettura buttata a ogni sync.
-  const nonCapofila = daImportare.filter((o: any) => !capofila.has(esistenti.get(String(o.id))?.id || ''))
   const [esitoPesi, esitoStati] = await Promise.allSettled([
-    leggiPesiWoo(integr, url, ck, cs, nonCapofila, esistenti, opz?.pesoFrescoMs ?? PESO_FRESCO_CRON_MS),
+    leggiPesiWoo(integr, url, ck, cs, daImportare, esistenti, opz?.pesoFrescoMs ?? PESO_FRESCO_CRON_MS),
     allineaStatiWoo(db, integr, url, ck, cs, statiDaSpedire, new Set(daImportare.map((o: any) => String(o.id))), daISO),
   ])
   const pesi = esitoPesi.status === 'fulfilled' ? esitoPesi.value : new Map<string, PesoArticolo>()
@@ -116,25 +110,23 @@ export async function sincronizzaOrdiniWoo(db: any, integr: any, range?: { dal?:
       stato_pagamento: o.status || '',
       raw: o,
     }
-    if (capofila.has(esistenti.get(String(o.id))?.id || '')) { delete payload.articoli; delete payload.totale }
     righe.push(payload)
   }
 
   // Scrittura A BLOCCHI, come PrestaShop: una chiamata ogni cinquanta ordini invece di una per ordine.
-  // Nello stesso blocco solo righe con le stesse colonne (i capofila non riscrivono articoli e totale).
-  // Se un blocco viene rifiutato si riprova riga per riga: una riga storta non si porta dietro le altre.
+  // Ogni riga e' il SUO ordine, anche quella di un capofila: il pacco di un'unione si compone in lettura
+  // (lib/ordini-uniti). Se un blocco viene rifiutato si riprova riga per riga: una riga storta non si
+  // porta dietro le altre.
   let importati = 0
   let primoErrore = ''
   const scrivi = async (blocco: any[]) => db.from('ordini_ecommerce').upsert(blocco, { onConflict: 'integrazione_id,ordine_esterno_id', ignoreDuplicates: false })
-  for (const gruppo of [righe.filter(r => 'articoli' in r), righe.filter(r => !('articoli' in r))]) {
-    for (let i = 0; i < gruppo.length; i += 50) {
-      const blocco = gruppo.slice(i, i + 50)
-      const { error } = await scrivi(blocco)
-      if (!error) { importati += blocco.length; continue }
-      for (const r of blocco) {
-        const { error: e1 } = await scrivi([r])
-        if (!e1) importati++; else if (!primoErrore) primoErrore = e1.message
-      }
+  for (let i = 0; i < righe.length; i += 50) {
+    const blocco = righe.slice(i, i + 50)
+    const { error } = await scrivi(blocco)
+    if (!error) { importati += blocco.length; continue }
+    for (const r of blocco) {
+      const { error: e1 } = await scrivi([r])
+      if (!e1) importati++; else if (!primoErrore) primoErrore = e1.message
     }
   }
   if (primoErrore) console.error('[WOO SYNC]', integr.identificativo, 'ordini non scritti:', righe.length - importati, primoErrore)
@@ -156,8 +148,8 @@ async function righeEsistenti(db: any, integrazioneId: string, ids: string[]): P
   for (let i = 0; i < ids.length; i += 200) {
     const { data, error } = await db.from('ordini_ecommerce').select('id,ordine_esterno_id,articoli')
       .eq('integrazione_id', integrazioneId).in('ordine_esterno_id', ids.slice(i, i + 200))
-    // Senza sapere quali righe ci sono non si sa chi e' capofila: meglio una sync fallita (si riprova)
-    // che articoli e totale di un pacco unito riscritti.
+    // Senza le righe gia' nostre i pesi letti andrebbero persi e si rileggerebbero tutti: meglio
+    // una sync fallita, che si riprova al giro dopo.
     if (error) throw new Error('lettura ordini esistenti: ' + error.message)
     for (const r of data || []) m.set(String(r.ordine_esterno_id), { id: r.id, articoli: Array.isArray(r.articoli) ? r.articoli : [] })
   }
@@ -206,11 +198,11 @@ async function allineaStatiWoo(db: any, integr: any, url: string, ck: string, cs
   // Sessanta giorni di import, o di piu' se la sync guarda piu' indietro (Sincronizza su un periodo vecchio).
   const sessanta = new Date(Date.now() - STATI_GIORNI * 86400000).toISOString()
   const daQuando = finestraDa && finestraDa < sessanta ? finestraDa : sessanta
-  const righe: { id: string; ordine_esterno_id: string; stato: string }[] = []
+  const righe: { id: string; ordine_esterno_id: string; stato: string; stato_pagamento: string | null }[] = []
   for (let da = 0; ; da += 1000) {
     // Dai piu' recenti: se il tempo non basta per tutti, restano fuori i piu' vecchi, non sempre gli stessi a caso.
-    const { data, error } = await db.from('ordini_ecommerce').select('id,ordine_esterno_id,stato')
-      .eq('integrazione_id', integr.id).is('spedizione_id', null).in('stato', ['da_spedire', 'annullato'])
+    const { data, error } = await db.from('ordini_ecommerce').select('id,ordine_esterno_id,stato,stato_pagamento')
+      .eq('integrazione_id', integr.id).is('spedizione_id', null).in('stato', ['da_spedire', 'annullato', 'unito'])
       .gte('created_at', daQuando).order('created_at', { ascending: false }).order('id').range(da, da + 999)
     if (error) throw new Error(error.message)
     righe.push(...(data || []))
@@ -220,12 +212,17 @@ async function allineaStatiWoo(db: any, integr: any, url: string, ck: string, cs
   // scrittura che segue riscrive il loro stato di pagamento: un cambio fatto qui verrebbe smentito;
   // (2) i CAPOFILA di un'unione — nel pacco c'e' anche la merce degli ordini assorbiti, e chiudere il
   // capofila perche' il SUO ordine e' stato annullato la lascerebbe ferma senza che niente lo dica.
+  // (3) gli ordini UNITI: restano uniti. Per loro e per i capofila si rinfresca solo lo stato del
+  // negozio (stato_pagamento): il pacco lascia fuori la merce e il contrassegno di chi e' stato annullato
+  // dopo l'unione (lib/ordini-uniti), e senza questo lo stato restava quello del giorno dell'import.
   const capofila = await capofilaDiUnioni(db, righe.map(r => r.id))
-  const aperte = righe.filter(r => !inQuestaSync.has(String(r.ordine_esterno_id)) && !capofila.has(r.id))
-  if (!aperte.length) return 0
+  const fuoriDallaSync = righe.filter(r => !inQuestaSync.has(String(r.ordine_esterno_id)))
+  const aperte = fuoriDallaSync.filter(r => r.stato !== 'unito' && !capofila.has(r.id))
+  const soloStatoNegozio = fuoriDallaSync.filter(r => r.stato === 'unito' || capofila.has(r.id))
+  if (!fuoriDallaSync.length) return 0
 
   const sulNegozio = new Map<string, string>()
-  const ids = aperte.map(r => String(r.ordine_esterno_id))
+  const ids = fuoriDallaSync.map(r => String(r.ordine_esterno_id))
   const compiti: (() => Promise<void>)[] = []
   for (let i = 0; i < ids.length; i += 100) {
     const blocco = ids.slice(i, i + 100)
@@ -246,6 +243,13 @@ async function allineaStatiWoo(db: any, integr: any, url: string, ck: string, cs
     const k = `${r.stato}>${a}>${st}`
     if (!cambi.has(k)) cambi.set(k, { da: r.stato, a, statoNegozio: st, ids: [] })
     cambi.get(k)!.ids.push(String(r.ordine_esterno_id))
+  }
+  for (const r of soloStatoNegozio) {
+    const st = sulNegozio.get(String(r.ordine_esterno_id))
+    if (!st || st === String(r.stato_pagamento || '').toLowerCase()) continue
+    const { error } = await db.from('ordini_ecommerce').update({ stato_pagamento: st })
+      .eq('integrazione_id', integr.id).is('spedizione_id', null).eq('id', r.id)
+    if (error) throw new Error(error.message)
   }
   let annullati = 0
   for (const c of cambi.values()) {
@@ -316,8 +320,9 @@ async function leggiPesiWoo(integr: any, url: string, ck: string, cs: string, or
 
   // Pesi gia' letti: stanno sugli articoli degli stessi ordini, salvati alle sync precedenti. La
   // finestra della sync automatica e' di sette giorni, quindi qui c'e' quasi tutto il venduto recente.
-  // Si prendono solo gli articoli che l'ordine ha ANCORA sul negozio: il capofila di un'unione porta
-  // anche le righe degli ordini assorbiti, magari di un altro negozio, dove lo stesso id e' un altro prodotto.
+  // Si prendono solo gli articoli che l'ordine ha ANCORA sul negozio: una riga che portasse articoli
+  // d'altri (i capofila delle unioni fatte prima del 19/10/2026, magari con righe di un altro negozio
+  // dove lo stesso id e' un altro prodotto) non deve dare pesi a questo.
   const noti = new Map<string, PesoArticolo>()
   for (const [idOrdine, r] of esistenti) for (const a of r.articoli) {
     const letto = Date.parse(a?.peso_letto || '')

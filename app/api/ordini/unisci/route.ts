@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import {
   chiaveDestinatario, destinatarioDaEcommerce, destinatarioDaImportato, stessoDestinatario,
 } from '@/lib/destinatario-chiave'
+import { assorbitiDi, componiPacco } from '@/lib/ordini-uniti'
 
 // UNISCE PIU' ORDINI IN UNO SOLO, quando vanno tutti alla stessa persona.
 //
@@ -73,22 +74,48 @@ export async function POST(req: NextRequest) {
   const capo = ordinati[0]
   const assorbiti = ordinati.slice(1)
 
+  const idsAssorbiti = assorbiti.map((o: any) => o.id)
+
+  // ORDINI DEI NEGOZI: NIENTE COPIE SUL CAPOFILA. Il capofila e' anche l'ordine del negozio e la sync lo
+  // riscrive con le sue sole righe: gli articoli e il totale copiati qui sparivano al giro dopo (eBay: 9
+  // capofila su 9, 19/10/2026), e il contrassegno era quello del capofila applicato a tutto il pacco. Il
+  // pacco ora si compone in lettura da tutti gli ordini uniti (lib/ordini-uniti): somma degli articoli e
+  // del valore, contrassegno = somma dei soli ordini in contrassegno.
+  if (tipo === 'ecommerce') {
+    const { error: e2 } = await supabase.from(tabella).update({ unito_in: capo.id, stato: 'unito' }).in('id', idsAssorbiti)
+    if (e2) return NextResponse.json({ error: e2.message }, { status: 400 })
+    // Chi era gia' unito a uno degli ordini appena assorbiti ora punta al nuovo capofila. La lettura
+    // segue comunque le catene (lib/ordini-uniti); cosi' pero' ogni assorbito dice da solo con chi parte.
+    const { error: e3 } = await supabase.from(tabella).update({ unito_in: capo.id }).in('unito_in', idsAssorbiti)
+    if (e3) console.error('[UNISCI] appiattimento unioni precedenti (le catene si seguono comunque):', e3.message)
+    // L'unione e' gia' scritta: un errore nel ricomporre il pacco per la risposta non deve farla sembrare fallita.
+    let membri: any[] = assorbiti
+    try { membri = (await assorbitiDi(supabase, [capo.id], 'id,unito_in,created_at,articoli,totale,spedizione_id,stato_pagamento')).get(capo.id) || assorbiti } catch {}
+    const pacco = componiPacco(capo, membri)
+    return NextResponse.json({
+      success: true, capofila: capo.id, uniti: assorbiti.length,
+      numero: capo.numero_ordine || null,
+      articoli: pacco.articoli.length,
+      totale: pacco.totale,
+    })
+  }
+
+  // ORDINI DA FILE: qui la riga e' solo nostra, nessuna sync la riscrive, e il pacco si scrive sul capofila.
   // Gli articoli si sommano: e' il contenuto del pacco unico.
   const articoli: any[] = []
   for (const o of ordinati) if (Array.isArray(o.articoli)) articoli.push(...o.articoli)
-  const totale = ordinati.reduce((s: number, o: any) => s + (Number(o.totale ?? o.totale_ordine) || 0), 0)
+  const totale = ordinati.reduce((s: number, o: any) => s + (Number(o.totale_ordine) || 0), 0)
 
-  const patchCapo: any = { articoli }
-  if (tipo === 'importati') {
-    patchCapo.totale_ordine = Math.round(totale * 100) / 100
+  const patchCapo: any = {
+    articoli,
+    totale_ordine: Math.round(totale * 100) / 100,
     // Peso e colli si sommano davvero: e' un pacco piu' pesante, non tre pacchi.
-    patchCapo.peso = ordinati.reduce((s: number, o: any) => s + (Number(o.peso) || 0), 0) || null
-    patchCapo.colli = ordinati.reduce((s: number, o: any) => s + (Number(o.colli) || 0), 0) || null
-    // Il contrassegno si somma: chi consegna incassa una volta sola, ma l'intero importo.
-    patchCapo.contrassegno = ordinati.reduce((s: number, o: any) => s + (Number(o.contrassegno) || 0), 0) || 0
-    patchCapo.rif_destinatario = ordinati.map((o: any) => o.order_id).filter(Boolean).join(' + ').slice(0, 120) || capo.rif_destinatario
-  } else {
-    patchCapo.totale = Math.round(totale * 100) / 100
+    peso: ordinati.reduce((s: number, o: any) => s + (Number(o.peso) || 0), 0) || null,
+    colli: ordinati.reduce((s: number, o: any) => s + (Number(o.colli) || 0), 0) || null,
+    // Il contrassegno si somma: chi consegna incassa una volta sola, ma l'intero importo. Un ordine
+    // gia' pagato ha contrassegno 0 e non aggiunge niente (pagato 100 + contrassegno 90 = 90).
+    contrassegno: ordinati.reduce((s: number, o: any) => s + (Number(o.contrassegno) || 0), 0) || 0,
+    rif_destinatario: ordinati.map((o: any) => o.order_id).filter(Boolean).join(' + ').slice(0, 120) || capo.rif_destinatario,
   }
 
   const { error: e1 } = await supabase.from(tabella).update(patchCapo).eq('id', capo.id)
@@ -96,22 +123,24 @@ export async function POST(req: NextRequest) {
 
   const { error: e2 } = await supabase.from(tabella)
     .update({ unito_in: capo.id, stato: 'unito' })
-    .in('id', assorbiti.map((o: any) => o.id))
+    .in('id', idsAssorbiti)
   if (e2) {
     // Il capofila e' gia' stato ingrossato: se gli assorbiti non si chiudono, spedirebbe la merce
     // di tutti e loro resterebbero da spedire. Si torna indietro.
     await supabase.from(tabella).update({
-      articoli: capo.articoli,
-      ...(tipo === 'importati'
-        ? { totale_ordine: capo.totale_ordine, peso: capo.peso, colli: capo.colli, contrassegno: capo.contrassegno, rif_destinatario: capo.rif_destinatario }
-        : { totale: capo.totale }),
+      articoli: capo.articoli, totale_ordine: capo.totale_ordine, peso: capo.peso, colli: capo.colli,
+      contrassegno: capo.contrassegno, rif_destinatario: capo.rif_destinatario,
     }).eq('id', capo.id)
     return NextResponse.json({ error: e2.message }, { status: 400 })
   }
+  // Chi era unito a uno degli assorbiti ora punta al nuovo capofila: i report del marketplace danno a
+  // ogni ordine unito il tracking di chi lo punta, e un ordine intermedio una spedizione non ce l'ha.
+  const { error: e3 } = await supabase.from(tabella).update({ unito_in: capo.id }).in('unito_in', idsAssorbiti)
+  if (e3) console.error('[UNISCI] appiattimento unioni precedenti:', e3.message)
 
   return NextResponse.json({
     success: true, capofila: capo.id, uniti: assorbiti.length,
-    numero: capo.numero_ordine || capo.order_id || null,
+    numero: capo.order_id || null,
     articoli: articoli.length,
     totale: Math.round(totale * 100) / 100,
   })

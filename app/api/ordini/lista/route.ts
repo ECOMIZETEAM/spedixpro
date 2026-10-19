@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { COLONNE_PAGAMENTO, assorbitiDelCliente, componiPacco, contrassegnoDi } from '@/lib/ordini-uniti'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   if (!integrIds.length) return NextResponse.json([])
   const ordini = await fetchAll(() => supabase
     .from('ordini_ecommerce')
-    .select('id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,p1:raw->>payment_method,p2:raw->>payment_method_title,p3:raw->>module,p4:raw->>payment,p5:raw->paymentSummary,d7:raw->>createdAt,p6:raw->paymentGatewayNames,n1:raw->>note,n2:raw->>customer_note')
+    .select(`id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,unito_in,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,d7:raw->>createdAt,${COLONNE_PAGAMENTO},n1:raw->>note,n2:raw->>customer_note`)
     .eq('cliente_id', utente.cliente_id)
     .eq('piattaforma', piattaforma)
     .in('integrazione_id', integrIds)
@@ -47,24 +48,30 @@ export async function GET(req: NextRequest) {
     const { data } = await supabase.from('spedizioni').select('id,created_at').in('id', spedIds.slice(i, i + 200))
     for (const s of (data || [])) dataSpedizione.set(String(s.id), s.created_at)
   }
-  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, p1, p2, p3, p4, p5, p6, n1, n2, ...o }: any) => {
+  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, n1, n2, ...o }: any) => {
     let t: any = d1 || d2 || d3 || d4 || d5 || d6 || d7 || null   // d7 = Shopify createdAt (camelCase)
     // epoch (TikTok/Temu): secondi o millisecondi -> ISO
     if (t && /^\d{9,13}$/.test(String(t))) t = new Date(Number(t) * (String(t).length <= 10 ? 1000 : 1)).toISOString()
-    // CONTRASSEGNO: Woo payment_method 'cod' (titolo "Pagamento alla consegna"), PrestaShop modulo
-    // cashondelivery, eBay paymentSummary CASH_ON_DELIVERY/PICKUP. Importo = totale dell'ordine.
-    const firma = JSON.stringify([p1, p2, p3, p4, p5, p6])
-    // CONTRASSEGNO = SOLDI: se non lo si riconosce, l'ordine risulta prepagato e non si incassa niente
-    // alla consegna. Oltre a 'cod'/'cash on delivery'/'contrassegno' si coprono gli slug dei gateway COD
-    // non standard (cod_advanced, wc_cod, cod-gateway…) con 'cod' come token o con separatore, e i termini
-    // in altre lingue (nachnahme DE, contre remboursement FR, contra reembolso ES).
-    const isCod = /cash[\s_-]?on[\s_-]?(delivery|pickup)|cashondelivery|\bcod\b|[_-]cod\b|\bcod[_-]|contrassegn|(pagamento|paghi)[\s_]*(alla|in)?[\s_]*consegna|alla consegna|payment on delivery|nachnahme|contre[\s_-]?remboursement|contra[\s_-]?reembolso/i.test(firma)
-    const cod = isCod ? (Number(o.totale) || 0) : 0
     // La nota dell'ordine si restituisce a parte: `raw` non esce mai da qui (pesante), ma questa
     // serve a chi spedisce — sono le istruzioni per il corriere. Shopify la chiama `note`, WooCommerce
     // `customer_note`: leggendo solo la prima, le note Woo non arrivavano mai alla spedizione
     // (1.416 ordini su 5.205 in 30 giorni, 19/10/2026: "citofono rotto", "lasciare al vicino"...).
-    return { ...o, data_ordine: t || o.created_at, data_spedizione: o.spedizione_id ? (dataSpedizione.get(String(o.spedizione_id)) || null) : null, cod, nota: n1 || n2 || null, metodo_pagamento: p2 || p1 || p4 || p3 || null }
+    // CONTRASSEGNO: Woo payment_method 'cod', PrestaShop modulo cashondelivery, eBay paymentSummary
+    // CASH_ON_DELIVERY/PICKUP. Importo = totale dell'ordine (lib/ordini-uniti).
+    return { ...o, data_ordine: t || o.created_at, data_spedizione: o.spedizione_id ? (dataSpedizione.get(String(o.spedizione_id)) || null) : null, cod: contrassegnoDi(o), nota: n1 || n2 || null, metodo_pagamento: o.p2 || o.p1 || o.p4 || o.p3 || null }
   })
-  return NextResponse.json(rows)
+
+  // ORDINI UNITI: il capofila mostra e spedisce il PACCO — articoli, valore e note di tutti, e come
+  // contrassegno la somma dei soli ordini in contrassegno (lib/ordini-uniti). Gli assorbiti si leggono a
+  // parte per `unito_in`: possono stare sotto un'altra connessione del negozio, o fuori da questa lista.
+  const colonneAssorbiti = `id,unito_in,created_at,articoli,totale,spedizione_id,stato_pagamento,${COLONNE_PAGAMENTO},n1:raw->>note,n2:raw->>customer_note`
+  const assorbiti = await assorbitiDelCliente(supabase, utente.cliente_id, colonneAssorbiti)
+  const conPacco = rows.map((o: any) => {
+    const loro = o.unito_in ? null : assorbiti.get(String(o.id))
+    if (!loro?.length) { const { p1, p2, p3, p4, p5, p6, ...resto } = o; return resto }
+    const pacco = componiPacco(o, loro.map((r: any) => ({ ...r, nota: r.n1 || r.n2 || null })))
+    const { p1, p2, p3, p4, p5, p6, ...resto } = o
+    return { ...resto, articoli: pacco.articoli, totale: pacco.totale, cod: pacco.cod, nota: pacco.nota, ordini_uniti: loro.length, ordini_fuori_dal_pacco: pacco.fuori }
+  })
+  return NextResponse.json(conPacco)
 }

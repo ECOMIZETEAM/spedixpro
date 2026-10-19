@@ -1,4 +1,5 @@
 import { PDFDocument, rgb } from 'pdf-lib'
+import { assorbitiDi, componiPacco } from '@/lib/ordini-uniti'
 
 // Foglio A5 "RIEPILOGO ORDINE" (packing slip) con le caratteristiche di ogni prodotto.
 // Condiviso tra la stampa MULTIPLA (etichette-bulk) e la SINGOLA (etichetta):
@@ -34,8 +35,18 @@ export async function preparaRiepiloghi(admin: any, spedizioni: any[]): Promise<
   if (spedRiepIds.length) {
     const { data: oImp } = await admin.from('ordini_importati').select('spedizione_id,articoli,order_id,totale_ordine').in('spedizione_id', spedRiepIds)
     for (const o of (oImp || [])) if ((o as any).spedizione_id) ctx.ordineDiSped.set((o as any).spedizione_id, { articoli: Array.isArray((o as any).articoli) ? (o as any).articoli : [], order_id: (o as any).order_id || null, totale: (o as any).totale_ordine ?? null })
-    const { data: oEc } = await admin.from('ordini_ecommerce').select('spedizione_id,articoli,numero_ordine,totale').in('spedizione_id', spedRiepIds)
-    for (const o of (oEc || [])) if ((o as any).spedizione_id && !ctx.ordineDiSped.has((o as any).spedizione_id)) ctx.ordineDiSped.set((o as any).spedizione_id, { articoli: Array.isArray((o as any).articoli) ? (o as any).articoli : [], order_id: (o as any).numero_ordine || null, totale: (o as any).totale ?? null })
+    const { data: oEc } = await admin.from('ordini_ecommerce').select('id,spedizione_id,articoli,numero_ordine,totale,stato_pagamento').in('spedizione_id', spedRiepIds)
+    // Un ordine unito ad altri spedisce il PACCO: nel riepilogo gli articoli di tutti (lib/ordini-uniti).
+    // Il riepilogo e' un foglio in piu': se la lettura delle unioni fallisce si stampa col solo capofila,
+    // non si ferma il lotto delle etichette.
+    let uniti = new Map<string, any[]>()
+    try { if ((oEc || []).length) uniti = await assorbitiDi(admin, (oEc || []).map((o: any) => String(o.id)), 'id,unito_in,created_at,articoli,totale,spedizione_id,stato_pagamento') }
+    catch (e: any) { console.error('[RIEPILOGO] ordini uniti non letti:', e?.message) }
+    for (const o of (oEc || [])) {
+      if (!(o as any).spedizione_id || ctx.ordineDiSped.has((o as any).spedizione_id)) continue
+      const pacco = componiPacco(o, uniti.get(String((o as any).id)) || [], { daSpedire: false })
+      ctx.ordineDiSped.set((o as any).spedizione_id, { articoli: pacco.articoli, order_id: (o as any).numero_ordine || null, totale: (o as any).totale == null ? null : pacco.totale })
+    }
   }
 
   const { data: art } = await admin.from('articoli_cliente').select('cliente_id,sku,nome,peso,lunghezza,larghezza,altezza').in('cliente_id', cliIds)
