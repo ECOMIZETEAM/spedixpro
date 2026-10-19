@@ -1,0 +1,39 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { sincronizzaOrdiniAmazon } from '@/lib/amazonSync'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300   // Amazon da' gli ordini a passo lento (limiti per secondo): una finestra lunga richiede tempo
+
+export async function POST(req: NextRequest) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase
+    .from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()
+  if (utente?.ruolo !== 'cliente' || !utente?.cliente_id) {
+    return NextResponse.json({ error: 'Solo i clienti possono sincronizzare' }, { status: 403 })
+  }
+
+  const body = await req.json().catch(() => ({}))
+  const integrazioneId = body.integrazione_id || body.id
+  if (!integrazioneId) return NextResponse.json({ error: 'integrazione_id mancante' }, { status: 400 })
+
+  // I token li legge il client di servizio: `credenziali` non e' leggibile da `authenticated`.
+  // Il perimetro e' lo stesso degli altri negozi: integrazione del cliente loggato.
+  const admin = createAdminSupabase()
+  const { data: integr } = await admin
+    .from('integrazioni').select('*')
+    .eq('id', integrazioneId).eq('cliente_id', utente.cliente_id).eq('piattaforma', 'amazon')
+    .maybeSingle()
+  if (!integr) return NextResponse.json({ error: 'Integrazione non trovata' }, { status: 404 })
+
+  try {
+    const res = await sincronizzaOrdiniAmazon(admin, integr, { dal: body.dal, al: body.al })
+    return NextResponse.json({ ok: true, ...res })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Errore sincronizzazione' }, { status: 502 })
+  }
+}

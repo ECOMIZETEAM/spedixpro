@@ -88,6 +88,12 @@ export async function GET(req: NextRequest) {
           const { sincronizzaOrdiniTemu } = await import('@/lib/temuSync')
           res = await sincronizzaOrdiniTemu(admin, it); break
         }
+        case 'amazon': {
+          // Amazon non prende la finestra dei sette giorni: legge gli ordini cambiati dall'ultimo
+          // giro (cursore suo), perche' concede una lettura ogni tre minuti (lib/amazonSync).
+          const { sincronizzaOrdiniAmazon } = await import('@/lib/amazonSync')
+          res = await sincronizzaOrdiniAmazon(admin, it, { incrementale: true }); break
+        }
         default:
           // Piattaforma senza sincronizzazione automatica (o non piu' usata): si marca come vista,
           // altrimenti resterebbe sempre in cima alla lista dei trascurati e ruberebbe il posto

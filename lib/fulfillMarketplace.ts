@@ -4,8 +4,9 @@ import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
 import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
 import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
 import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
+import { fulfillSpedizioniAmazon } from '@/lib/amazonFulfill'
 
-// Spinge il tracking a TUTTI i marketplace collegati per le spedizioni date (Shopify, WooCommerce,
+// Spinge il tracking a TUTTI i marketplace collegati per le spedizioni date (Shopify, WooCommerce, Amazon,
 // PrestaShop, eBay, TikTok, Temu). Best-effort e IDEMPOTENTE: ogni fulfill salta gli ordini già 'ok',
 // quindi si può chiamare più volte (alla creazione distinta E, in futuro, altrove) senza doppioni.
 // Usato dalla creazione distinta lato CLIENTE, lato MASTER e dalla chiusura automatica, così eBay &
@@ -52,5 +53,6 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[]): Prom
   try { await fulfillSpedizioniEbay(adm, pronti) } catch {}
   try { await fulfillSpedizioniTiktok(adm, pronti) } catch {}
   try { await fulfillSpedizioniTemu(adm, pronti) } catch {}
+  try { await fulfillSpedizioniAmazon(adm, pronti) } catch {}
   return esiti
 }

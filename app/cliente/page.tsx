@@ -27,6 +27,7 @@ export default function ClienteLogin() {
       login_shopify: 'Il negozio è stato collegato, ma non siamo riusciti ad aprire il tuo portale in automatico. Accedi qui sotto (o riprova il collegamento dal negozio).',
       collegamento_scaduto: 'La richiesta di collegamento è scaduta o è già stata completata. Se il negozio non risulta collegato, riprova dal tuo negozio Shopify.',
       collegamento_token: 'Non siamo riusciti a completare il collegamento con Shopify (scambio credenziali). Riprova tra poco dal tuo negozio Shopify.',
+      amazon_accedi: 'Per collegare il tuo account Amazon accedi qui sotto, poi vai in Integrazioni → Amazon → Collega.',
     }
     setErrore(MSG[err] || 'Si è verificato un problema durante il collegamento Shopify. Riprova dal tuo negozio; se il problema persiste contatta l\'assistenza.')
   }, [])

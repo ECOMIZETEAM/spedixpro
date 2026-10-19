@@ -22,6 +22,8 @@ const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; do
   { id: 'shopify',     nome: 'Shopify',      attivo: true,  colore: '#95BF47', dominio: 'shopify.com' },
   { id: 'woocommerce', nome: 'WooCommerce',  attivo: true,  colore: '#96588a', dominio: 'woocommerce.com' },
   { id: 'prestashop',  nome: 'PrestaShop',   attivo: true,  colore: '#df0067', dominio: 'prestashop.com' },
+  // Amazon spento finche' Amazon non approva l'app (SP-API): il collegamento c'e', ma senza
+  // l'approvazione nessun venditore potrebbe autorizzarlo. Intanto gli ordini Amazon entrano da file.
   { id: 'amazon',      nome: 'Amazon',       attivo: false, colore: '#ff9900', dominio: 'amazon.com' },
   { id: 'ebay',        nome: 'eBay',         attivo: true,  colore: '#e53238', dominio: 'ebay.com' },
   { id: 'magento',     nome: 'Magento',      attivo: false, colore: '#f46f25', dominio: 'magento.com' },
@@ -104,6 +106,7 @@ export default function IntegrazioniPage() {
     if (id === 'prestashop') setStep('prestashop')
     if (id === 'woocommerce') setStep('woocommerce')
     if (id === 'ebay') { setConnecting(true); window.location.href = '/api/integrazioni/ebay/install' }
+    if (id === 'amazon') { setConnecting(true); window.location.href = '/api/integrazioni/amazon/install' }
     if (id === 'tiktok') { setConnecting(true); window.location.href = '/api/integrazioni/tiktok/install' }
     if (id === 'temu') { setConnecting(true); window.location.href = '/api/integrazioni/temu/install' }
   }

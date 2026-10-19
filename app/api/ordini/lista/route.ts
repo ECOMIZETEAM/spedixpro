@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   if (!integrIds.length) return NextResponse.json([])
   const ordini = await fetchAll(() => supabase
     .from('ordini_ecommerce')
-    .select(`id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,unito_in,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,d7:raw->>createdAt,${COLONNE_PAGAMENTO},n1:raw->>note,n2:raw->>customer_note`)
+    .select(`id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,unito_in,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,d7:raw->>createdAt,d8:raw->>createdTime,${COLONNE_PAGAMENTO},n1:raw->>note,n2:raw->>customer_note`)
     .eq('cliente_id', utente.cliente_id)
     .eq('piattaforma', piattaforma)
     .in('integrazione_id', integrIds)
@@ -48,8 +48,8 @@ export async function GET(req: NextRequest) {
     const { data } = await supabase.from('spedizioni').select('id,created_at').in('id', spedIds.slice(i, i + 200))
     for (const s of (data || [])) dataSpedizione.set(String(s.id), s.created_at)
   }
-  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, n1, n2, ...o }: any) => {
-    let t: any = d1 || d2 || d3 || d4 || d5 || d6 || d7 || null   // d7 = Shopify createdAt (camelCase)
+  const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, d8, n1, n2, ...o }: any) => {
+    let t: any = d1 || d2 || d3 || d4 || d5 || d6 || d7 || d8 || null   // d7 = Shopify createdAt (camelCase), d8 = Amazon createdTime
     // epoch (TikTok/Temu): secondi o millisecondi -> ISO
     if (t && /^\d{9,13}$/.test(String(t))) t = new Date(Number(t) * (String(t).length <= 10 ? 1000 : 1)).toISOString()
     // La nota dell'ordine si restituisce a parte: `raw` non esce mai da qui (pesante), ma questa
