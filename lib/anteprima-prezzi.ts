@@ -32,6 +32,7 @@ import { cittaPerLaSpedizione } from '@/lib/citta-spedizione'
 import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 import { annotaPuntoPoste, contrattiConFasceATaglia, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
 import { internoEsclusivoViola } from '@/lib/interno-esclusivo'
+import { MAX_COLLI_PER_RIGA, type Collo } from '@/lib/colli-ordine'
 
 export type RigaDaPrezzare = {
   id: string
@@ -39,9 +40,9 @@ export type RigaDaPrezzare = {
   citta: string
   provincia: string
   paese: string
-  // UN solo collo: e' cosi' che le porte di massa spediscono. Chi ha piu' colli passa dal modulo
-  // della spedizione singola, dove il prezzo si vede gia'.
-  collo: { weight: number; length: number; width: number; height: number }
+  // I COLLI CON CUI L'ORDINE PARTE, uno per pacco (lib/colli-ordine.ts per l'import da file; gli
+  // ordini dei negozi ne hanno uno). Sono gli stessi che la pagina manda alla creazione.
+  colli: Collo[]
   contrassegno: number
   // La creazione rifiuta i servizi internazionali senza la descrizione della merce.
   haContenuto: boolean
@@ -89,11 +90,21 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
   // spedizione che non nascera' (il motore, da solo, la prezzerebbe per CAP).
   if (!riga.provincia.trim()) return senza('Manca la provincia del destinatario.')
 
+  const packages = riga.colli
+  if (!packages.length) return senza('Manca il collo da spedire.')
+  if (packages.length > MAX_COLLI_PER_RIGA) return senza(`Troppi colli per spedirlo da qui (massimo ${MAX_COLLI_PER_RIGA}): aprilo con la matita.`)
+  // ESTERO CON PIU' COLLI: il modulo della spedizione singola vuole il peso di OGNI collo e non divide
+  // quello dell'ordine (app/cliente/spedizioni/nuova/page.tsx, esteroMulti). Qui il peso per collo non
+  // c'e': dividerlo in parti uguali sarebbe una dichiarazione inventata verso la dogana. Si manda alla
+  // matita, come fa il modulo. Al 19/10/2026 nessun ordine importato estero ha piu' di un collo.
+  if (packages.length > 1 && (riga.paese || 'IT').toUpperCase() !== 'IT') {
+    return senza('Spedizione estera con più colli: aprila con la matita e indica il peso di ogni collo.')
+  }
+
   // 1) LA CITTA': la stessa decisione della creazione, PRIMA di qualunque prezzo.
   const cd = await cittaPerLaSpedizione({ cap: riga.cap, citta: riga.citta, paese: riga.paese, daImport: true })
   if (!cd.ok) return senza(cd.errore)
 
-  const packages = [riga.collo]
   const shipTo = { state: riga.provincia, postalCode: riga.cap, city: cd.citta, country: riga.paese }
   const shipFrom = { postalCode: ctx.mittente.cap, state: ctx.mittente.provincia }
 
@@ -118,6 +129,22 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
   await annotaPuntoPoste(ctx.dbAdmin, offerte)
   offerte = offerte.filter((r: any) => !eTariffaAUnPunto(r) && !aTaglia.has(r._corriere_id))
 
+  // CONTRATTI SENZA MULTICOLLO. La creazione rifiuta piu' colli su un contratto con
+  // `multicollo = false` (app/api/spedizioni/crea/route.ts, "Il contratto non prevede la funzione
+  // multicollo"), mentre il motore del preventivo quel flag non lo guarda e il contratto lo propone.
+  // Con un collo solo non contava; coi colli dell'ordine "prezzo minore" potrebbe sceglierne uno che
+  // la creazione poi boccia. Una lettura fallita non e' un "si' al multicollo": si solleva, e la riga
+  // esce come inciampo da riprovare.
+  const senzaMulticollo = new Set<string>()
+  if (packages.length > 1) {
+    const ids = offerte.map((r: any) => r._corriere_id).filter(Boolean)
+    if (ids.length) {
+      const { data, error } = await ctx.dbAdmin.from('corrieri').select('id,multicollo').in('id', ids)
+      if (error) throw new Error('lettura del flag multicollo: ' + (error.message || error.code))
+      for (const c of data || []) if (c.multicollo === false) senzaMulticollo.add(String(c.id))
+    }
+  }
+
   // 3) QUANTO: per ogni contratto offribile, il calcolo dell'addebito.
   const tariffe: TariffaAnteprima[] = []
   for (const r of offerte) {
@@ -125,6 +152,7 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
     if (!corriereId) continue
     const nome = String(r.corriere_nome || 'Corriere')
     // Stessi rifiuti della creazione, per cio' che si puo' sapere prima:
+    if (senzaMulticollo.has(String(corriereId))) continue                     // piu' colli su un contratto che non li prevede
     if (/international/i.test(nome) && !riga.haContenuto) continue           // serve la descrizione della merce
     if (riga.contrassegno > 0 && r._corriere_tipo === 'inpost') continue     // InPost non gestisce il contrassegno
     if (await internoEsclusivoViola(ctx.dbAdmin, {

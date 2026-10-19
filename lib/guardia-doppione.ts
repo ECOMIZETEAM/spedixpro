@@ -1,5 +1,12 @@
 import { rifOrdineAffidabile } from '@/lib/rif-ordine'
 
+// Una spedizione che CONTA come partita: non cancellata e non annullata (nemmeno in attesa di
+// annullo). Annullare e rifare e' legittimo, quindi un'annullata non fa da doppione. La usa anche
+// chi collega a un ordine la spedizione nata da una creazione di cui la pagina non ha avuto risposta
+// (app/api/ordini/aggiorna-stato): stessa definizione, o le due cose direbbero "spedito" su casi diversi.
+export const spedizioneAttiva = (s: { stato?: string | null; cancellata_il?: string | null }): boolean =>
+  !s.cancellata_il && !['annullata', 'annullamento_pending', 'annullamento_manuale'].includes(String(s.stato || ''))
+
 // La regola anti-doppione decide se un ordine e' gia' stato spedito: vale soldi, quindi non puo'
 // vivere in UNA porta sola. Stava solo nella creazione dal portale (app/api/spedizioni/crea);
 // l'API pubblica /api/v1, gli import e le integrazioni la scavalcavano -> stesso ordine spedito due
@@ -26,8 +33,7 @@ export async function spedizioneDoppioneAttiva(
     .eq('dest_cap', cap)
     .in('rif_ordine', Array.from(new Set([rif, rifNudo, '#' + rifNudo])))
     .limit(5)
-  const attiva = (data || []).find((s: any) => !s.cancellata_il
-    && !['annullata', 'annullamento_pending', 'annullamento_manuale'].includes(String(s.stato || '')))
+  const attiva = (data || []).find(spedizioneAttiva)
   return attiva ? { id: attiva.id, numero: attiva.numero } : null
 }
 

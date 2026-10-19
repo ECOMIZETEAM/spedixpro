@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { conMemoria, type ContatoreLetture } from '@/lib/db-memoria'
 import { prezziPerRighe, type RigaDaPrezzare } from '@/lib/anteprima-prezzi'
+import { MAX_COLLI_PER_RIGA, type Collo } from '@/lib/colli-ordine'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -46,17 +47,28 @@ const numero = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0
 }
 
+const colloDalCorpo = (v: unknown): Collo => {
+  const c: any = (v && typeof v === 'object') ? v : {}
+  return { weight: numero(c.weight), length: numero(c.length), width: numero(c.width), height: numero(c.height) }
+}
+
 function rigaDalCorpo(r: any): RigaDaPrezzare | null {
   const id = testo(r?.id, 80)
   if (!id) return null
-  const c = (r?.collo && typeof r.collo === 'object') ? r.collo : {}
+  // I COLLI, come la pagina li mandera' alla creazione. `collo` (uno solo) e' la forma di prima del
+  // 19/10/2026: una pagina aperta da prima del rilascio la manda ancora, e spedira' un collo solo —
+  // il suo prezzo deve restare quello di un collo. Se ne leggono al massimo uno in piu' del tetto:
+  // abbastanza perche' il calcolo dica "troppi colli", senza lavorare un elenco smisurato.
+  const colli = Array.isArray(r?.colli) && r.colli.length
+    ? r.colli.slice(0, MAX_COLLI_PER_RIGA + 1).map(colloDalCorpo)
+    : [colloDalCorpo(r?.collo)]
   return {
     id,
     cap: testo(r?.cap, 20),
     citta: testo(r?.citta, 120),
     provincia: testo(r?.provincia, 60),
     paese: testo(r?.paese, 60) || 'IT',
-    collo: { weight: numero(c.weight), length: numero(c.length), width: numero(c.width), height: numero(c.height) },
+    colli,
     contrassegno: numero(r?.contrassegno),
     haContenuto: r?.haContenuto === true,
   }

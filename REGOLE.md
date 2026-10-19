@@ -134,6 +134,22 @@ Queste sono decisioni del committente, non scelte tecniche. Il codice deve rispe
 
 Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
 
+- **Con quanti colli parte un ordine importato da file: due posti.** "Spedisci selezionati" e
+  l'anteprima del prezzo usano `lib/colli-ordine.ts` → `colliDellOrdine`; la matita apre il modulo
+  Nuova spedizione, che i colli se li costruisce da sé (precompilato + `buildPackages`). Oggi danno
+  gli stessi colli — peso dell'ordine diviso in parti uguali, misure di pacco o articolo solo sul
+  primo collo, gli altri 20×15×10 — ed è voluto: lo stesso ordine deve costare uguale dalle due
+  strade. Chi cambia la regola in uno dei due la cambia nell'altro. Fino al 19 ottobre il lotto
+  mandava sempre un collo solo, qualunque cosa dicesse il file (21 ordini multicollo in novanta
+  giorni, partiti con un'etichetta).
+  **Una differenza c'è, ed è un difetto della matita**: in virgola mobile il peso diviso, risommato,
+  può superare il totale (100 kg in 7 colli = 100,00000000000001 kg), e il motore confronta con le
+  fasce senza arrotondare: un totale che cade sul limite di una fascia passa alla successiva, e oltre
+  l'ultima prende un blocco in più (caso vero, ordine 120725 su SDA EXPRESS L: 22 € col peso intero,
+  44 € diviso). Succede in 81 combinazioni su 900 (pesi interi 1–100 kg, 2–10 colli). Il lotto toglie
+  l'eccedenza dall'ultimo collo; la matita (`buildPackages`) no. La cura per tutte le porte sarebbe
+  arrotondare il peso fatturato in `calcolaPesoFatturato` (lib/pricing.ts): tocca ogni prezzo, va
+  rieseguita prima su tutte le spedizioni.
 - **Eliminare un contratto guarda solo lo storico della SUA riga, non quello delle copie dei
   sotto-master.** Caso vero (13 ottobre): il "GLS CASERTA Consegna Diretta" di MULTIEXPRESS ha 0
   spedizioni sulla sua riga, mentre la copia di GTS ne ha 2.366 in trenta giorni. Se MULTIEXPRESS lo

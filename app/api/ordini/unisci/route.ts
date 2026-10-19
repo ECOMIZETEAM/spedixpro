@@ -109,9 +109,16 @@ export async function POST(req: NextRequest) {
   const patchCapo: any = {
     articoli,
     totale_ordine: Math.round(totale * 100) / 100,
-    // Peso e colli si sommano davvero: e' un pacco piu' pesante, non tre pacchi.
+    // Il peso si somma: e' un pacco piu' pesante, non tre pacchi.
     peso: ordinati.reduce((s: number, o: any) => s + (Number(o.peso) || 0), 0) || null,
-    colli: ordinati.reduce((s: number, o: any) => s + (Number(o.colli) || 0), 0) || null,
+    // I COLLI NO. Qui si sommavano anche loro, contro la frase sopra e contro cio' che la pagina
+    // chiede ("Unire N ordini in un pacco solo?"): ogni capofila finiva con tanti colli quanti ordini
+    // uniti, perche' da Amazon, Shopify e Temu ogni ordine arriva con 1 collo di default. Finche' il
+    // lotto spediva sempre un collo solo non si vedeva; la matita invece apriva la spedizione con N
+    // colli e il peso diviso. Su 63 unioni (fino al 19/10/2026) 49 sono partite a un collo — 18 col
+    // cliente che riportava a mano i colli a 1 — e 14 a piu' colli. Resta il numero piu' alto fra gli
+    // ordini uniti: un collo per chi non ne dichiara, e chi ha davvero piu' scatole lo dice nel modulo.
+    colli: Math.max(1, ...ordinati.map((o: any) => Math.round(Number(o.colli)) || 1)),
     // Il contrassegno si somma: chi consegna incassa una volta sola, ma l'intero importo. Un ordine
     // gia' pagato ha contrassegno 0 e non aggiunge niente (pagato 100 + contrassegno 90 = 90).
     contrassegno: ordinati.reduce((s: number, o: any) => s + (Number(o.contrassegno) || 0), 0) || 0,

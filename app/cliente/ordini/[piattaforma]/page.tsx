@@ -9,6 +9,7 @@ import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import { numeriOrdine, numeroOrdineCorrisponde } from '@/lib/numero-ordine-negozio'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo } from '@/app/cliente/anteprima-prezzi'
+import { descriviColli } from '@/lib/colli-ordine'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
@@ -336,6 +337,17 @@ export default function OrdiniPage() {
   function frecc(k:string){ if(!sort||sort.k!==k) return '↕'; return sort.d===1?'↑':'↓' }
 
   const [spedendo, setSpedendo] = useState(false)
+  // USCIRE DALLA PAGINA A META' LOTTO interrompe solo l'attesa del browser: la creazione in corso il
+  // server la finisce e la addebita, ma l'ordine resta "da spedire" senza la sua spedizione — pronto
+  // a ripartire una seconda volta. Le voci del menu ricaricano la pagina intera: finche' il lotto e'
+  // in corso il browser chiede conferma prima di lasciarla (stesso guasto e stessa difesa
+  // dell'import da file, vedi app/cliente/importa/page.tsx).
+  useEffect(() => {
+    if (!spedendo) return
+    const trattieni = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', trattieni)
+    return () => window.removeEventListener('beforeunload', trattieni)
+  }, [spedendo])
   // Carrello: credito insufficiente per l'intero lotto → "Paga con la carta" per il mancante.
   // Il lotto già preparato (tariffe calcolate) resta qui, così il pagamento non lo ricalcola.
   const [creditoKO, setCreditoKO] = useState<{ mancante: number; costo: number; credito: number } | null>(null)
@@ -378,7 +390,8 @@ export default function OrdiniPage() {
     return {
       id: o.id,
       cap: d.cap, citta: d.citta, provincia: d.provincia||'', paese: d.paese||'IT',
-      collo: { length:rp.l, width:rp.w, height:rp.h, weight:rp.peso },
+      // Un collo: gli ordini dei negozi non dicono quanti pacchi sono (ordini_ecommerce non ha i colli).
+      colli: [{ length:rp.l, width:rp.w, height:rp.h, weight:rp.peso }],
       contrassegno: codDaOrdine(o),
       haContenuto: !!arts.map((a:any)=>a.nome).join(', ').slice(0,100).trim(),
     }
@@ -435,9 +448,8 @@ export default function OrdiniPage() {
     const t = scegliTariffa(e.tariffe, spedisciCon)
     const elenco = e.tariffe.map(x=>x.nome+'  '+euro(x.prezzo)).join('\n')
     if (!t) return <span title={'Con il contratto scelto questo ordine non si può spedire.\nDisponibili per questo ordine:\n'+elenco} style={{color:'#b91c1c',fontWeight:600}}>non disponibile con il contratto scelto</span>
-    const c = rp.collo
     return (
-      <span title={'Calcolato su '+c.weight+' kg, '+c.length+'×'+c.width+'×'+c.height+' cm.\nÈ l\'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.'
+      <span title={'Calcolato su '+descriviColli(rp.colli)+'.\nÈ l\'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.'
         + (e.tariffe.length>1 ? '\n\nTutti i contratti per questo ordine:\n'+elenco : '')}>
         <span style={{fontWeight:700,color:'#1a1a1a'}}>{euro(t.prezzo)}</span>
         <span style={{color:'#6b7280',marginLeft:'6px'}}>{t.nome}</span>
@@ -559,9 +571,9 @@ export default function OrdiniPage() {
         // Destinazione e collo vengono dallo STESSO oggetto usato per l'anteprima (rigaPrezzoDi): cio'
         // che e' stato prezzato e' cio' che si spedisce.
         const d = x.o.destinatario || {}
-        const c = x.rp.collo
+        const c = x.rp.colli[0]
         const shipTo = { name:d.nome, company:'', street1:d.indirizzo, street2:'', city:x.rp.citta, state:x.rp.provincia, postalCode:x.rp.cap, country:x.rp.paese, phone:d.telefono||'', email:d.email||'' }
-        preparati.push({ id:x.id, o:x.o, num:x.num, arts:x.arts, rp:{ peso:c.weight, l:c.length, w:c.width, h:c.height }, packages:[c], shipTo, t })
+        preparati.push({ id:x.id, o:x.o, num:x.num, arts:x.arts, rp:{ peso:c.weight, l:c.length, w:c.width, h:c.height }, packages:x.rp.colli, shipTo, t })
       }
       // I prezzi appena ricalcolati tornano a schermo (il confronto qui sopra e' gia' fatto, su
       // quelli che il cliente vedeva): se da qui si esce senza spedire — Annulla, credito

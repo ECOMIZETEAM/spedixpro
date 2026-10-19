@@ -20,6 +20,7 @@
  * Cambiare "prezzo minore" con "contratto X" NON richiama il server: per ogni ordine arriva
  * l'elenco di tutti i contratti disponibili, e la scelta si rifa' qui. */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Collo } from '@/lib/colli-ordine'
 
 export type TariffaAnteprima = { corriere_id: string; nome: string; prezzo: number }
 
@@ -31,7 +32,8 @@ export type RigaPrezzo = {
   citta: string
   provincia: string
   paese: string
-  collo: { weight: number; length: number; width: number; height: number }
+  // I colli con cui l'ordine parte: sono i `packages` della creazione, nello stesso ordine.
+  colli: Collo[]
   contrassegno: number
   haContenuto: boolean
 }
@@ -71,7 +73,7 @@ export const euro = (n: number): string =>
 // Cambia quando cambia QUALSIASI dato che entra nel prezzo: e' cosi' che l'anteprima sa di dover
 // ricalcolare (un altro pacco predefinito, un ordine unito, un indirizzo di partenza diverso).
 export function firmaRiga(r: RigaPrezzo, m: MittentePrezzo): string {
-  return JSON.stringify([r.cap, r.citta, r.provincia, r.paese, r.collo.weight, r.collo.length, r.collo.width, r.collo.height, r.contrassegno, r.haContenuto, m.cap, m.provincia])
+  return JSON.stringify([r.cap, r.citta, r.provincia, r.paese, r.colli.map(c => [c.weight, c.length, c.width, c.height]), r.contrassegno, r.haContenuto, m.cap, m.provincia])
 }
 
 // `riprova` = il server non e' riuscito a calcolare QUELLA riga per un errore tecnico.
@@ -85,10 +87,19 @@ export const eUnRifiuto = (e: any): boolean => e?.stato === 400 || e?.stato === 
 export const testoDelRifiuto = (e: any): string =>
   e?.stato === 401 ? 'Sessione scaduta: ricarica la pagina e accedi di nuovo.' : String(e?.message || 'Calcolo dei prezzi non consentito.')
 
+// `collo` accanto a `colli`: e' la forma che la rotta conosceva prima del 19/10/2026 (un collo col
+// peso intero e le misure del primo). La rotta di oggi lo ignora quando ci sono i colli; serve se si
+// torna a una versione precedente con pagine gia' aperte, che altrimenti senza `collo` prezzerebbe
+// ogni ordine su 1 kg — e la creazione addebiterebbe poi il prezzo vero, piu' alto di quello mostrato.
+const conColloDiPrima = (r: RigaPrezzo) => ({
+  ...r,
+  collo: { ...r.colli[0], weight: r.colli.reduce((s, c) => s + (Number(c.weight) || 0), 0) },
+})
+
 async function chiediBlocco(righe: RigaPrezzo[], mittente: MittentePrezzo): Promise<Map<string, RispostaRiga>> {
   const res = await fetch('/api/cliente/anteprima-prezzi', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mittente, righe }),
+    body: JSON.stringify({ mittente, righe: righe.map(conColloDiPrima) }),
   })
   const dati = await res.json().catch(() => null)
   if (!res.ok || !dati || !Array.isArray(dati.righe)) {

@@ -5,6 +5,7 @@ import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { chiaveDestinatario, destinatarioDaImportato, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo, type TariffaAnteprima } from '@/app/cliente/anteprima-prezzi'
+import { colliDellOrdine, descriviColli } from '@/lib/colli-ordine'
 
 // Per quanti ordini A SCHERMO il prezzo si calcola da solo. Quelli SELEZIONATI si calcolano sempre
 // (fino al tetto sotto). Un import tipico sta sotto questi numeri e si vede tutto subito; ma c'e'
@@ -12,6 +13,11 @@ import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, test
 // vorrebbe dire migliaia di letture al database per righe che nessuno sta per spedire.
 const PREZZI_A_SCHERMO = 40
 const PREZZI_SELEZIONATI = 200
+
+// L'ordine la cui creazione non ha risposto e la cui spedizione, cercata, non si e' trovata. Puo'
+// essere nata dopo: il testo dice di guardare prima di rispedire (la guardia anti-doppione ferma
+// solo i numeri d'ordine "affidabili").
+const ESITO_SCONOSCIUTO = 'Risposta della creazione non arrivata: prima di rispedire controlla in Lista Spedizioni se è partita.'
 
 const ACCENT = '#f97316'
 
@@ -125,6 +131,18 @@ export default function ImportaOrdiniPage() {
   const [spedendo, setSpedendo] = useState(false)
   const [unendo, setUnendo] = useState(false)
 
+  // USCIRE DALLA PAGINA A META' LOTTO interrompe solo l'attesa del browser, non la creazione: il
+  // server la finisce e la addebita, ma l'ordine resta senza esito. E' cio' che c'era dietro i
+  // "Failed to fetch" (14/10/2026, TUTTO CASA SHOP: pagina ricaricata mentre una SDA EXPRESS L in
+  // catena stava ancora nascendo, ~23 secondi). Le voci del menu ricaricano la pagina intera: il
+  // browser chiede conferma prima di lasciarla, finche' il lotto e' in corso.
+  useEffect(() => {
+    if (!spedendo) return
+    const trattieni = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', trattieni)
+    return () => window.removeEventListener('beforeunload', trattieni)
+  }, [spedendo])
+
   // UNISCE PIU' ORDINI IN UN PACCO SOLO, se vanno tutti alla stessa identica persona.
   // La verifica dell'identita' del destinatario la fa il server — e' l'unico posto da cui non si
   // puo' scappare, e la stessa che usa l'elenco degli ordini dei negozi: se ognuna delle due
@@ -148,7 +166,7 @@ export default function ImportaOrdiniPage() {
     } catch { alert('Errore di connessione.') }
     setUnendo(false)
   }
-  const [progress, setProgress] = useState<{ done: number; total: number; fase?: 'tariffe' | 'crea' } | null>(null)
+  const [progress, setProgress] = useState<{ done: number; total: number; fase?: 'tariffe' | 'crea' | 'verifica' } | null>(null)
   // Carrello: credito insufficiente per l'intero lotto → "Paga con la carta" per il mancante.
   // Il lotto già preparato (tariffe calcolate) si conserva qui, così il pagamento non lo ricalcola.
   const [creditoKO, setCreditoKO] = useState<{ mancante: number; costo: number; credito: number } | null>(null)
@@ -472,7 +490,7 @@ export default function ImportaOrdiniPage() {
         postalCode: rp.cap, country: rp.paese,
         phone: o.telefono || '', email: o.email_destinatario || '',
       }
-      preparati.push({ o, packages: [rp.collo], shipTo, scelta, corriereId: scelta.corriere_id })
+      preparati.push({ o, packages: rp.colli, shipTo, scelta, corriereId: scelta.corriere_id })
     })
     // I prezzi appena ricalcolati tornano a schermo (il confronto qui sopra e' gia' fatto, su quelli
     // che il cliente vedeva): se da qui si esce senza spedire — Annulla, credito insufficiente —
@@ -518,6 +536,48 @@ export default function ImportaOrdiniPage() {
     await eseguiCreazioneLotto(preparati, preErrori, shipFrom)
   }
 
+  // SCRIVE L'ESITO SULL'ORDINE. Un inciampo di rete qui non deve fermare il lotto, ne' trasformare in
+  // "errore" una spedizione riuscita: prima questa chiamata stava nello stesso try della creazione,
+  // e se falliva DOPO una creazione andata bene l'ordine finiva in errore (3 casi in novanta giorni,
+  // collegati ma in errore). Un secondo tentativo, poi si va avanti. Torna la risposta, o null.
+  // `keepalive`: la richiesta arriva al server anche se la pagina si sta chiudendo — e' proprio il
+  // momento in cui la creazione resta senza risposta e l'esito va scritto lo stesso.
+  async function segnaOrdine(id: string, esito: Record<string, unknown>): Promise<any> {
+    for (let t = 0; t < 2; t++) {
+      try {
+        const r = await fetch('/api/ordini/aggiorna-stato', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, ...esito }),
+          keepalive: true,
+        })
+        if (r.ok) return await r.json().catch(() => ({}))
+      } catch { /* secondo tentativo */ }
+    }
+    return null
+  }
+
+  // CREAZIONE SENZA RISPOSTA: si chiede al server se la spedizione di questo ordine e' nata lo stesso
+  // (app/api/ordini/aggiorna-stato, `verifica`). La PRIMA domanda parte subito: scrive sull'ordine
+  // "risposta non arrivata" (o lo collega, se la spedizione c'e' gia'), cosi' anche se la pagina si
+  // chiude in quell'istante l'ordine non resta "da spedire" senza traccia. Le altre sono contate
+  // dall'INVIO della creazione, e l'ultima arriva dopo il minuto che la creazione puo' durare
+  // (maxDuration di /api/spedizioni/crea): una spedizione nata tardi viene trovata comunque.
+  // 'irraggiungibile' = nessuna domanda e' arrivata al server: e' la rete, non l'ordine.
+  async function verificaCreazione(id: string, inviataAlle: number): Promise<'collegata' | 'non_trovata' | 'irraggiungibile'> {
+    let raggiunto = false
+    for (const dopo of [0, 15000, 35000, 65000]) {
+      const attesa = inviataAlle + dopo - Date.now()
+      if (attesa > 0) await new Promise(r => setTimeout(r, attesa))
+      // `trascorsiMs`: da quanto e' partita QUESTA creazione. Il server cerca solo spedizioni nate dopo,
+      // cosi' non scambia per sua quella di un ordine gemello (stesso destinatario, CAP e riferimento)
+      // creata poco prima e rimasta scollegata. Un valore relativo: l'orologio del PC non conta.
+      const d = await segnaOrdine(id, { stato: 'errore', errore: ESITO_SCONOSCIUTO, verifica: true, trascorsiMs: Date.now() - inviataAlle })
+      if (d) raggiunto = true
+      if (d?.collegata) return 'collegata'
+    }
+    return raggiunto ? 'non_trovata' : 'irraggiungibile'
+  }
+
   // Crea le spedizioni del lotto già preparato (tariffe scelte nel pre-passaggio). Chiamato subito
   // se il credito basta, oppure dopo "Paga con la carta" (riusa lo stesso lotto, niente ricalcolo).
   async function eseguiCreazioneLotto(preparati: any[], preErrori: { o: any; err: string }[], shipFrom: any) {
@@ -528,18 +588,31 @@ export default function ImportaOrdiniPage() {
 
     // Le righe rimaste senza tariffa: segnate errore subito, non si creano.
     for (const pe of preErrori) {
-      await fetch('/api/ordini/aggiorna-stato', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pe.o.id, stato: 'errore', errore: pe.err }),
-      })
+      await segnaOrdine(pe.o.id, { stato: 'errore', errore: pe.err })
       ko++
     }
     setProgress({ done: ko, total: totale, fase: 'crea' })
 
+    // Ordini con la spedizione creata ma l'esito non scritto sull'ordine (server non raggiungibile
+    // dopo la creazione): vanno detti, perche' restano "da spedire" pur essendo partiti.
+    let nonCollegate = 0
+    // RETE GIU': due ordini di fila senza risposta e senza nemmeno poter chiedere l'esito. Si ferma il
+    // lotto invece di aspettare un minuto per ognuno degli ordini rimasti, senza poterli toccare.
+    let senzaRetePiuVolte = 0
+    let nonTentati = 0
+
     for (let i = 0; i < preparati.length; i++) {
+      if (senzaRetePiuVolte >= 2) { nonTentati = preparati.length - i; break }
       const { o, packages, shipTo, scelta, corriereId } = preparati[i]
+      const inviataAlle = Date.now()
+      // LA CREAZIONE HA TRE ESITI, non due: creata; rifiutata (il server dice perche', e non ha creato
+      // niente); oppure SENZA RISPOSTA — il browser smette di aspettare (connessione caduta, risposta
+      // che non e' JSON come un 504) mentre il server puo' averla creata e addebitata lo stesso. Prima
+      // il terzo finiva "in errore" col testo del browser ("Failed to fetch"), e in novanta giorni 33
+      // ordini su 34 avevano invece la spedizione: ora si verifica.
+      let cRes: Response | null = null
       try {
-        const cRes = await fetch('/api/spedizioni/crea', {
+        cRes = await fetch('/api/spedizioni/crea', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             _corriere_id: corriereId,
@@ -554,32 +627,27 @@ export default function ImportaOrdiniPage() {
             rifOrdine: o.order_id || '',   // → "Rif." in etichetta (SpediamoPro externalReference)
           }),
         })
-        const cData = await cRes.json()
+      } catch { cRes = null }
+      const cData: any = cRes ? await cRes.json().catch(() => null) : null
+
+      if (cRes?.status === 409 && cData?.gia_spedito) {
         // GIA' SPEDITO: la guardia server ha impedito il doppione. L'ordine E' gia' spedito (spedizione
         // esistente): lo segniamo 'spedito' collegandola, cosi' esce dalla lista e non si ritenta —
         // self-heal del disaccoppiamento crea↔segna-spedito che causava i doppioni. NON e' un errore.
-        if (cRes.status === 409 && cData?.gia_spedito) {
-          await fetch('/api/ordini/aggiorna-stato', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: o.id, stato: 'spedito', numero: cData.gia_spedito }),
-          })
-          ok++
-          setProgress({ done: ko + ok, total: totale, fase: 'crea' })
-          continue
-        }
-        if (!cRes.ok || cData.error) throw new Error(cData?.error || 'Errore creazione spedizione')
-
-        await fetch('/api/ordini/aggiorna-stato', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: o.id, stato: 'spedito', numero: cData.numero }),
-        })
-        ok++
-      } catch (e: any) {
-        await fetch('/api/ordini/aggiorna-stato', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: o.id, stato: 'errore', errore: String(e?.message || e) }),
-        })
-        ko++
+        if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.gia_spedito, spedizione_id: cData.gia_spedito_id })) nonCollegate++
+        ok++; senzaRetePiuVolte = 0
+      } else if (cRes?.ok && cData && !cData.error) {
+        if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.numero, spedizione_id: cData.spedizioneId })) nonCollegate++
+        ok++; senzaRetePiuVolte = 0
+      } else if (cData?.error) {
+        // Rifiutata, col motivo del server (credito, telefono, corriere…): non e' nata.
+        await segnaOrdine(o.id, { stato: 'errore', errore: String(cData.error) })
+        ko++; senzaRetePiuVolte = 0
+      } else {
+        setProgress({ done: ko + ok, total: totale, fase: 'verifica' })
+        const esito = await verificaCreazione(o.id, inviataAlle)
+        if (esito === 'collegata') { ok++; senzaRetePiuVolte = 0 }
+        else { ko++; senzaRetePiuVolte = esito === 'irraggiungibile' ? senzaRetePiuVolte + 1 : 0 }
       }
       setProgress({ done: ko + ok, total: totale, fase: 'crea' })
     }
@@ -593,9 +661,14 @@ export default function ImportaOrdiniPage() {
     // 'errore') sparirebbero dalla vista "Da spedire" e l'utente vedrebbe una lista vuota nonostante
     // il banner gli dica di guardarli. Così compaiono subito, con il motivo accanto allo stato.
     if (ko) setFiltroStato('errore')
+    const avvisi = [
+      nonCollegate ? `${nonCollegate} create ma non segnate sull'ordine (connessione persa): risultano ancora da spedire, controllale in Lista Spedizioni prima di rispedirle` : '',
+      nonTentati ? `connessione assente: lotto fermato, ${nonTentati} ordini non tentati — riprova quando la rete torna` : '',
+    ].filter(Boolean)
     setMsg({
-      type: ko ? 'err' : 'ok',
-      text: `Spedizioni completate: ${ok} riuscite${ko ? `, ${ko} in errore — le trovi qui sotto, con il motivo accanto allo stato` : ''}`,
+      type: ko || avvisi.length ? 'err' : 'ok',
+      text: `Spedizioni completate: ${ok} riuscite${ko ? `, ${ko} in errore — le trovi qui sotto, con il motivo accanto allo stato` : ''}`
+        + (avvisi.length ? '. ' + avvisi.join('. ') + '.' : ''),
     })
   }
 
@@ -665,9 +738,11 @@ export default function ImportaOrdiniPage() {
   // l'anteprima del prezzo e "Spedisci selezionati". Il pre-passaggio della spedizione se la
   // riscriveva per conto suo: con due copie, il giorno che ne cambia una il prezzo mostrato non e'
   // piu' quello del pacco che parte.
-  //   PESO:   articolo del catalogo (per SKU) > pacco > peso del file > 1 kg.
+  //   PESO:   articolo del catalogo (per SKU) > pacco > peso del file > 1 kg. E' il peso dell'ORDINE.
   //   MISURE: pacco (scelto a mano, oppure per SKU) > articolo (se ha misure) > 20x15x10.
-  const colloDi = (o: Ordine) => {
+  //   COLLI:  quelli dell'ordine (colonna "colli" del file), col peso diviso in parti uguali e le
+  //           misure sul primo — la regola della matita, scritta in lib/colli-ordine.ts.
+  const colliDi = (o: Ordine) => {
     const articolo = articoloPerOrdine(o)
     const box = paccoPerOrdine(o)   // pacco = sorgente delle MISURE
     const peso = (articolo && Number(articolo.peso) > 0) ? Number(articolo.peso)
@@ -678,7 +753,7 @@ export default function ImportaOrdiniPage() {
       : (articolo && (Number(articolo.lunghezza) || Number(articolo.larghezza) || Number(articolo.altezza)))
         ? { l: articolo.lunghezza, w: articolo.larghezza, h: articolo.altezza }
         : { l: 20, w: 15, h: 10 }
-    return { length: Number(dims.l) || 20, width: Number(dims.w) || 15, height: Number(dims.h) || 10, weight: peso as number }
+    return colliDellOrdine(peso, o.colli, { length: Number(dims.l) || 20, width: Number(dims.w) || 15, height: Number(dims.h) || 10 })
   }
   // Nessuna fonte per il peso (ne' catalogo, ne' pacco, ne' file): si spedisce e si prezza su 1 kg.
   // Va detto accanto al prezzo: e' la situazione della maggior parte degli ordini importati.
@@ -687,11 +762,11 @@ export default function ImportaOrdiniPage() {
     return !(articolo && Number(articolo.peso) > 0) && !(box && Number(box.peso) > 0) && !o.peso
   }
   // Tutto cio' che entra nel prezzo di un ordine. Da QUESTO oggetto nascono sia la riga
-  // dell'anteprima sia destinazione e collo mandati alla creazione.
+  // dell'anteprima sia destinazione e colli mandati alla creazione.
   const rigaPrezzoDi = (o: Ordine): RigaPrezzo => ({
     id: o.id,
     cap: o.cap, citta: o.localita, provincia: o.provincia, paese: o.country || 'IT',
-    collo: colloDi(o),
+    colli: colliDi(o),
     contrassegno: o.contrassegno || 0,
     haContenuto: !!String(o.contenuto || '').trim(),
   })
@@ -787,9 +862,8 @@ export default function ImportaOrdiniPage() {
         </span>
       )
     }
-    const c = rp.collo
     return (
-      <span title={`Calcolato su ${c.weight} kg, ${c.length}×${c.width}×${c.height} cm.\nÈ l'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.`
+      <span title={`Calcolato su ${descriviColli(rp.colli)}.\nÈ l'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.`
         + (e.tariffe.length > 1 ? '\n\nTutti i contratti per questo ordine:\n' + elenco : '')}>
         <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{euro(t.prezzo)}</span>
         <div style={sub}>{t.nome}</div>
@@ -915,7 +989,11 @@ export default function ImportaOrdiniPage() {
             {spedendo && progress
               ? (progress.fase === 'tariffe'
                   ? `Calcolo tariffe ${progress.done}/${progress.total}…`
-                  : `Spedizione ${progress.done}/${progress.total} in corso…`)
+                  // Una creazione in catena dura fino a mezzo minuto: detto qui, chi aspetta non
+                  // ricarica la pagina pensando che si sia bloccata.
+                  : progress.fase === 'verifica'
+                    ? `La risposta tarda: controllo se la spedizione ${progress.done + 1}/${progress.total} è partita… non chiudere la pagina`
+                    : `Spedizione ${progress.done}/${progress.total} in corso… non chiudere e non ricaricare la pagina`)
               : (sel.size > 0 ? <>{sel.size} selezionati{riepilogoPrezzi}</> : `${ordiniVisti.length}${ordiniVisti.length !== ordini.length ? ` di ${ordini.length}` : ''} ordini`)}
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
