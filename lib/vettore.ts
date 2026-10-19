@@ -32,3 +32,15 @@ export function vettoreFisico(c: { tipo?: string | null; nome_contratto?: string
   // Fallback: prima parola del nome, o il tipo. Non deve mai unire cose diverse per sbaglio.
   return n.split(/\s+/)[0] || t.toUpperCase() || 'ALTRO'
 }
+
+// CONSEGNA CON MEZZI PROPRI: il contratto e' un corriere interno, cioe' consegnano gli autisti di chi
+// lo detiene e non un corriere commerciale. Stessa definizione di "interno" della regola sulla
+// copertura dei CAP (lib/pricing.ts, soloCapCoperti): tipo 'interno', oppure il flag
+// settings.solo_cap_coperti per gli interni che passano da un altro tipo di contratto (l'"INTERNO
+// EXPRESS" di Quick e' di tipo spedisci). InPost non e' un interno anche se ha la stessa regola sui CAP.
+// Funzione PURA: usabile sia lato client che lato API.
+export function consegnaConMezziPropri(c: { tipo?: string | null; settings?: any } | null | undefined): boolean {
+  const t = (c?.tipo || '').toLowerCase()
+  if (t === 'interno') return true
+  return t !== 'inpost' && c?.settings?.solo_cap_coperti === true
+}

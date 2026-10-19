@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { piattaformaDa, ordiniSpeditiPerRiferimento } from '../route'
 import { fetchAll } from '@/lib/fetch-all'
+import { consegnaConMezziPropri } from '@/lib/vettore'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,17 +19,26 @@ function cell(v: any): string {
 // ("carrier-name ... ignored because it is invalid or conflicts with the value in another field"),
 // UNO PER RIGA: era la causa delle "114 allerte su 114 record" del 27/07. Quindi: name valorizzato
 // SOLO nel ramo 'Other'.
-function carrierAmazon(nome: string): { code: string; name: string } {
-  const n = (nome || '').toUpperCase()
-  if (n.includes('BRT')) return { code: 'BRT', name: '' }
-  if (n.includes('GLS')) return { code: 'GLS', name: '' }
-  if (n.includes('POSTE')) return { code: 'Poste Italiane', name: '' }
-  if (n.includes('SDA')) return { code: 'SDA', name: '' }
-  if (n.includes('DHL')) return { code: 'DHL', name: '' }
-  if (n.includes('UPS')) return { code: 'UPS', name: '' }
-  if (n.includes('TNT')) return { code: 'TNT', name: '' }
-  if (n.includes('FEDEX') || n.includes('FED EX')) return { code: 'FedEx', name: '' }
-  return { code: 'Other', name: nome || 'Corriere' }
+//
+// CORRIERE INTERNO = "MEZZI PROPRI" / "SELF DELIVERY". Prima un interno usciva come 'Other' col nome
+// del contratto ("INTERNO EXPRESS") e ship-method 'Standard': per Amazon era un corriere sconosciuto
+// con un tracking che nessun corriere scansiona, quindi la spedizione entrava nelle metriche del
+// venditore (Valid Tracking Rate) e le peggiorava. Segnalato da un cliente di Quick il 19/10/2026.
+// In Seller Central si sceglie il vettore "Mezzi propri" con il metodo "Self Delivery": nel file e'
+// il carrier-code 'Self Delivery' (valore della lista vettori di Amazon), senza carrier-name.
+function carrierAmazon(corriere: { nome_contratto?: string | null; tipo?: string | null; settings?: any } | null | undefined): { code: string; name: string; method: string } {
+  if (consegnaConMezziPropri(corriere)) return { code: 'Self Delivery', name: '', method: 'Self Delivery' }
+  const nome = corriere?.nome_contratto || ''
+  const n = nome.toUpperCase()
+  if (n.includes('BRT')) return { code: 'BRT', name: '', method: 'Standard' }
+  if (n.includes('GLS')) return { code: 'GLS', name: '', method: 'Standard' }
+  if (n.includes('POSTE')) return { code: 'Poste Italiane', name: '', method: 'Standard' }
+  if (n.includes('SDA')) return { code: 'SDA', name: '', method: 'Standard' }
+  if (n.includes('DHL')) return { code: 'DHL', name: '', method: 'Standard' }
+  if (n.includes('UPS')) return { code: 'UPS', name: '', method: 'Standard' }
+  if (n.includes('TNT')) return { code: 'TNT', name: '', method: 'Standard' }
+  if (n.includes('FEDEX') || n.includes('FED EX')) return { code: 'FedEx', name: '', method: 'Standard' }
+  return { code: 'Other', name: nome || 'Corriere', method: 'Standard' }
 }
 
 // Genera il file tracking degli ordini importati DA FILE e spediti, per una piattaforma
@@ -54,7 +64,7 @@ export async function GET(req: NextRequest) {
   // duplicare o perdere ordini (righe con lo stesso created_at).
   const righe = await fetchAll(() => supabase
     .from('ordini_importati')
-    .select('order_id, contenuto, colli, raw, articoli, spedizioni!inner(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto))')
+    .select('order_id, contenuto, colli, raw, articoli, spedizioni!inner(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings))')
     .eq('cliente_id', utente.cliente_id)
     .eq('stato', 'spedito')
     .is('integrazione_id', null)
@@ -80,7 +90,7 @@ export async function GET(req: NextRequest) {
   if (capoIds.length) {
     const capi = await fetchAll(() => supabase
       .from('ordini_importati')
-      .select('id, spedizioni(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto))')
+      .select('id, spedizioni(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings))')
       .in('id', capoIds))
     for (const c of (capi || [])) if ((c as any).spedizioni) spedDiCapo.set((c as any).id, (c as any).spedizioni)
   }
@@ -93,7 +103,7 @@ export async function GET(req: NextRequest) {
   // di quella spedizione, altrimenti restano "non spediti" pur essendo partiti (spesso già consegnati).
   const orfani = await ordiniSpeditiPerRiferimento(
     supabase, utente.cliente_id,
-    'tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto)')
+    'tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings)')
 
   const righeTutte = [...(righe || []), ...unitiConSped, ...orfani]
 
@@ -120,7 +130,7 @@ export async function GET(req: NextRequest) {
     for (const r of filtrate) {
       const raw = r.raw || {}
       const sp = r.spedizioni || {}
-      const car = carrierAmazon(sp.corrieri?.nome_contratto || '')
+      const car = carrierAmazon(sp.corrieri)
       const shipDate = (sp.created_at || '').slice(0, 10)   // YYYY-MM-DD
       // order-id: prima quello normalizzato salvato (ora popolato anche dai file 'amazon-order-id'),
       // poi i nomi grezzi come rete per gli ordini importati PRIMA della correzione dell'alias, che
@@ -128,7 +138,7 @@ export async function GET(req: NextRequest) {
       const orderId = r.order_id || raw.orderid || raw.amazonorderid || raw.amazon_order_id || raw.merchantorderid || ''
       const riga = (orderItemId: any, qty: any) => [
         tab(orderId), tab(orderItemId), tab(qty), tab(shipDate),
-        tab(car.code), tab(car.name), tab(sp.tracking_number || ''), tab('Standard'),
+        tab(car.code), tab(car.name), tab(sp.tracking_number || ''), tab(car.method),
       ].join('\t')
       const arts = Array.isArray(r.articoli) ? r.articoli.filter((a: any) => a && a.order_item_id) : []
       if (arts.length) {
