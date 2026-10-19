@@ -10,8 +10,8 @@ export function wooBase(url: string): string {
   return url.replace(/\/+$/, '') + '/wp-json/wc/v3'
 }
 
-export async function wooGet(url: string, ck: string, cs: string, path: string): Promise<any> {
-  const r = await fetch(`${wooBase(url)}${path}`, { headers: wooHeaders(ck, cs), signal: AbortSignal.timeout(20000) })
+export async function wooGet(url: string, ck: string, cs: string, path: string, attesaMs = 20000): Promise<any> {
+  const r = await fetch(`${wooBase(url)}${path}`, { headers: wooHeaders(ck, cs), signal: AbortSignal.timeout(attesaMs) })
   const text = await r.text()
   if (!r.ok) throw new Error(`WooCommerce ${r.status}: ${text.slice(0, 200)}`)
   try { return JSON.parse(text) } catch { return null }

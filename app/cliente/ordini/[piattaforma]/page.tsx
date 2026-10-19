@@ -149,9 +149,14 @@ export default function OrdiniPage() {
     leggiMittente()
   }, [])
 
-  // SKU -> peso/misure (catalogo articoli) e SKU -> pacco (scatola). eBay/PrestaShop arrivano con
-  // grammi=0: senza questo il peso restava sempre 1kg (non si poteva cambiare fascia). Priorità peso:
-  // articolo(SKU) > pacco(SKU) > grammi del file > 1kg.
+  // SKU -> peso/misure (catalogo articoli) e SKU -> pacco (scatola).
+  //
+  // IL PESO E' LA SOMMA DEL PACCO, riga per riga e pezzo per pezzo: per ogni articolo il catalogo
+  // (SKU) se ha un peso, altrimenti quello letto dal negozio (grammi), per la quantita'. Prima contava
+  // solo il PRIMO articolo, una volta sola: un ordine da 7 righe e 9 pezzi pesava quanto il primo
+  // pezzo (Raccolto e Mangiato, 19/10/2026: 122 ordini su 252 con piu' di un pezzo).
+  // Il pacco dello SKU da' le misure; il suo peso conta solo se nessun articolo ne ha uno, al posto
+  // del chilo di ripiego. Nessuna fonte: si spedisce su 1 kg, e la riga lo dice.
   const skuToArt = useMemo(()=>{ const m=new Map<string,any>(); for(const a of articoliCat){ const k=String(a.sku||'').trim().toLowerCase(); if(k) m.set(k,a) } return m }, [articoliCat])
   const skuToPacco = useMemo(()=>{ const m=new Map<string,any>(); for(const p of pacchi) for(const s of String(p.sku||'').split(/[\s,;]+/)){ const k=s.trim().toLowerCase(); if(k) m.set(k,p) } return m }, [pacchi])
   function risolviPeso(o:any){
@@ -159,16 +164,25 @@ export default function OrdiniPage() {
     const sku0 = String(arts[0]?.sku||'').trim().toLowerCase()
     const art = sku0 ? skuToArt.get(sku0) : null
     const pacco = sku0 ? skuToPacco.get(sku0) : null
-    let peso = (art && Number(art.peso)>0) ? Number(art.peso)
-      : (pacco && Number(pacco.peso)>0) ? Number(pacco.peso)
-      : (arts.reduce((s:number,a:any)=>s+(Number(a.grammi)||0)*(Number(a.quantita)||1),0)/1000)
-    // Nessuna fonte per il peso (ne' catalogo, ne' pacco, ne' grammi dal negozio): si spedisce su 1 kg.
+    let peso = 0, senzaPeso = 0
+    for (const a of arts) {
+      const k = String(a?.sku||'').trim().toLowerCase()
+      const cat = k ? skuToArt.get(k) : null
+      const unitario = (cat && Number(cat.peso)>0) ? Number(cat.peso) : (Number(a?.grammi)>0 ? Number(a.grammi)/1000 : 0)
+      if (unitario>0) peso += unitario*(Number(a?.quantita)||1); else senzaPeso++
+    }
+    peso = Math.round(peso*1000)/1000
+    if (!(peso>0) && pacco && Number(pacco.peso)>0) { peso = Number(pacco.peso); senzaPeso = 0 }
+    // Somma INCOMPLETA: mai sotto il chilo di ripiego. 150 g noti piu' un articolo senza peso non sono
+    // un pacco da 150 g, e senza questa soglia l'ordine scenderebbe sotto cio' che si dichiarava prima.
+    if (senzaPeso>0 && peso>0 && peso<1) peso = 1
     const pesoStimato = !(peso>0)
     if (pesoStimato) peso = 1
     const box = pacco ? {l:pacco.lunghezza,w:pacco.larghezza,h:pacco.altezza}
       : (art && (Number(art.lunghezza)||Number(art.larghezza)||Number(art.altezza))) ? {l:art.lunghezza,w:art.larghezza,h:art.altezza}
       : {l:20,w:15,h:10}
-    return { peso: Math.max(0.01, peso), l:Number(box.l)||20, w:Number(box.w)||15, h:Number(box.h)||10, pesoStimato }
+    // senzaPeso: articoli rimasti fuori dalla somma (ne' catalogo ne' negozio): il peso e' per difetto.
+    return { peso: Math.max(0.01, peso), l:Number(box.l)||20, w:Number(box.w)||15, h:Number(box.h)||10, pesoStimato, senzaPeso: pesoStimato ? 0 : senzaPeso }
   }
   useEffect(()=>{ fetch('/api/cliente/corrieri').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d?.corrieri)?d.corrieri:[])).catch(()=>{}) }, [])
 
@@ -427,7 +441,15 @@ export default function OrdiniPage() {
         + (e.tariffe.length>1 ? '\n\nTutti i contratti per questo ordine:\n'+elenco : '')}>
         <span style={{fontWeight:700,color:'#1a1a1a'}}>{euro(t.prezzo)}</span>
         <span style={{color:'#6b7280',marginLeft:'6px'}}>{t.nome}</span>
-        {risolviPeso(o).pesoStimato && <span style={{color:'#b45309',marginLeft:'6px'}}>· su 1 kg: peso non indicato</span>}
+        {(()=>{
+          // Il peso si vede accanto al prezzo: e' la prima cosa che il cliente controlla ("il peso non
+          // l'ha preso"), e prima stava solo nel suggerimento al passaggio del mouse.
+          const p = risolviPeso(o)
+          if (p.pesoStimato) return <span style={{color:'#b45309',marginLeft:'6px'}}>· su 1 kg: peso non indicato</span>
+          const kg = <span style={{color:'#6b7280',marginLeft:'6px'}}>· {String(p.peso).replace('.',',')} kg</span>
+          if (!p.senzaPeso) return kg
+          return <>{kg}<span style={{color:'#b45309',marginLeft:'6px'}}>senza il peso di {p.senzaPeso===1?'1 articolo':p.senzaPeso+' articoli'}</span></>
+        })()}
       </span>
     )
   }

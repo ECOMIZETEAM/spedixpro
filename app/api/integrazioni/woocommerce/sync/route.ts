@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { sincronizzaOrdiniWoo } from '@/lib/wooSync'
+import { sincronizzaOrdiniWoo, PESO_FRESCO_MANUALE_MS } from '@/lib/wooSync'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120   // finestre ampie (es. un mese) con molti ordini: niente timeout
+// Finestre ampie (es. un mese) con molti ordini, piu' la lettura dei pesi degli articoli: un negozio
+// lento (Raccolto e Mangiato, ~5 secondi a chiamata) stava gia' sui 100-110 secondi col mese intero, e
+// la prima lettura dei pesi ne aggiunge fino a una trentina. Stesso tetto della sync automatica.
+export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -31,7 +34,9 @@ export async function POST(req: NextRequest) {
   if (!integr) return NextResponse.json({ error: 'Integrazione non trovata' }, { status: 404 })
 
   try {
-    const res = await sincronizzaOrdiniWoo(supabase, integr, { dal: body.dal, al: body.al })
+    // Chi preme Sincronizza dopo aver corretto un peso sul negozio deve vederlo: i pesi si rileggono
+    // se hanno piu' di qualche minuto, non un giorno come nella sync automatica.
+    const res = await sincronizzaOrdiniWoo(supabase, integr, { dal: body.dal, al: body.al }, { pesoFrescoMs: PESO_FRESCO_MANUALE_MS })
     return NextResponse.json({ ok: true, ...res })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Errore sincronizzazione' }, { status: 502 })
