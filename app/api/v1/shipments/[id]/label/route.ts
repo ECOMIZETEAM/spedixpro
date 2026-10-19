@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { leggiEtichettaCompleta } from '@/lib/etichette'
+import { attendiTmp } from '@/lib/tmp-completa'
+
+// Su una spedizione provvisoria la rotta aspetta la LDV fino a ~20 s (vedi sotto): il tetto deve
+// lasciare spazio anche a un tentativo lento del fornitore.
+export const maxDuration = 60
+
+const CAMPI = 'id,numero,stato,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id,corriere_id,rif_ordine,contenuto'
 
 // Scarica l'etichetta (LDV) PDF della spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -10,8 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const _b = rispostaBlocco(ctx); if (_b) return _b
   const { id } = await params
   const admin = createAdminSupabase()
-  const { data: s } = await admin.from('spedizioni')
-    .select('id,numero,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id,corriere_id,rif_ordine,contenuto').eq('id', id).maybeSingle()
+  let { data: s } = await admin.from('spedizioni').select(CAMPI).eq('id', id).maybeSingle()
   if (!s || s.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   // leggiEtichettaCompleta sa dove vive il PDF (Storage o base64) ED è MULTICOLLO: su una spedizione
   // a più colli unisce tutte le etichette in un unico PDF, così chi si integra via API non riceve il
@@ -21,8 +27,31 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // il cliente finale avrebbe avuto la resa coi dati della gamba a monte invece che della sua riga, e
   // rileggerla per riscriverla cancellava i codici (provato il 13/10). La resa pulita la fa il portale
   // di chi stampa, sulla sua riga; chi si integra via API riceve la stessa 1011 di sempre.
-  const et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
-  if (!et) return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
+  let et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
+
+  // SPEDIZIONE NATA PROVVISORIA (DVA, "TMP-<ordine>"): invece di rispondere subito che l'etichetta non
+  // c'e', la si va a chiedere al fornitore e si aspetta qualche secondo (lib/tmp-completa, attendiTmp).
+  // Solo appena creata (in_lavorazione): su una spedizione annullata o in annullo non c'e' niente da
+  // aspettare. La catena della condivisione non passa mai di qui: nessun contratto-ponte ha DVA come
+  // fornitore, e solo DVA produce numeri provvisori.
+  const provvisoria = () => String(s?.numero || '').startsWith('TMP-')
+  if (!et && provvisoria() && s.stato === 'in_lavorazione') {
+    await attendiTmp(admin, s.id)
+    const { data: riletta } = await admin.from('spedizioni').select(CAMPI).eq('id', id).maybeSingle()
+    if (riletta) s = riletta
+    et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
+  }
+  if (!et) {
+    // ANCORA NON PRONTA: 503 con Retry-After, non 404. Il 404 diceva "non esiste", e chi lo riceveva
+    // non riprovava: lo salvava come se fosse l'etichetta. Il corpo resta JSON, come ogni errore.
+    if (provvisoria() && s.stato === 'in_lavorazione') {
+      return NextResponse.json(
+        { error: 'Etichetta non ancora pronta: il corriere non ha ancora assegnato la lettera di vettura. Riprova tra 30 secondi.', retry_after: 30 },
+        { status: 503, headers: { 'Retry-After': '30' } },
+      )
+    }
+    return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
+  }
   return new NextResponse(et.buffer as any, {
     headers: {
       'Content-Type': et.mime,
@@ -34,6 +63,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 // ANCHE IN POST, identica: stessa chiave, stessi controlli, stesso PDF. La strada documentata resta GET.
 // Il portale di CONTORNO SRL chiede l'etichetta in POST sulle spedizioni Poste (in GET sulle SDA):
 // Next rispondeva 405 senza corpo, e il loro portale salvava quel vuoto come .pdf, che Acrobat non
-// apre. 55 spedizioni su 55 dal 24/09/2026, mai un'etichetta arrivata. Una lettura in POST non
-// scrive niente, quindi accettarla non apre nulla di nuovo.
+// apre. 55 spedizioni su 55 dal 24/09/2026, mai un'etichetta arrivata. POST fa esattamente quello che
+// fa GET, quindi accettarla non apre nulla di nuovo.
 export const POST = GET

@@ -140,3 +140,28 @@ export async function completaTmp(
 
   return esito
 }
+
+// ASPETTARE LA LDV DI UNA SPEDIZIONE SOLA, per chi la chiede subito dopo averla creata.
+//
+// I portali che si integrano via API creano la spedizione e nello stesso secondo ne chiedono
+// l'etichetta. Se e' nata provvisoria, l'etichetta non c'e' ancora: si rispondeva 404 e piu' di un
+// portale salvava quell'errore come .pdf. Il 19/10/2026 CONTORNO SRL: 3UW1WLJ080838 nata
+// TMP-26578154 alle 05:48:02, etichetta chiesta una volta sola nello stesso secondo, completata dal
+// giro veloce alle 05:48:45 — ma il loro portale non ha piu' riprovato. Nella settimana prima la
+// stessa cosa e' capitata a circa 80 spedizioni di altri clienti.
+//
+// Qui si fa lo stesso tentativo del giro veloce e del pulsante "Riprova adesso", solo ripetuto per
+// qualche secondo. Quando il fornitore non ha ancora la LDV risponde in pochi centesimi di secondo,
+// quindi i tentativi costano poco; il tetto e' sul tempo, non sul numero.
+// Restituisce subito se la spedizione non e' (piu') provvisoria: chi chiama rilegge la riga e decide.
+export async function attendiTmp(admin: any, spedizioneId: string, attesaMs = 20_000, pausaMs = 4_000): Promise<void> {
+  const fine = Date.now() + attesaMs
+  for (;;) {
+    const es = await completaTmp(admin, { spedizioneId })
+    // Fatto (numero o almeno etichette), oppure non c'e' piu' niente da fare: non provvisoria,
+    // gia' completata da un altro giro, annullata, o di un tipo che non produce provvisori.
+    if (es.completate || es.soloEtichette || !es.esaminate || es.saltate) return
+    if (Date.now() + pausaMs > fine) return
+    await new Promise(r => setTimeout(r, pausaMs))
+  }
+}
