@@ -346,8 +346,14 @@ export async function svincolaKsync(c: KsyncCred, req: { shipmentId: string; rel
     body.address = { item: [{ givenName: pulisciPoste(r.ragioneSociale), surname: '', streetNumber: pulisciPoste(r.civico), streetName: pulisciPoste(r.indirizzo), town: pulisciPoste(r.citta), region: (r.provincia || '').toUpperCase(), postCode: r.cap || '', country: nazione(r.paese), phone: telPdb(r.telefono), email: emailPoste(r.email) }] }
   }
   const { ok, j } = await chiama(c, 'deposits/release', body)
-  const esito = String(j?.result?.result || j?.result || '').toUpperCase()
-  return { ok: ok && esito !== 'KO', descrizione: String(j?.description || j?.result?.errorDescription || ''), raw: j }
+  // L'ESITO STA IN result.item[0].result ("OK" / "KO"), e KSync risponde HTTP 200 anche quando rifiuta
+  // (provato in produzione il 19/10: "Dati obbligatori mancanti: releaseAct" con HTTP 200 e item KO).
+  // Prima si leggeva result.result, che non esiste: un rifiuto passava per riuscito e lo svincolo veniva
+  // addebitato e segnato fatto. Ora vale solo un OK esplicito.
+  const item = Array.isArray(j?.result?.item) ? j.result.item[0] : null
+  const esito = String(item?.result ?? j?.result?.result ?? '').toUpperCase()
+  const descrizione = String((esito === 'OK' ? j?.description : item?.errorDescription) || j?.description || j?.result?.errorDescription || '')
+  return { ok: ok && esito === 'OK', descrizione, raw: j }
 }
 
 // ── POD DIGITALE (digipod) ───────────────────────────────────────────────────
