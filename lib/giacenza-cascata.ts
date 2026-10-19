@@ -625,8 +625,11 @@ export async function pianoServizioGiacenzaCondivisione(
 
 async function addebitaServizioGiacenzaCondivisione(
   admin: any, gambe: GambaSpedizione[], operazione: string, opz: { richiestaSpedizioneId: string; importoServizioCliente: number },
+  pianoPronto?: { o: any; piano: VoceGiacenza[] },
 ): Promise<EsitoAddebito> {
-  const { o, piano } = await pianoServizioGiacenzaCondivisione(admin, gambe, operazione, opz)
+  // Il piano lo passa lo svincolo, calcolato PRIMA del corriere: dopo che il corriere ha accettato non si
+  // rilegge niente, perche' una lettura caduta in quel momento faceva risultare fallito uno svincolo fatto.
+  const { o, piano } = pianoPronto || await pianoServizioGiacenzaCondivisione(admin, gambe, operazione, opz)
   const descr = `${OP_LABEL[operazione] || operazione} ${o.numero}`
 
   const ids = gambe.map(g => g.spedizioneId)
@@ -656,7 +659,11 @@ async function addebitaServizioGiacenzaCondivisione(
  * il cliente paga l'importo (congelato nella richiesta) e la spesa risale la rete (ogni master
  * paga il SUO servizio). L'apertura NON si tocca qui (già addebitata all'entrata).
  */
-export async function addebitaServizioGiacenza(sped: SpedGiac, operazione: string, importoServizioCliente: number): Promise<EsitoAddebito> {
+export async function addebitaServizioGiacenza(
+  sped: SpedGiac, operazione: string, importoServizioCliente: number,
+  // Dallo svincolo: le gambe e il piano gia' letti prima del corriere (vedi sopra). Senza, si leggono qui.
+  opz: { gambe?: GambaSpedizione[]; piano?: { o: any; piano: VoceGiacenza[] } } = {},
+): Promise<EsitoAddebito> {
   const admin = createAdminSupabase()
   const { data: corr } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').eq('id', sped.corriere_id).maybeSingle()
   // PACCO CONDIVISO (piu' gambe, la prima un ponte): il servizio e il reso sono eventi del PACCO, e si
@@ -669,10 +676,10 @@ export async function addebitaServizioGiacenza(sped: SpedGiac, operazione: strin
       if (eT) throw new Error('spedizione non leggibile: ' + eT.message)
       trk = (t as any)?.tracking_number || null
     }
-    const gambe = trk ? ((await gambePerTracking(admin, [trk])).get(trk) || []) : []
+    const gambe = opz.gambe ?? (trk ? ((await gambePerTracking(admin, [trk])).get(trk) || []) : [])
     if (gambe.length > 1 && gambe[0].tipo === 'moovexpress') {
       if (operazione === 'reso') return addebitaResoCondivisione(admin, gambe[0].spedizioneId, corr?.nome_contratto || '', true)
-      return addebitaServizioGiacenzaCondivisione(admin, gambe, operazione, { richiestaSpedizioneId: sped.id, importoServizioCliente })
+      return addebitaServizioGiacenzaCondivisione(admin, gambe, operazione, { richiestaSpedizioneId: sped.id, importoServizioCliente }, opz.piano)
     }
   }
   // Ponte senza altre gambe (dati incompleti): niente fila da cui addebitare, come prima.

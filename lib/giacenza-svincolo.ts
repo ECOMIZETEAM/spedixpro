@@ -38,8 +38,17 @@ export async function eseguiSvincolo(
   const trk = sped.tracking_number ? String(sped.tracking_number) : ''
   const gambe = trk ? ((await gambePerTracking(admin, [trk])).get(trk) || []) : []
   const condiviso = gambe.length > 1 && gambe[0].tipo === 'moovexpress'
+  const idsGambe = condiviso ? gambe.map(g => g.spedizioneId) : [id]
   let spedCorriere = sped
+  let pianoServizio: any = undefined
   if (condiviso) {
+    // GIA' SVINCOLATA DA UN'ALTRA GAMBA (un altro livello della fila): l'istruzione e' gia' partita. Senza
+    // questo controllo ogni gamba poteva rimandarla al corriere, e da ognuna si vede il bottone "Svincola".
+    const { data: statiGambe, error: eSt } = await admin.from('spedizioni').select('id,giacenza_stato').in('id', idsGambe)
+    if (eSt) throw new Error('Gambe del pacco non leggibili: lo svincolo non è stato inviato. Riprova.')
+    if ((statiGambe || []).some((g: any) => g.giacenza_stato === 'svincolata')) {
+      throw new Error('Questa giacenza risulta già svincolata da un altro livello della rete: al corriere non è stato inviato niente.')
+    }
     const detentore = gambe.find(g => !g.venditoreSpedizioneId && g.tipo !== 'moovexpress')
     if (!detentore) throw new Error('Non si trova chi detiene il contratto di questa spedizione: lo svincolo non è stato inviato. Contatta l\'assistenza.')
     const { data: o, error: eO } = await admin.from('spedizioni')
@@ -49,8 +58,9 @@ export async function eseguiSvincolo(
     spedCorriere = { ...o, numero: o.tracking_number || o.numero }
     // Prima di parlare col corriere: il servizio si deve poter addebitare lungo la fila (il reso lo fa il
     // database). Se la fila non si legge si lancia qui, e al corriere non e' partito niente.
+    // Il piano si TIENE e si passa all'addebito: dopo il corriere non si rilegge niente.
     if (rich.operazione !== 'reso') {
-      await pianoServizioGiacenzaCondivisione(admin, gambe, rich.operazione, { richiestaSpedizioneId: id, importoServizioCliente: Number(rich.costo_servizio) || 0 })
+      pianoServizio = await pianoServizioGiacenzaCondivisione(admin, gambe, rich.operazione, { richiestaSpedizioneId: id, importoServizioCliente: Number(rich.costo_servizio) || 0 })
     }
   }
 
@@ -150,7 +160,14 @@ export async function eseguiSvincolo(
       // operazione: la riconsegna è AZ0001 (dall'esempio), gli altri li dà ParcelPilot e stanno nei settings
       // del contratto. Se manca il codice per l'operazione richiesta NON si indovina (rischio azione
       // sbagliata su un pacco vero): ci si ferma con un avviso chiaro.
-      const settingsPo = (sped.corrieri as any)?.settings || {}
+      // Le settings del contratto le legge questa funzione: i chiamanti non le portano (nella pagina del
+      // dettaglio finirebbero nel browser), e senza l'interruttore qui non si accendeva mai.
+      let settingsPo: any = (sped.corrieri as any)?.settings
+      if (settingsPo === undefined) {
+        const { data: cs } = await admin.from('corrieri').select('settings').eq('id', sped.corriere_id).maybeSingle()
+        settingsPo = (cs as any)?.settings
+      }
+      settingsPo = settingsPo || {}
       // INTERRUTTORE: in produzione KSync non lavora ancora gli svincoli (al 16/10 attivi solo sul demo,
       // swagger "non supportata"). Se accettasse la richiesta senza eseguirla, qui si addebiterebbe un
       // servizio che nessuno fa. Si accende dal contratto (settings.svincolo_api = true) quando il
@@ -205,23 +222,63 @@ export async function eseguiSvincolo(
   // ADDEBITO: solo il servizio scelto (l'apertura è già stata addebitata all'ENTRATA in giacenza).
   // Il RESO non guarda giacenza_addebito_effettuato (un pacco può finire in giacenza due volte).
   let resoAddebitato = false
-  if (rich.operazione === 'reso') {
-    const esito = await addebitaServizioGiacenza(
-      { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id, tracking_number: sped.tracking_number },
-      'reso', 0,
-    )
-    resoAddebitato = esito.addebitato
-  }
-  if (!sped.giacenza_addebito_effettuato) {
-    if (rich.operazione !== 'reso') {
-      await addebitaServizioGiacenza(
-        { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id, tracking_number: sped.tracking_number },
-        rich.operazione, Number(rich.costo_servizio) || 0,
-      )
+  let addebitoRiportato = totale
+  const spedGiac = { id, numero: sped.numero, cliente_id: sped.cliente_id, master_id: sped.master_id, corriere_id: sped.corriere_id, tracking_number: sped.tracking_number }
+  if (!condiviso) {
+    if (rich.operazione === 'reso') {
+      const esito = await addebitaServizioGiacenza(spedGiac, 'reso', 0, { gambe })
+      resoAddebitato = esito.addebitato
     }
-    if (extra > 0) {
-      await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
-        descrizione: `Costi giacenza ${sped.numero}`, riferimento: sped.numero, importo: -Math.abs(extra), spedizioneId: id })
+    if (!sped.giacenza_addebito_effettuato) {
+      if (rich.operazione !== 'reso') {
+        await addebitaServizioGiacenza(spedGiac, rich.operazione, Number(rich.costo_servizio) || 0, { gambe })
+      }
+      if (extra > 0) {
+        await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',
+          descrizione: `Costi giacenza ${sped.numero}`, riferimento: sped.numero, importo: -Math.abs(extra), spedizioneId: id })
+      }
+    }
+  } else {
+    // PACCO CONDIVISO. Il corriere ha gia' accettato: da qui in poi niente deve far risultare fallito lo
+    // svincolo, perche' chi riprova rimanderebbe l'istruzione. Un addebito che non riesce si scrive nei log
+    // e le gambe restano svincolate con giacenza_addebito_effettuato a false: e' cosi' che si ritrovano.
+    try {
+      let segnoMio = false
+      if (rich.operazione === 'reso') {
+        const esito = await addebitaServizioGiacenza(spedGiac, 'reso', 0, { gambe })
+        resoAddebitato = esito.addebitato
+        // Il reso lo addebita il database: il segno qui serve ai costi manuali, una volta per pacco.
+        const { data: presi, error: eSegno } = await admin.from('spedizioni').update({ giacenza_addebito_effettuato: true })
+          .in('id', idsGambe).or('giacenza_addebito_effettuato.is.null,giacenza_addebito_effettuato.eq.false').select('id')
+        if (eSegno) throw new Error('segno non scritto: ' + eSegno.message)
+        segnoMio = (presi || []).length === idsGambe.length
+      } else {
+        const esito = await addebitaServizioGiacenza(spedGiac, rich.operazione, Number(rich.costo_servizio) || 0, { gambe, piano: pianoServizio })
+        segnoMio = esito.addebitato
+      }
+      if (segnoMio) {
+        // COSTI MANUALI DI TUTTE LE GAMBE: ognuno li mette sulla gamba che vede (il master di Blood sulla
+        // gamba del cliente, LOGIXIA sulla sua). Leggendo la sola gamba premuta, quelli delle altre si
+        // perdevano. Ogni importo va al cliente della SUA gamba, come prima per la gamba singola.
+        const { data: costiPacco } = await admin.from('giacenza_costi').select('spedizione_id,importo').in('spedizione_id', idsGambe)
+        const perGamba = new Map<string, number>()
+        for (const c of (costiPacco || [])) perGamba.set(c.spedizione_id, (perGamba.get(c.spedizione_id) || 0) + (Number(c.importo) || 0))
+        const conCosti = [...perGamba].filter(([, v]) => v > 0).map(([k]) => k)
+        if (conCosti.length) {
+          const { data: righe } = await admin.from('spedizioni').select('id,numero,master_id,cliente_id').in('id', conCosti)
+          for (const g of (righe || [])) {
+            if (!g.cliente_id) continue
+            await registraMovimento(admin, { masterId: g.master_id, clienteId: g.cliente_id, tipo: 'giacenza',
+              descrizione: `Costi giacenza ${g.numero}`, riferimento: g.numero, importo: -Math.abs(perGamba.get(g.id) || 0), spedizioneId: g.id })
+          }
+        }
+      } else {
+        // Il servizio del pacco l'ha gia' preso un altro svincolo: a chi ha premuto non si mostra un costo mai scritto.
+        addebitoRiportato = 0
+      }
+    } catch (e: any) {
+      console.error('[SVINCOLO][ADDEBITO NON RIUSCITO] il corriere ha accettato, l\'addebito no:', sped.numero, e?.message)
+      addebitoRiportato = 0
     }
   }
 
@@ -229,7 +286,6 @@ export async function eseguiSvincolo(
   // Pacco condiviso: una richiesta ancora aperta su un'altra gamba (es. il master che aveva chiesto la
   // stessa cosa) e' superata. Lasciarla "da confermare" vorrebbe dire poter rimandare l'istruzione al
   // corriere una seconda volta.
-  const idsGambe = condiviso ? gambe.map(g => g.spedizioneId) : [id]
   if (condiviso) {
     await admin.from('giacenza_richieste').update({ stato: 'annullata' })
       .in('spedizione_id', idsGambe).neq('id', rich.id).eq('stato', 'da_confermare')
@@ -264,8 +320,12 @@ export async function eseguiSvincolo(
   }
   // Pacco condiviso: tutte le gambe, perche' ogni master della fila e il cliente devono vederla svincolata
   // (prima si segnava la sola riga di chi aveva premuto, e sulle altre la giacenza restava aperta).
-  if (condiviso) await admin.from('spedizioni').update(svincolata).in('id', idsGambe)
-  else await admin.from('spedizioni').update(svincolata).eq('id', id)
+  // Sul condiviso giacenza_addebito_effettuato lo scrive l'addebito (il segno): forzarlo qui a true
+  // nasconderebbe un addebito non riuscito.
+  if (condiviso) {
+    const { giacenza_addebito_effettuato: _segno, ...soloStato } = svincolata
+    await admin.from('spedizioni').update(soloStato).in('id', idsGambe)
+  } else await admin.from('spedizioni').update(svincolata).eq('id', id)
 
-  return { addebito: totale, distintaReso: numeroDistintaReso, avviso }
+  return { addebito: condiviso ? addebitoRiportato : totale, distintaReso: numeroDistintaReso, avviso }
 }

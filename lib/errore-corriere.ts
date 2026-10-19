@@ -2,7 +2,9 @@
 // gli errori dei corrieri arrivano grezzi e spesso contengono il nome del fornitore o il suo
 // dominio. Erano ripuliti in quattro punti diversi, ognuno con la propria lista — e infatti
 // all'arrivo del terzo fornitore tre di quei quattro punti sono rimasti scoperti. Lista unica.
-const NOMI_FORNITORI = /spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|easy\s*parcel|api\.easyparcel\.it|\bdva\b/gi
+// Il 19/10/2026 mancavano KSync e il suo dominio: con lo svincolo SDA EXPRESS L al cliente sarebbe arrivato
+// "Operazione non supportata dal provider KSync" tale e quale.
+const NOMI_FORNITORI = /spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|easy\s*parcel|api\.easyparcel\.it|\bdva\b|k\s*sync(wrapper)?|parcel\s*pilot|parcelpilot\.it/gi
 
 // SVINCOLO GIACENZA: l'errore del corriere arrivava all'utente come JSON grezzo
 // ('release : {"processId":"<jmkc…>","error":{"id":"err_…","status":500,…}}') — illeggibile e
@@ -20,8 +22,12 @@ export function erroreSvincoloPulito(raw: any): string {
   if (/non.*trovat|not found|inesistente/.test(t)) {
     return 'Il corriere non trova più questa giacenza (potrebbe essere già stata svincolata o scaduta). Aggiorna la pagina e ricontrolla lo stato.'
   }
-  if (/timed\s*out|timeout|0 bytes received/.test(t)) {
+  if (/timed\s*out|timeout|0 bytes received|non raggiungibile|fetch failed/.test(t)) {
     return 'Il corriere non ha risposto in tempo. Riprova tra qualche istante.'
+  }
+  // Il fornitore non ha (ancora) lo svincolo su questo account: non e' un errore del pacco.
+  if (/non supportat|not supported|501/.test(t)) {
+    return 'Lo svincolo automatico non è disponibile in questo momento su questo contratto: contatta il corriere, poi chiudi la giacenza a mano.'
   }
   if (/scadut|expired|termine/.test(t)) {
     return 'I termini di giacenza sono scaduti: il pacco è già in rientro al mittente. Non serve alcuno svincolo.'
@@ -46,7 +52,8 @@ export function erroreSvincoloPulito(raw: any): string {
   }
   const pulito = (interno || s)
     .replace(NOMI_FORNITORI, '').replace(/https?:\/\/\S+/gi, '')
-    .replace(/\{[\s\S]*\}/, '').replace(/release\s*:/i, '').replace(/\s{2,}/g, ' ').trim().slice(0, 140)
+    .replace(/\{[\s\S]*\}/, '').replace(/release\s*:/i, '').replace(/\s{2,}/g, ' ').trim()
+    .replace(/^[\s:;,.-]+/, '').slice(0, 140)   // tolto il nome del fornitore in testa ("KSync: ...") resta la punteggiatura
   return `Svincolo non riuscito sul corriere${pulito ? ': ' + pulito : ''}. Riprova o contatta l'assistenza.`
 }
 
