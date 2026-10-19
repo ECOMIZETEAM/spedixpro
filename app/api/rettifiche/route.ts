@@ -58,12 +58,11 @@ export async function GET(req: NextRequest) {
   const spedDati = new Map<string, any>()
   if (idSped.length) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const adm = createAdminSupabase()
-    for (let i = 0; i < idSped.length; i += 300) {
-      const { data: ss } = await adm.from('spedizioni')
-        .select('id,stato,peso_reale,lunghezza,larghezza,altezza,colli,colli_dettaglio,corriere_id').in('id', idSped.slice(i, i + 300))
-      for (const s of (ss || [])) { statoSped.set((s as any).id, (s as any).stato); spedDati.set((s as any).id, s) }
-    }
+    const { spedizioniConColliLeggeri } = await import('@/lib/colli-senza-etichette')
+    // MAI colli_dettaglio intero: dentro ci sono le etichette (vedi colli-senza-etichette). Il 19/10 con
+    // 3.706 rettifiche di LOGIXIA in attesa erano ~1,4 GB e la pagina restava su "Caricamento…".
+    const ss = await spedizioniConColliLeggeri(createAdminSupabase(), idSped, 'stato,peso_reale,lunghezza,larghezza,altezza,corriere_id')
+    for (const [id, s] of ss) { statoSped.set(id, s.stato); spedDati.set(id, s) }
   }
 
   // ── SU COSA SI PAGAVA PRIMA, E SU COSA SI PAGA ORA ──
@@ -273,12 +272,9 @@ export async function POST(req: NextRequest) {
     const { pesoSuReale, descriviAgevolazione } = await import('@/lib/agevolazione-misure')
     const idS = [...new Set(rettifiche.map((r: any) => r.spedizione_id).filter(Boolean))]
     const spedInfo = new Map<string, any>()
-    for (let i = 0; i < idS.length; i += 300) {
-      const { data } = await adminDb.from('spedizioni')
-        .select('id,peso_reale,colli,colli_dettaglio,lunghezza,larghezza,altezza,corriere_id,master_id,corrieri(settings)')
-        .in('id', idS.slice(i, i + 300))
-      for (const x of (data || [])) spedInfo.set((x as any).id, x)
-    }
+    // Senza le etichette dentro colli_dettaglio: servono solo peso e lati (vedi colli-senza-etichette).
+    const { spedizioniConColliLeggeri } = await import('@/lib/colli-senza-etichette')
+    for (const [k, x] of await spedizioniConColliLeggeri(adminDb, idS, 'peso_reale,lunghezza,larghezza,altezza,corriere_id,master_id,corrieri(settings)')) spedInfo.set(k, x)
     const fattori = new Map<string, number>()
     const fattoreDi = async (sp: any) => {
       const k = `${sp.master_id}|${sp.corriere_id}`
