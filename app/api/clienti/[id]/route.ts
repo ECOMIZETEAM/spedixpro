@@ -18,6 +18,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // L'agente non vede la rete/sotto-master.
   if (id.startsWith('m:')) {
     const _v = bloccaAgente(utente, 'Non disponibile per gli agenti.'); if (_v) return _v
+    // Il record del sotto-master si legge con la chiave di servizio (IBAN, credito, dati Stripe): le regole
+    // per riga non fanno da rete, e il solo master_id lo hanno anche clienti e autisti dello stesso master.
+    if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     const targetId = id.slice(2)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
