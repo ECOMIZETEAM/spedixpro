@@ -53,10 +53,16 @@ const RIPROVA_MAX = 10
 
 type Opzioni = { dal?: string | null; al?: string | null; incrementale?: boolean }
 type Ripresa = { query: Record<string, string>; token: string; fine: string; scade: number }
-type StatoSync = { cursore?: string; ripresa?: Ripresa; da_riprovare?: Record<string, number> }
+// cursore        da dove il giro automatico legge gli aggiornamenti
+// ripresa        lettura interrotta (limite o tempo) da continuare col token di pagina di Amazon
+// primo_manuale  quando e' stato premuto "Sincronizza" prima del primo giro automatico
+// da_riprovare   ordini non salvati, da rileggere uno per uno (id → giri falliti)
+// non_salvati    ordini lasciati dopo RIPROVA_MAX giri: restano scritti nell'errore dell'integrazione
+type StatoSync = { cursore?: string; ripresa?: Ripresa; primo_manuale?: string; da_riprovare?: Record<string, number>; non_salvati?: string[] }
 type Esito = { letti: number; importati: number; spediti: number; daSpedire: number; annullati: number; completa: boolean; avviso: string | null }
 
 const istante = (s?: string | null) => (s ? Date.parse(s) : NaN)
+const NON_SALVATI_MAX = 50
 
 export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni = {}): Promise<Esito> {
   let token: string
@@ -77,6 +83,7 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
   let query: Record<string, string> | null
   let paginaToken: string | undefined
   let fine: string
+  let inRipresa = false
   if (!opz.incrementale) {
     const { daISO, aISO } = rangeGiorniISO(opz.dal, opz.al)
     const a = istante(aISO) < istante(prima) ? aISO : prima
@@ -87,6 +94,7 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
     query = sync.ripresa.query
     paginaToken = sync.ripresa.token
     fine = sync.ripresa.fine
+    inRipresa = true
   } else if (sync.cursore && istante(sync.cursore) < istante(prima)) {
     query = { lastUpdatedAfter: sync.cursore, lastUpdatedBefore: prima, fulfillmentStatuses: STATI_TUTTI }
     fine = prima
@@ -123,6 +131,7 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
 
   // 2. La lettura vera e propria, pagina per pagina.
   const fissi = { marketplaceIds: MARKETPLACE_IT, fulfilledBy: 'MERCHANT', maxResultsPerPage: '100', includedData: DATI }
+  let primaPagina = true
   while (query) {
     let r: any
     try {
@@ -131,8 +140,19 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
       r = await spapi(token, 'GET', PERCORSO, { query: { ...query, ...fissi, paginationToken: paginaToken }, tentativi: 1 })
     } catch (e) {
       if (e instanceof LimiteAmazon) { interrotta = 'limite'; break }
+      // Un token di pagina che Amazon rifiuta non torna buono riprovando: se e' quello di una
+      // ripresa, la si scarta (il giro dopo legge dal cursore, che non si era mosso) invece di
+      // ripresentarlo a ogni giro fino alla scadenza.
+      if (inRipresa && primaPagina) {
+        await aggiornaCredenzialiAmazon(db, integr, attuali => {
+          const s = { ...((attuali || {}).sync || {}) }
+          delete s.ripresa
+          return { ...attuali, sync: s }
+        })
+      }
       throw e
     }
+    primaPagina = false
     const ordini: any[] = Array.isArray(r?.orders) ? r.orders : []
     conta(await salvaPagina(db, integr, ordini))
     letti.push(...ordini.map(o => String(o?.orderId || '')).filter(Boolean))
@@ -148,34 +168,57 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
     if (Date.now() - avvio > tempoMax) { interrotta = 'tempo'; break }
   }
 
-  // 3. Il punto da cui ripartire: solo per il giro automatico (il tasto in pagina legge un periodo
-  // scelto a mano e non deve spostare il cursore degli aggiornamenti).
-  let esauriti = 0
+  // 3. Lo stato della sincronizzazione. Il cursore e la ripresa li sposta solo il giro automatico:
+  // il tasto in pagina legge un periodo scelto a mano e non deve spostare gli aggiornamenti.
+  const nuovo: StatoSync = { ...sync }
   if (opz.incrementale) {
-    const nuovo: StatoSync = { ...sync }
-    if (interrotta && paginaToken && query) nuovo.ripresa = { query, token: paginaToken, fine, scade: Date.now() + 23 * 3600 * 1000 }
-    else if (!interrotta) { delete nuovo.ripresa; nuovo.cursore = fine }
-    // (fermata prima ancora della prima pagina: niente da spostare, si riprova uguale al giro dopo)
-    const prossimi: Record<string, number> = {}
-    for (const [id, n] of Object.entries(sync.da_riprovare || {})) {
-      if (!riprovati.has(id)) prossimi[id] = n          // non ancora tentato in questo giro
-      else if (falliti.has(id)) {
-        if (n + 1 < RIPROVA_MAX) prossimi[id] = n + 1
-        else { esauriti++; console.error('[AMAZON SYNC] ordine', id, 'non salvato dopo', RIPROVA_MAX, 'giri: lasciato') }
-      }
+    if (interrotta && paginaToken && query) {
+      // La scadenza resta quella del token: rinnovarla a ogni giro lo terrebbe in vita oltre le
+      // 24 ore in cui Amazon lo accetta.
+      nuovo.ripresa = { query, token: paginaToken, fine, scade: inRipresa && sync.ripresa ? sync.ripresa.scade : Date.now() + 23 * 3600 * 1000 }
+    } else if (!interrotta) {
+      delete nuovo.ripresa
+      // PRIMO GIRO DOPO UN "SINCRONIZZA" A MANO: si riparte da quando e' stato premuto. Il primo
+      // giro legge solo gli ordini aperti; un ordine importato a mano e poi annullato o spedito su
+      // Amazon prima di questo giro non sarebbe mai piu' tornato.
+      const daManuale = !sync.cursore && sync.primo_manuale && istante(sync.primo_manuale) < istante(fine)
+      nuovo.cursore = daManuale ? sync.primo_manuale : fine
+      delete nuovo.primo_manuale
     }
-    for (const id of falliti) if (!(id in prossimi) && !riprovati.has(id)) prossimi[id] = 0
-    if (Object.keys(prossimi).length) nuovo.da_riprovare = prossimi
-    else delete nuovo.da_riprovare
+    // (fermata prima ancora della prima pagina: niente da spostare, si riprova uguale al giro dopo)
+  } else if (!sync.cursore && !sync.primo_manuale) {
+    nuovo.primo_manuale = prima
+  }
+  // Ordini non salvati: si rileggono al giro automatico dopo, anche quelli del tasto in pagina.
+  // Quelli che falliscono RIPROVA_MAX giri restano scritti (non_salvati) e nell'errore
+  // dell'integrazione, finche' un giro non riesce a salvarli.
+  const prossimi: Record<string, number> = {}
+  const lasciati = new Set<string>(sync.non_salvati || [])
+  for (const [id, n] of Object.entries(sync.da_riprovare || {})) {
+    if (!riprovati.has(id)) prossimi[id] = n          // non ancora tentato in questo giro
+    else if (falliti.has(id)) {
+      if (n + 1 < RIPROVA_MAX) prossimi[id] = n + 1
+      else { lasciati.add(id); console.error('[AMAZON SYNC] ordine', id, 'non salvato dopo', RIPROVA_MAX, 'giri') }
+    }
+  }
+  for (const id of falliti) if (!(id in prossimi) && !riprovati.has(id) && !lasciati.has(id)) prossimi[id] = 0
+  for (const id of letti) if (!falliti.has(id)) lasciati.delete(id)   // salvato in questo giro
+  if (Object.keys(prossimi).length) nuovo.da_riprovare = prossimi
+  else delete nuovo.da_riprovare
+  if (lasciati.size) nuovo.non_salvati = Array.from(lasciati).slice(-NON_SALVATI_MAX)
+  else delete nuovo.non_salvati
+  if (JSON.stringify(nuovo) !== JSON.stringify(sync)) {
     await aggiornaCredenzialiAmazon(db, integr, attuali => ({ ...attuali, sync: nuovo }))
   }
 
   // Log senza dati dei compratori: solo conteggi e il negozio.
   console.log(`[AMAZON SYNC] cliente=${integr.cliente_id} negozio="${integr.nome_negozio}" letti=${letti.length} salvati=${importati} annullati=${annullati} falliti=${falliti.size} interrotta=${interrotta || 'no'}`)
 
-  const errore = falliti.size
-    ? `${falliti.size} ordini Amazon non salvati: si riprovano al prossimo giro`
-    : esauriti ? `${esauriti} ordini Amazon non salvati dopo ${RIPROVA_MAX} tentativi` : null
+  const daRiprovare = Object.keys(prossimi).length
+  const errore = [
+    daRiprovare ? `${daRiprovare} ordini Amazon non salvati: si riprovano al prossimo giro automatico` : '',
+    nuovo.non_salvati?.length ? `${nuovo.non_salvati.length} ordini Amazon non salvati dopo ${RIPROVA_MAX} tentativi (${nuovo.non_salvati.slice(0, 3).join(', ')}${nuovo.non_salvati.length > 3 ? '…' : ''})` : '',
+  ].filter(Boolean).join(' · ') || null
   await db.from('integrazioni')
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: letti.length, errore })
     .eq('id', integr.id)
@@ -230,7 +273,8 @@ async function salvaPagina(db: any, integr: any, ordini: any[]): Promise<EsitoPa
   return { salvati, annullati: a.cambiati, falliti: [...falliti, ...s.falliti, ...a.falliti] }
 }
 
-// Spedito o annullato SU AMAZON: si aggiornano le sole righe gia' presenti e mai spedite da noi.
+// Spedito o annullato SU AMAZON: si aggiornano le sole righe gia' presenti (mai create qui), e lo
+// stato solo per quelle mai spedite da noi.
 // Come per WooCommerce (lib/wooSync): un ordine semplice cambia stato (esce dai "Da spedire");
 // un ordine UNITO, o il CAPOFILA di un'unione, tiene il suo stato e riceve solo lo stato del
 // negozio — e' da li' che il pacco lascia fuori la merce di un ordine annullato (lib/ordini-uniti).
@@ -238,18 +282,29 @@ async function salvaPagina(db: any, integr: any, ordini: any[]): Promise<EsitoPa
 // ordine unito gia' confermato tornerebbe "spedito" senza spedizione, cioe' rispedibile.
 async function allineaStati(db: any, integr: any, ids: string[], verso: 'spedito' | 'annullato', statoNegozio: 'SHIPPED' | 'CANCELLED'): Promise<{ cambiati: number; falliti: string[] }> {
   if (!ids.length) return { cambiati: 0, falliti: [] }
-  const { data: righe, error } = await db.from('ordini_ecommerce').select('id,ordine_esterno_id,stato,stato_pagamento')
-    .eq('integrazione_id', integr.id).in('ordine_esterno_id', ids).is('spedizione_id', null)
+  const { data: tutte, error } = await db.from('ordini_ecommerce').select('id,ordine_esterno_id,stato,stato_pagamento,spedizione_id')
+    .eq('integrazione_id', integr.id).in('ordine_esterno_id', ids)
   if (error) { console.error('[AMAZON SYNC] lettura stati KO -', error.message); return { cambiati: 0, falliti: ids } }
-  if (!righe?.length) return { cambiati: 0, falliti: [] }
+  const falliti: string[] = []
+  // ANNULLATO DOPO L'ETICHETTA: la riga ha gia' la sua spedizione e non cambia stato (il pacco
+  // esiste), ma riceve lo stato del negozio: la conferma ad Amazon la salta (lib/amazonFulfill),
+  // invece di mandare il tracking di un ordine che il compratore ha annullato.
+  const giaSpediteAnnullate = statoNegozio === 'CANCELLED'
+    ? (tutte || []).filter((r: any) => r.spedizione_id && r.stato_pagamento !== 'CANCELLED') : []
+  if (giaSpediteAnnullate.length) {
+    const { error: e0 } = await db.from('ordini_ecommerce').update({ stato_pagamento: 'CANCELLED' })
+      .eq('integrazione_id', integr.id).in('id', giaSpediteAnnullate.map((r: any) => r.id))
+    if (e0) { console.error('[AMAZON SYNC] stato negozio KO -', e0.message); falliti.push(...giaSpediteAnnullate.map((r: any) => r.ordine_esterno_id)) }
+  }
+  const righe = (tutte || []).filter((r: any) => !r.spedizione_id)
+  if (!righe.length) return { cambiati: 0, falliti }
   let capofila: Set<string>
   try { capofila = await capofilaDiUnioni(db, righe.map((r: any) => r.id)) }
-  catch (e: any) { console.error('[AMAZON SYNC]', e.message); return { cambiati: 0, falliti: righe.map((r: any) => r.ordine_esterno_id) } }
+  catch (e: any) { console.error('[AMAZON SYNC]', e.message); return { cambiati: 0, falliti: [...falliti, ...righe.map((r: any) => r.ordine_esterno_id)] } }
 
   const semplici = righe.filter((r: any) => r.stato === 'da_spedire' && !capofila.has(r.id))
   const soloNegozio = righe.filter((r: any) => (r.stato === 'unito' || capofila.has(r.id)) && r.stato_pagamento !== statoNegozio)
   let cambiati = 0
-  const falliti: string[] = []
   if (semplici.length) {
     // Le guardie stanno NELLA scrittura: solo se ancora da spedire e senza spedizione collegata
     // (nel frattempo il cliente puo' averlo spedito).

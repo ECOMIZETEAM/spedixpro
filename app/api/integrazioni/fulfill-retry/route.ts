@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
 
   const { data: ordini } = await admin.from('ordini_ecommerce')
-    .select('id,spedizione_id,fulfillment_stato,fulfillment_tentativi,shop')
+    .select('id,spedizione_id,fulfillment_stato,fulfillment_tentativi,shop,piattaforma')
     .not('spedizione_id', 'is', null)
     // Tutto tranne i gia' evasi E tranne gli ANNULLATI: 'annullato' non e' 'ok', quindi rientrava
     // qui dentro e il cron rievadeva una spedizione appena annullata — seconda email al compratore
@@ -50,12 +50,24 @@ export async function GET(req: NextRequest) {
   // fallimenti: aspettano solo la LDV vera (SpediamoPro/Poste async, anche 18h+), quindi NON devono
   // consumare tentativi — altrimenti un ordine legittimo si esaurirebbe solo perche' la LDV tarda.
   const { ldvProvvisoria } = await import('@/lib/numero-spedizione')
-  const { data: sped } = await admin.from('spedizioni').select('id,tracking_number').in('id', spedIds)
-  const prontiSet = new Set((sped || [])
+  // A blocchi di 200: gli id finiscono nell'indirizzo della richiesta, e oltre ~450 la richiesta
+  // torna "Bad Request" (e' il guasto che ha fermato purge-pii da settembre 2026).
+  const sped: any[] = []
+  for (let i = 0; i < spedIds.length; i += 200) {
+    const { data } = await admin.from('spedizioni').select('id,tracking_number').in('id', spedIds.slice(i, i + 200))
+    sped.push(...(data || []))
+  }
+  const prontiSet = new Set(sped
     .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number)).map((s: any) => s.id))
 
   // fulfillMarketplace filtra da sé le LDV provvisorie e salta i già evasi.
-  const esiti = await fulfillMarketplace(admin, spedIds)
+  // A blocchi di 200 spedizioni: dentro, ogni negozio le legge con un `.in()` solo, e con le 1000
+  // del tetto qui sopra quelle letture tornerebbero "Bad Request" per tutti i negozi insieme.
+  const tentatiAmazon = new Set<string>()
+  const esiti: any[] = []
+  for (let i = 0; i < spedIds.length; i += 200) {
+    esiti.push(...await fulfillMarketplace(admin, spedIds.slice(i, i + 200), { tentatiAmazon }))
+  }
   const ok = esiti.filter((e: any) => e?.stato === 'ok').length
 
   // Incremento il contatore SOLO per gli ordini PRONTI (davvero tentati) che DOPO il giro sono ancora
@@ -67,9 +79,15 @@ export async function GET(req: NextRequest) {
   // cioe' la chiave/il negozio ora funziona. Serve sotto per riesumare il pregresso al tetto.
   const shopsSani = new Set<string>()
   if (prontiCand.length) {
-    const { data: dopo } = await admin.from('ordini_ecommerce')
-      .select('id,fulfillment_stato').in('id', prontiCand.map((o: any) => o.id))
-    const statoOra = new Map((dopo || []).map((o: any) => [o.id, o.fulfillment_stato]))
+    // A blocchi, come sopra: se questa rilettura fallisse, ogni ordine risulterebbe "non evaso" e
+    // si consumerebbe un tentativo anche a quelli appena andati a buon fine.
+    const dopo: any[] = []
+    const idsPronti = prontiCand.map((o: any) => o.id)
+    for (let i = 0; i < idsPronti.length; i += 200) {
+      const { data } = await admin.from('ordini_ecommerce').select('id,fulfillment_stato').in('id', idsPronti.slice(i, i + 200))
+      dopo.push(...(data || []))
+    }
+    const statoOra = new Map(dopo.map((o: any) => [o.id, o.fulfillment_stato]))
     const shopById = new Map(prontiCand.map((o: any) => [o.id, o.shop]))
     for (const [id, st] of statoOra) {
       const sh = shopById.get(id)
@@ -83,6 +101,10 @@ export async function GET(req: NextRequest) {
       // ~2h40 su un blocco che dura giorni, e l'ordine restava Unfulfilled per sempre. Stessa
       // ragione per cui le LDV provvisorie non consumano tentativi: aspettare non e' fallire.
       if (st === 'attesa') continue
+      // Amazon ha un limite di tempo per giro (lib/amazonFulfill): un ordine che non e' stato
+      // raggiunto non e' fallito. Senza questo, otto giri tagliati bastavano a toglierlo dai
+      // recuperi per sempre, con lo stato vuoto e nessun avviso.
+      if (o.piattaforma === 'amazon' && !tentatiAmazon.has(String(o.id))) continue
       const n = Number(o.fulfillment_tentativi || 0) + 1
       await admin.from('ordini_ecommerce').update({ fulfillment_tentativi: n }).eq('id', o.id)
       if (n >= MAX_TENTATIVI) esauriti++
@@ -123,8 +145,8 @@ export async function GET(req: NextRequest) {
 // non confermano gli ordini uniti.
 async function unitiAmazonDaConfermare(admin: any): Promise<any[]> {
   const { data: uniti } = await admin.from('ordini_ecommerce')
-    .select('id,unito_in,fulfillment_stato,fulfillment_tentativi,shop')
-    .eq('piattaforma', 'amazon').eq('stato', 'unito').not('unito_in', 'is', null)
+    .select('id,unito_in,fulfillment_stato,fulfillment_tentativi,shop,piattaforma')
+    .eq('piattaforma', 'amazon').eq('stato', 'unito').not('unito_in', 'is', null).is('spedizione_id', null)
     .or('fulfillment_stato.is.null,and(fulfillment_stato.neq.ok,fulfillment_stato.neq.annullato,fulfillment_stato.neq.annullato_store,fulfillment_stato.neq.esterno)')
     .lt('fulfillment_tentativi', MAX_TENTATIVI)
     .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())

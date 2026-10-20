@@ -41,6 +41,19 @@ export function amazonAuthorizeUrl(state: string): string {
   return `${CONSENSO_EU}?${p.toString()}`
 }
 
+// La richiesta parte da una pagina del portale? Il browser lo dice in Sec-Fetch-Site e, per un
+// POST, manda sempre Origin: un sito estraneo non puo' falsificare nessuno dei due. Serve alle
+// rotte che avviano un collegamento Amazon: devono partire da un clic nel portale, mai da un link.
+export function richiestaDalPortale(req: Request): boolean {
+  const sito = req.headers.get('sec-fetch-site')
+  if (sito) return sito === 'same-origin'
+  const origine = req.headers.get('origin')
+  if (!origine) return false
+  const nostre = [new URL(req.url).origin]
+  try { if (process.env.SHOPIFY_APP_URL) nostre.push(new URL(process.env.SHOPIFY_APP_URL).origin) } catch {}
+  return nostre.includes(origine)
+}
+
 // I domini di Amazon, ancorati alla fine del nome: "amazon." da solo non basta, perche'
 // amazon.attacker.example o sellercentral.amazon.it.evil.com lo contengono anche loro.
 const DOMINIO_AMAZON = /^(?:[a-z0-9-]+\.)*amazon\.(?:com|it|de|fr|es|co\.uk|nl|se|pl|com\.be|ie|com\.tr)$/i
@@ -163,16 +176,34 @@ export async function chiudiIntegrazioneAmazon(admin: any, integr: any, motivo: 
 // CANCELLAZIONE DEI DATI DI UN ACCOUNT AMAZON che non e' piu' collegato (scollegato dal cliente o
 // autorizzazione revocata). La Data Protection Policy (§1.7) vuole cancellate le informazioni
 // Amazon entro 30 giorni: qui si fa subito.
-//  - Gli ordini MAI spediti da noi si eliminano: sono solo una copia dei dati di Amazon, e senza
+//  - Gli ordini PARTITI restano agganciati alla loro spedizione (lo storico non si cancella), ma
+//    senza dati del compratore e senza la copia di Amazon. Partiti vuol dire: con una spedizione
+//    loro, oppure UNITI nel pacco di un capofila che ha la sua (l'unito non ha spedizione propria:
+//    viaggia in quella del capofila, lib/ordini-uniti).
+//  - Gli ordini MAI partiti si eliminano: sono solo una copia dei dati di Amazon, e senza
 //    collegamento nessuno li spedira' piu' da qui (al ricollegamento tornano quelli ancora aperti).
-//  - Gli ordini spediti da noi restano agganciati alla loro spedizione (lo storico non si
-//    cancella), ma senza dati del compratore e senza la copia di Amazon.
 export async function cancellaDatiAmazon(admin: any, integrazioneId: string): Promise<void> {
-  const { error: e1 } = await admin.from('ordini_ecommerce').delete()
-    .eq('integrazione_id', integrazioneId).eq('piattaforma', 'amazon').is('spedizione_id', null)
-  const { error: e2 } = await admin.from('ordini_ecommerce').update({ destinatario: null, raw: null, cliente_nome: null })
-    .eq('integrazione_id', integrazioneId).eq('piattaforma', 'amazon').not('spedizione_id', 'is', null)
-  if (e1 || e2) console.error('[AMAZON] cancellazione dati account non riuscita:', (e1 || e2).message)
+  const righe: any[] = []
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await admin.from('ordini_ecommerce').select('id,stato,spedizione_id,unito_in')
+      .eq('integrazione_id', integrazioneId).eq('piattaforma', 'amazon').order('id').range(da, da + 999)
+    if (error) { console.error('[AMAZON] cancellazione dati: lettura non riuscita:', error.message); return }
+    righe.push(...(data || []))
+    if ((data || []).length < 1000) break
+  }
+  const conSpedizione = new Set(righe.filter(r => r.spedizione_id).map(r => String(r.id)))
+  const partito = (r: any) => !!r.spedizione_id || (r.stato === 'unito' && r.unito_in && conSpedizione.has(String(r.unito_in)))
+  const daTenere = righe.filter(partito).map(r => String(r.id))
+  const daEliminare = righe.filter(r => !partito(r)).map(r => String(r.id))
+  for (let i = 0; i < daTenere.length; i += 200) {
+    const { error } = await admin.from('ordini_ecommerce').update({ destinatario: null, raw: null, cliente_nome: null })
+      .in('id', daTenere.slice(i, i + 200))
+    if (error) console.error('[AMAZON] cancellazione dati: anonimizzazione non riuscita:', error.message)
+  }
+  for (let i = 0; i < daEliminare.length; i += 200) {
+    const { error } = await admin.from('ordini_ecommerce').delete().in('id', daEliminare.slice(i, i + 200))
+    if (error) console.error('[AMAZON] cancellazione dati: eliminazione non riuscita:', error.message)
+  }
 }
 
 const attesa = (ms: number) => new Promise(r => setTimeout(r, ms))

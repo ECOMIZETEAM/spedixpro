@@ -78,10 +78,13 @@ export async function GET(req: NextRequest) {
 
   // Ordini Amazon DA FILE spediti oltre la soglia e non ancora anonimizzati. Anche il riferimento
   // destinatario e la nota: alcuni clienti ci scrivono il nome di chi riceve.
+  // Anche gli ordini UNITI in un altro: partono nel pacco del capofila ma restano 'unito' per sempre,
+  // e non servono piu' a niente (l'unione copia articoli, peso e colli sul capofila; un unito non si
+  // spedisce, non si modifica e non si riunisce). Con il solo 'spedito' non si pulivano mai.
   const anonimizzati = await anonimizzaABlocchi('ordini Amazon da file',
     () => admin.from('ordini_importati')
       .select('id')
-      .eq('stato', 'spedito')
+      .in('stato', ['spedito', 'unito'])
       .neq('destinatario', '[dati rimossi]')
       .lt('created_at', sogliaAmazon)
       .filter('order_id', 'match', '^\\d{3}-\\d{7}-\\d{7}$')

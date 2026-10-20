@@ -1,4 +1,4 @@
-import { tokenAmazon, spapi, MARKETPLACE_IT } from '@/lib/amazon'
+import { tokenAmazon, spapi, MARKETPLACE_IT, LimiteAmazon } from '@/lib/amazon'
 import { vettoreAmazon } from '@/lib/amazon-vettore'
 
 // CONFERMA DI SPEDIZIONE AD AMAZON col tracking, alla chiusura distinta (lib/fulfillMarketplace).
@@ -17,24 +17,40 @@ import { vettoreAmazon } from '@/lib/amazon-vettore'
 // c'e' (lib/ordini-uniti lo lascia fuori) e confermarlo darebbe solo un errore.
 //
 // Amazon concede 2 conferme al secondo (raffica di 10), e questa funzione gira dentro la
-// creazione della distinta, che l'utente aspetta: oltre TEMPO_MAX_MS ci si ferma, e il cron
-// fulfill-retry riprende gli ordini rimasti senza esito.
+// creazione della distinta, che l'utente aspetta: oltre TEMPO_MAX_MS non si comincia un'altra
+// conferma, e a "troppe chiamate" ci si ferma invece di aspettare. Il cron fulfill-retry riprende
+// gli ordini rimasti senza esito; `tentati` gli dice quali sono stati davvero mandati, perche'
+// solo quelli consumano un tentativo.
 const TEMPO_MAX_MS = 30000
 
-export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[]) {
+// Letture a blocchi di 200 id: gli id finiscono nell'indirizzo della richiesta, e oltre ~450 la
+// richiesta torna "Bad Request" (il guasto che ha fermato purge-pii da settembre 2026).
+async function leggiABlocchi(ids: string[], leggi: (blocco: string[]) => PromiseLike<{ data: any[] | null }>): Promise<any[]> {
+  const out: any[] = []
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await leggi(ids.slice(i, i + 200))
+    out.push(...(data || []))
+  }
+  return out
+}
+
+export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[], tentati?: Set<string>) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  const colonne = 'id,integrazione_id,ordine_esterno_id,numero_ordine,articoli,spedizione_id,unito_in,stato_pagamento,fulfillment_stato'
-  const { data: diretti } = await db.from('ordini_ecommerce').select(colonne)
-    .in('spedizione_id', spedizioneIds).eq('piattaforma', 'amazon')
-  if (!diretti?.length) return esiti
+  const colonne = 'id,integrazione_id,ordine_esterno_id,numero_ordine,articoli,spedizione_id,unito_in,stato_pagamento,fulfillment_stato,created_at'
+  const righeDirette = await leggiABlocchi(spedizioneIds, b => db.from('ordini_ecommerce').select(colonne)
+    .in('spedizione_id', b).eq('piattaforma', 'amazon'))
+  if (!righeDirette.length) return esiti
+  // I piu' vecchi per primi: se il tempo non basta restano fuori i piu' recenti, non sempre gli stessi.
+  const diretti = [...righeDirette].sort((a: any, b: any) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
 
   // Gli uniti dei capofila qui sopra: viaggiano nel pacco del capofila e si confermano subito dopo
-  // di lui, cosi' il limite di tempo non taglia sempre loro.
-  const { data: uniti } = await db.from('ordini_ecommerce').select(colonne)
-    .in('unito_in', diretti.map((o: any) => o.id)).eq('piattaforma', 'amazon')
+  // di lui, cosi' il limite di tempo non taglia sempre loro. Non quelli che hanno una spedizione
+  // loro (spediti a parte): si confermano col proprio tracking, come ordini diretti.
+  const uniti = await leggiABlocchi(diretti.map((o: any) => String(o.id)), b => db.from('ordini_ecommerce').select(colonne)
+    .in('unito_in', b).eq('piattaforma', 'amazon').is('spedizione_id', null))
   const unitiDi = new Map<string, any[]>()
-  for (const u of uniti || []) {
+  for (const u of uniti) {
     const k = String(u.unito_in)
     if (!unitiDi.has(k)) unitiDi.set(k, [])
     unitiDi.get(k)!.push(u)
@@ -47,10 +63,9 @@ export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[]) 
   const restanti = daConfermare.filter(x => x.o.fulfillment_stato !== 'ok' && x.o.fulfillment_stato !== 'annullato_store')
   if (!restanti.length) return esiti
 
-  const { data: sped } = await db.from('spedizioni')
-    .select('id, tracking_number, created_at, corrieri(nome_contratto, tipo, settings)')
-    .in('id', Array.from(new Set(restanti.map(x => x.spedId))))
-  const spedizioni = new Map<string, any>((sped || []).map((s: any) => [String(s.id), s]))
+  const sped = await leggiABlocchi(Array.from(new Set(restanti.map(x => x.spedId))), b => db.from('spedizioni')
+    .select('id, tracking_number, created_at, corrieri(nome_contratto, tipo, settings)').in('id', b))
+  const spedizioni = new Map<string, any>(sped.map((s: any) => [String(s.id), s]))
 
   const token = new Map<string, string>()
   const integrazioni = new Map<string, any>()
@@ -58,6 +73,7 @@ export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[]) 
 
   for (const { o: ordine, spedId } of restanti) {
     if (Date.now() - avvio > TEMPO_MAX_MS) break
+    tentati?.add(String(ordine.id))
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
@@ -98,9 +114,12 @@ export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[]) 
           orderItems: righe,
         },
       }
-      await spapi(token.get(iid)!, 'POST', `/orders/v0/orders/${encodeURIComponent(String(ordine.ordine_esterno_id))}/shipmentConfirmation`, { corpo })
+      await spapi(token.get(iid)!, 'POST', `/orders/v0/orders/${encodeURIComponent(String(ordine.ordine_esterno_id))}/shipmentConfirmation`, { corpo, tentativi: 1 })
       await segna('ok', null)
     } catch (e: any) {
+      // Limite di Amazon: non e' un errore dell'ordine. Ci si ferma qui, e quest'ordine non conta
+      // come tentato: lo riprende il recupero senza consumargli un tentativo.
+      if (e instanceof LimiteAmazon) { tentati?.delete(String(ordine.id)); break }
       await segna('errore', String(e?.message || e).slice(0, 150))
     }
   }

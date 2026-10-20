@@ -11,7 +11,10 @@ import { fulfillSpedizioniAmazon } from '@/lib/amazonFulfill'
 // quindi si può chiamare più volte (alla creazione distinta E, in futuro, altrove) senza doppioni.
 // Usato dalla creazione distinta lato CLIENTE, lato MASTER e dalla chiusura automatica, così eBay &
 // co. vengono SEMPRE marcati come spediti col tracking, a prescindere da chi crea la distinta.
-export async function fulfillMarketplace(db: any, spedizioneIds: string[]): Promise<any[]> {
+// `opz.tentatiAmazon`: chi lo passa (il cron fulfill-retry) ci trova gli ordini Amazon davvero
+// mandati ad Amazon — l'unica evasione con un limite di tempo, quindi l'unica che puo' lasciarne
+// indietro senza averli tentati. Gli altri chiamanti non lo passano e non cambia niente.
+export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: { tentatiAmazon?: Set<string> } = {}): Promise<any[]> {
   let esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
 
@@ -53,6 +56,6 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[]): Prom
   try { await fulfillSpedizioniEbay(adm, pronti) } catch {}
   try { await fulfillSpedizioniTiktok(adm, pronti) } catch {}
   try { await fulfillSpedizioniTemu(adm, pronti) } catch {}
-  try { await fulfillSpedizioniAmazon(adm, pronti) } catch {}
+  try { await fulfillSpedizioniAmazon(adm, pronti, opz.tentatiAmazon) } catch {}
   return esiti
 }

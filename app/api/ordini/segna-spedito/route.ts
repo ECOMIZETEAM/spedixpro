@@ -28,10 +28,20 @@ export async function POST(req: NextRequest) {
   // tentativi al massimo il recupero non lo ripescava. Si azzerano solo quando la spedizione cambia
   // davvero: un doppio clic sullo stesso ordine non deve far ripartire niente.
   if (spedizioneId) {
-    await supabase.from('ordini_ecommerce')
+    const { data: cambiato } = await supabase.from('ordini_ecommerce')
       .update({ stato: 'spedito', spedizione_id: spedizioneId, fulfillment_stato: null, fulfillment_errore: null, fulfillment_tentativi: 0 })
       .eq('id', ordineId).eq('cliente_id', utente.cliente_id)
       .or(`spedizione_id.is.null,spedizione_id.neq.${spedizioneId}`)
+      .select('id')
+    // AMAZON, ORDINI UNITI A QUESTO: viaggiano nel pacco del capofila e Amazon li conferma col
+    // tracking del pacco (lib/amazonFulfill). Se il pacco e' cambiato, la loro conferma vecchia porta
+    // il tracking di un'etichetta che non c'e' piu': tornano da confermare, e la spinta qui sotto li
+    // rimanda col tracking nuovo (stesso pacco per Amazon: la conferma si corregge, non si somma).
+    if ((cambiato || []).length) {
+      await supabase.from('ordini_ecommerce')
+        .update({ fulfillment_stato: null, fulfillment_errore: null, fulfillment_tentativi: 0 })
+        .eq('unito_in', ordineId).eq('cliente_id', utente.cliente_id).eq('piattaforma', 'amazon')
+    }
   }
   await supabase.from('ordini_ecommerce')
     .update({ stato: 'spedito', spedizione_id: spedizioneId })

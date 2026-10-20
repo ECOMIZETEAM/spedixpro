@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { isAppNativa } from '@/lib/app-nativa'
 
 const ACCENT = '#f97316'
 
@@ -106,9 +107,31 @@ export default function IntegrazioniPage() {
     if (id === 'prestashop') setStep('prestashop')
     if (id === 'woocommerce') setStep('woocommerce')
     if (id === 'ebay') { setConnecting(true); window.location.href = '/api/integrazioni/ebay/install' }
-    if (id === 'amazon') { setConnecting(true); window.location.href = '/api/integrazioni/amazon/install' }
+    if (id === 'amazon') { collegaAmazon(); return }
     if (id === 'tiktok') { setConnecting(true); window.location.href = '/api/integrazioni/tiktok/install' }
     if (id === 'temu') { setConnecting(true); window.location.href = '/api/integrazioni/temu/install' }
+  }
+
+  // AMAZON: il collegamento parte con un POST da questa pagina (la rotta rifiuta un link aperto da
+  // un altro sito) e torna l'indirizzo di Seller Central a cui andare.
+  // Nell'app iOS/Android no: Seller Central si apre nel browser del telefono, che non ha la sessione
+  // dell'app, e al ritorno il collegamento verrebbe rifiutato (chi chiude il giro dev'essere chi
+  // l'ha aperto). Meglio dirlo prima che sprecare un consenso su Amazon.
+  async function collegaAmazon() {
+    if (isAppNativa()) {
+      setMsg({ type: 'err', text: 'Il collegamento con Amazon si fa dal browser: apri moovexpress.com dal computer o da Safari/Chrome, accedi e vai in Integrazioni → Amazon.' })
+      return
+    }
+    setConnecting(true)
+    try {
+      const res = await fetch('/api/integrazioni/amazon/install', { method: 'POST' })
+      const d = await res.json().catch(() => ({}))
+      if (res.ok && d.url) { window.location.href = d.url; return }
+      setMsg({ type: 'err', text: d.error || 'Collegamento Amazon non avviato' })
+    } catch {
+      setMsg({ type: 'err', text: 'Errore di rete' })
+    }
+    setConnecting(false)
   }
 
   async function connettiWoo() {
@@ -185,7 +208,9 @@ export default function IntegrazioniPage() {
       })
       const data = await res.json()
       if (res.ok) {
-        setMsg({ type: 'ok', text: `${data.importati ?? 0} ordini importati da ${it.nome_negozio || it.piattaforma}` })
+        // L'avviso del negozio (lettura parziale di Amazon, permessi PrestaShop) va detto anche qui:
+        // senza, una lettura interrotta sembra completa.
+        setMsg({ type: 'ok', text: `${data.importati ?? 0} ordini importati da ${it.nome_negozio || it.piattaforma}` + (data.avviso ? ' — ⚠ ' + data.avviso : '') })
         load()
       } else {
         setMsg({ type: 'err', text: data.error || 'Sincronizzazione non disponibile' })

@@ -60,14 +60,19 @@ export async function GET(req: NextRequest) {
   // selling_partner_id (come eBay con lo username). Il nome del negozio Amazon non lo chiediamo:
   // l'operazione che lo darebbe richiede ruoli che questa app non ha.
   const identificativo = `amazon:${sellerId}`
-  const { data: esistente } = await supabase.from('integrazioni').select('id, credenziali')
+  const { data: esistente } = await supabase.from('integrazioni').select('id, stato, credenziali')
     .eq('cliente_id', st.cliente_id).eq('piattaforma', 'amazon').eq('identificativo', identificativo).maybeSingle()
+  // Rinnovo di un collegamento ATTIVO: si tiene il punto della sincronizzazione, cosi' il giro dopo
+  // vede gli annulli e le spedizioni del frattempo. Dopo una revoca invece no: chiudendo si sono
+  // cancellati gli ordini aperti (cancellaDatiAmazon), e ripartire dal vecchio cursore non li
+  // riporterebbe piu' (Amazon ridà solo quelli cambiati). Si riparte da capo: il primo giro
+  // reimporta gli ordini da spedire degli ultimi 7 giorni.
+  const syncPrecedente = esistente?.stato === 'attivo' ? (esistente?.credenziali as any)?.sync : undefined
   const payload: any = {
     master_id: st.master_id, cliente_id: st.cliente_id, piattaforma: 'amazon',
     nome_negozio: `Amazon · ${sellerId}`,
     identificativo,
-    // Ricollegamento (anche il rinnovo annuale): si tiene il punto della sincronizzazione.
-    credenziali: credenzialiAmazon({ sellerId, refreshToken: tokens.refresh_token, accessToken: tokens.access_token, expiresIn: tokens.expires_in, syncPrecedente: (esistente?.credenziali as any)?.sync }),
+    credenziali: credenzialiAmazon({ sellerId, refreshToken: tokens.refresh_token, accessToken: tokens.access_token, expiresIn: tokens.expires_in, syncPrecedente }),
     stato: 'attivo', errore: null,
   }
   const { error } = esistente?.id
