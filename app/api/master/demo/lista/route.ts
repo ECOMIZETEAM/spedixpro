@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eStaffDelSuperMaster } from '@/lib/ruoli'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,15 +10,15 @@ export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const admin = createAdminSupabase()
-  const { data: mio } = await admin.from('masters').select('is_super_master,parent_master_id').eq('id', utente.master_id).single()
   // SOLO il super-master vero. NON "parent_master_id === null": le demo SONO create come root isolati
   // (parent null), quindi quel ramo le lasciava gestire le altre demo (listare le email, crearne,
   // terminarle). Verificato: 1 solo is_super_master reale, le 2 demo hanno parent null ma non il flag.
-  if (!mio?.is_super_master) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // Col ruolo insieme al flag (lib/ruoli): un cliente sotto la radice leggeva le email delle demo.
+  if (!(await eStaffDelSuperMaster(utente, admin))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const { data: demos } = await admin.from('masters')
     .select('id,nome,email,demo_scadenza,created_at')

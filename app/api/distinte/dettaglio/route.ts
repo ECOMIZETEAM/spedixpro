@@ -4,25 +4,36 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { vedeLaRete } from '@/lib/ruoli'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,cliente_id').eq('id', user.id).single()
   const id = req.nextUrl.searchParams.get('id')
   if (!id || !utente?.master_id) return NextResponse.json([])
+  const eCliente = (utente.ruolo || '').toLowerCase() === 'cliente'
 
   const admin = createAdminSupabase()
   const cols = 'numero,dest_nome,dest_indirizzo,dest_cap,dest_citta,dest_provincia,rif_destinatario,assicurazione,contrassegno,colli,peso_reale'
 
-  // Autorizzazione: la distinta deve appartenere al mio sotto-albero (mie + rete).
-  const { data: dist } = await admin.from('distinte').select('master_id').eq('id', id).maybeSingle()
+  // Autorizzazione: il RUOLO, poi la distinta. Col solo sotto-albero il cliente e l'autista, che il
+  // master_id lo hanno come tutti, leggevano le righe di qualunque distinta della rete (destinatari,
+  // indirizzi, contrassegni). Il cliente legge solo la propria, e dentro solo le sue spedizioni.
+  const { data: dist } = await admin.from('distinte').select('master_id,cliente_id').eq('id', id).maybeSingle()
   if (!dist) return NextResponse.json([])
-  const subtree = await sottoAlberoMasterIds(admin, utente.master_id)
-  if (!subtree.includes((dist as any).master_id)) return NextResponse.json([])
+  if (eCliente) {
+    if (!utente.cliente_id || (dist as any).cliente_id !== utente.cliente_id) return NextResponse.json([])
+  } else {
+    if (!vedeLaRete(utente)) return NextResponse.json([])
+    // La distinta deve appartenere al mio sotto-albero (mie + rete).
+    const subtree = await sottoAlberoMasterIds(admin, utente.master_id)
+    if (!subtree.includes((dist as any).master_id)) return NextResponse.json([])
+  }
 
   let q = admin.from('spedizioni').select(cols).eq('distinta_id', id).order('created_at', { ascending: true })
+  if (eCliente) q = q.eq('cliente_id', utente.cliente_id)
   // NASCONDI-FORNITORI (come lista/contrassegni): niente gambe a monte (cliente = ledger d'acquisto).
   const ledgerNascosti = !isAgente(utente as any) && utente.ruolo !== 'cliente'
     ? await ledgerFornitoriDaNascondere(admin, utente.master_id) : []

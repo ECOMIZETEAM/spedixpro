@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eStaffDelSuperMaster } from '@/lib/ruoli'
 import { spediamoproSearchStocks } from '@/lib/spediamopro'
 import { spedisciStocksAperti } from '@/lib/spedisci'
 import { easyparcelTracking, mapStatoEasyparcel } from '@/lib/easyparcel'
@@ -28,11 +29,10 @@ export async function GET(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     let sm = false
     if (user) {
-      const { data: u } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-      if (u?.master_id) {
-        const { data: mm } = await admin.from('masters').select('is_super_master').eq('id', u.master_id).single()
-        sm = !!mm?.is_super_master
-      }
+      // Il ruolo insieme al master (lib/ruoli): col solo flag del master il bottone lo premeva anche un
+      // cliente sotto la radice, che faceva partire le chiamate ai corrieri su tutte le giacenze.
+      const { data: u } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+      sm = await eStaffDelSuperMaster(u, admin)
     }
     if (!sm) return blocco
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eStaffDelSuperMaster } from '@/lib/ruoli'
 import { seminaDemo } from '@/lib/demo-seed'
 import { DEMO_GIORNI } from '@/lib/demo'
 
@@ -29,8 +30,10 @@ export async function POST(req: NextRequest) {
   // Solo il super master genera demo (è il proprietario della piattaforma). NON "parent_master_id
   // === null": le demo sono create come root isolati (parent null) e quel ramo le lasciava creare
   // altre demo a raffica. Solo il flag is_super_master (verificato: 1 solo, le demo non ce l'hanno).
-  const { data: mioMaster } = await admin.from('masters').select('is_super_master').eq('id', utente.master_id).single()
-  if (!mioMaster?.is_super_master) {
+  // E il RUOLO insieme al flag (lib/ruoli): il flag e' del master, e sotto la radice ci sono anche utenti
+  // cliente (app Shopify pubblica) che con la propria sessione si creavano account di prova con le
+  // credenziali in risposta. Il middleware ferma le scritture di agente e autista, non del cliente.
+  if (!(await eStaffDelSuperMaster(utente, admin))) {
     return NextResponse.json({ error: 'Solo il super master può creare account demo' }, { status: 403 })
   }
 

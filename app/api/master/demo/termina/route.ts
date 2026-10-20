@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eStaffDelSuperMaster } from '@/lib/ruoli'
 
 // Termina SUBITO una prova demo (solo super master): porta la scadenza a ora → login e operazioni
 // bloccati all'istante. Non cancella i dati (sono isolati e innocui): è una chiusura sicura e
@@ -9,14 +10,14 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const admin = createAdminSupabase()
-  const { data: mio } = await admin.from('masters').select('is_super_master,parent_master_id').eq('id', utente.master_id).single()
   // SOLO il super-master vero: le demo sono root con parent null, "parent === null" le lasciava
-  // terminare le demo altrui. Vedi la stessa guardia in demo/lista.
-  if (!mio?.is_super_master) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // terminare le demo altrui. Vedi la stessa guardia in demo/lista. Col ruolo insieme al flag
+  // (lib/ruoli): un cliente sotto la radice poteva chiudere le prove degli altri.
+  if (!(await eStaffDelSuperMaster(utente, admin))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const { id } = await req.json().catch(() => ({}))
   if (!id) return NextResponse.json({ error: 'id mancante' }, { status: 400 })

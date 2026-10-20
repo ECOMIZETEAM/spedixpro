@@ -3,6 +3,9 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { vedeLaRete } from '@/lib/ruoli'
+import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { borderoSenzaDettaglio } from '@/lib/report-spedizioni-cols'
 
 // Dettaglio di UNA distinta (header + righe spedizioni) per la pagina /dashboard/distinte/[id].
 // NB: /api/distinte/dettaglio (senza id in path) resta e serve ai generatori PDF/Excel; qui torna una
@@ -13,8 +16,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,cliente_id').eq('id', user.id).single()
   if (!id || !utente?.master_id) return NextResponse.json({ error: 'Non trovata' }, { status: 404 })
+  const eCliente = (utente.ruolo || '').toLowerCase() === 'cliente'
 
   const admin = createAdminSupabase()
   const { data: distinta } = await admin.from('distinte')
@@ -22,12 +26,27 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .eq('id', id).maybeSingle()
   if (!distinta) return NextResponse.json({ error: 'Non trovata' }, { status: 404 })
 
-  // Perimetro: la distinta deve stare nel mio sotto-albero (mie + rete).
-  const subtree = await sottoAlberoMasterIds(admin, utente.master_id)
-  if (!subtree.includes((distinta as any).master_id)) return NextResponse.json({ error: 'Non autorizzata' }, { status: 403 })
+  // IL RUOLO PRIMA DEL SOTTO-ALBERO. Si controllava solo che la distinta stesse nella rete del master
+  // dell'utente, e il master_id ce l'hanno anche il cliente e l'autista: con l'id di una distinta
+  // qualunque della rete ne leggevano le righe, destinatari e citta' di clienti non loro. Il cliente
+  // vede soltanto la PROPRIA distinta, e dentro solo le sue spedizioni; l'autista nessuna.
+  if (eCliente) {
+    if (!utente.cliente_id || (distinta as any).cliente_id !== utente.cliente_id) return NextResponse.json({ error: 'Non autorizzata' }, { status: 403 })
+  } else if (!vedeLaRete(utente)) {
+    return NextResponse.json({ error: 'Non autorizzata' }, { status: 403 })
+  } else {
+    // Perimetro: la distinta deve stare nel mio sotto-albero (mie + rete).
+    const subtree = await sottoAlberoMasterIds(admin, utente.master_id)
+    if (!subtree.includes((distinta as any).master_id)) return NextResponse.json({ error: 'Non autorizzata' }, { status: 403 })
+  }
 
   const cols = 'id, numero, tracking_number, stato, mitt_nome, dest_nome, dest_citta, dest_cap, dest_provincia, peso_reale, colli, cliente_id, corriere_id, corrieri(nome_contratto)'
   let q = admin.from('spedizioni').select(cols).eq('distinta_id', id).order('created_at', { ascending: true })
+  if (eCliente) q = q.eq('cliente_id', utente.cliente_id)
+  // NASCONDI-FORNITORI, come /api/distinte/dettaglio e l'elenco spedizioni: qui mancava, e nel dettaglio
+  // della distinta uscivano anche le gambe di chi vende al master (cliente = ledger d'acquisto).
+  const ledgerNascosti = !eCliente && !isAgente(utente as any) ? await ledgerFornitoriDaNascondere(admin, utente.master_id) : []
+  if (ledgerNascosti.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
   // Agente: solo le spedizioni dei suoi clienti dentro la distinta.
   if (isAgente(utente as any)) q = q.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente as any)))
   const { data: spedizioni } = await q
@@ -40,5 +59,5 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     contratto_label = nomi.length === 1 ? String(nomi[0]) : nomi.length ? `${nomi.length} contratti` : '—'
   }
 
-  return NextResponse.json({ distinta: { ...distinta, contratto_label }, spedizioni: spedizioni || [] })
+  return NextResponse.json({ distinta: { ...distinta, bordero_id: borderoSenzaDettaglio((distinta as any).bordero_id), contratto_label }, spedizioni: spedizioni || [] })
 }

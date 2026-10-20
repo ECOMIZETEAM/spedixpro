@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 // Rubrica destinatari: autocomplete sul nominativo. DUE sorgenti unite:
 //  1) la RUBRICA salvata dal cliente (tabella rubrica_destinatari, anche importata da file) — ha la
@@ -16,6 +17,11 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json([])
+  // L'AUTISTA NON HA UNA RUBRICA. Il ruolo si guardava solo per il cliente e per l'agente: chi non era
+  // nessuno dei due cadeva nel ramo del master, e l'autista riceveva nome, indirizzo, telefono ed email
+  // dei destinatari di tutto il master, rubrica salvata compresa (letta con la chiave di servizio).
+  // Restano il cliente, l'agente e lo staff del master, ognuno col suo perimetro qui sotto.
+  if ((utente.ruolo || '').toLowerCase() !== 'cliente' && !isAgente(utente) && !gestisceLaRete(utente)) return NextResponse.json([])
 
   const q = (req.nextUrl.searchParams.get('q') || '').trim()
   if (q.length < 2) return NextResponse.json([])

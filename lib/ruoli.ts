@@ -29,6 +29,24 @@ export function vedeLaRete(u: UtenteRuolo): boolean {
   return gestisceLaRete(u) || r(u) === 'agente'
 }
 
+// LE PAGINE DEL SUPER MASTER SI APRONO COL RUOLO E COL MASTER, INSIEME.
+// Il rapporto delle giacenze di tutta la piattaforma, i segreti dei webhook in ingresso e gli account
+// demo guardavano solo `is_super_master` del master dell'utente. Sotto la radice pero' ci sono anche
+// utenti cliente, uno per ogni negozio che installa l'app Shopify pubblica (lib/shopifyProvision.ts):
+// con la propria sessione leggevano giacenze, clienti e master di tutta la rete, e potevano registrare
+// un segreto del webhook, cioe' firmare eventi di giacenza che aprono addebiti lungo la catena.
+// I ruoli ammessi sono quelli che /api/audit e /api/root/api-clienti usano dal 5 agosto: master e admin.
+// L'operatore del super master resta fuori finche' non lo decide Lorenzo: si aggiunge qui, una volta.
+const RUOLI_SUPER_MASTER = ['master', 'admin']
+export async function eStaffDelSuperMaster(
+  u: { ruolo?: string | null; master_id?: string | null } | null | undefined,
+  admin: { from: (t: string) => any },
+): Promise<boolean> {
+  if (!u?.master_id || !RUOLI_SUPER_MASTER.includes(r(u))) return false
+  const { data: m } = await admin.from('masters').select('is_super_master').eq('id', u.master_id).maybeSingle()
+  return !!(m as any)?.is_super_master
+}
+
 /** Toglie da una riga di spedizione le colonne che dicono il COSTO DEL MASTER: `costo_spedizione` (quanto
  *  paga lui al corriere) e `raw_response`, la risposta del fornitore, che contiene lo stesso prezzo
  *  (shipmentCost, totalPrice, importo). Va applicata a tutto cio' che esce verso chi NON gestisce la rete:

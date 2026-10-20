@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
+import { siglaContratto } from '@/lib/corriere-logo'
 // GET: contratti del listino del cliente + stato abilitato + settings per-contratto
 export async function GET(req: NextRequest, { params }: { params: Promise<{id:string}> }) {
   const { id } = await params
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato'}, { status: 401 })
+  // E' la scheda Impostazioni del cliente nel portale del master: la apre il suo staff. Il ramo dei
+  // sotto-master guardava solo che il sotto-master fosse figlio del master dell'utente, e il master_id
+  // ce l'hanno anche cliente e autista: leggevano i contratti abilitati di un sotto-master, col tipo del
+  // fornitore. Il cliente ha la sua rotta (/api/cliente/corrieri-abilitati).
+  const { data: chi } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  if (!gestisceLaRete(chi)) return NextResponse.json([])
   // Sotto-master: contratti dal LISTINO ASSEGNATO (parent_listino_id) + stato da masters_corrieri_abilitati.
   if (id.startsWith('m:')) {
     const subId = id.slice(2)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+    const utente = chi
     const { data: sm } = await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', subId).maybeSingle()
     if (!sm || sm.parent_master_id !== utente?.master_id) return NextResponse.json([])
     if (!sm.parent_listino_id) return NextResponse.json([])
@@ -28,8 +36,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
       .select('corriere_id, abilitato, settings').eq('master_id', subId)
     const abilM = new Map((statiM||[]).map((s:any) => [s.corriere_id, s.abilitato]))
     const settM = new Map((statiM||[]).map((s:any) => [s.corriere_id, s.settings || {}]))
+    // Il tipo esce come sigla (lib/corriere-logo): la pagina non lo legge, e grezzo e' il nome del fornitore.
     return NextResponse.json(contrattiM.map((c:any) => ({
-      id: c.id, nome_contratto: c.nome_contratto, tipo: c.tipo,
+      id: c.id, nome_contratto: c.nome_contratto, tipo: siglaContratto(c.tipo),
       abilitato: abilM.has(c.id) ? abilM.get(c.id) : true,
       settings: settM.has(c.id) ? settM.get(c.id) : {},
     })))
@@ -55,7 +64,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{id:st
   const mappaAbil = new Map((stati||[]).map((s:any) => [s.corriere_id, s.abilitato]))
   const mappaSett = new Map((stati||[]).map((s:any) => [s.corriere_id, s.settings || {}]))
   const risultato = contratti.map((c:any) => ({
-    id: c.id, nome_contratto: c.nome_contratto, tipo: c.tipo,
+    id: c.id, nome_contratto: c.nome_contratto, tipo: siglaContratto(c.tipo),
     abilitato: mappaAbil.has(c.id) ? mappaAbil.get(c.id) : true,
     settings: mappaSett.has(c.id) ? mappaSett.get(c.id) : {},
   }))
@@ -74,7 +83,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
     const subId = id.slice(2)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+    const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+    // Scrive con la chiave di servizio e ri-materializza il listino del sotto-master: solo lo staff del
+    // padre. Col solo master_id un cliente del padre (il middleware non ferma le sue scritture) poteva
+    // spegnere un contratto a un sotto-master.
+    if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     const { data: sm } = await admin.from('masters').select('parent_master_id').eq('id', subId).maybeSingle()
     if (!sm || sm.parent_master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     const payloadM: any = { master_id: subId, corriere_id: corriereId }

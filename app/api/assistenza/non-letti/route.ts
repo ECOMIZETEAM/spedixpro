@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 // Conteggio notifiche separato per Ticket e POD.
 // - Cliente/sotto-master: aggiornamenti non letti sui propri ticket/pod.
@@ -23,7 +24,9 @@ export async function GET(_req: NextRequest) {
   if (ruolo === 'cliente' || utente?.cliente_id) {
     const { data } = await admin.from('tickets').select('categoria').eq('cliente_id', utente?.cliente_id).eq('aperto_letto', false)
     for (const r of (data || [])) { if (cat(r) === 'pod') pod++; else ticket++ }
-  } else if (utente?.master_id) {
+  } else if (utente?.master_id && gestisceLaRete(utente)) {
+    // Solo lo staff del master: con il solo master_id ci arrivava anche l'autista, e leggeva quanti e
+    // quali ticket del master erano da leggere (stessa causa della lista ticket).
     const [{ data: ric }, { data: miei }, { data: rete }] = await Promise.all([
       // Ricevuti: da leggere per l'assistenza (nuovo ticket o risposta del richiedente), esclusi i chiusi.
       admin.from('tickets').select('categoria').eq('owner_master_id', utente.master_id).eq('non_letto_owner', true).neq('stato', 'chiuso'),

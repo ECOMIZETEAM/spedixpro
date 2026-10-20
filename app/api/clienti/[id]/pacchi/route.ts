@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente } from '@/lib/agente'
+import { vedeLaRete } from '@/lib/ruoli'
 
 // Pacchi predefiniti (misure + peso) di UN cliente, per la Nuova Spedizione lato master/agente.
 // Scoped: il cliente deve appartenere alla rete del master (o essere un cliente dell'agente).
@@ -12,7 +13,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,cliente_id').eq('id', user.id).single()
-  if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json([])
+  // Il ruolo con la regola unica (staff del master o agente), non escludendo solo il cliente: l'autista
+  // passava e, con l'id di un cliente della rete, leggeva i suoi pacchi predefiniti (misure, peso,
+  // contenuto, contrassegno) con la chiave di servizio.
+  if (!utente?.master_id || !vedeLaRete(utente)) return NextResponse.json([])
 
   const admin = createAdminSupabase()
   const { data: cli } = await admin.from('clienti').select('id,master_id,agente').eq('id', id).maybeSingle()

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eStaffDelSuperMaster } from '@/lib/ruoli'
 
 // Gestione dei SECRET webhook (verifica firme in ingresso, es. spedisci/Poste Crono). Config di
 // PIATTAFORMA, non del singolo master → riservata al SUPER MASTER. Così i secret si aggiungono dal
@@ -12,9 +13,11 @@ async function ctx() {
   if (!user) return { err: NextResponse.json({ error: 'Non autenticato' }, { status: 401 }) }
   const { data: u } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const admin = createAdminSupabase()
-  let superMaster = false
-  if (u?.master_id) { const { data: m } = await admin.from('masters').select('is_super_master').eq('id', u.master_id).maybeSingle(); superMaster = !!(m as any)?.is_super_master }
-  if (!superMaster) return { err: NextResponse.json({ error: 'Riservato al super master' }, { status: 403 }) }
+  // Il ruolo veniva letto e poi ignorato: bastava appartenere al super master, e un cliente sotto la
+  // radice poteva registrare un proprio segreto. Il webhook in ingresso accetta qualunque segreto della
+  // tabella, quindi con quello firmava eventi di giacenza su qualunque LDV, e ogni giacenza aperta
+  // entra nella coda degli addebiti (REGOLE.md). Regola unica in lib/ruoli.
+  if (!(await eStaffDelSuperMaster(u, admin))) return { err: NextResponse.json({ error: 'Riservato al super master' }, { status: 403 }) }
   return { admin }
 }
 const maschera = (s: string) => { const t = String(s || ''); return t.length <= 8 ? '••••' : t.slice(0, 6) + '••••' + t.slice(-4) }

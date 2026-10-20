@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 // Rubrica MITTENTI: autocomplete sul nominativo. Sorgente = mittenti già usati nelle spedizioni
 // del master (da qualsiasi origine), così si popola da sola come la rubrica destinatari.
@@ -11,6 +12,9 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json([])
+  // Come nella rubrica destinatari: l'autista cadeva nel ramo del master e leggeva i mittenti di tutto
+  // il master. Restano il cliente, l'agente e lo staff del master, col perimetro di ciascuno.
+  if ((utente.ruolo || '').toLowerCase() !== 'cliente' && !isAgente(utente) && !gestisceLaRete(utente)) return NextResponse.json([])
 
   const q = (req.nextUrl.searchParams.get('q') || '').trim()
   if (q.length < 2) return NextResponse.json([])

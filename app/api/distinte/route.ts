@@ -4,16 +4,24 @@ import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
 import { masterFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
+import { borderoSenzaDettaglio } from '@/lib/report-spedizioni-cols'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,cliente_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
   const dal = p.get('dal')
   const al = p.get('al')
   const ruolo = (utente?.ruolo || '').toLowerCase()
+  // L'AUTISTA NON HA DISTINTE. "Non cliente e non agente" voleva dire anche autista: diventava un master
+  // e riceveva le distinte di tutta la rete col client di servizio. Restano lo staff del master,
+  // l'agente (sui suoi clienti) e il cliente (sulle sue, qui sotto).
+  if (!vedeLaRete(utente) && ruolo !== 'cliente') {
+    return NextResponse.json((parseInt(p.get('page') || '0') || 0) >= 1 ? { rows: [], total: 0, vettori: [], contratti: [] } : [])
+  }
 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -24,7 +32,7 @@ export async function GET(req: NextRequest) {
   let masterIds: string[] = mine ? [mine] : []
   const primaLineaId = new Map<string, string>()   // master discendente -> figlio diretto (prima linea)
   const nomeMaster = new Map<string, string>()      // master id -> nome
-  const isMasterRete = ruolo !== 'cliente' && ruolo !== 'agente' && !!mine
+  const isMasterRete = gestisceLaRete(utente) && !!mine
   if (isMasterRete) {
     let frontier = [mine as string]
     for (let i = 0; i < 12 && frontier.length; i++) {
@@ -110,7 +118,18 @@ export async function GET(req: NextRequest) {
         if (!vettore) vettore = vett || null
         if (set && set.size) contratto_label = `${vett} (${set.size} contratt${set.size === 1 ? 'o' : 'i'})`.trim()
       }
-      return { ...d, cliente_label, master_rete, contratto_label, vettore }
+      // Il TIPO del contratto qui serve solo a calcolare il vettore (sopra), e per quattro canali su cinque e'
+      // il nome del sistema tecnico a valle: con `...d` arrivava in ogni riga del JSON, a tutti i ruoli che
+      // aprono l'elenco. La pagina legge solo il nome del contratto. Per la stessa via uscivano il motivo di
+      // una chiusura fallita (bordero_id, col messaggio del fornitore) e il borderò del fornitore in base64
+      // (bordero_pdf), che la pagina non usa.
+      return {
+        ...d,
+        corrieri: d.corrieri ? { nome_contratto: d.corrieri.nome_contratto } : d.corrieri,
+        bordero_id: borderoSenzaDettaglio(d.bordero_id),
+        bordero_pdf: undefined,
+        cliente_label, master_rete, contratto_label, vettore,
+      }
     })
   }
 
@@ -129,6 +148,9 @@ export async function GET(req: NextRequest) {
         .in('master_id', masterIdsDistinte.length ? masterIdsDistinte : noMaster)
         .order('created_at', { ascending: false })
       if (filtroAgente) q = q.in('cliente_id', filtroAgente)
+      // Il cliente: le SUE distinte, scritto qui e non lasciato alla sola RLS (che in sola lettura non si
+      // verifica). Il portale cliente ha /api/cliente/distinte; se arriva qui, non vede altro.
+      if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id || noMaster[0])
       if (dal) q = q.gte('created_at', dal)
       if (al) q = q.lte('created_at', al + 'T23:59:59')
       return q

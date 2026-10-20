@@ -10,6 +10,19 @@ import { vedeLaRete } from '@/lib/perimetro'
 // risposta), resettare la password del MASTER e leggerla a schermo, e cancellare l'account di accesso
 // del master. Trovato dall'audit del 2/10/2026, verificato sul codice. Il filtro giusto esiste gia' ed
 // e' uno solo: vedeLaRete() lascia passare master/admin/operatore e tiene fuori cliente, agente e autista.
+//
+// E LO STAFF LO GESTISCONO SOLO IL TITOLARE E GLI ADMIN (scelta di Lorenzo del 20/10/2026). vedeLaRete()
+// fa entrare anche l'operatore, e qui l'operatore poteva creare un collaboratore 'admin' (che ha tutti i
+// permessi, lib/permessi.ts: isFull), promuovere ad 'admin' se stesso o un altro, e reimpostare la
+// password di un admin leggendola a schermo: scavalcava i permessi che il master gli aveva tolto. Creare,
+// modificare e cancellare collaboratori resta al titolare (master) e agli admin; l'operatore continua a
+// LEGGERE l'elenco (GET), che serve ad altre pagine, per esempio per assegnare un agente a un cliente.
+// E le modifiche valgono SOLO sui collaboratori: il titolare e i login cliente hanno lo stesso master_id,
+// e con il solo controllo sul master_id si poteva reimpostare la password del titolare, o cancellare il
+// suo accesso o quello di un cliente. La pagina Staff non li mostra mai (staff/page.tsx li filtra).
+const RUOLI_STAFF = ['admin', 'operatore', 'agente', 'autista']
+const governaLoStaff = (u: any) => ['master', 'admin'].includes(String(u?.ruolo || '').toLowerCase())
+const SOLO_TITOLARE = 'Lo staff lo gestiscono il titolare e gli admin'
 
 // Lista staff del master: utenti + email/ultimo_accesso da auth
 export async function GET(_req: NextRequest) {
@@ -59,7 +72,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!me?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
-  if (!vedeLaRete(me)) return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
+  if (!governaLoStaff(me)) return NextResponse.json({ error: SOLO_TITOLARE }, { status: 403 })
 
   const body = await req.json()
   const { nome, ruolo, email } = body
@@ -67,8 +80,7 @@ export async function POST(req: NextRequest) {
   if (!email || !email.trim()) return NextResponse.json({ error: 'Email obbligatoria' }, { status: 400 })
   // 'autista' e' uno staff a tutti gli effetti, ma non entra nel portale: dal telefono vede solo
   // le sue consegne. E' il modo di dargli un accesso senza dovergli far installare niente.
-  const ruoliValidi = ['admin', 'operatore', 'agente', 'autista']
-  if (!ruoliValidi.includes((ruolo||'').toLowerCase())) return NextResponse.json({ error: 'Ruolo non valido' }, { status: 400 })
+  if (!RUOLI_STAFF.includes((ruolo||'').toLowerCase())) return NextResponse.json({ error: 'Ruolo non valido' }, { status: 400 })
 
   const admin = createAdminSupabase()
   // Creo l'utente con password diretta (mostrata a schermo). L'email di credenziali
@@ -144,16 +156,16 @@ export async function PUT(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!me?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
-  if (!vedeLaRete(me)) return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
+  if (!governaLoStaff(me)) return NextResponse.json({ error: SOLO_TITOLARE }, { status: 403 })
 
   const body = await req.json()
   const { id, resetPassword, nuova_email } = body
   if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
   const admin = createAdminSupabase()
-  // Dev'essere uno staff del mio master
-  const { data: st } = await supabase.from('utenti').select('id,nome,master_id').eq('id', id).eq('master_id', me.master_id).maybeSingle()
-  if (!st) return NextResponse.json({ error: 'Account non trovato' }, { status: 404 })
+  // Dev'essere uno staff del mio master: un COLLABORATORE, non il titolare né un login cliente.
+  const { data: st } = await supabase.from('utenti').select('id,nome,master_id,ruolo').eq('id', id).eq('master_id', me.master_id).maybeSingle()
+  if (!st || !RUOLI_STAFF.includes(String((st as any).ruolo || '').toLowerCase())) return NextResponse.json({ error: 'Account non trovato' }, { status: 404 })
 
   // Email attuale (da auth)
   let emailAttuale = ''
@@ -189,7 +201,7 @@ export async function PUT(req: NextRequest) {
   if (typeof body.nome === 'string') anagrafica.nome = body.nome.trim()
   if (typeof body.cognome === 'string') anagrafica.cognome = body.cognome.trim() || null
   if (typeof body.telefono === 'string') anagrafica.telefono = body.telefono.trim() || null
-  if (body.ruolo && ['admin', 'operatore', 'agente', 'autista'].includes(String(body.ruolo).toLowerCase())) anagrafica.ruolo = String(body.ruolo).toLowerCase()
+  if (body.ruolo && RUOLI_STAFF.includes(String(body.ruolo).toLowerCase())) anagrafica.ruolo = String(body.ruolo).toLowerCase()
   if (typeof body.attivo === 'boolean') anagrafica.attivo = body.attivo
   // Listino agente (costo dell'agente): un listino cliente di proprietà del master.
   if ('listino_agente_id' in body) {
@@ -219,11 +231,16 @@ export async function DELETE(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: me } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  if (!vedeLaRete(me)) return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
+  if (!me?.master_id || !governaLoStaff(me)) return NextResponse.json({ error: SOLO_TITOLARE }, { status: 403 })
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
+  // Si cancella solo un COLLABORATORE del mio master: il titolare e i login cliente hanno lo stesso
+  // master_id e con il solo controllo sul master_id se ne cancellava l'accesso.
+  const { data: st } = await supabase.from('utenti').select('id,ruolo').eq('id', id).eq('master_id', me.master_id).maybeSingle()
+  const ruoloSt = String((st as any)?.ruolo || '').toLowerCase()
+  if (!st || !RUOLI_STAFF.includes(ruoloSt)) return NextResponse.json({ error: 'Account non trovato' }, { status: 404 })
   const admin = createAdminSupabase()
-  await admin.from('utenti').delete().eq('id', id).eq('master_id', me?.master_id)
+  await admin.from('utenti').delete().eq('id', id).eq('master_id', me.master_id)
   try { await admin.auth.admin.deleteUser(id) } catch {}
   return NextResponse.json({ success: true })
 }

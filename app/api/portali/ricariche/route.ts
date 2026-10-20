@@ -25,12 +25,22 @@ function ordine(portale: string): number {
   return portale === 'spediamopro' ? 0 : portale === 'easyparcel' ? 1 : 2
 }
 
+// CHI LAVORA QUI: lo staff di E&A che vede la Lista Movimenti, cioe' master e admin (la voce di menu non
+// ha permessi, quindi la vedono solo loro). Il controllo era solo `master_id === E&A`, e il master_id
+// ce l'hanno anche i clienti e gli agenti di E&A: l'agente leggeva i conti a valle coi loro saldi, e un
+// cliente (le sue scritture il middleware non le ferma) poteva registrare una ricarica falsa, che
+// accredita il conto rete di E&A, o cancellarne una vera e stornarla. Se l'operatore di E&A deve
+// entrare, lo decide Lorenzo: si aggiunge qui.
+async function staffEA(supabase: any, userId: string): Promise<boolean> {
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', userId).single()
+  return utente?.master_id === EA_ID && ['master', 'admin'].includes(String(utente?.ruolo || '').toLowerCase())
+}
+
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ abilitato: false })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  if (utente?.master_id !== EA_ID) return NextResponse.json({ abilitato: false })
+  if (!(await staffEA(supabase, user.id))) return NextResponse.json({ abilitato: false })
 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -136,8 +146,7 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  if (utente?.master_id !== EA_ID) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (!(await staffEA(supabase, user.id))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const body = await req.json()
   // Ora si passa il GRUPPO (fine). Compat: se arriva ancora 'portale', vale come gruppo.
@@ -175,8 +184,7 @@ export async function DELETE(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  if (utente?.master_id !== EA_ID) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (!(await staffEA(supabase, user.id))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 

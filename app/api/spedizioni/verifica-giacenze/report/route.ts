@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eStaffDelSuperMaster } from '@/lib/ruoli'
 
 // REPORT del controllo agente giacenze — SOLO super master (è il suo monitoraggio, globale su tutta
 // la rete, non dei singoli master). Legge l'esito già salvato dal cron (giacenza_verifica_*): nessun
@@ -9,11 +10,12 @@ export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const admin = createAdminSupabase()
-  const { data: m } = await admin.from('masters').select('is_super_master').eq('id', utente.master_id).single()
-  if (!m?.is_super_master) return NextResponse.json({ error: 'Sezione riservata al super master' }, { status: 403 })
+  // Il ruolo insieme al master (lib/ruoli → eStaffDelSuperMaster): col solo flag del master passava
+  // anche un cliente sotto la radice, e riceveva le giacenze ferme di tutta la piattaforma.
+  if (!(await eStaffDelSuperMaster(utente, admin))) return NextResponse.json({ error: 'Sezione riservata al super master' }, { status: 403 })
 
   // TUTTE le svincolate (fetchAll: oltre 1000 verrebbero troncate e i conteggi uscirebbero sbagliati).
   const rows: any[] = []

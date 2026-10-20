@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { mascheraCatena, assegnatoPer, risolviNomiAttuali } from '@/lib/ticket-accesso'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 // Lista ticket:
 // - ricevuti: ticket che il MIO master deve gestire (aperti da miei clienti o sotto-master)
@@ -35,6 +36,10 @@ export async function GET(_req: NextRequest) {
   // Agente: sola lettura sui SUOI clienti, niente dati del master né della rete (lib/agente.ts).
   // I ticket non hanno un agente, quindi non c'è un perimetro da applicare: resta fuori.
   if (ruolo === 'agente') return NextResponse.json({ ricevuti: [], miei: [], rete: [] })
+  // L'autista non e' ne' cliente ne' agente, e cadeva qui sotto: con la chiave di servizio riceveva i
+  // ticket del master, messaggi dei clienti e prove di consegna comprese. I ticket del master li
+  // gestisce il suo staff; il dettaglio (/api/assistenza/[id]) lo escludeva gia'.
+  if (!gestisceLaRete(utente)) return NextResponse.json({ ricevuti: [], miei: [], rete: [] })
 
   // Master: ricevuti (owner) + miei (aperti verso la linea superiore) + RETE (inoltrati a me
   // da un master sotto di me: partecipo alla catena, il cliente non mi vede).

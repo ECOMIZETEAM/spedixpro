@@ -33,6 +33,18 @@ function servicesTxt(v: any): string {
   return String(v)
 }
 
+// IL BORDERO', NON IL MOTIVO DEL GUASTO. Quando la chiusura di una distinta non riesce, `bordero_id`
+// vale 'ERRORE: <motivo>': e' la sentinella con cui le chiusure sanno di dover ritentare
+// (startsWith('ERRORE') in lib/distinte-chiusura.ts e nelle chiusure di ogni corriere), quindi nel
+// database resta cosi'. Ma il motivo e' il messaggio grezzo del fornitore, col suo nome dentro, e
+// usciva tale e quale nel report che il cliente scarica, nella risposta dell'API e nel JSON delle
+// distinte. Fuori dal database si dice solo che c'e' un errore: 'ERRORE', senza il resto.
+export function borderoSenzaDettaglio(v: unknown): string | null {
+  const s = v == null ? '' : String(v)
+  if (!s) return null
+  return s.startsWith('ERRORE') ? 'ERRORE' : s
+}
+
 export function righeReportSpedizioni(spedizioni: any[], opts?: { master?: boolean; extra?: boolean }): any[] {
   const master = !!opts?.master
   // Le colonne EXTRA (Margine, Rettifica) sono numeri del master. Di default ci sono solo per il
@@ -65,7 +77,10 @@ export function righeReportSpedizioni(spedizioni: any[], opts?: { master?: boole
     if (master) riga.prezzo_corriere = s.prezzo_corriere != null ? Number(s.prezzo_corriere) : ''
     riga.contrassegno = Number(s.contrassegno || 0)
     riga.valore_assicurazione = Number(s.assicurazione || 0)
-    riga.bda = s.distinte?.bordero_id || ''
+    // Un errore di chiusura non e' un numero di bordero': la colonna resta vuota (lo stato vero della
+    // chiusura e' confermata_vettore, nella pagina delle distinte).
+    const bda = borderoSenzaDettaglio(s.distinte?.bordero_id)
+    riga.bda = bda && bda !== 'ERRORE' ? bda : ''
     riga.order_id = s.rif_ordine || s.id_ordine_esterno || ''
     riga.canale = s.canale || ''
     riga.Data_spedizione = dataIT(s.created_at)

@@ -1,4 +1,5 @@
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 // Default permessi per ruolo (usati se il master non ha ancora salvato nulla in master_permessi).
 // true = permesso attivo. Admin/master hanno sempre tutto (non serve elencarli).
@@ -104,9 +105,15 @@ export async function getPermessiUtente(): Promise<PermessiUtente | null> {
 // (creare un sotto-master con credenziali proprie) e soprattutto alla PATCH di /api/master/[id],
 // con cui poteva cambiare la password del proprio master ed entrare nel portale al posto suo.
 // Un ruolo di sola lettura non deve poter fare nulla di tutto questo.
+//
+// E NEMMENO IL CLIENTE O L'AUTISTA. Escludere l'agente per nome lasciava dentro tutti gli altri ruoli
+// che hanno un master_id: il cliente e l'autista di un master col flag acceso arrivavano a
+// /api/master/figli col parent_id del proprio master (la guardia sul sotto-albero e' vera per lui) e
+// leggevano clienti diretti e sotto-master con le email di accesso; da /api/master/gerarchia l'intero
+// sotto-albero. Il ruolo si chiede alla regola unica di lib/ruoli (master, admin, operatore).
 export async function puoGestireRete(): Promise<boolean> {
   const p = await getPermessiUtente()
-  if (!p || p.ruolo === 'agente') return false
+  if (!p || !gestisceLaRete(p)) return false
   return !!p.gestioneRete
 }
 
