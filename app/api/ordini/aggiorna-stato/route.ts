@@ -64,6 +64,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Parametri non validi' }, { status: 400 })
   }
 
+  // UN ORDINE SENZA PIU' I DATI DEL DESTINATARIO NON TORNA SPEDIBILE. Gli ordini Amazon perdono i
+  // dati del compratore dopo 30 giorni (app/api/privacy/purge-pii, regole di Amazon) e vanno in
+  // archivio: riaperti, "Spedisci selezionati" ne farebbe un'etichetta per "[dati rimossi]".
+  if (stato === 'da_spedire' || stato === 'errore') {
+    const { data: riga } = await supabase.from('ordini_importati')
+      .select('destinatario').eq('id', id).eq('cliente_id', utente.cliente_id).maybeSingle()
+    if (riga?.destinatario === '[dati rimossi]') {
+      return NextResponse.json({ error: 'Ordine archiviato: i dati del destinatario sono stati rimossi dopo 30 giorni, come richiesto da Amazon.' }, { status: 409 })
+    }
+  }
+
   // ESITO SCONOSCIUTO (verifica): prima di scrivere l'errore si guarda se la spedizione e' nata lo
   // stesso. Se c'e', l'ordine diventa spedito e si collega: e' cio' che e' successo davvero.
   if (verifica === true && stato === 'errore') {

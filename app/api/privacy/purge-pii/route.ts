@@ -81,17 +81,37 @@ export async function GET(req: NextRequest) {
   // Anche gli ordini UNITI in un altro: partono nel pacco del capofila ma restano 'unito' per sempre,
   // e non servono piu' a niente (l'unione copia articoli, peso e colli sul capofila; un unito non si
   // spedisce, non si modifica e non si riunisce). Con il solo 'spedito' non si pulivano mai.
+  // Anche gli ARCHIVIATI a mano dal cliente: archiviare non cancellava niente.
+  const datiVia = { destinatario: '[dati rimossi]', indirizzo: '[dati rimossi]', telefono: null, email_destinatario: null, raw: null, rif_destinatario: null, note: null }
   const anonimizzati = await anonimizzaABlocchi('ordini Amazon da file',
     () => admin.from('ordini_importati')
       .select('id')
-      .in('stato', ['spedito', 'unito'])
+      .in('stato', ['spedito', 'unito', 'archiviato'])
       .neq('destinatario', '[dati rimossi]')
       .lt('created_at', sogliaAmazon)
       .filter('order_id', 'match', '^\\d{3}-\\d{7}-\\d{7}$')
       .limit(BLOCCO),
     ids => admin.from('ordini_importati')
-      .update({ destinatario: '[dati rimossi]', indirizzo: '[dati rimossi]', telefono: null, email_destinatario: null, raw: null, rif_destinatario: null, note: null })
+      .update(datiVia)
       .in('id', ids),
+    scadenza, errori)
+
+  // Ordini Amazon DA FILE MAI SPEDITI (da spedire o in errore) oltre la soglia. Dopo 30 giorni un
+  // ordine Amazon non si spedisce piu' — la sua data di spedizione e' passata da settimane, e se il
+  // pacco e' partito da un'altra porta lo dice la spedizione, non questa riga — e la regola di Amazon
+  // vuole i dati del compratore via. Si tolgono e l'ordine passa in ARCHIVIATO: senza dati non deve
+  // restare fra i "da spedire", dove "Spedisci selezionati" ne farebbe un'etichetta per
+  // "[dati rimossi]". (Riaprirlo non si puo': app/api/ordini/aggiorna-stato.)
+  const archiviati = await anonimizzaABlocchi('ordini Amazon da file mai spediti',
+    () => admin.from('ordini_importati')
+      .select('id')
+      .in('stato', ['da_spedire', 'errore'])
+      .lt('created_at', sogliaAmazon)
+      .filter('order_id', 'match', '^\\d{3}-\\d{7}-\\d{7}$')
+      .limit(BLOCCO),
+    ids => admin.from('ordini_importati')
+      .update({ ...datiVia, stato: 'archiviato', errore: null })
+      .in('id', ids).in('stato', ['da_spedire', 'errore']),
     scadenza, errori)
 
   // Ordini Amazon dal COLLEGAMENTO DIRETTO (SP-API), IN QUALUNQUE STATO. Amazon vuole i dati
@@ -152,10 +172,10 @@ export async function GET(req: NextRequest) {
   const sogliaAudit = new Date(Date.now() - 396 * 24 * 3600 * 1000).toISOString()
   await admin.from('audit_accessi').delete().lt('created_at', sogliaAudit)
 
-  console.log(`[PURGE-PII] ordini Amazon anonimizzati=${anonimizzati} ordini Amazon collegati=${amazonCollegato} ordini store anonimizzati=${ecommerce}`)
+  console.log(`[PURGE-PII] ordini Amazon anonimizzati=${anonimizzati} archiviati=${archiviati} ordini Amazon collegati=${amazonCollegato} ordini store anonimizzati=${ecommerce}`)
   if (errori.length) {
     console.error('[PURGE-PII] ERRORI: ' + errori.join(' | '))
-    return NextResponse.json({ ok: false, anonimizzati, amazonCollegato, ecommerce, errori }, { status: 500 })
+    return NextResponse.json({ ok: false, anonimizzati, archiviati, amazonCollegato, ecommerce, errori }, { status: 500 })
   }
-  return NextResponse.json({ ok: true, anonimizzati, amazonCollegato, ecommerce })
+  return NextResponse.json({ ok: true, anonimizzati, archiviati, amazonCollegato, ecommerce })
 }

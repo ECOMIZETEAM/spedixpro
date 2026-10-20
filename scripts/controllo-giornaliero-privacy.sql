@@ -30,7 +30,7 @@ coda as (
 ),
 privacy_amazon as (
   select (select count(*) from ordini_importati
-            where order_id ~ '^\d{3}-\d{7}-\d{7}$' and stato in ('spedito', 'unito')
+            where order_id ~ '^\d{3}-\d{7}-\d{7}$'
               and destinatario <> '[dati rimossi]' and created_at < now() - interval '32 days')
        + (select count(*) from ordini_ecommerce
             where piattaforma = 'amazon' and destinatario is not null

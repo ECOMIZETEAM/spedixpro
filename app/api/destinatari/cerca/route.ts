@@ -21,10 +21,15 @@ export async function GET(req: NextRequest) {
   if (q.length < 2) return NextResponse.json([])
   const clienteId = req.nextUrl.searchParams.get('clienteId') || null
 
+  // FUORI I COMPRATORI AMAZON. La Data Protection Policy di Amazon consente di usare i loro dati
+  // solo per spedire quell'ordine: proporli come contatti della rubrica e' un altro uso. Si
+  // riconoscono dal numero d'ordine Amazon nel riferimento (123-1234567-1234567); le spedizioni
+  // senza riferimento restano.
   let query = supabase.from('spedizioni')
     .select('dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_telefono,dest_email,created_at')
     .eq('master_id', utente.master_id)
     .ilike('dest_nome', `${q}%`)
+    .or('rif_ordine.is.null,rif_ordine.not.match.^\\d{3}-\\d{7}-\\d{7}$')
     .order('created_at', { ascending: false })
     .limit(60)
   // Il cliente vede SOLO i propri destinatari; il master può filtrare per cliente selezionato.
