@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
+import { ESITI_DA_RIPETERE, MAX_TENTATIVI_NEGOZIO, PIATTAFORME_UNITI_EVASI, STATI_SPEDIZIONE_IN_ANNULLO, spedizioneDelPacco } from '@/lib/evasione-ordini'
+import { PREFISSO_ANNULLO, riconciliaEvasioniAnnullate } from '@/lib/shopify'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+// 300 come annullamenti-cron e sync-cron: dopo le evasioni il giro annulla su Shopify le evasioni delle
+// spedizioni annullate (seconda fase, sotto), e una chiamata lenta non deve far scadere la funzione.
+export const maxDuration = 300
 
 // RIEVASIONE DEGLI ORDINI MARKETPLACE RIMASTI INDIETRO.
 //
@@ -15,145 +19,202 @@ export const maxDuration = 120
 // gli ordini NON ancora 'ok' e si ripassano a fulfillMarketplace, che (a) evade solo quelli con LDV
 // ORMAI vera e (b) salta i già 'ok' (idempotente): così appena il cron scrive la LDV reale, l'evasione
 // parte da sola, e i fallimenti transitori si ritentano.
-// Oltre questi tentativi FALLITI il retry si arrende su un ordine: e' un errore PERMANENTE (store giu' da
-// giorni o, tipicamente, chiave store READ-ONLY che risponde 405 al write-back). ~8 giri da 20min = ~2h40
-// di tentativi. Senza questo cap un ordine irrecuperabile veniva ritentato ogni 20min per 10 giorni,
-// bruciando chiamate API allo store e occupando il budget di 1000 a scapito degli ordini recuperabili.
-const MAX_TENTATIVI = 8
-
+// Oltre MAX_TENTATIVI_NEGOZIO tentativi FALLITI (lib/evasione-ordini) il retry si arrende su un ordine:
+// e' un errore PERMANENTE (store giu' da giorni o, tipicamente, chiave store READ-ONLY che risponde 405
+// al write-back). ~8 giri da 20min = ~2h40 di tentativi. Senza questo cap un ordine irrecuperabile veniva
+// ritentato ogni 20min per 10 giorni, bruciando chiamate API allo store e occupando il budget di 1000 a
+// scapito degli ordini recuperabili.
+//
+// SECONDA FASE: l'annullo su Shopify delle evasioni delle spedizioni annullate (lib/shopify,
+// riconciliaEvasioniAnnullate). E' la garanzia per tutte le porte che annullano, anche quelle lato
+// corriere che non lo chiedono: le porte d'annullo lo accelerano soltanto.
 export async function GET(req: NextRequest) {
   const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
+  const avvio = Date.now()
+  const dieciGiorni = new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString()
 
   const { data: ordini } = await admin.from('ordini_ecommerce')
     .select('id,spedizione_id,fulfillment_stato,fulfillment_tentativi,shop,piattaforma')
     .not('spedizione_id', 'is', null)
     // Tutto tranne i gia' evasi E tranne gli ANNULLATI: 'annullato' non e' 'ok', quindi rientrava
     // qui dentro e il cron rievadeva una spedizione appena annullata — seconda email al compratore
-    // con un tracking morto. Rete di sicurezza: chi annulla sgancia gia' spedizione_id, ma questa
-    // riga protegge anche le piattaforme che dovessero usare lo stesso stato senza sganciarlo.
+    // con un tracking morto. Rete di sicurezza: l'ordine dalla spedizione annullata lo stacca gia' il
+    // database (trigger trg_ordine_torna_da_spedire), ma questa riga protegge anche una riga 'annullato'
+    // rimasta collegata, su qualunque piattaforma.
     // Fuori anche gli stati TERMINALI introdotti con la revisione Shopify: 'annullato_store'
     // (l'ordine l'ha annullato il negoziante) ed 'esterno' (la merce sta in un magazzino di terzi
     // e l'evasione la registra quel servizio). Ritentarli non li sistemerebbe mai.
     .or('fulfillment_stato.is.null,and(fulfillment_stato.neq.ok,fulfillment_stato.neq.annullato,fulfillment_stato.neq.annullato_store,fulfillment_stato.neq.esterno)')
-    .lt('fulfillment_tentativi', MAX_TENTATIVI)                         // salta gli irrecuperabili (cap raggiunto)
-    .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
+    .lt('fulfillment_tentativi', MAX_TENTATIVI_NEGOZIO)                 // salta gli irrecuperabili (cap raggiunto)
+    .gte('created_at', dieciGiorni)
     .order('created_at', { ascending: true })   // i PIÙ VECCHI prima: si svuota la coda, non si perdono gli arretrati
     .limit(1000)
 
-  const candidati: any[] = [...(ordini || []).filter((o: any) => o.fulfillment_stato !== 'ok'), ...await unitiAmazonDaConfermare(admin)]
+  // ORDINI UNITI. Un ordine assorbito non ha una spedizione sua: parte nel pacco del capofila e sulle
+  // piattaforme accese (lib/evasione-ordini) si evade col suo tracking. Se la sua evasione e' fallita
+  // o e' trattenuta (ESITI_DA_RIPETERE), lo si riprende legandolo alla spedizione del pacco; i suoi
+  // tentativi si contano come per le righe collegate. Una lettura fallita non ferma le altre evasioni.
+  // Solo le righe ancora 'unito', come l'evasione (assorbitiDaEvadere): una riga unita partita con una
+  // spedizione sua, poi annullata, il trigger la stacca e il pacco del capofila non porta la sua merce.
+  let uniti: any[] = []
+  try {
+    const { data, error } = await admin.from('ordini_ecommerce')
+      .select('id,unito_in,fulfillment_stato,fulfillment_tentativi,shop')
+      .in('piattaforma', Array.from(PIATTAFORME_UNITI_EVASI))
+      .eq('stato', 'unito').not('unito_in', 'is', null).is('spedizione_id', null)
+      .in('fulfillment_stato', ESITI_DA_RIPETERE)
+      .lt('fulfillment_tentativi', MAX_TENTATIVI_NEGOZIO)
+      .gte('created_at', dieciGiorni)
+      .order('created_at', { ascending: true })
+      .limit(1000)
+    if (error) throw new Error(error.message)
+    const pacchi = await spedizioneDelPacco(admin, data || [])
+    uniti = (data || [])
+      .map((o: any) => ({ ...o, spedizione_id: pacchi.get(String(o.id)) || null }))
+      .filter((o: any) => o.spedizione_id)
+  } catch (e: any) {
+    console.error('[FULFILL-RETRY] ordini uniti non letti (si riprendono al giro dopo):', String(e?.message || e).slice(0, 200))
+  }
+
+  const candidati: any[] = [...(ordini || []).filter((o: any) => o.fulfillment_stato !== 'ok'), ...uniti, ...await unitiAmazonDaConfermare(admin)]
   const TERMINALI = ['ok', 'annullato', 'annullato_store', 'esterno']
   const spedIds = Array.from(new Set(candidati.map((o: any) => o.spedizione_id)))
-  if (!spedIds.length) return NextResponse.json({ ok: true, candidate: 0, evase: 0 })
 
-  // Quali spedizioni hanno la LDV DEFINITIVA (verranno davvero tentate). Le PROVVISORIE non sono
-  // fallimenti: aspettano solo la LDV vera (SpediamoPro/Poste async, anche 18h+), quindi NON devono
-  // consumare tentativi — altrimenti un ordine legittimo si esaurirebbe solo perche' la LDV tarda.
-  const { ldvProvvisoria } = await import('@/lib/numero-spedizione')
-  // A blocchi di 200: gli id finiscono nell'indirizzo della richiesta, e oltre ~450 la richiesta
-  // torna "Bad Request" (e' il guasto che ha fermato purge-pii da settembre 2026).
-  const sped: any[] = []
-  for (let i = 0; i < spedIds.length; i += 200) {
-    const { data } = await admin.from('spedizioni').select('id,tracking_number').in('id', spedIds.slice(i, i + 200))
-    sped.push(...(data || []))
-  }
-  const prontiSet = new Set(sped
-    .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number)).map((s: any) => s.id))
-
-  // fulfillMarketplace filtra da sé le LDV provvisorie e salta i già evasi.
-  // A blocchi di 200 spedizioni: dentro, ogni negozio le legge con un `.in()` solo, e con le 1000
-  // del tetto qui sopra quelle letture tornerebbero "Bad Request" per tutti i negozi insieme.
-  // Amazon ha UN limite di tempo per tutto il giro, non uno per blocco: sette blocchi da 30 secondi
-  // supererebbero la durata massima della funzione e lascerebbero a meta' la contabilita' sotto.
-  const tentatiAmazon = new Set<string>()
-  const scadenzaAmazon = Date.now() + 30000
   const esiti: any[] = []
-  for (let i = 0; i < spedIds.length; i += 200) {
-    esiti.push(...await fulfillMarketplace(admin, spedIds.slice(i, i + 200), { tentatiAmazon, scadenzaAmazon }))
-  }
-  const ok = esiti.filter((e: any) => e?.stato === 'ok').length
-
-  // Incremento il contatore SOLO per gli ordini PRONTI (davvero tentati) che DOPO il giro sono ancora
-  // non-'ok': quelli sono fallimenti veri. Rileggo lo stato per non incrementare chi e' appena andato a
-  // buon fine. Al raggiungimento del cap l'ordine esce dai retry (resta 'errore', ricreabile a mano).
-  const prontiCand = candidati.filter((o: any) => prontiSet.has(o.spedizione_id))
+  let ok = 0
   let esauriti = 0
-  // Store che in QUESTO giro hanno avuto almeno un ordine 'ok': la scrittura sullo store e' passata,
-  // cioe' la chiave/il negozio ora funziona. Serve sotto per riesumare il pregresso al tetto.
-  const shopsSani = new Set<string>()
-  if (prontiCand.length) {
-    // A blocchi, come sopra: se questa rilettura fallisse, ogni ordine risulterebbe "non evaso" e
-    // si consumerebbe un tentativo anche a quelli appena andati a buon fine.
-    const dopo: any[] = []
-    const idsPronti = prontiCand.map((o: any) => o.id)
-    for (let i = 0; i < idsPronti.length; i += 200) {
-      const { data } = await admin.from('ordini_ecommerce').select('id,fulfillment_stato').in('id', idsPronti.slice(i, i + 200))
-      dopo.push(...(data || []))
-    }
-    const statoOra = new Map(dopo.map((o: any) => [o.id, o.fulfillment_stato]))
-    const shopById = new Map(prontiCand.map((o: any) => [o.id, o.shop]))
-    for (const [id, st] of statoOra) {
-      const sh = shopById.get(id)
-      if (st === 'ok' && sh) shopsSani.add(String(sh))
-    }
-    for (const o of prontiCand) {
-      const st = String(statoOra.get(o.id) || '')
-      if (TERMINALI.includes(st)) continue   // evaso o chiuso in questo giro: non incremento
-      // 'attesa' = stiamo aspettando il NEGOZIANTE (ordine trattenuto su Shopify), non abbiamo
-      // sbagliato niente noi. Bruciarci un tentativo ogni 20 minuti significava arrendersi dopo
-      // ~2h40 su un blocco che dura giorni, e l'ordine restava Unfulfilled per sempre. Stessa
-      // ragione per cui le LDV provvisorie non consumano tentativi: aspettare non e' fallire.
-      if (st === 'attesa') continue
-      // Amazon ha un limite di tempo per giro (lib/amazonFulfill): un ordine che non e' stato
-      // raggiunto non e' fallito. Senza questo, otto giri tagliati bastavano a toglierlo dai
-      // recuperi per sempre, con lo stato vuoto e nessun avviso. Vale anche per un ordine Amazon
-      // su una spedizione annullata (fulfillMarketplace non la evade): resta in attesa, perche' se
-      // la spedizione viene ripristinata deve partire la conferma, e la finestra di 10 giorni lo chiude.
-      if (o.piattaforma === 'amazon' && !tentatiAmazon.has(String(o.id))) continue
-      const n = Number(o.fulfillment_tentativi || 0) + 1
-      await admin.from('ordini_ecommerce').update({ fulfillment_tentativi: n }).eq('id', o.id)
-      if (n >= MAX_TENTATIVI) esauriti++
-    }
-  }
-
-  // AUTO-RECUPERO DEL PREGRESSO QUANDO LO STORE TORNA SANO.
-  // Il fallimento tipico (chiave webservice PrestaShop senza permesso PUT, o store giu' per giorni) e'
-  // PER-STORE, non per-ordine: quando il merchant sistema, l'intero negozio riparte insieme. Ma gli
-  // ordini che nel frattempo avevano toccato il tetto di tentativi restavano fuori dai retry PER SEMPRE
-  // (.lt(tentativi, MAX)) e il loro tracking non tornava mai al negozio nemmeno dopo il fix — si
-  // sbloccavano solo rifacendo la spedizione a mano. Qui: se in questo giro un ordine di uno store e'
-  // andato a buon fine ('ok' = lo store ha ACCETTATO la scrittura ⇒ la chiave ora funziona), rimetto in
-  // pista i suoi ordini ancora 'errore' e al tetto, azzerando i tentativi; il giro dopo rientrano tra i
-  // candidati e vengono ritentati. Uno store ancora rotto non produce nessun 'ok', quindi non entra qui
-  // e il cap continua a proteggerlo dagli sprechi. Il segnale e' un successo REALE appena visto, non una
-  // stima: niente ripescaggi a vuoto sui negozi davvero morti.
   let recuperati = 0
-  if (shopsSani.size) {
-    const { data: capRes } = await admin.from('ordini_ecommerce')
-      .update({ fulfillment_tentativi: 0 })
-      .eq('fulfillment_stato', 'errore')
-      .gte('fulfillment_tentativi', MAX_TENTATIVI)
-      .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
-      .in('shop', Array.from(shopsSani))
-      .select('id')
-    recuperati = (capRes || []).length
+  if (spedIds.length) {
+    // Quali spedizioni hanno la LDV DEFINITIVA (verranno davvero tentate). Le PROVVISORIE non sono
+    // fallimenti: aspettano solo la LDV vera (SpediamoPro/Poste async, anche 18h+), quindi NON devono
+    // consumare tentativi — altrimenti un ordine legittimo si esaurirebbe solo perche' la LDV tarda.
+    // Lo stesso per le spedizioni che si stanno annullando: fulfillMarketplace non le evade, e
+    // aspettare l'annullo (48 ore, o la conferma DVA) bruciava un tentativo a ogni giro.
+    const { ldvProvvisoria } = await import('@/lib/numero-spedizione')
+    // A blocchi di 200: gli id finiscono nell'indirizzo della richiesta, e oltre ~450 la richiesta
+    // torna "Bad Request" (e' il guasto che ha fermato purge-pii da settembre 2026).
+    const sped: any[] = []
+    for (let i = 0; i < spedIds.length; i += 200) {
+      const { data } = await admin.from('spedizioni').select('id,tracking_number,stato').in('id', spedIds.slice(i, i + 200))
+      sped.push(...(data || []))
+    }
+    const prontiSet = new Set(sped
+      .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number))
+      .filter((s: any) => !STATI_SPEDIZIONE_IN_ANNULLO.includes(String(s.stato || '')))
+      .map((s: any) => s.id))
+
+    // fulfillMarketplace filtra da sé le LDV provvisorie e salta i già evasi.
+    // A blocchi di 200 spedizioni: fulfillMarketplace le rilegge con un `.in()` solo, e con le 1000 del
+    // tetto qui sopra, piu' gli uniti, quella lettura tornerebbe "Bad Request": nessuna evasione per
+    // nessun negozio.
+    // Amazon ha UN limite di tempo per tutto il giro, non uno per blocco: sette blocchi da 30 secondi
+    // supererebbero la durata massima della funzione e lascerebbero a meta' la contabilita' sotto.
+    const tentatiAmazon = new Set<string>()
+    const scadenzaAmazon = Date.now() + 30000
+    for (let i = 0; i < spedIds.length; i += 200) {
+      esiti.push(...await fulfillMarketplace(admin, spedIds.slice(i, i + 200), { tentatiAmazon, scadenzaAmazon }))
+    }
+    ok = esiti.filter((e: any) => e?.stato === 'ok').length
+
+    // Incremento il contatore SOLO per gli ordini PRONTI (davvero tentati) che DOPO il giro sono ancora
+    // non-'ok': quelli sono fallimenti veri. Rileggo lo stato per non incrementare chi e' appena andato a
+    // buon fine. Al raggiungimento del cap l'ordine esce dai retry (resta 'errore', ricreabile a mano).
+    const prontiCand = candidati.filter((o: any) => prontiSet.has(o.spedizione_id))
+    // Store che in QUESTO giro hanno avuto almeno un ordine 'ok': la scrittura sullo store e' passata,
+    // cioe' la chiave/il negozio ora funziona. Serve sotto per riesumare il pregresso al tetto.
+    const shopsSani = new Set<string>()
+    if (prontiCand.length) {
+      // A blocchi, come sopra: se questa rilettura fallisse, ogni ordine risulterebbe "non evaso" e
+      // si consumerebbe un tentativo anche a quelli appena andati a buon fine.
+      const dopo: any[] = []
+      const idsPronti = prontiCand.map((o: any) => o.id)
+      for (let i = 0; i < idsPronti.length; i += 200) {
+        const { data } = await admin.from('ordini_ecommerce').select('id,fulfillment_stato').in('id', idsPronti.slice(i, i + 200))
+        dopo.push(...(data || []))
+      }
+      const statoOra = new Map(dopo.map((o: any) => [o.id, o.fulfillment_stato]))
+      const shopById = new Map(prontiCand.map((o: any) => [o.id, o.shop]))
+      for (const [id, st] of statoOra) {
+        const sh = shopById.get(id)
+        if (st === 'ok' && sh) shopsSani.add(String(sh))
+      }
+      for (const o of prontiCand) {
+        const st = String(statoOra.get(o.id) || '')
+        if (TERMINALI.includes(st)) continue   // evaso o chiuso in questo giro: non incremento
+        // 'attesa' = stiamo aspettando il NEGOZIANTE (ordine trattenuto su Shopify), non abbiamo
+        // sbagliato niente noi. Bruciarci un tentativo ogni 20 minuti significava arrendersi dopo
+        // ~2h40 su un blocco che dura giorni, e l'ordine restava Unfulfilled per sempre. Stessa
+        // ragione per cui le LDV provvisorie non consumano tentativi: aspettare non e' fallire.
+        if (st === 'attesa') continue
+        // Amazon ha un limite di tempo per giro (lib/amazonFulfill): un ordine che non e' stato
+        // raggiunto non e' fallito. Senza questo, otto giri tagliati bastavano a toglierlo dai
+        // recuperi per sempre, con lo stato vuoto e nessun avviso. Vale anche per un ordine Amazon
+        // su una spedizione annullata (fulfillMarketplace non la evade): resta in attesa, perche' se
+        // la spedizione viene ripristinata deve partire la conferma, e la finestra di 10 giorni lo chiude.
+        if (o.piattaforma === 'amazon' && !tentatiAmazon.has(String(o.id))) continue
+        const n = Number(o.fulfillment_tentativi || 0) + 1
+        await admin.from('ordini_ecommerce').update({ fulfillment_tentativi: n }).eq('id', o.id)
+        if (n >= MAX_TENTATIVI_NEGOZIO) esauriti++
+      }
+    }
+
+    // AUTO-RECUPERO DEL PREGRESSO QUANDO LO STORE TORNA SANO.
+    // Il fallimento tipico (chiave webservice PrestaShop senza permesso PUT, o store giu' per giorni) e'
+    // PER-STORE, non per-ordine: quando il merchant sistema, l'intero negozio riparte insieme. Ma gli
+    // ordini che nel frattempo avevano toccato il tetto di tentativi restavano fuori dai retry PER SEMPRE
+    // (.lt(tentativi, MAX)) e il loro tracking non tornava mai al negozio nemmeno dopo il fix — si
+    // sbloccavano solo rifacendo la spedizione a mano. Qui: se in questo giro un ordine di uno store e'
+    // andato a buon fine ('ok' = lo store ha ACCETTATO la scrittura ⇒ la chiave ora funziona), rimetto in
+    // pista i suoi ordini ancora 'errore' e al tetto, azzerando i tentativi; il giro dopo rientrano tra i
+    // candidati e vengono ritentati. Uno store ancora rotto non produce nessun 'ok', quindi non entra qui
+    // e il cap continua a proteggerlo dagli sprechi. Il segnale e' un successo REALE appena visto, non una
+    // stima: niente ripescaggi a vuoto sui negozi davvero morti.
+    // Solo righe da EVADERE: le collegate, e le unite che non portano un testo dell'annullo su Shopify
+    // (PREFISSO_ANNULLO). Gli errori dell'annullo stanno sulle righe staccate e anche sulle unite (un
+    // assorbito di un pacco annullato e' candidato della riconciliazione per conto suo): quelli al tetto,
+    // definitivi o esauriti, riesumati qui ripartirebbero ogni 20 minuti per dieci giorni. Il valore e'
+    // fra virgolette perche' il filtro resti valido anche se il prefisso cambiasse punteggiatura.
+    if (shopsSani.size) {
+      const { data: capRes } = await admin.from('ordini_ecommerce')
+        .update({ fulfillment_tentativi: 0 })
+        .eq('fulfillment_stato', 'errore')
+        .gte('fulfillment_tentativi', MAX_TENTATIVI_NEGOZIO)
+        .gte('created_at', dieciGiorni)
+        .in('shop', Array.from(shopsSani))
+        .or(`spedizione_id.not.is.null,and(unito_in.not.is.null,fulfillment_errore.not.like."${PREFISSO_ANNULLO}*")`)
+        .select('id')
+      recuperati = (capRes || []).length
+    }
   }
 
-  return NextResponse.json({ ok: true, candidate: spedIds.length, esiti: esiti.length, evase_ok: ok, esauriti, recuperati })
+  // SECONDA FASE, DOPO le evasioni e a parte: un errore qui si registra e non tocca cio' che si e' gia'
+  // evaso, e una chiamata a Shopify che non risponde non ferma piu' le evasioni di tutti i clienti.
+  // Al massimo 50 ordini per giro, e nessuno nuovo dopo quattro minuti dall'avvio.
+  let annulli: any
+  try {
+    annulli = await riconciliaEvasioniAnnullate(admin, { limite: 50, scadenza: avvio + 240 * 1000, contaTentativi: true })
+  } catch (e: any) {
+    console.error('[FULFILL-RETRY] annullo delle evasioni:', String(e?.message || e).slice(0, 200))
+    annulli = { errore: String(e?.message || e).slice(0, 200) }
+  }
+
+  return NextResponse.json({ ok: true, candidate: spedIds.length, esiti: esiti.length, evase_ok: ok, esauriti, recuperati, annulli })
 }
 
 // ORDINI AMAZON UNITI IN UN PACCO. Viaggiano nel pacco del capofila e non hanno una spedizione loro,
 // quindi la selezione qui sopra (spedizione_id non vuoto) non li vede: se il capofila e' gia' 'ok'
 // e un ordine unito no, per Amazon quell'ordine resterebbe non spedito (ritardi, reclami sul conto
 // del venditore). Si rimettono in giro con la spedizione DEL CAPOFILA, che lib/amazonFulfill conferma
-// insieme ai suoi uniti; contano i tentativi come gli altri. Solo Amazon: gli altri negozi
-// non confermano gli ordini uniti.
+// insieme ai suoi uniti; contano i tentativi come gli altri. Con una regola sua, non quella degli
+// ORDINI UNITI qui sopra (lib/evasione-ordini, solo Shopify): anche gli uniti mai tentati, e niente
+// legame con l'esito del capofila. Le altre piattaforme gli ordini uniti non li evadono.
 async function unitiAmazonDaConfermare(admin: any): Promise<any[]> {
   const { data: uniti } = await admin.from('ordini_ecommerce')
     .select('id,unito_in,fulfillment_stato,fulfillment_tentativi,shop,piattaforma')
     .eq('piattaforma', 'amazon').eq('stato', 'unito').not('unito_in', 'is', null).is('spedizione_id', null)
     .or('fulfillment_stato.is.null,and(fulfillment_stato.neq.ok,fulfillment_stato.neq.annullato,fulfillment_stato.neq.annullato_store,fulfillment_stato.neq.esterno)')
-    .lt('fulfillment_tentativi', MAX_TENTATIVI)
+    .lt('fulfillment_tentativi', MAX_TENTATIVI_NEGOZIO)
     .gte('created_at', new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString())
     .limit(300)
   if (!uniti?.length) return []

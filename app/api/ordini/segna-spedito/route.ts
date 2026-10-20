@@ -1,8 +1,41 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { ESITI_EVASIONE, PIATTAFORME_UNITI_EVASI, assorbitiDaEvadere } from '@/lib/evasione-ordini'
+import { assorbitiDi } from '@/lib/ordini-uniti'
+import { PREFISSO_ANNULLO } from '@/lib/shopify'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+// Il segno lasciato su una riga Shopify rispedita mentre su Shopify c'e' forse ancora l'evasione
+// della spedizione di prima (vedi sotto). Comincia col prefisso dell'annullo: se la spedizione nuova
+// venisse annullata prima di essere evasa, la riga resta candidata dell'annullo (lib/shopify).
+const EVASIONE_PRECEDENTE = `${PREFISSO_ANNULLO}: evasione precedente da annullare`
+
+// IL PACCO NUOVO VALE ANCHE PER GLI ASSORBITI. Sulle piattaforme dove gli ordini uniti si evadono col
+// tracking del capofila (lib/evasione-ordini), quando il capofila cambia spedizione si azzerano allo
+// stesso modo gli assorbiti che l'evasione manda col pacco (assorbitiDaEvadere, la stessa regola). Mai
+// quelli spediti a parte, nemmeno se poi la loro spedizione si e' annullata: hanno avuto la loro
+// evasione, e rievaderli col pacco manderebbe al compratore una seconda email. Si leggono con la
+// sessione del cliente e ogni scrittura resta vincolata al cliente.
+async function azzeraAssorbitiDelPacco(supabase: any, capoId: string, clienteId: string) {
+  const perCapo = await assorbitiDi(supabase, [capoId], 'id,unito_in,created_at,piattaforma,stato,spedizione_id,stato_pagamento,fulfillment_stato')
+  const colPacco = assorbitiDaEvadere(perCapo.get(String(capoId)) || [])
+  const conTraccia = colPacco.filter((r: any) => r.piattaforma === 'shopify' && ESITI_EVASIONE.includes(String(r.fulfillment_stato || ''))).map((r: any) => r.id)
+  const altri = colPacco.map((r: any) => r.id).filter((id: string) => !conTraccia.includes(id))
+  if (conTraccia.length) {
+    const { error } = await supabase.from('ordini_ecommerce')
+      .update({ fulfillment_stato: 'errore', fulfillment_errore: EVASIONE_PRECEDENTE, fulfillment_tentativi: 0 })
+      .in('id', conTraccia).eq('cliente_id', clienteId).is('spedizione_id', null)
+    if (error) throw new Error(error.message)
+  }
+  if (altri.length) {
+    const { error } = await supabase.from('ordini_ecommerce')
+      .update({ fulfillment_stato: null, fulfillment_errore: null, fulfillment_tentativi: 0 })
+      .in('id', altri).eq('cliente_id', clienteId).is('spedizione_id', null)
+    if (error) throw new Error(error.message)
+  }
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -28,16 +61,35 @@ export async function POST(req: NextRequest) {
   // tentativi al massimo il recupero non lo ripescava. Si azzerano solo quando la spedizione cambia
   // davvero: un doppio clic sullo stesso ordine non deve far ripartire niente.
   if (spedizioneId) {
-    const { data: cambiato } = await supabase.from('ordini_ecommerce')
+    // In due tempi. PRIMA la riga Shopify che porta la traccia di un'evasione nostra forse ancora
+    // attiva: senza spedizione ma con un esito d'evasione (ok, attesa, errore), cioe' un ordine evaso e
+    // poi staccato da una spedizione annullata (trigger trg_ordine_torna_da_spedire). Azzerata a null,
+    // se la spedizione nuova venisse annullata prima di essere evasa la riga perderebbe la traccia, e
+    // l'evasione col tracking morto resterebbe su Shopify per sempre. Con 'errore' l'evasione la lavora
+    // comunque (salta solo gli 'ok') e prima toglie l'evasione morta (lib/shopify). Fino ad allora la
+    // riga mostra «Store non aggiornato», ed e' vero.
+    const { data: conTraccia } = await supabase.from('ordini_ecommerce')
+      .update({ stato: 'spedito', spedizione_id: spedizioneId, fulfillment_stato: 'errore', fulfillment_errore: EVASIONE_PRECEDENTE, fulfillment_tentativi: 0 })
+      .eq('id', ordineId).eq('cliente_id', utente.cliente_id)
+      .eq('piattaforma', 'shopify').is('spedizione_id', null).in('fulfillment_stato', ESITI_EVASIONE)
+      .select('id,piattaforma')
+    // POI le altre, come sempre.
+    const { data: azzerate } = await supabase.from('ordini_ecommerce')
       .update({ stato: 'spedito', spedizione_id: spedizioneId, fulfillment_stato: null, fulfillment_errore: null, fulfillment_tentativi: 0 })
       .eq('id', ordineId).eq('cliente_id', utente.cliente_id)
       .or(`spedizione_id.is.null,spedizione_id.neq.${spedizioneId}`)
-      .select('id')
+      .select('id,piattaforma')
+    const cambiata = [...(conTraccia || []), ...(azzerate || [])][0]
+    if (cambiata && PIATTAFORME_UNITI_EVASI.has(String(cambiata.piattaforma))) {
+      // L'ordine e' gia' legato alla spedizione: un errore qui non deve far fallire la risposta.
+      try { await azzeraAssorbitiDelPacco(supabase, String(ordineId), utente.cliente_id) }
+      catch (e: any) { console.error('[ORDINI][ASSORBITI DEL PACCO]', ordineId, e?.message) }
+    }
     // AMAZON, ORDINI UNITI A QUESTO: viaggiano nel pacco del capofila e Amazon li conferma col
     // tracking del pacco (lib/amazonFulfill). Se il pacco e' cambiato, la loro conferma vecchia porta
     // il tracking di un'etichetta che non c'e' piu': tornano da confermare, e la spinta qui sotto li
     // rimanda col tracking nuovo (stesso pacco per Amazon: la conferma si corregge, non si somma).
-    if ((cambiato || []).length) {
+    if (cambiata) {
       await supabase.from('ordini_ecommerce')
         .update({ fulfillment_stato: null, fulfillment_errore: null, fulfillment_tentativi: 0 })
         .eq('unito_in', ordineId).eq('cliente_id', utente.cliente_id).eq('piattaforma', 'amazon').is('spedizione_id', null)

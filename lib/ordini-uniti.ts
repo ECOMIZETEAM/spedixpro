@@ -80,12 +80,21 @@ export async function assorbitiDi(db: any, capofilaIds: string[], colonne: strin
 const ANNULLATO_SUL_NEGOZIO = new Set(['cancelled', 'refunded', 'failed'])
 const annullatoSulNegozio = (r: any) => ANNULLATO_SUL_NEGOZIO.has(String(r?.stato_pagamento || '').toLowerCase())
 
+// Quali ASSORBITI fanno parte del pacco: quelli senza una spedizione propria e, per un pacco ancora da
+// spedire, non annullati sul negozio. La stessa regola decide tre cose: cosa entra nel pacco (lista e
+// riepilogo), chi si evade sul negozio insieme al capofila (lib/evasione-ordini) e chi si azzera quando
+// il capofila si rispedisce (segna-spedito). Vale per i soli assorbiti: il capofila e' la riga collegata
+// alla spedizione, e toglierlo dall'evasione perche' annullato sul negozio gli leverebbe l'esito.
+export function assorbitiNelPacco<T = any>(assorbiti: T[], opz: { daSpedire?: boolean } = { daSpedire: true }): T[] {
+  return assorbiti.filter((r: any) => !r.spedizione_id).filter((r: any) => !(opz.daSpedire && annullatoSulNegozio(r)))
+}
+
 // Il pacco: capofila + assorbiti. Ogni riga porta i suoi articoli, totale, campi di pagamento, nota.
 // Fuori dal pacco: gli assorbiti spediti a parte (hanno la loro spedizione: rimetterli qui li
 // spedirebbe e incasserebbe due volte) e, per un pacco ancora da spedire, gli ordini annullati sul
 // negozio. Il riepilogo di una spedizione gia' fatta li tiene: racconta cosa e' partito.
 export function componiPacco(capo: any, assorbiti: any[], opz: { daSpedire?: boolean } = { daSpedire: true }) {
-  const tutti = [capo, ...assorbiti.filter(r => !r.spedizione_id)].filter(r => !(opz.daSpedire && annullatoSulNegozio(r)))
+  const tutti = [...(opz.daSpedire && annullatoSulNegozio(capo) ? [] : [capo]), ...assorbitiNelPacco(assorbiti, opz)]
   const note: string[] = []
   for (const r of tutti) { const n = String(r.nota || '').trim(); if (n && !note.includes(n)) note.push(n) }
   return {

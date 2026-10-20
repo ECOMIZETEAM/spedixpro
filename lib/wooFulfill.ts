@@ -1,5 +1,6 @@
 import { wooPost, wooPut } from '@/lib/woo'
 import { marchioCorriere } from '@/lib/corriere-logo'
+import { righeDaEvadere } from '@/lib/evasione-ordini'
 
 // Rimanda il tracking a WooCommerce alla chiusura distinta.
 // Woo non ha un campo tracking nativo: aggiungiamo una NOTA ordine (visibile al cliente)
@@ -7,11 +8,9 @@ import { marchioCorriere } from '@/lib/corriere-logo'
 export async function fulfillSpedizioniWoo(db: any, spedizioneIds: string[]) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  const { data: ordini } = await db
-    .from('ordini_ecommerce').select('*')
-    .in('spedizione_id', spedizioneIds)
-    .eq('piattaforma', 'woocommerce')
-  for (const ordine of ordini || []) {
+  // Quali righe evadere lo decide lib/evasione-ordini, uguale per i sei negozi.
+  const righe = await righeDaEvadere(db, spedizioneIds, 'woocommerce')
+  for (const { ordine, spedizioneId } of righe) {
     if (ordine.fulfillment_stato === 'ok') continue
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
@@ -20,7 +19,7 @@ export async function fulfillSpedizioniWoo(db: any, spedizioneIds: string[]) {
     try {
       const { data: sped } = await db
         .from('spedizioni').select('tracking_number, tracking_token, corrieri(nome_contratto)')
-        .eq('id', ordine.spedizione_id).maybeSingle()
+        .eq('id', spedizioneId).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
       // BRAND PUBBLICO, mai il nome del contratto (roba interna). E link di tracciamento WHITE-LABEL

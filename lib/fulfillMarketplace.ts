@@ -5,6 +5,7 @@ import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
 import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
 import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
 import { fulfillSpedizioniAmazon } from '@/lib/amazonFulfill'
+import { STATI_SPEDIZIONE_IN_ANNULLO } from '@/lib/evasione-ordini'
 
 // Spinge il tracking a TUTTI i marketplace collegati per le spedizioni date (Shopify, WooCommerce, Amazon,
 // PrestaShop, eBay, TikTok, Temu). Best-effort e IDEMPOTENTE: ogni fulfill salta gli ordini già 'ok',
@@ -24,19 +25,19 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: 
   // DVA-). Spingerlo al compratore = tracking FINTO nella sua email + ordine chiuso 'spedito' sullo store,
   // che poi NON viene mai ri-aggiornato con la LDV vera. Quindi qui si evadono SOLO le spedizioni con LDV
   // definitiva; le altre le riprende `fulfill-retry` appena il tracking diventa vero. Guardia in UN punto
-  // solo: vale per Shopify/Woo/PrestaShop/eBay/TikTok/Temu insieme.
+  // solo: vale per Shopify/Woo/PrestaShop/eBay/TikTok/Temu/Amazon insieme.
   //
-  // NON si evade nemmeno una spedizione ANNULLATA. Sembra impossibile che ci arrivi, e invece ci
-  // arrivava: chi annulla sgancia l'ordine dalla spedizione, ma questa funzione la chiamano in sei
-  // punti e basta che uno passi l'id di una spedizione appena annullata perche' il compratore riceva
-  // l'email di spedizione con un tracking gia' morto. La guardia sta QUI, dove passano tutte e sei le
-  // piattaforme, invece che in ognuna delle porte che annullano.
-  const ANNULLATE = ['annullata', 'annullamento_pending', 'annullamento_manuale']
+  // NON si evade nemmeno una spedizione ANNULLATA, o che si sta annullando. Lo sgancio dell'ordine lo fa
+  // il database (trigger trg_ordine_torna_da_spedire, quando la spedizione diventa 'annullata'), ma le
+  // spinte arrivano anche dopo: girano in after() a risposta gia' data, e il recupero ripassa ogni 20
+  // minuti. Basta che una passi l'id di una spedizione appena annullata, o in attesa d'annullo, perche' il
+  // compratore riceva l'email di spedizione con un tracking gia' morto. La guardia sta QUI, dove passano
+  // tutte e sette le piattaforme, con la lista degli stati scritta in un posto solo (lib/evasione-ordini).
   const { ldvProvvisoria } = await import('@/lib/numero-spedizione')
   const { data: sped } = await db.from('spedizioni').select('id,tracking_number,stato').in('id', spedizioneIds)
   const pronti = (sped || [])
     .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number))
-    .filter((s: any) => !ANNULLATE.includes(String(s.stato || '')))
+    .filter((s: any) => !STATI_SPEDIZIONE_IN_ANNULLO.includes(String(s.stato || '')))
     .map((s: any) => s.id)
   if (!pronti.length) return esiti
 
@@ -51,12 +52,20 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const adm = createAdminSupabase()
 
-  try { esiti = await fulfillSpedizioniShopify(adm, pronti) } catch {}
-  try { await fulfillSpedizioniWoo(adm, pronti) } catch {}
-  try { await fulfillSpedizioniPrestashop(adm, pronti) } catch {}
-  try { await fulfillSpedizioniEbay(adm, pronti) } catch {}
-  try { await fulfillSpedizioniTiktok(adm, pronti) } catch {}
-  try { await fulfillSpedizioniTemu(adm, pronti) } catch {}
-  try { await fulfillSpedizioniAmazon(adm, pronti, opz.tentatiAmazon, opz.scadenzaAmazon) } catch {}
+  // Una piattaforma che fallisce non ferma le altre, ma lo dice: prima il catch era muto, e un errore
+  // nella lettura delle righe da evadere (lib/evasione-ordini) spariva senza lasciare traccia.
+  const passa = async (piattaforma: string, evadi: () => Promise<any>) => {
+    try { return await evadi() } catch (e: any) {
+      console.error('[FULFILL]', piattaforma, 'evasione non eseguita:', String(e?.message || e).slice(0, 200))
+      return null
+    }
+  }
+  esiti = (await passa('shopify', () => fulfillSpedizioniShopify(adm, pronti))) || []
+  await passa('woocommerce', () => fulfillSpedizioniWoo(adm, pronti))
+  await passa('prestashop', () => fulfillSpedizioniPrestashop(adm, pronti))
+  await passa('ebay', () => fulfillSpedizioniEbay(adm, pronti))
+  await passa('tiktok', () => fulfillSpedizioniTiktok(adm, pronti))
+  await passa('temu', () => fulfillSpedizioniTemu(adm, pronti))
+  await passa('amazon', () => fulfillSpedizioniAmazon(adm, pronti, opz.tentatiAmazon, opz.scadenzaAmazon))
   return esiti
 }

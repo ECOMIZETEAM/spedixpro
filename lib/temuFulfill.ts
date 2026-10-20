@@ -1,24 +1,23 @@
 import { getValidTemuToken, temuRequest } from '@/lib/temu'
 import { marchioCorriere } from '@/lib/corriere-logo'
+import { righeDaEvadere } from '@/lib/evasione-ordini'
 
 // Rimanda il tracking a Temu alla chiusura distinta. Best-effort.
 // NB: nome API ("bg.logistics.shipment.confirm") e campi da confermare sui doc partner Temu.
 export async function fulfillSpedizioniTemu(db: any, spedizioneIds: string[]) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  const { data: ordini } = await db
-    .from('ordini_ecommerce').select('*')
-    .in('spedizione_id', spedizioneIds)
-    .eq('piattaforma', 'temu')
+  // Quali righe evadere lo decide lib/evasione-ordini, uguale per i sei negozi.
+  const righe = await righeDaEvadere(db, spedizioneIds, 'temu')
 
-  for (const ordine of ordini || []) {
+  for (const { ordine, spedizioneId } of righe) {
     if (ordine.fulfillment_stato === 'ok') continue
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
     }
     try {
-      const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto)').eq('id', ordine.spedizione_id).maybeSingle()
+      const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto)').eq('id', spedizioneId).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
       // Il brand PUBBLICO (Poste/BRT/GLS…), mai il nome del nostro contratto: non deve arrivare al

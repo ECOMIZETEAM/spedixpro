@@ -1,4 +1,5 @@
 import { psGet, psGetXml, psPutXml, psPostXml, psXml, PS_STATI_DI_SERIE } from '@/lib/prestashop'
+import { righeDaEvadere } from '@/lib/evasione-ordini'
 
 // Rimanda il tracking a PrestaShop alla chiusura distinta: imposta tracking_number
 // sull'order_carrier dell'ordine. Best-effort, mai bloccante.
@@ -22,10 +23,8 @@ type Negozio = { url: string; key: string; shippedId: number; statiSpediti: Set<
 export async function fulfillSpedizioniPrestashop(db: any, spedizioneIds: string[]) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  const { data: ordini } = await db
-    .from('ordini_ecommerce').select('*')
-    .in('spedizione_id', spedizioneIds)
-    .eq('piattaforma', 'prestashop')
+  // Quali righe evadere lo decide lib/evasione-ordini, uguale per i sei negozi.
+  const righe = await righeDaEvadere(db, spedizioneIds, 'prestashop')
 
   // Credenziali e stati del negozio UNA volta per negozio, non una per ordine: una distinta con
   // cinquanta ordini dello stesso negozio rileggeva cinquanta volte lo stesso elenco di stati.
@@ -56,14 +55,14 @@ export async function fulfillSpedizioniPrestashop(db: any, spedizioneIds: string
     return n
   }
 
-  for (const ordine of ordini || []) {
+  for (const { ordine, spedizioneId } of righe) {
     if (ordine.fulfillment_stato === 'ok') continue
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
     }
     try {
-      const { data: sped } = await db.from('spedizioni').select('tracking_number').eq('id', ordine.spedizione_id).maybeSingle()
+      const { data: sped } = await db.from('spedizioni').select('tracking_number').eq('id', spedizioneId).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
 

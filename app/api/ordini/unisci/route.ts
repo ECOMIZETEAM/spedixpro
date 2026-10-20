@@ -15,9 +15,12 @@ import { assorbitiDi, componiPacco } from '@/lib/ordini-uniti'
 // mandare la merce di uno a casa di un altro. L'unica tolleranza e' su come e' scritto lo stesso
 // dato (maiuscole, accenti, spazi, punteggiatura): quella non cambia dove va il pacco.
 //
-// LO STORICO NON SI CANCELLA: gli ordini assorbiti restano, con `unito_in` che punta al capofila.
-// Il negozio continua a vederli e a poterli marcare evasi, e chi guarda dopo capisce cosa e'
-// successo. Cancellarli farebbe sparire il numero d'ordine del negozio.
+// LO STORICO NON SI CANCELLA: gli ordini assorbiti restano, con `unito_in` che punta al capofila, e
+// chi guarda dopo capisce cosa e' successo. Cancellarli farebbe sparire il numero d'ordine del negozio.
+// Sul negozio gli assorbiti Shopify li evadiamo noi, col tracking del capofila, uno per uno, quando il
+// pacco parte (lib/evasione-ordini); quelli Amazon li conferma il collegamento diretto, con una regola
+// sua (lib/amazonFulfill). Sulle altre piattaforme il negozio continua a vederli aperti e a poterli
+// marcare evasi da se': estendere l'evasione anche a loro e' una scelta ancora da fare.
 //
 // Si uniscono solo ordini ANCORA DA SPEDIRE: uno gia' partito ha la sua etichetta e i suoi soldi.
 

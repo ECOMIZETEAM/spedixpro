@@ -42,8 +42,28 @@ function getData(o:any){
   return o.data_ordine || r.creationDate || r.date_created || r.created_at || r.createdDate || r.create_time || o.created_at || o.creato_il || null
 }
 function getTags(o:any){ const t = o.tags ?? o.raw?.tags; return Array.isArray(t)?t.join(', '):(t||'') }
-function labelPag(s:any){ const m:Record<string,string>={ paid:'Pagato', pending:'In attesa', refunded:'Rimborsato', partially_paid:'Parziale', voided:'Annullato' }; return m[s]||s||'—' }
-function coloriPag(s:any){ if(s==='paid') return {bg:'#dcfce7',fg:'#166534'}; if(s==='refunded'||s==='voided') return {bg:'#fee2e2',fg:'#991b1b'}; return {bg:'#fef3c7',fg:'#92400e'} }
+// 'cancelled' e' l'ordine annullato sul negozio: lo scrivono la sync WooCommerce e quella Shopify.
+function labelPag(s:any){ const m:Record<string,string>={ paid:'Pagato', pending:'In attesa', refunded:'Rimborsato', partially_paid:'Parziale', voided:'Annullato', cancelled:'Annullato' }; return m[s]||s||'—' }
+function coloriPag(s:any){ if(s==='paid') return {bg:'#dcfce7',fg:'#166534'}; if(s==='refunded'||s==='voided'||s==='cancelled') return {bg:'#fee2e2',fg:'#991b1b'}; return {bg:'#fef3c7',fg:'#92400e'} }
+
+// L'ESITO DELL'EVASIONE SUL NEGOZIO, una funzione sola per le due colonne della riga (spedito da noi,
+// oppure ancora da spedire). null = niente da dire.
+function badgeEvasione(o:any){
+  // Write-back allo store fallito (es. chiavi negozio in sola lettura): il tracking NON e' arrivato al
+  // negozio ne' al compratore. Prima "✓ Spedito" lo nascondeva. Sulle righe Shopify senza spedizione e'
+  // anche l'annullo dell'evasione di una spedizione annullata che non e' riuscito: il motivo e' nel titolo.
+  if (o.fulfillment_stato==='errore') return <span title={o.fulfillment_errore || 'Il tracking non e\' stato inviato al negozio: verifica che le chiavi API del negozio siano in lettura E SCRITTURA (read-write).'} style={{color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',border:'1px solid #fde68a',cursor:'help',whiteSpace:'nowrap'}}>⚠ Store non aggiornato</span>
+  // ASPETTARE NON E' UN GUASTO, e non deve avere il colore del guasto.
+  // 'attesa' = l'ordine e' trattenuto sul negozio (blocco antifrode, richiesta del compratore): tocca al
+  // negoziante sbloccarlo, noi riproviamo da soli. 'esterno' = la merce sta in un magazzino gestito da un
+  // servizio di evasione del negozio, che registra lui l'evasione. Con l'arancione dell'errore il
+  // negoziante andava a cercare un guasto nostro che non c'e'.
+  if (o.fulfillment_stato==='attesa' || o.fulfillment_stato==='esterno') return <span title={o.fulfillment_errore || ''} style={{color:'#1d4ed8',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#eff6ff',border:'1px solid #bfdbfe',cursor:'help',whiteSpace:'nowrap'}}>{o.fulfillment_stato==='attesa' ? '⏳ In attesa dal negozio' : 'ℹ Evasione del magazzino esterno'}</span>
+  // IL NEGOZIANTE HA ANNULLATO L'ORDINE dopo che l'avevamo preso: se l'etichetta c'e', il pacco non deve
+  // partire. Prima la riga restava «✓ Spedito» senza nessun avviso.
+  if (o.fulfillment_stato==='annullato_store') return <span title={o.fulfillment_errore || 'Ordine annullato sul negozio'} style={{color:'#991b1b',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fee2e2',border:'1px solid #fecaca',cursor:'help',whiteSpace:'nowrap'}}>⛔ Annullato sul negozio</span>
+  return null
+}
 
 export default function OrdiniPage() {
   const params = useParams()
@@ -360,6 +380,13 @@ export default function OrdiniPage() {
   // CHI SI SPEDISCE DA QUI, e chi no — una regola sola per l'anteprima e per «Spedisci selezionati»:
   // se fossero due, il totale mostrato conterebbe ordini che poi il pulsante salta.
   const ordiniPerId = useMemo(()=>new Map<string,any>(ordini.map((o:any)=>[o.id,o])), [ordini])
+  // Il capofila con cui parte un ordine unito: quello in cima, perche' le unioni di prima possono essere
+  // a catena. null se non e' fra gli ordini caricati (sta sotto un'altra connessione del negozio).
+  function capofilaDi(o:any): any {
+    let c = ordiniPerId.get(o?.unito_in)
+    for (let i = 0; i < 5 && c?.unito_in && ordiniPerId.has(c.unito_in); i++) c = ordiniPerId.get(c.unito_in)
+    return c || null
+  }
   // Fuori i gia' spediti DA NOI (hanno la spedizione collegata) e quelli UNITI a un altro ordine: un
   // ordine assorbito parte dentro il pacco del capofila, spedirlo da solo sarebbe un doppione.
   // Fuori anche gli ANNULLATI SUL NEGOZIO (annullati o rimborsati dopo che li avevamo importati): in
@@ -951,27 +978,25 @@ export default function OrdiniPage() {
                         style={{marginLeft:'6px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fdba74',borderRadius:'999px',padding:'1px 8px',fontSize:'11px',fontWeight:700,cursor:'pointer'}}>
                         {g.length} ordini{tutti?' ✓':''}
                       </button>) })()}<div style={{fontSize:'11px',color:'#999'}}>{d.citta}{d.provincia?' ('+d.provincia+')':''} {d.paese||''}</div></td>
-                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><span title={o.stato==='annullato'?'Sul negozio questo ordine non è più valido (annullato o rimborsato) dopo che era stato importato':undefined} style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',whiteSpace:'nowrap',background:o.stato==='spedito'?'#dcfce7':o.stato==='annullato'?'#f3f4f6':'#fef3c7',color:o.stato==='spedito'?'#166534':o.stato==='annullato'?'#4b5563':'#92400e'}}>{o.stato==='spedito'?'Spedito':o.stato==='annullato'?'Annullato sul negozio':'Da spedire'}</span></td>
+                    {/* UNITO: l'ordine parte nel pacco del capofila. Prima la riga diceva «Da spedire», e
+                        non era vero: la sua merce era gia' nel pacco di un altro ordine. */}
+                    <td style={{...td,borderTop:'none',padding:'9px 12px 3px'}}><span title={o.stato==='annullato'?'Sul negozio questo ordine non è più valido (annullato o rimborsato) dopo che era stato importato':o.stato==='unito'?(capofilaDi(o)?.numero_ordine?'Parte nel pacco dell\'ordine '+capofilaDi(o).numero_ordine:'Parte nel pacco di un altro ordine'):undefined} style={{fontSize:'11px',fontWeight:600,padding:'3px 9px',borderRadius:'999px',whiteSpace:'nowrap',background:o.stato==='spedito'?'#dcfce7':o.stato==='annullato'?'#f3f4f6':o.stato==='unito'?'#eff6ff':'#fef3c7',color:o.stato==='spedito'?'#166534':o.stato==='annullato'?'#4b5563':o.stato==='unito'?'#1d4ed8':'#92400e'}}>{o.stato==='spedito'?'Spedito':o.stato==='annullato'?'Annullato sul negozio':o.stato==='unito'?'Unito':'Da spedire'}</span></td>
                     <td style={{...td,borderTop:'none',padding:'9px 12px 3px',textAlign:'right',whiteSpace:'nowrap'}}>
                       {/* "Spedito" solo se lo abbiamo spedito NOI (ha la spedizione Moove): allora niente
                           ri-spedizione. Se è "spedito" solo sul marketplace (import eBay dei già-evasi,
                           senza spedizione_id) mostro comunque "Crea spedizione" → si fa l'etichetta e nel
                           form si può modificare l'ordine. */}
                       {(o.stato!=='spedito' || !o.spedizione_id)
-                        ? <button onClick={()=>creaSpedizione(o)} title={o.stato==='spedito'?'Già segnato spedito sul marketplace: crea comunque l\'etichetta e modifica i dati nel form':o.stato==='annullato'?'Attenzione: sul negozio questo ordine risulta annullato o rimborsato':undefined} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
+                        ? <span style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-end',gap:'3px'}}>
+                            <button onClick={()=>creaSpedizione(o)} title={o.stato==='spedito'?'Già segnato spedito sul marketplace: crea comunque l\'etichetta e modifica i dati nel form':o.stato==='annullato'?'Attenzione: sul negozio questo ordine risulta annullato o rimborsato':undefined} style={{background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>Crea spedizione</button>
+                            {/* Anche senza una spedizione nostra l'esito dell'evasione conta: un ordine unito
+                                si evade col pacco del capofila, e su una riga Shopify si vede se l'annullo
+                                dell'evasione di una spedizione annullata non e' riuscito. */}
+                            {(o.unito_in || piattaforma==='shopify') ? badgeEvasione(o) : null}
+                          </span>
                         : <span style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-end',gap:'3px'}}>
                             <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>
-                            {/* Write-back allo store fallito (es. chiavi negozio in sola lettura): il tracking
-                                NON e' arrivato al negozio ne' al compratore. Prima "✓ Spedito" lo nascondeva. */}
-                            {o.fulfillment_stato==='errore' && <span title={o.fulfillment_errore || 'Il tracking non e\' stato inviato al negozio: verifica che le chiavi API del negozio siano in lettura E SCRITTURA (read-write).'} style={{color:'#b45309',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',border:'1px solid #fde68a',cursor:'help',whiteSpace:'nowrap'}}>⚠ Store non aggiornato</span>}
-                            {/* ASPETTARE NON E' UN GUASTO, e non deve avere il colore del guasto.
-                                'attesa' = l'ordine e' trattenuto sul negozio (blocco antifrode,
-                                richiesta del compratore): tocca al negoziante sbloccarlo, noi
-                                riproviamo da soli. 'esterno' = la merce sta in un magazzino gestito
-                                da un servizio di evasione del negozio, che registra lui l'evasione.
-                                Con l'arancione dell'errore il negoziante andava a cercare un guasto
-                                nostro che non c'e'. */}
-                            {(o.fulfillment_stato==='attesa' || o.fulfillment_stato==='esterno') && <span title={o.fulfillment_errore || ''} style={{color:'#1d4ed8',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#eff6ff',border:'1px solid #bfdbfe',cursor:'help',whiteSpace:'nowrap'}}>{o.fulfillment_stato==='attesa' ? '⏳ In attesa dal negozio' : 'ℹ Evasione del magazzino esterno'}</span>}
+                            {badgeEvasione(o)}
                           </span>}
                     </td>
                   </tr>

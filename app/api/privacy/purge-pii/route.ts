@@ -141,11 +141,22 @@ export async function GET(req: NextRequest) {
       .limit(BLOCCO),
     pulisciCollegato, scadenza, errori)
 
-  // Ordini degli STORE COLLEGATI, gia' spediti e piu' vecchi della soglia.
+  // Ordini degli STORE COLLEGATI, gia' spediti (anche uniti nel pacco di un altro) o annullati sul
+  // negozio, piu' vecchi della soglia.
   //
   // Si azzerano i due campi che contengono dati personali: `destinatario` (nome, indirizzo, email,
   // telefono del compratore) e `raw`, che fino a oggi era la copia integrale della risposta dello
   // store. `articoli`, `totale`, `numero_ordine` restano.
+  //
+  // ANCHE GLI ANNULLATI, con la stessa soglia. Fino alla revisione del 20/10/2026 la sync Shopify
+  // chiudeva 'spedito' gli ordini annullati sul negozio, e la cancellazione li prendeva per quella via.
+  // Ora diventano 'annullato' (lib/shopifySync), come su WooCommerce e PrestaShop: senza questa riga i
+  // loro dati resterebbero per sempre, contro quello che dichiariamo a Shopify.
+  // E GLI UNITI GIA' PARTITI. Fino alla stessa revisione la sync riscriveva 'spedito' anche sugli ordini
+  // uniti appena risultavano evasi sul negozio; ora restano 'unito' per sempre (lib/shopifySync), e quelli
+  // che evadiamo noi col pacco del capofila non si sarebbero piu' puliti. Si prendono quando la loro
+  // evasione e' andata ('ok'): il pacco e' partito. Mai gli uniti di un pacco ancora da spedire, che
+  // servono al pacco (dal `raw` si calcola il contrassegno, lib/ordini-uniti).
   //
   // PERIMETRO: SOLO SHOPIFY, per ora. La cancellazione e' irreversibile e sulle altre piattaforme
   // colpirebbe subito 15.520 ordini gia' spediti (eBay 13.491, WooCommerce 1.243, PrestaShop 786,
@@ -157,7 +168,7 @@ export async function GET(req: NextRequest) {
   const { data: righeEc } = await admin.from('ordini_ecommerce')
     .select('id')
     .eq('piattaforma', 'shopify')
-    .eq('stato', 'spedito')
+    .or('stato.in.(spedito,annullato),and(stato.eq.unito,fulfillment_stato.eq.ok)')
     .not('destinatario', 'is', null)
     .lt('created_at', soglia)
     .limit(1000)

@@ -1,27 +1,26 @@
 import { getValidTiktokToken, tiktokRequest } from '@/lib/tiktok'
 import { marchioCorriere } from '@/lib/corriere-logo'
+import { righeDaEvadere } from '@/lib/evasione-ordini'
 
 // Rimanda il tracking a TikTok Shop alla chiusura distinta (self-managed shipping). Best-effort.
 // Flusso 202309: l'ordine ha uno o più package -> per ciascuno si imposta tracking + provider e si spedisce.
 export async function fulfillSpedizioniTiktok(db: any, spedizioneIds: string[]) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  const { data: ordini } = await db
-    .from('ordini_ecommerce').select('*')
-    .in('spedizione_id', spedizioneIds)
-    .eq('piattaforma', 'tiktok')
+  // Quali righe evadere lo decide lib/evasione-ordini, uguale per i sei negozi.
+  const righe = await righeDaEvadere(db, spedizioneIds, 'tiktok')
 
   // cache provider per integrazione (evita chiamate ripetute)
   const providerCache = new Map<string, any[]>()
 
-  for (const ordine of ordini || []) {
+  for (const { ordine, spedizioneId } of righe) {
     if (ordine.fulfillment_stato === 'ok') continue
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
     }
     try {
-      const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto)').eq('id', ordine.spedizione_id).maybeSingle()
+      const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto)').eq('id', spedizioneId).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
       // Si abbina sul BRAND pubblico (Poste/BRT/GLS…), non sul nome del NOSTRO contratto: così il match

@@ -1,5 +1,6 @@
 import { getValidEbayToken, ebayPost } from '@/lib/ebay'
 import { vettoreFisico } from '@/lib/vettore'
+import { righeDaEvadere } from '@/lib/evasione-ordini'
 
 // Brand del vettore (vettoreFisico) → CODICE vettore eBay (ShippingCarrierCodeType). Solo i codici
 // VERIFICATI: un codice sbagliato fa RIFIUTARE l'evasione (tracking perso), quindi tutto ciò che non è
@@ -24,18 +25,16 @@ function codiceVettoreEbay(corr: { tipo?: string | null; nome_contratto?: string
 export async function fulfillSpedizioniEbay(db: any, spedizioneIds: string[]) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
-  const { data: ordini } = await db
-    .from('ordini_ecommerce').select('*')
-    .in('spedizione_id', spedizioneIds)
-    .eq('piattaforma', 'ebay')
-  for (const ordine of ordini || []) {
+  // Quali righe evadere lo decide lib/evasione-ordini, uguale per i sei negozi.
+  const righe = await righeDaEvadere(db, spedizioneIds, 'ebay')
+  for (const { ordine, spedizioneId } of righe) {
     if (ordine.fulfillment_stato === 'ok') continue
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
     }
     try {
-      const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto,tipo)').eq('id', ordine.spedizione_id).maybeSingle()
+      const { data: sped } = await db.from('spedizioni').select('tracking_number, corrieri(nome_contratto,tipo)').eq('id', spedizioneId).maybeSingle()
       const tracking = sped?.tracking_number
       if (!tracking) { await segna('errore', 'tracking number mancante'); continue }
       // CODICE vettore eBay dal brand reale del contratto (Poste/BRT/GLS/SDA/UPS/DHL): così eBay AGGANCIA
