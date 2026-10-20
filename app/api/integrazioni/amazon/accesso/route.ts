@@ -25,10 +25,17 @@ async function chiEntra() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { user: null as any, cli: null as any }
-  const { data: utente } = await supabase.from('utenti').select('ruolo, cliente_id, master_id, masters(demo)').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()
   if (utente?.ruolo !== 'cliente' || !utente?.cliente_id) return { user, cli: null as any }
-  const { data: cliente } = await supabase.from('clienti').select('ragione_sociale').eq('id', utente.cliente_id).maybeSingle()
-  const m: any = Array.isArray((utente as any).masters) ? (utente as any).masters[0] : (utente as any).masters
+  // Nome del cliente e flag demo del suo master li legge il client di servizio, ristretto agli id
+  // presi dalla sessione: con la sessione del cliente la lettura di `masters` puo' non essere
+  // concessa (il middleware lo sa e ripiega), e il nome e' proprio cio' che la pagina di conferma
+  // deve mostrare — non deve poter sparire per un permesso.
+  const admin = createAdminSupabase()
+  const { data: cliente } = await admin.from('clienti').select('ragione_sociale').eq('id', utente.cliente_id).maybeSingle()
+  const { data: m } = utente.master_id
+    ? await admin.from('masters').select('demo').eq('id', utente.master_id).maybeSingle()
+    : { data: null as any }
   return { user, cli: { cliente_id: utente.cliente_id, master_id: utente.master_id, ragione_sociale: cliente?.ragione_sociale || '', demo: m?.demo === true } }
 }
 
