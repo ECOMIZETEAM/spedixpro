@@ -603,6 +603,13 @@ export async function GET(req: NextRequest) {
   if (!light && ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
     try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id, capPagina) } catch { calcAgente = null }
   }
+  // IL COSTO DEL MASTER lo vede solo il master. Cliente e agente MAI: l'agente ha come costo SOLO il
+  // listino che gli ha assegnato il master (calcAgente), il cliente nessuno. I rami qui sotto (contratto
+  // proprio, gamba-ponte, acquisto all'ingrosso) giravano anche per loro e, venendo PRIMA del listino
+  // agente, lo scavalcavano: in ott 2026 la colonna Costo dell'agente era il costo_spedizione del master
+  // su ~12.000 spedizioni in 30 giorni (SDA EXPRESS L, BRT VELOX, Poste STANDARD I), anche per gli
+  // agenti senza listino, che dovevano vedere un trattino.
+  const vedeCostoMaster = ruolo !== 'cliente' && ruolo !== 'agente'
 
   // Flag "annullo bloccato oltre 15 giorni": SOLO SpediamoPro (limite fisso di Poste), stessa condizione
   // della porta /elimina. Serve ai portali a NASCONDERE il cestino su queste e spiegare il perche' al
@@ -631,6 +638,8 @@ export async function GET(req: NextRequest) {
       for (const r of (cs || [])) costoSpedPonte.set((r as any).id, Number((r as any).costo_spedizione) || 0)
     }
   }
+  // Il costo del ponte e' il costo_spedizione del master: a cliente e agente non serve e non va.
+  if (!vedeCostoMaster) costoSpedPonte.clear()
   // CONDIVISIONE — ACQUIRENTE (vista di chi COMPRA all'ingrosso). Se io compro questa spedizione via
   // corrieri_condivisi, il mio costo VERO e' quello che pago al fornitore, sulla GAMBA col MIO ledger
   // d'acquisto (stesso tracking) — NON il mio listino. Senza, la riga ORIGINATRICE di un sotto-master
@@ -638,7 +647,7 @@ export async function GET(req: NextRequest) {
   // comprato DIRETTO: es. 282224J033553 mostrava a MULTI COSTO 18,00 di listino e margine -4,98, mentre
   // paga Wave 11,73 e guadagna +1,29. Vuota per i master senza acquisti-codice → zero impatto.
   const costoIngrossoAcq = new Map<string, number>()   // originator.id -> costo che pago al fornitore
-  if (!light && mineId && (spedizioni || []).length) {
+  if (!light && mineId && vedeCostoMaster && (spedizioni || []).length) {
     const { data: ccAcq } = await admin.from('corrieri_condivisi')
       .select('cliente_ledger_id').eq('master_id', mineId).eq('stato', 'attiva')
     const mieiLedger = Array.from(new Set((ccAcq || []).map((r: any) => r.cliente_ledger_id).filter(Boolean)))
@@ -702,7 +711,7 @@ export async function GET(req: NextRequest) {
     // questo prezzo_corriere ripiegava sul prezzo cliente → COSTO = CLIENTE, margine 0 FALSO, mentre il
     // margine reale c'è (es. Velox su Poste STANDARD I: +0,26/0,75 a spedizione). Solo per le PROPRIE
     // spedizioni del master (s.master_id === mineId) su un corriere marcato proprio.
-    if (prezzo_corriere == null && s.master_id === mineId && corrProprio.get(s.corriere_id) && Number((s as any).costo_spedizione) > 0) {
+    if (prezzo_corriere == null && vedeCostoMaster && s.master_id === mineId && corrProprio.get(s.corriere_id) && Number((s as any).costo_spedizione) > 0) {
       prezzo_corriere = Number((s as any).costo_spedizione)
     }
     // CONDIVISIONE: una gamba-ponte ('moovexpress') è un livello-CODICE → il suo costo è sul cliente-ledger,
@@ -723,10 +732,11 @@ export async function GET(req: NextRequest) {
       const mioCorr = (s.master_id === mineId) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
     }
-    // Agente: il suo "costo" viene dal listino agente (stesso corriere della spedizione).
-    if (prezzo_corriere == null && calcAgente) {
-      const r = calcAgente(s)
-      if (r && r.totale != null) prezzo_corriere = r.totale
+    // Agente: il suo "costo" viene SOLO dal listino agente (stesso corriere della spedizione). Si
+    // assegna, non si riempie un vuoto: qualunque ramo sopra, di oggi o aggiunto domani, per lui non conta.
+    if (ruolo === 'agente') {
+      const r = calcAgente ? calcAgente(s) : null
+      prezzo_corriere = (r && r.totale != null) ? r.totale : null
     }
     // AGENTE senza costo proprio (nessun listino agente assegnato, o corriere non coperto):
     // il margine NON è zero, è SCONOSCIUTO. Pareggiare il costo col prezzo cliente faceva
