@@ -3,7 +3,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { provisionShopifyCliente } from '@/lib/shopifyProvision'
 import { SHOPIFY_SCOPES_ESSENZIALI } from '@/lib/shopify'
 import { loginMerchantERedirect } from '@/lib/shopifyLogin'
-import crypto from 'crypto'
+import { verificaLinkShopify } from '@/lib/shopifyFirma'
 import { conErrore, conCollegato } from '@/lib/esiti-collegamento'
 import { accessoDelCliente } from '@/lib/accesso-cliente'
 
@@ -11,21 +11,6 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/
-
-// Verifica firma HMAC della richiesta Shopify (valori decodificati, key=value ordinati, join &)
-function verifyHmac(sp: URLSearchParams, secret: string): boolean {
-  const hmac = sp.get('hmac') || ''
-  const entries: string[] = []
-  sp.forEach((v, k) => { if (k !== 'hmac' && k !== 'signature') entries.push(`${k}=${v}`) })
-  entries.sort()
-  const message = entries.join('&')
-  const digest = crypto.createHmac('sha256', secret).update(message).digest('hex')
-  try {
-    return crypto.timingSafeEqual(Buffer.from(digest, 'hex'), Buffer.from(hmac, 'hex'))
-  } catch {
-    return false
-  }
-}
 
 // OGNI USCITA D'ERRORE DI QUESTA ROTTA E' UN REDIRECT CON UN CODICE, MAI UNA FRASE NE' UN JSON.
 // Fino al 20/10/2026 nell'indirizzo finivano frasi italiane e perfino il testo dell'errore del database
@@ -53,7 +38,10 @@ export async function GET(req: NextRequest) {
     console.warn('[SHOPIFY][CALLBACK] richiesta incompleta', SHOP_RE.test(shop) ? shop : '(negozio assente o non valido)')
     return NextResponse.redirect(new URL(conErrore('/cliente', 'firma'), req.url))
   }
-  if (!verifyHmac(sp, apiSecret)) {
+  // La firma la verifica lib/shopifyFirma.ts, la stessa regola di /enter. Il tempo qui non ferma niente,
+  // di proposito: il riuso di questo indirizzo lo blocca gia' lo state monouso (qui sotto), e chi ricarica
+  // la pagina dopo il collegamento deve continuare a finire su ?connected anche se sono passati minuti.
+  if (verificaLinkShopify(sp, apiSecret).esito === 'firma_falsa') {
     console.warn('[SHOPIFY][CALLBACK] firma non valida', shop)
     return NextResponse.redirect(new URL(conErrore('/cliente', 'firma'), req.url))
   }

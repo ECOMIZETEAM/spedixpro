@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { loginMerchantERedirect } from '@/lib/shopifyLogin'
-import crypto from 'crypto'
+import { verificaLinkShopify } from '@/lib/shopifyFirma'
+import { conErrore } from '@/lib/esiti-collegamento'
 import { accessoDelCliente } from '@/lib/accesso-cliente'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/
-
-// Verifica la firma HMAC dei parametri della App URL (come per l'OAuth)
-function verifyHmac(sp: URLSearchParams, secret: string): boolean {
-  const hmac = sp.get('hmac') || ''
-  const entries: string[] = []
-  sp.forEach((v, k) => { if (k !== 'hmac' && k !== 'signature') entries.push(`${k}=${v}`) })
-  entries.sort()
-  const digest = crypto.createHmac('sha256', secret).update(entries.join('&')).digest('hex')
-  try { return crypto.timingSafeEqual(Buffer.from(digest, 'hex'), Buffer.from(hmac, 'hex')) } catch { return false }
-}
 
 // App URL (modello NON embedded / redirect): quando il merchant apre l'app da Shopify,
 // verifichiamo la firma, troviamo il suo account MoovExpress e lo portiamo nel portale
@@ -32,9 +23,32 @@ export async function GET(req: NextRequest) {
   if (!secret || !SHOP_RE.test(shop)) {
     return NextResponse.redirect(new URL('/cliente', req.url))
   }
-  // la richiesta deve arrivare da Shopify (firma valida)
-  if (!verifyHmac(sp, secret)) {
-    return NextResponse.redirect(new URL('/cliente?error=firma', req.url))
+  // La richiesta deve arrivare da Shopify (firma valida) ed essere appena partita (lib/shopifyFirma.ts).
+  // Il controllo sta prima del database: un link scaduto non legge niente e non arriva a /install, che
+  // scrive uno state a ogni chiamata.
+  const link = verificaLinkShopify(sp, secret)
+  if (link.esito === 'firma_falsa') {
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'firma'), req.url))
+  }
+  // UN LINK VECCHIO NON ENTRA. Fino al 20/10/2026 lo stesso indirizzo riapriva il portale per sempre, a
+  // chiunque lo ritrovasse in una cronologia o in un log. Ora si ferma sulla pagina che dice di riaprire
+  // MoovExpress dall'admin del negozio: li' Shopify firma un link nuovo solo per chi e' loggato su Shopify,
+  // quindi il negoziante vero rientra e chi ha un link ripescato no.
+  // Niente rimando automatico all'admin (https://{shop}/admin/apps/{client_id}): per un'app non embedded
+  // nessuna guida dice che riapra l'app con un link nuovo, e finche' non e' provato sul dev store un
+  // rimbalzo potrebbe finire in una pagina senza uscita invece che su questa, che dice cosa fare.
+  if (link.esito === 'scaduto') {
+    // Nel log solo negozio e scarto: mai l'hmac ne' l'indirizzo, che fino alla scadenza valgono un accesso.
+    // La firma qui e' buona, quindi il link l'ha fatto Shopify: un link vecchio ha lo scarto positivo.
+    // Senza un timestamp valido (scarto null) o con uno nel futuro non e' un link ritrovato in una
+    // cronologia: e' il formato del tempo (in millisecondi lo scarto e' dell'ordine di -1e12) o un orologio
+    // sfasato, e allora non entra NESSUN negoziante. Va fra gli errori, per non confonderlo coi link vecchi.
+    if (link.scartoSec === null || link.scartoSec < 0) {
+      console.error('[SHOPIFY][ENTER] link scaduto ANOMALO, timestamp assente o nel futuro', shop, 'scarto s:', link.scartoSec)
+    } else {
+      console.warn('[SHOPIFY][ENTER] link scaduto', shop, 'scarto s:', link.scartoSec)
+    }
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'link_scaduto'), req.url))
   }
 
   const admin = createAdminSupabase()
