@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
+import { registraAudit } from '@/lib/audit'
 import { leggiEtichettaCompleta } from '@/lib/etichette'
 import { attendiTmp } from '@/lib/tmp-completa'
 
@@ -19,6 +20,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const admin = createAdminSupabase()
   let { data: s } = await admin.from('spedizioni').select(CAMPI).eq('id', id).maybeSingle()
   if (!s || s.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+  // Registro degli accessi ai dati personali anche per l'API (l'etichetta porta il destinatario).
+  const numeroSped = (s as any).numero
+  after(() => registraAudit({ ruolo: 'api', azione: 'api_etichetta', risorsa: numeroSped, dettaglio: `cliente ${ctx.clienteId}` }))
   // leggiEtichettaCompleta sa dove vive il PDF (Storage o base64) ED è MULTICOLLO: su una spedizione
   // a più colli unisce tutte le etichette in un unico PDF, così chi si integra via API non riceve il
   // solo primo collo. Prima usava leggiEtichetta (singola) e non leggeva nemmeno colli_dettaglio.

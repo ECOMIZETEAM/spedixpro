@@ -1,5 +1,6 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { registraAudit } from '@/lib/audit'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { createHash } from 'node:crypto'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
@@ -38,6 +39,9 @@ export async function POST(req: NextRequest) {
   // restituisce in ordine arbitrario → le etichette uscivano mescolate rispetto alla selezione.
   const posizione = new Map<string, number>((ids as string[]).map((id: string, i: number) => [id, i]))
   spedizioni = (spedizioni || []).slice().sort((a: any, b: any) => (posizione.get(a.id) ?? 1e9) - (posizione.get(b.id) ?? 1e9))
+  // Registro degli accessi ai dati personali (le etichette portano i destinatari): quante, non quali dati.
+  const quante = spedizioni.length
+  after(() => registraAudit({ utenteId: user.id, ruolo: utente?.ruolo, azione: 'etichette_bulk', dettaglio: String(quante) }))
 
   // Riepilogo ordine (packing slip): dati + drawer condivisi con la stampa singola.
   const riepCtx = await preparaRiepiloghi(admin, spedizioni || [])

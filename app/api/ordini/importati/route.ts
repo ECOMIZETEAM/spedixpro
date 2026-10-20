@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { registraAudit } from '@/lib/audit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,5 +22,8 @@ export async function GET(_req: NextRequest) {
     .select('id,destinatario,indirizzo,cap,localita,provincia,country,telefono,email_destinatario,peso,colli,contrassegno,contenuto,articoli,sku,note,rif_mittente,rif_destinatario,order_id,totale_ordine,fonte,stato,errore,spedizione_id,created_at')
     .eq('cliente_id', utente.cliente_id)
     .order('created_at', { ascending: false }))
+  // Registro degli accessi ai dati personali (la lista porta i destinatari). Dopo la risposta.
+  const quanti = (ordini as any[]).length
+  after(() => registraAudit({ utenteId: user.id, ruolo: utente.ruolo, azione: 'ordini_importati_lista', dettaglio: String(quanti) }))
   return NextResponse.json({ ordini })
 }

@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente } from '@/lib/agente'
+import { registraAudit } from '@/lib/audit'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { preparaRiepiloghi, disegnaRiepilogoSped } from '@/lib/riepilogo-ordine'
 import { ldvProvvisoria } from '@/lib/numero-spedizione'
@@ -48,6 +49,10 @@ export async function GET(req: NextRequest) {
     const miei = await clientiAgente(supabase, utente as any)
     if (!sped.cliente_id || !miei.includes(sped.cliente_id)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
+
+  // REGISTRO DEGLI ACCESSI AI DATI PERSONALI: un'etichetta porta nome, indirizzo e telefono del
+  // destinatario. Dopo la risposta (after): non rallenta il download. Senza dati personali.
+  after(() => registraAudit({ utenteId: user.id, ruolo: utente?.ruolo, azione: 'etichetta_download', risorsa: sped.numero }))
 
   // Riepilogo ordine (se il cliente lo ha attivato): viene ANTEPOSTO all'etichetta quando è un PDF.
   const { createAdminSupabase: _admR } = await import('@/lib/supabase-admin')

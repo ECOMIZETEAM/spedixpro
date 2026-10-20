@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { trovaOwnerContratto } from '@/lib/annullaSpedizione'
+import { registraAudit } from '@/lib/audit'
 
 // Dettaglio/stato di una spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -16,6 +17,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .select('id,numero,tracking_number,rif_ordine,stato,costo_totale,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,peso_reale,colli,contrassegno,note,created_at,cliente_id,corriere_id,corrieri(nome_contratto)')
     .eq('id', id).maybeSingle()
   if (!s || s.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+  // Registro degli accessi ai dati personali anche per l'API (il dettaglio porta il destinatario).
+  after(() => registraAudit({ ruolo: 'api', azione: 'api_spedizione', risorsa: s.numero, dettaglio: `cliente ${ctx.clienteId}` }))
   return NextResponse.json({
     id: s.id, tracking: s.tracking_number || s.numero, stato: s.stato,
     contratto: (s.corrieri as any)?.nome_contratto || null, prezzo: Number(s.costo_totale || 0), valuta: 'EUR',

@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
+import { registraAudit } from '@/lib/audit'
 import { COLONNE_PAGAMENTO, assorbitiDelCliente, componiPacco, contrassegnoDi } from '@/lib/ordini-uniti'
 
 export const runtime = 'nodejs'
@@ -16,6 +17,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   }
   const piattaforma = new URL(req.url).searchParams.get('piattaforma') || 'shopify'
+  // Registro degli accessi ai dati personali: la lista porta i destinatari degli ordini. Dopo la
+  // risposta, senza dati personali.
+  after(() => registraAudit({ utenteId: user.id, ruolo: utente.ruolo, azione: 'ordini_lista', risorsa: piattaforma }))
   // Colonne esplicite: escludo 'raw' (JSON completo dell'ordine, pesante e inutile in lista) MA
   // estraggo dal raw i soli campi-DATA (stringhe minuscole) per calcolare la DATA REALE dell'ordine:
   // eBay=creationDate, Woo=date_created, Shopify=created_at, TikTok/Temu=create_time (epoch),
