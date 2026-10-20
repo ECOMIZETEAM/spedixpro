@@ -79,7 +79,9 @@ const NAV_BASE: NavItem[] = [
       { label: 'Stampa e Notifiche', href: '/cliente/impostazioni/stampa-notifiche' },
       { label: 'Cambia Password', href: '/cliente/impostazioni/cambia-password' },
       { label: 'API Key', href: '/cliente/impostazioni/api-key' },
-      { label: 'Logo', href: '/cliente/impostazioni/logo' },
+      // Niente voce «Logo»: il logo e' del master e il cliente vede gia' il suo (white-label,
+      // app/cliente/layout.tsx). La voce puntava a una pagina mai esistita: dal 2/07 al 20/10/2026 chi
+      // la cliccava trovava una 404, e per Shopify una 404 nell'app e' motivo di rifiuto (2.1.1).
       { label: 'Dati doganali (EORI)', href: '/cliente/impostazioni/dogana' },
     ],
   },

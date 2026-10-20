@@ -141,7 +141,10 @@ export async function POST(req: NextRequest) {
       },
       metadata: { cliente_id: cli.id, piano_api: piano.codice },
       success_url: `${base}/cliente/impostazioni/api-key?pagato=1`,
-      cancel_url: `${base}/cliente/impostazioni/api`,
+      // Si torna sulla pagina da cui si e' partiti, come col mese singolo qui sopra. Dal 3/08 al 20/10
+      // questo indirizzo era /cliente/impostazioni/api, una pagina mai esistita: chi lasciava la cassa
+      // senza pagare finiva su una 404 invece che sul suo pacchetto.
+      cancel_url: `${base}/cliente/impostazioni/api-key`,
     })
     return NextResponse.json({ url: sessione.url })
   } catch (e: any) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { SHOPIFY_SCOPES } from '@/lib/shopify'
+import { conErrore } from '@/lib/esiti-collegamento'
 import crypto from 'crypto'
 
 export const runtime = 'nodejs'
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
   if (!apiKey) {
     // Config mancante: non un 500 nudo (il reviewer vedrebbe "la pagina non funziona"), ma una
     // pagina utile con il perché.
-    return NextResponse.redirect(new URL('/cliente/integrazioni?shopify_error=config', req.url))
+    return NextResponse.redirect(new URL(conErrore('/cliente/integrazioni', 'shopify_non_configurato'), req.url))
   }
   // App URL NORMALIZZATA: niente slash finale + fallback all'origine. Shopify confronta il redirect_uri
   // BYTE-A-BYTE con l'allowed redirection URL: uno slash di troppo (//api), http, o www invece
@@ -30,9 +31,9 @@ export async function GET(req: NextRequest) {
   const appUrl = (process.env.SHOPIFY_APP_URL || new URL(req.url).origin).trim().replace(/\/+$/, '')
 
   // L'OAuth parte SUBITO (requisito app pubblica Shopify).
-  // Se un cliente MoovExpress e' gia' loggato, colleghiamo il negozio al volo:
-  // salviamo cliente_id/master_id nello state. Altrimenti restano null e il
-  // collegamento avverra' dopo il login (negozio in stato pending).
+  // Se nel browser c'e' un cliente MoovExpress loggato, il negozio si collega a lui: cliente_id e
+  // master_id vanno nello state (caso A del callback). Altrimenti restano null, e il callback crea o
+  // riusa il cliente del negozio e lo fa entrare nel portale gia' loggato (caso B).
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   let clienteId: string | null = null

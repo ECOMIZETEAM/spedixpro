@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { conErrore } from '@/lib/esiti-collegamento'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { ebayAuthorizeUrl } from '@/lib/ebay'
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL('/cliente', req.url))
   }
   if (!process.env.EBAY_CLIENT_ID || !process.env.EBAY_RU_NAME) {
-    return NextResponse.redirect(new URL('/cliente/integrazioni?error=eBay+non+configurato', req.url))
+    return NextResponse.redirect(new URL(conErrore('/cliente/integrazioni', 'ebay_non_configurato'), req.url))
   }
 
   const state = crypto.randomBytes(24).toString('hex')

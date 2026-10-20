@@ -1,7 +1,8 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import CampoPassword from '../components/CampoPassword'
 import PuliziaSessione from '../components/PuliziaSessione'
+import EsitoCollegamento from './EsitoCollegamento'
 
 // Dopo l'accesso si DEVE ricaricare la pagina per intero, non navigare con router.push:
 // /cliente (questo modulo) e /cliente/dashboard stanno sotto lo STESSO app/cliente/layout.tsx,
@@ -16,22 +17,6 @@ export default function ClienteLogin() {
   const [errore, setErrore] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Se un collegamento Shopify è fallito, i vari rami rimandano qui con ?error=... . Prima la pagina
-  // NON lo leggeva: il reviewer vedeva solo il form di login, muto, senza sapere cosa fosse andato
-  // storto né come proseguire — un vicolo cieco. Ora mostriamo un messaggio chiaro.
-  useEffect(() => {
-    const err = new URLSearchParams(window.location.search).get('error')
-    if (!err) return
-    const MSG: Record<string, string> = {
-      firma: 'Collegamento Shopify non riuscito: la richiesta non è stata riconosciuta. Riprova ad aprire l\'app dal tuo negozio Shopify.',
-      login_shopify: 'Il negozio è stato collegato, ma non siamo riusciti ad aprire il tuo portale in automatico. Accedi qui sotto (o riprova il collegamento dal negozio).',
-      collegamento_scaduto: 'La richiesta di collegamento è scaduta o è già stata completata. Se il negozio non risulta collegato, riprova dal tuo negozio Shopify.',
-      collegamento_token: 'Non siamo riusciti a completare il collegamento con Shopify (scambio credenziali). Riprova tra poco dal tuo negozio Shopify.',
-      amazon_accedi: 'Per collegare il tuo account Amazon accedi qui sotto, poi vai in Integrazioni → Amazon → Collega.',
-    }
-    setErrore(MSG[err] || 'Si è verificato un problema durante il collegamento Shopify. Riprova dal tuo negozio; se il problema persiste contatta l\'assistenza.')
-  }, [])
-
   async function accedi(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true); setErrore('')
@@ -42,19 +27,6 @@ export default function ClienteLogin() {
     const data = await res.json()
     setLoading(false)
     if (data.error) { setErrore(data.error); return }
-    // Se l'utente arriva da un'installazione Shopify (OAuth partito da Shopify),
-    // collega ora il negozio in attesa al suo account, poi vai alle integrazioni.
-    const pending = new URLSearchParams(window.location.search).get('shopify_pending')
-    if (pending) {
-      try {
-        await fetch('/api/integrazioni/shopify/rivendica', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ shop: pending })
-        })
-      } catch {}
-      vaiA('/cliente/integrazioni?connected=' + encodeURIComponent(pending))
-      return
-    }
     // 'vai' arriva dal server: il cliente va al suo portale, lo staff che ha sbagliato modulo
     // (agente/master/operatore) viene portato direttamente nell'area master, senza rifare l'accesso.
     vaiA(data.vai || '/cliente/dashboard')
@@ -68,6 +40,10 @@ export default function ClienteLogin() {
           <div style={{fontSize:'13px',color:'#999',marginTop:'4px'}}>Portale Cliente</div>
         </div>
         <PuliziaSessione />
+        {/* Se un collegamento di negozio e' fallito, le rotte rimandano qui con ?error=<codice>. Prima
+            questa pagina non lo leggeva: il revisore Shopify vedeva solo il modulo, muto, senza sapere
+            cosa fosse andato storto ne' come proseguire. Il testo sta in lib/esiti-collegamento.ts. */}
+        <EsitoCollegamento />
         {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
         <form onSubmit={accedi} style={{display:'flex',flexDirection:'column' as const,gap:'14px'}}>
           <div>

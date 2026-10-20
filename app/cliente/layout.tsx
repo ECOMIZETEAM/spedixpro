@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import ClienteShell from './ClienteShell'
 import BannerPiano from '../components/BannerPiano'
 import AvvisoApi from './AvvisoApi'
+import EsitoCollegamento from './EsitoCollegamento'
 import { DialogProvider } from '../components/DialogProvider'
 
 // Mai in cache: dipende dalla sessione (senza questo, Vercel può servire una
@@ -36,7 +37,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
 
   return (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}>
-      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano />{children}</DialogProvider>
+      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano /><EsitoCollegamento />{children}</DialogProvider>
     </ClienteShell>
   )
 }

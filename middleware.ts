@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { PARAM_ERRORE, PARAM_COLLEGATO } from '@/lib/esiti-collegamento'
 
 // SCRITTURE CONSENTITE ALL'AGENTE.
 // L'agente e' di sola lettura, ma alcune rotte usano POST per LEGGERE (preventivi, esportazioni,
@@ -214,14 +215,28 @@ export async function middleware(req: NextRequest) {
     return r
   }
 
+  // L'ESITO DI UN COLLEGAMENTO NON SI BUTTA NEI RIMBALZI.
+  // Le rotte dei negozi mandano ?error=<codice> o ?connected= a /cliente/integrazioni e a /cliente:
+  // i due rimbalzi qui sotto (senza sessione → modulo di accesso, con sessione → dashboard) costruivano
+  // la destinazione dal solo percorso, e il messaggio spariva proprio quando serviva (INST-07). Si
+  // portano dietro solo questi due parametri, non l'indirizzo intero.
+  const conEsito = (path: string) => {
+    const q = new URLSearchParams()
+    for (const k of [PARAM_ERRORE, PARAM_COLLEGATO]) {
+      const v = req.nextUrl.searchParams.get(k)
+      if (v) q.set(k, v)
+    }
+    const s = q.toString()
+    return s ? `${path}?${s}` : path
+  }
+
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) {
     // Sulle pagine di accesso e' la situazione normale: si mostra il modulo.
     if (isPaginaAccesso) return response
     // Non autenticato: rimanda al login appropriato
-    const loginUrl = isCliente ? '/cliente' : '/'
-    return vaiA(loginUrl)
+    return vaiA(isCliente ? conEsito('/cliente') : '/')
   }
 
   const { data: utente } = await supabase
@@ -236,7 +251,10 @@ export async function middleware(req: NextRequest) {
   // rivedere il modulo di login a chi e' dentro.
   if (isPaginaAccesso) {
     if (ruolo === 'autista') return vaiA('/autista')
-    return vaiA(ruolo === 'cliente' ? '/cliente/dashboard' : '/dashboard')
+    // Solo dal modulo cliente: e' li' che arrivano gli esiti dei negozi. Il modulo master usa ?error=
+    // per i suoi codici d'accesso, che nel portale cliente non vogliono dire niente.
+    if (ruolo === 'cliente') return vaiA(pathname === '/cliente' ? conEsito('/cliente/dashboard') : '/cliente/dashboard')
+    return vaiA('/dashboard')
   }
 
   // Cliente che tenta di accedere all'area master -> rimanda al suo dashboard cliente

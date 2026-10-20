@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { conErrore, conCollegato } from '@/lib/esiti-collegamento'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { ebayExchangeCode, getEbayUser } from '@/lib/ebay'
 
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
   const state = url.searchParams.get('state') || ''
   const appUrl = process.env.SHOPIFY_APP_URL || url.origin
 
-  if (!code || !state) return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=callback+eBay+non+valido`)
+  if (!code || !state) return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'ebay_annullato')}`)
 
   // ADMIN (service role): il callback OAuth NON dipende dalla sessione utente. Al ritorno da eBay il
   // cookie di sessione può mancare (redirect cross-site) e con l'anon chiuso la lettura dello stato
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
   const supabase = createAdminSupabase()
   const { data: st } = await supabase.from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
   if (!st || st.shop !== 'ebay') {
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=state+non+valido`)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'ebay_scaduto')}`)
   }
   await supabase.from('shopify_oauth_state').delete().eq('state', state)
 
@@ -29,7 +30,10 @@ export async function GET(req: NextRequest) {
   try {
     tokens = await ebayExchangeCode(code)
   } catch (e: any) {
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=${encodeURIComponent('eBay: ' + (e?.message || 'scambio token fallito'))}`)
+    // Il motivo tecnico va nel log, non nell'indirizzo: al cliente non serve, e nell'URL finiva in
+    // chiaro qualunque testo restituito da eBay.
+    console.error('[EBAY][CALLBACK] scambio token', e?.message || e)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'ebay_token')}`)
   }
 
   const now = Date.now()
@@ -56,8 +60,15 @@ export async function GET(req: NextRequest) {
   // Aggiorna la connessione dello STESSO account (stesso identificativo); altrimenti ne crea una nuova.
   const { data: existing } = await supabase.from('integrazioni').select('id')
     .eq('cliente_id', st.cliente_id).eq('piattaforma', 'ebay').eq('identificativo', identificativo).maybeSingle()
-  if (existing?.id) await supabase.from('integrazioni').update(payload).eq('id', existing.id)
-  else await supabase.from('integrazioni').insert(payload)
+  // L'esito si guarda: senza, un salvataggio fallito tornava lo stesso «?connected=ebay», e ora che il
+  // portale mostra l'esito direbbe «collegato» per un account che non c'e'.
+  const esito = existing?.id
+    ? await supabase.from('integrazioni').update(payload).eq('id', existing.id)
+    : await supabase.from('integrazioni').insert(payload)
+  if (esito.error) {
+    console.error('[EBAY][CALLBACK] integrazione non salvata', esito.error.message)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'ebay_non_salvato')}`)
+  }
 
-  return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=ebay`)
+  return NextResponse.redirect(`${appUrl}${conCollegato('/cliente/integrazioni', 'ebay')}`)
 }

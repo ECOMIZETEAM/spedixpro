@@ -85,6 +85,9 @@ const NAV: NavItem[] = [
   ]},
   { label: 'Fatture', href: '/dashboard/fatture', icon: '◻', sub: [
     { label: 'Elenco Fatture', href: '/dashboard/fatture', perm: 'admin.invoice.index' },
+    // La pagina non c'e' ancora: e' da costruire, collegabile a Fatture in Cloud e simili (Lorenzo,
+    // 20/10). La voce resta, e scripts/controlla-link-menu.mjs la lascia passare con un'eccezione
+    // esplicita; finche' manca, chi la apre trova la 404 del portale con la via per tornare indietro.
     { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova', perm: 'admin.invoice.create' },
   ]},
   { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
@@ -125,7 +128,9 @@ const NAV: NavItem[] = [
     { label: 'SMS', href: '/dashboard/reports/storico-sms' },
     { label: 'Staff', href: '/dashboard/impostazioni/staff' },
     { label: 'Permessi', href: '/dashboard/impostazioni/permessi' },
-    { label: 'Zone di Consegna', href: '/dashboard/listini/zone' },
+    // E' la stessa pagina di Listini → Gestione Zone: li' chi ha il circuito interno imposta le sue zone
+    // di consegna. Dal 30/06 al 20/10 puntava a /dashboard/listini/zone, una pagina mai esistita (404).
+    { label: 'Zone di Consegna', href: '/dashboard/zone' },
     { label: 'Cambia Password', href: '/dashboard/impostazioni/password', always: true },
   ]},
   { label: 'Centro Notifiche', href: '/dashboard/notifiche', icon: '✦', perm: 'admin.notification', sub: [

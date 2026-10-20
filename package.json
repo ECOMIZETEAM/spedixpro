@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/controlla-credenziali.mjs && node scripts/controlla-scope-shopify.mjs && next build",
+    "build": "node scripts/controlla-credenziali.mjs && node scripts/controlla-scope-shopify.mjs && node scripts/controlla-link-menu.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "controlla-credenziali": "node scripts/controlla-credenziali.mjs",
     "controlla-scope-shopify": "node scripts/controlla-scope-shopify.mjs",
+    "controlla-link-menu": "node scripts/controlla-link-menu.mjs",
     "archivio-cap": "node scripts/aggiorna-archivio-cap.mjs",
     "archivio-estero": "node scripts/aggiorna-archivio-estero.mjs"
   },

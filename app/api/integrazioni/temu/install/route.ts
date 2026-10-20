@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { conErrore } from '@/lib/esiti-collegamento'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { temuAuthorizeUrl, temuConfigurato } from '@/lib/temu'
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL('/cliente', req.url))
   }
   if (!temuConfigurato()) {
-    return NextResponse.redirect(new URL('/cliente/integrazioni?error=Temu+non+configurato', req.url))
+    return NextResponse.redirect(new URL(conErrore('/cliente/integrazioni', 'temu_non_configurato'), req.url))
   }
 
   const state = crypto.randomBytes(24).toString('hex')

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { conErrore, conCollegato } from '@/lib/esiti-collegamento'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { tiktokExchangeCode, tiktokGetShops } from '@/lib/tiktok'
@@ -13,14 +14,14 @@ export async function GET(req: NextRequest) {
   const state = url.searchParams.get('state') || ''
   const appUrl = process.env.SHOPIFY_APP_URL || url.origin
 
-  if (!code || !state) return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=callback+TikTok+non+valido`)
+  if (!code || !state) return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_annullato')}`)
 
   const supabase = await createServerSupabase()
   // shopify_oauth_state è chiusa (RLS + no grant) e il cookie può mancare al ritorno OAuth: uso admin.
   const adminState = createAdminSupabase()
   const { data: st } = await adminState.from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
   if (!st || st.shop !== 'tiktok') {
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=state+non+valido`)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_scaduto')}`)
   }
   await adminState.from('shopify_oauth_state').delete().eq('state', state)
 
@@ -28,7 +29,10 @@ export async function GET(req: NextRequest) {
   try {
     tokens = await tiktokExchangeCode(code)
   } catch (e: any) {
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=${encodeURIComponent('TikTok: ' + (e?.message || 'scambio token fallito'))}`)
+    // Il motivo tecnico va nel log, non nell'indirizzo: al cliente non serve, e nell'URL finiva in
+    // chiaro qualunque testo restituito da TikTok.
+    console.error('[TIKTOK][CALLBACK] scambio token', e?.message || e)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_token')}`)
   }
 
   const now = Date.now()
@@ -52,7 +56,8 @@ export async function GET(req: NextRequest) {
       nomeNegozio = shops[0].name || nomeNegozio
     }
   } catch (e: any) {
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=${encodeURIComponent('TikTok: ' + (e?.message || 'recupero negozio fallito'))}`)
+    console.error('[TIKTOK][CALLBACK] recupero negozio', e?.message || e)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_negozio')}`)
   }
 
   const payload: any = {
@@ -64,8 +69,16 @@ export async function GET(req: NextRequest) {
   // SECONDO negozio TikTok faceva UPDATE sulla riga del primo, perdendone credenziali/shop_cipher.
   const { data: existing } = await supabase.from('integrazioni').select('id')
     .eq('cliente_id', st.cliente_id).eq('piattaforma', 'tiktok').eq('identificativo', cred.shop_id || 'tiktok').maybeSingle()
-  if (existing?.id) await supabase.from('integrazioni').update(payload).eq('id', existing.id)
-  else await supabase.from('integrazioni').insert(payload)
+  // L'esito si guarda: questa scrittura passa dalla sessione, che al ritorno dall'OAuth puo' mancare,
+  // e senza il controllo si tornava lo stesso su «?connected=tiktok» — che ora il portale mostra come
+  // «collegato» anche per un negozio mai salvato.
+  const esito = existing?.id
+    ? await supabase.from('integrazioni').update(payload).eq('id', existing.id)
+    : await supabase.from('integrazioni').insert(payload)
+  if (esito.error) {
+    console.error('[TIKTOK][CALLBACK] integrazione non salvata', esito.error.message)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_non_salvato')}`)
+  }
 
-  return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=tiktok`)
+  return NextResponse.redirect(`${appUrl}${conCollegato('/cliente/integrazioni', 'tiktok')}`)
 }

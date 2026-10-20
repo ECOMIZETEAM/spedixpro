@@ -160,10 +160,11 @@ export default function RitiriPage() {
                       <input type="checkbox" checked={selectedIds.includes(r.id)} onChange={()=>toggleSelect(r.id)}/>
                     </td>
                     <td style={{padding:'9px 12px'}}>
-                      <a href={'/cliente/ritiri/'+r.id}
-                        style={{color:'#f97316',fontWeight:'600',fontSize:'12px',textDecoration:'none'}}>
+                      {/* Testo, non link: puntava a /cliente/ritiri/<id>, una pagina che non e' mai esistita,
+                          e chi cliccava il codice trovava una 404 (per Shopify motivo di rifiuto, 2.1.1). */}
+                      <span style={{color:'#1a1a1a',fontWeight:'600',fontSize:'12px'}}>
                         {r.cod_ritiro||'—'}
-                      </a>
+                      </span>
                     </td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{r.pagamento||'Porto franco'}</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontWeight:'500',fontSize:'12px'}}>{r.clienti?.ragione_sociale||'—'}</td>
