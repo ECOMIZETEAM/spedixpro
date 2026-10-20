@@ -967,10 +967,13 @@ export default function ImportaOrdiniPage() {
           <div style={{ flex: '1 1 320px', fontSize: '12.5px', color: '#666', lineHeight: 1.6 }}>
             Puoi caricare direttamente l&apos;<b>export ordini di Shopify</b>, il file di{' '}
             <b>Amazon</b> (il .txt originale, senza convertirlo), l&apos;export ordini di{' '}
-            <b>Temu</b>, quello di <b>Magento</b> (Vendite → Ordini → Esporta CSV) o quello di{' '}
+            <b>Temu</b>, quello di <b>Magento</b> (Vendite → Ordini → Esporta CSV), quello di{' '}
+            <b>Ecwid</b> (Ordini → Esporta) o quello di{' '}
             <b>Spartoo</b>: il sistema riconosce da solo le colonne e il separatore, e raggruppa
             gli ordini con più prodotti. Da Magento importa solo gli ordini{' '}
-            <b>da spedire</b> (Processing / Pending), saltando quelli già evasi o annullati.<br />
+            <b>da spedire</b> (Processing / Pending), saltando quelli già evasi o annullati; da Ecwid
+            quelli <b>in attesa di elaborazione</b>, saltando spediti, annullati e non ancora pagati
+            (tranne il contrassegno).<br />
             Da <b>Temu</b> serve l&apos;export completo degli ordini — quello che contiene{' '}
             <b>Nome completo del destinatario</b>, <b>Indirizzo di spedizione 1</b>,{' '}
             <b>Città di spedizione</b> e <b>Codice postale di spedizione</b> — non l&apos;elenco

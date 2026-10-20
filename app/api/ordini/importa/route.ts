@@ -9,6 +9,7 @@ import frazioniIT from '@/lib/data/frazioni.json'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { eSpartoo, rimappaSpartoo } from '@/lib/import-spartoo'
 import { eMagento, rimappaMagento } from '@/lib/import-magento'
+import { eEcwid, rimappaEcwid, type OrdineEcwidSaltato } from '@/lib/import-ecwid'
 
 export const runtime = 'nodejs'
 
@@ -244,6 +245,27 @@ export async function POST(req: NextRequest) {
     }, { status: 400 })
   }
 
+  // ECWID: export ordini (';', una riga per prodotto, ogni riga ripete l'ordine). Come Magento e
+  // Spartoo, lo riconosco e lo rimappo sulle canoniche PRIMA dell'auto-mapping (vedi lib/import-ecwid):
+  // `name` li' e' il prodotto e `total` il totale della riga, che fra gli alias vogliono dire altro.
+  // Entrano solo gli ordini ancora da spedire; quelli saltati finiscono nell'elenco dei non importati,
+  // ciascuno col suo motivo.
+  let saltatiEcwid: OrdineEcwidSaltato[] = []
+  const fileEcwid = eEcwid(rows[0])
+  if (fileEcwid) {
+    const ordiniNelFile = new Set(rows.map(r => String(r.order_number ?? '').trim()).filter(Boolean)).size
+    const esito = rimappaEcwid(rows)
+    rows = esito.righe
+    saltatiEcwid = esito.saltati
+    // Le colonne le danno le righe rimappate, non l'intestazione del file: le canoniche non ci sono, e
+    // `sku` e' stata tolta di proposito (lib/import-ecwid spiega perche').
+    intestazioni = null
+    if (!rows.length) return NextResponse.json({
+      error: `Nel file Ecwid non c'e' nessun ordine da spedire: tutti i ${ordiniNelFile} risultano gia' spediti, annullati, rimborsati o in attesa di pagamento.`,
+      errori: saltatiEcwid,
+    }, { status: 400 })
+  }
+
   // Risolvo le colonne per NOME (auto-mapping)
   const headers = new Set(intestazioni?.length ? intestazioni : Object.keys(rows[0] || {}))
   const M: Record<string, string | null> = {}
@@ -355,7 +377,7 @@ export async function POST(req: NextRequest) {
   // ELENCO DELLE RIGHE NON IMPORTATE — riga del file, ordine, motivo — che la pagina mostra al cliente.
   // Prima usciva solo il CONTEGGIO con tre motivi accorpati: chi caricava 200 ordini e ne vedeva
   // entrare 197 non sapeva QUALI tre mancassero, quindi non aveva modo di correggere il suo file.
-  const errori: { riga: number | null; ordine: string | null; motivo: string }[] = []
+  const errori: { riga: number | null; ordine: string | null; motivo: string }[] = [...saltatiEcwid]
   // Riga del file per numero d'ordine: serve a dire "riga 42" anche per quelli saltati dal dedup.
   const rigaPerOrdine = new Map<string, number>()
   // Solo le righe MALFORMATE: `scartati` non deve gonfiarsi con i "gia' importati", che sono un'altra cosa.
@@ -480,8 +502,12 @@ export async function POST(req: NextRequest) {
   {
     // Si deduplica SOLO sugli order_id che sono un VERO id d'ordine (Amazon/Temu/numero): su
     // un'etichetta generica riusata ("AMAZON", "g") si salterebbero ordini DIVERSI = falso positivo.
+    // ECWID fa eccezione: il suo numero d'ordine ("CBUJW") e' un identificativo unico del negozio, non
+    // un'etichetta, ma per la regola generale non e' "affidabile" (lettere, cinque caratteri). Senza
+    // eccezione, ricaricare lo stesso export (Ecwid li esporta tutti) creerebbe gli ordini doppi — e la
+    // guardia della creazione, che usa la stessa regola, non fermerebbe le spedizioni doppie.
     const { rifOrdineAffidabile } = await import('@/lib/rif-ordine')
-    const ids = [...new Set(records.map(r => r.order_id).filter((x: any) => rifOrdineAffidabile(x)))]
+    const ids = [...new Set(records.map(r => r.order_id).filter((x: any) => fileEcwid ? !!String(x || '').trim() : rifOrdineAffidabile(x)))]
     if (ids.length) {
       const esistenti = new Set<string>()
       for (let i = 0; i < ids.length; i += 300) {
