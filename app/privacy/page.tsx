@@ -125,7 +125,9 @@ export default function PrivacyPage() {
           I dati dei compratori Amazon (dal report degli ordini o dal collegamento diretto) servono solo a spedire
           quell'ordine e a confermarne la spedizione ad Amazon. Non li usiamo per marketing o profilazione, non li
           proponiamo come contatti nella rubrica degli indirizzi e non li condividiamo, se non con il corriere della
-          spedizione. Si cancellano con le regole del punto 7, e ogni incidente che li riguarda viene notificato ad
+          spedizione. Si cancellano con le regole del punto 7: dopo 30 giorni resta solo il destinatario scritto
+          sulla spedizione, che è il documento di trasporto del pacco e si conserva per gli obblighi di legge,
+          visibile solo al commerciante che l'ha spedito. Ogni incidente che li riguarda viene notificato ad
           Amazon entro 24 ore.
         </p>
 
