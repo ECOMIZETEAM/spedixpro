@@ -12,7 +12,8 @@ import { readFileSync } from 'fs'
 import Stripe from 'stripe'
 
 const PIANI = ['enterprise_5k','enterprise_10k','enterprise_20k','enterprise_50k',
-               'enterprise_80k','enterprise_100k','enterprise_120k','enterprise_150k']
+               'enterprise_80k','enterprise_100k','enterprise_120k','enterprise_150k',
+               'enterprise_200k','enterprise_250k']
 
 function env() {
   try {

@@ -15,6 +15,8 @@ export const PIANI_ENTERPRISE: Piano[] = [
   { id: 'enterprise_100k', nome: 'Enterprise 100K', limite: 100000, prezzo: 1090 },
   { id: 'enterprise_120k', nome: 'Enterprise 120K', limite: 120000, prezzo: 1300 },
   { id: 'enterprise_150k', nome: 'Enterprise 150K', limite: 150000, prezzo: 1620 },
+  { id: 'enterprise_200k', nome: 'Enterprise 200K', limite: 200000, prezzo: 2150 },
+  { id: 'enterprise_250k', nome: 'Enterprise 250K', limite: 250000, prezzo: 2675 },
 ]
 
 // Piani Smart (clienti) — pronti per quando li attiviamo
