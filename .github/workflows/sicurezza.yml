@@ -1,0 +1,48 @@
+# SCANSIONE DI SICUREZZA A OGNI RILASCIO (e ogni lunedi').
+#
+# Amazon (SP-API, controllo 2.7) chiede che il codice sia scansionato prima di ogni rilascio e i
+# sistemi almeno ogni 30 giorni, con le vulnerabilita' critiche corrette entro 7 giorni. Qui: ogni
+# push su main (= rilascio su Vercel) passa da due controlli, e il risultato resta sul commit.
+#  - dipendenze: le vulnerabilita' note nelle librerie di produzione. Una CRITICA fa diventare rosso
+#    il controllo (non ferma Vercel: il rilascio e' gia' partito, ma si vede subito sul commit).
+#  - codice: segreti finiti nel repository e analisi statica, come rapporto.
+# Eccezione nota e mitigata: pdfjs-dist 3 (alta) e' usato con isEvalSupported:false in tutte le
+# letture (lib/etichetta-sda, lib/zebra-print, app/api/clienti/estrai-visura).
+name: Scansione di sicurezza
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dipendenze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Vulnerabilita' note nelle librerie di produzione (critiche = rosso)
+        run: npm audit --omit=dev --audit-level=critical
+      - name: Rapporto completo
+        if: always()
+        run: npm audit --omit=dev || true
+
+  codice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Segreti nel codice
+        run: semgrep scan --config p/secrets --metrics=off || true
+      - name: Analisi statica (TypeScript, React)
+        run: semgrep scan --config p/typescript --config p/react --metrics=off || true

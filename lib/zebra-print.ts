@@ -36,7 +36,10 @@ function imageDataToZpl(data: Uint8ClampedArray, w: number, h: number): string {
 // genera il PDF piu' largo dell'etichetta da 10 cm).
 async function pdfToZpl(pdfData: ArrayBuffer, dpi: number, maxW = 0): Promise<string> {
   const pdfjs = await loadPdfjs()
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(pdfData) }).promise
+  // isEvalSupported: false chiude la falla di pdfjs-dist 3 (codice eseguito da un PDF costruito ad
+  // arte, CVE-2024-4367) senza cambiare il disegno: le etichette arrivano dai corrieri, ma il
+  // lettore non deve fidarsi del file. Come nelle altre letture (etichetta-sda, estrai-visura).
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(pdfData), isEvalSupported: false }).promise
   let out = ''
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p)
