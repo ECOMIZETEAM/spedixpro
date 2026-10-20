@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 const COLONNE = [
   'nome','partita_iva','piva','codice_fiscale','codice_sdi','pec',
@@ -24,10 +25,14 @@ export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const { data: master } = await supabase.from('masters').select('*').eq('id', utente?.master_id).single()
   if (!master) return NextResponse.json({})
-  const out: any = { ...master, ragione_sociale: master.nome || '' }
+  // Chi NON gestisce la rete (l'agente apre Nuova Spedizione, Ritiri e l'elenco, che leggono da qui
+  // mittente e impostazioni di stampa) riceve solo il profilo: le colonne qui sopra. La riga intera
+  // portava credito, credito_proprio, commissioni, abbonamento — i conti del master.
+  const riga: any = gestisceLaRete(utente) ? master : Object.fromEntries(['id', ...COLONNE].map(k => [k, (master as any)[k]]))
+  const out: any = { ...riga, ragione_sociale: master.nome || '' }
   return NextResponse.json(out)
 }
 

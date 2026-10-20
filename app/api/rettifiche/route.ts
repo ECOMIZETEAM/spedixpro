@@ -155,7 +155,12 @@ export async function GET(req: NextRequest) {
     }
     return { classe: 'da_controllare', motivo, manca }
   }
-  const righe = righeGrezze.map((r: any) => {
+  // COSTO FORNITORE = quanto il corriere ha addebitato AL MASTER per la ripesatura: e' il suo costo, e
+  // all'agente arrivava sia grezzo sia dentro il motivo ("il corriere ha addebitato X€ ... mancano Y€").
+  // Per lui la riga si legge come se il costo fornitore non ci fosse: niente cifra, niente motivo.
+  const agente = isAgente(utente)
+  const righe = righeGrezze.map((r0: any) => {
+    const r = agente ? { ...r0, costo_fornitore: null } : r0
     const b = baseDi(r)
     return {
       ...r,

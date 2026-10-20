@@ -85,6 +85,9 @@ export async function POST(req: Request) {
       } else if (isCliente) {
         const { data: c } = await admin.from('clienti').select('credito').eq('id', u!.cliente_id).maybeSingle()
         testo = `Il tuo credito residuo è € ${Number(c?.credito || 0).toFixed(2)}.`
+      } else if (isAgente) {
+        // Finiva nel ramo sotto e leggeva a voce il credito del MASTER: i conti del master non sono suoi.
+        testo = 'Il credito non è consultabile dal profilo agente.'
       } else {
         const { data: m } = await admin.from('masters').select('credito').eq('id', u!.master_id).maybeSingle()
         testo = `Il tuo credito residuo è € ${Number(m?.credito || 0).toFixed(2)}.`

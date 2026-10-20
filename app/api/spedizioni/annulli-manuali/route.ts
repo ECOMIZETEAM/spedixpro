@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 // Coda annulli MANUALI (Spedisci): le vede SOLO il detentore del contratto
 // (annullamento_owner_id = suo master). Le richiede via assistenza WhatsApp e poi conferma.
@@ -10,7 +11,10 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
-  if (!utente?.master_id || (utente.ruolo || '').toLowerCase() === 'cliente') return NextResponse.json([])
+  // Solo chi lavora nel portale del master. L'agente passava (si fermava solo il cliente) e vedeva la
+  // coda INTERA del detentore — anche pacchi di clienti non suoi — col prezzo che il master ha pagato
+  // la LDV (costo_pagato), scaricabile pure in CSV. E' lavoro del detentore, non di chi rivende.
+  if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json([])
 
   const admin = createAdminSupabase()
   const data = await fetchAll(() => admin.from('spedizioni')

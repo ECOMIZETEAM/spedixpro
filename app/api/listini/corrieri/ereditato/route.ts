@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 // Listino "ereditato" per un SOTTO-MASTER: i prezzi che il master padre gli ha
 // assegnato (masters.parent_listino_id, un listino_clienti). Sola lettura.
@@ -8,8 +9,10 @@ export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ ereditato: false })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
-  if (!utente?.master_id) return NextResponse.json({ ereditato: false })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  // E' il prezzo a cui il master COMPRA dal padre, cioe' il suo costo: solo per chi lavora nel suo
+  // portale. Prima bastava il master_id, che hanno anche clienti e agenti.
+  if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ ereditato: false })
 
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters').select('parent_master_id,parent_listino_id').eq('id', utente.master_id).maybeSingle()

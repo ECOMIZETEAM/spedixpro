@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
 import { vedeLaRete } from '@/lib/perimetro'
+import { gestisceLaRete, senzaCostoMaster } from '@/lib/ruoli'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 
@@ -112,5 +113,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json((lista as any[]).filter(s => (s.stato_contrassegno || 'in_attesa') === statoContrassegno))
     }
   }
-  return NextResponse.json(lista)
+  // SPED_COLS porta costo_spedizione: all'agente non esce (il suo costo e' il listino agente). Il ramo
+  // qui sopra esclude l'agente (perLivello), quindi basta qui.
+  return NextResponse.json(gestisceLaRete(utente) ? lista : (lista as any[]).map(senzaCostoMaster))
 }

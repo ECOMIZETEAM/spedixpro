@@ -2,6 +2,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { senzaCostoMaster } from '@/lib/ruoli'
 import { nonStaffMaster } from '@/lib/permessi'
 import { fetchAll } from '@/lib/fetch-all'
 
@@ -58,7 +59,8 @@ export async function GET() {
       spedizioniTotali, fatturatoMese: Math.round(fatturatoMese * 100) / 100, consegnateMese,
       inTransito, inGiacenza, codDaRimettere: 0, sottomaster: 0,
       consegnateTotali, tassoConsegna, topCorriere: null, topCliente: null,
-      statsMensili: [], statiUltimi30: {}, ultimeSpedizioni: ultime || [],
+      // SPED_COLS porta costo_spedizione: il costo del master non va all'agente.
+      statsMensili: [], statiUltimi30: {}, ultimeSpedizioni: (ultime || []).map(senzaCostoMaster),
     })
   }
 

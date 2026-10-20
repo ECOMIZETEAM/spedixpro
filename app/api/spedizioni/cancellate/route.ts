@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { fetchAll } from '@/lib/fetch-all'
+import { gestisceLaRete, senzaCostoMaster } from '@/lib/ruoli'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -28,5 +29,7 @@ export async function GET(req: NextRequest) {
     if (al) q = q.lte('created_at', al + 'T23:59:59')
     return q
   }
-  return NextResponse.json(await fetchAll(build))
+  const righe = await fetchAll(build)
+  // `*` porta costo_spedizione e raw_response (il prezzo del fornitore): fuori per chi non e' del master.
+  return NextResponse.json(gestisceLaRete(utente) ? righe : (righe as any[]).map(senzaCostoMaster))
 }

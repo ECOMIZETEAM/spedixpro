@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
+import { senzaCostoMaster } from '@/lib/ruoli'
 import { eseguiSvincolo } from '@/lib/giacenza-svincolo'
 // Il calcolo dei prezzi giacenza vive in lib/giacenza-prezzi.ts: lo usa anche l'API pubblica,
 // che prima registrava le richieste con costo zero.
@@ -136,7 +137,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // con cui spediamo. Servono solo qui dentro, per parlare col corriere: al browser si manda il
   // nome del contratto e basta.
   const { credenziali: _chiavi, ...corriereSenzaChiavi } = (sped.corrieri || {}) as any
-  const spedPulita = { ...sped, corrieri: corriereSenzaChiavi }
+  // Per lo stesso motivo il COSTO DEL MASTER (costo_spedizione, e la risposta del fornitore che lo
+  // ripete) non va a cliente e agente: la pagina mostra solo i prezzi qui sotto.
+  const spedPulita = { ...((ruolo === 'cliente' || agente) ? senzaCostoMaster(sped) : sped), corrieri: corriereSenzaChiavi }
 
   // NOMI DELLA RETE A MONTE NON ESCONO VERSO IL CLIENTE (nè l'agente).
   // Lo "Storico Azioni" mostra chi ha creato/confermato l'azione: quando la giacenza viene

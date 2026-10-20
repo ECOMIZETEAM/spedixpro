@@ -28,3 +28,14 @@ export function gestisceLaRete(u: UtenteRuolo): boolean {
 export function vedeLaRete(u: UtenteRuolo): boolean {
   return gestisceLaRete(u) || r(u) === 'agente'
 }
+
+/** Toglie da una riga di spedizione le colonne che dicono il COSTO DEL MASTER: `costo_spedizione` (quanto
+ *  paga lui al corriere) e `raw_response`, la risposta del fornitore, che contiene lo stesso prezzo
+ *  (shipmentCost, totalPrice, importo). Va applicata a tutto cio' che esce verso chi NON gestisce la rete:
+ *  l'agente ha come costo solo il suo listino agente, il cliente nessuno. Nessuna pagina le legge — ma
+ *  finivano nel browser, e bastava aprire gli strumenti per sviluppatori. */
+export function senzaCostoMaster<T>(riga: T): T {
+  if (!riga || typeof riga !== 'object') return riga
+  const { costo_spedizione: _costo, raw_response: _fornitore, ...resto } = riga as any
+  return resto as T
+}

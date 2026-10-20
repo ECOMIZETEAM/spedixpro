@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
+import { gestisceLaRete, senzaCostoMaster } from '@/lib/ruoli'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 
@@ -92,5 +93,6 @@ export async function GET(req: NextRequest) {
   if (al) query = query.or(`giacenza_data.lte.${al}T23:59:59,and(giacenza_data.is.null,created_at.lte.${al}T23:59:59)`)
 
   const { data } = await query
-  return NextResponse.json(data || [])
+  // SPED_COLS porta costo_spedizione: all'agente non esce (il suo costo e' il listino agente).
+  return NextResponse.json(gestisceLaRete(utente) ? (data || []) : (data || []).map(senzaCostoMaster))
 }

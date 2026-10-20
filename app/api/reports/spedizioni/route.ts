@@ -278,7 +278,9 @@ export async function GET(req: NextRequest) {
       data_consegna: consegnaMap.get(s.id) || null,   // colonna "Data_consegna" del report
       distinte: distMap.get(s.distinta_id) || null,   // { data, bordero_id } per Data_distinta/bda (lookup, non embed)
       dett_corriere: null,
-      cli_nolo: calcAgente ? (prezzo_corriere ?? 0) : (eCliente ? 0 : Number(s.costo_spedizione || 0)),
+      // Agente SENZA listino: niente costo, come per il cliente. Prima qui ripiegava su costo_spedizione
+      // e ricopiava nel JSON proprio la colonna tolta poche righe sopra.
+      cli_nolo: calcAgente ? (prezzo_corriere ?? 0) : ((eCliente || agenteSenzaListino) ? 0 : Number(s.costo_spedizione || 0)),
       cli_supplementi: 0,
     }
   })

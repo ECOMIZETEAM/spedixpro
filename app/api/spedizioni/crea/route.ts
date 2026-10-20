@@ -42,7 +42,24 @@ import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
 // il pacco esiste dal corriere e da noi no. Un minuto e' molto piu' di quanto serva davvero.
 export const maxDuration = 60
 
+// IL COSTO DEL MASTER NON ESCE DALLA CREAZIONE. Ogni ramo corriere chiude con `costo`: quanto paga il
+// master al corriere o al fornitore (shipmentCost, totalPrice, importo, il suo listino corrieri). Questa
+// rotta la chiamano anche il portale cliente e l'agente, e nessuna pagina legge quel campo sulla
+// risposta riuscita: si toglie qui, all'uscita, una volta sola invece che in undici rami. Le risposte
+// d'errore restano intatte: quella del credito insufficiente (402) porta in `costo` il prezzo DEL
+// CLIENTE, ed e' quello che la finestra di pagamento mostra.
 export async function POST(req: NextRequest) {
+  const res = await creaSpedizioneInterna(req)
+  if (!res.ok) return res
+  const corpo = await res.clone().json().catch(() => null)
+  if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo) || !('costo' in corpo)) return res
+  const { costo: _costoMaster, ...resto } = corpo
+  const headers = new Headers(res.headers)
+  headers.delete('content-length')
+  return NextResponse.json(resto, { status: res.status, headers })
+}
+
+async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
