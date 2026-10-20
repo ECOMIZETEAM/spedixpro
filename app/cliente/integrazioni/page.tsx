@@ -98,6 +98,28 @@ export default function IntegrazioniPage() {
   }
   useEffect(() => { load() }, [])
 
+  // ESITO DEL COLLEGAMENTO AMAZON. Le rotte Amazon tornano qui con un CODICE (?amazon=…), e la frase
+  // la scrive questa pagina: un testo preso dall'indirizzo farebbe scrivere a chiunque cosa vuole
+  // nel riquadro dei messaggi. Poi il codice si toglie dall'indirizzo, cosi' un ricarica non lo ripete.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    const esito = sp.get('amazon')
+    if (!esito) return
+    const FRASI: Record<string, { type: 'ok' | 'err'; text: string }> = {
+      collegato: { type: 'ok', text: 'Account Amazon collegato. Gli ordini da spedire arrivano nei prossimi minuti.' },
+      rinnovato: { type: 'ok', text: 'Collegamento Amazon rinnovato.' },
+      non_valido: { type: 'err', text: 'Collegamento Amazon non riuscito: la richiesta non è valida. Riprova da qui con «Collega negozio» → Amazon.' },
+      scaduto: { type: 'err', text: 'Il collegamento con Amazon è scaduto prima di essere completato. Riprova da qui con «Collega negozio» → Amazon.' },
+      scambio: { type: 'err', text: 'Amazon non ha confermato il collegamento. Riprova tra qualche minuto; se si ripete, contatta l\'assistenza.' },
+      salvataggio: { type: 'err', text: 'Collegamento Amazon non salvato. Riprova; se si ripete, contatta l\'assistenza.' },
+      non_avviato: { type: 'err', text: 'Collegamento Amazon non avviato. Riprova tra qualche minuto.' },
+    }
+    setMsg(FRASI[esito] || FRASI.non_valido)
+    sp.delete('amazon')
+    const resto = sp.toString()
+    window.history.replaceState(null, '', window.location.pathname + (resto ? '?' + resto : ''))
+  }, [])
+
   function openModal() { setStep('platforms'); setShop(''); setModal(true) }
   function closeModal() { setModal(false) }
 
@@ -117,9 +139,11 @@ export default function IntegrazioniPage() {
   // Nell'app iOS/Android no: Seller Central si apre nel browser del telefono, che non ha la sessione
   // dell'app, e al ritorno il collegamento verrebbe rifiutato (chi chiude il giro dev'essere chi
   // l'ha aperto). Meglio dirlo prima che sprecare un consenso su Amazon.
+  // I messaggi si danno dopo aver chiuso la finestra delle piattaforme: sotto resterebbero coperti.
   async function collegaAmazon() {
     if (isAppNativa()) {
-      setMsg({ type: 'err', text: 'Il collegamento con Amazon si fa dal browser: apri moovexpress.com dal computer o da Safari/Chrome, accedi e vai in Integrazioni → Amazon.' })
+      closeModal()
+      await dialog.alert({ title: 'Amazon si collega dal browser', message: 'Apri moovexpress.com dal computer o da Safari/Chrome, accedi e vai in Integrazioni → Amazon.' })
       return
     }
     setConnecting(true)
@@ -127,8 +151,10 @@ export default function IntegrazioniPage() {
       const res = await fetch('/api/integrazioni/amazon/install', { method: 'POST' })
       const d = await res.json().catch(() => ({}))
       if (res.ok && d.url) { window.location.href = d.url; return }
+      closeModal()
       setMsg({ type: 'err', text: d.error || 'Collegamento Amazon non avviato' })
     } catch {
+      closeModal()
       setMsg({ type: 'err', text: 'Errore di rete' })
     }
     setConnecting(false)

@@ -36,9 +36,12 @@ export function vettoreAmazon(corriere: { nome_contratto?: string | null; tipo?:
   // si tolgono i nomi dei fornitori, come nelle altre schermate (lib/corriere-logo).
   const nome = senzaNomiFornitori(String(corriere?.nome_contratto || '')).trim()
   const t = String(corriere?.tipo || '').toLowerCase()
-  const tipo = isProviderTecnico(t) || t === 'moovexpress' ? null : (corriere?.tipo ?? null)
+  const viaFornitore = isProviderTecnico(t) || t === 'moovexpress'
+  const tipo = viaFornitore ? null : (corriere?.tipo ?? null)
   const brand = corriere ? vettoreFisico({ nome_contratto: nome, tipo }) : ''
   const codice = CODICE[brand]
   if (codice) return { carrierCode: codice, shippingMethod: 'Standard' }
-  return { carrierCode: 'Other', carrierName: nome || 'Corriere', shippingMethod: 'Standard' }
+  // Un contratto via fornitore che non dice il corriere: il suo nome puo' contenere quello del
+  // fornitore in forme che il filtro non toglie (es. "DVA"), quindi verso Amazon e' "Corriere".
+  return { carrierCode: 'Other', carrierName: !viaFornitore && nome ? nome : 'Corriere', shippingMethod: 'Standard' }
 }

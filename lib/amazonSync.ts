@@ -55,10 +55,12 @@ type Opzioni = { dal?: string | null; al?: string | null; incrementale?: boolean
 type Ripresa = { query: Record<string, string>; token: string; fine: string; scade: number }
 // cursore        da dove il giro automatico legge gli aggiornamenti
 // ripresa        lettura interrotta (limite o tempo) da continuare col token di pagina di Amazon
-// primo_manuale  quando e' stato premuto "Sincronizza" prima del primo giro automatico
+// primo_manuale  da quando leggere gli aggiornamenti al primo cursore: il momento del primo
+//                "Sincronizza" a mano, o dell'inizio del primo giro automatico, se viene prima
 // da_riprovare   ordini non salvati, da rileggere uno per uno (id → giri falliti)
-// non_salvati    ordini lasciati dopo RIPROVA_MAX giri: restano scritti nell'errore dell'integrazione
-type StatoSync = { cursore?: string; ripresa?: Ripresa; primo_manuale?: string; da_riprovare?: Record<string, number>; non_salvati?: string[] }
+// non_salvati    gli ultimi 50 ordini lasciati dopo RIPROVA_MAX giri: restano nell'errore
+//                dell'integrazione (non_salvati_troncati: ce n'erano di piu')
+type StatoSync = { cursore?: string; ripresa?: Ripresa; primo_manuale?: string; da_riprovare?: Record<string, number>; non_salvati?: string[]; non_salvati_troncati?: boolean }
 type Esito = { letti: number; importati: number; spediti: number; daSpedire: number; annullati: number; completa: boolean; avviso: string | null }
 
 const istante = (s?: string | null) => (s ? Date.parse(s) : NaN)
@@ -104,6 +106,11 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
   } else {
     query = { createdAfter: new Date(ora - GIORNI_PRIMO_GIRO * 86400000).toISOString(), createdBefore: prima, fulfillmentStatuses: STATI_APERTI }
     fine = prima
+    // PRIMO GIRO ANCORATO DA SUBITO. Se si interrompe (limite, tempo, errore) e la sua ripresa poi
+    // cade, il giro dopo ricomincia da capo: senza quest'ancora gli aggiornamenti si leggerebbero
+    // solo da quel nuovo inizio, e un ordine importato ora e annullato su Amazon nel frattempo non
+    // tornerebbe piu'. L'ancora si salva con lo stato a fine giro, anche se interrotto.
+    if (!sync.primo_manuale || istante(sync.primo_manuale) > istante(prima)) sync.primo_manuale = prima
   }
 
   const letti: string[] = []
@@ -205,8 +212,11 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
   for (const id of letti) if (!falliti.has(id)) lasciati.delete(id)   // salvato in questo giro
   if (Object.keys(prossimi).length) nuovo.da_riprovare = prossimi
   else delete nuovo.da_riprovare
-  if (lasciati.size) nuovo.non_salvati = Array.from(lasciati).slice(-NON_SALVATI_MAX)
-  else delete nuovo.non_salvati
+  // Si tengono gli ultimi 50 (lo stato non deve crescere senza fine); se erano di piu' lo si dice.
+  if (lasciati.size) {
+    nuovo.non_salvati = Array.from(lasciati).slice(-NON_SALVATI_MAX)
+    if (lasciati.size > NON_SALVATI_MAX || sync.non_salvati_troncati) nuovo.non_salvati_troncati = true
+  } else { delete nuovo.non_salvati; delete nuovo.non_salvati_troncati }
   if (JSON.stringify(nuovo) !== JSON.stringify(sync)) {
     await aggiornaCredenzialiAmazon(db, integr, attuali => ({ ...attuali, sync: nuovo }))
   }
@@ -217,7 +227,7 @@ export async function sincronizzaOrdiniAmazon(db: any, integr: any, opz: Opzioni
   const daRiprovare = Object.keys(prossimi).length
   const errore = [
     daRiprovare ? `${daRiprovare} ordini Amazon non salvati: si riprovano al prossimo giro automatico` : '',
-    nuovo.non_salvati?.length ? `${nuovo.non_salvati.length} ordini Amazon non salvati dopo ${RIPROVA_MAX} tentativi (${nuovo.non_salvati.slice(0, 3).join(', ')}${nuovo.non_salvati.length > 3 ? '…' : ''})` : '',
+    nuovo.non_salvati?.length ? `${nuovo.non_salvati_troncati ? 'oltre ' + NON_SALVATI_MAX : nuovo.non_salvati.length} ordini Amazon non salvati dopo ${RIPROVA_MAX} tentativi (${nuovo.non_salvati.slice(0, 3).join(', ')}${nuovo.non_salvati.length > 3 ? '…' : ''})` : '',
   ].filter(Boolean).join(' · ') || null
   await db.from('integrazioni')
     .update({ ultimo_sync: new Date().toISOString(), ordini_totali: letti.length, errore })

@@ -16,11 +16,13 @@ import { vettoreAmazon } from '@/lib/amazon-vettore'
 // Si salta (stato terminale 'annullato_store') un ordine che Amazon da' annullato: nel pacco non
 // c'e' (lib/ordini-uniti lo lascia fuori) e confermarlo darebbe solo un errore.
 //
-// Amazon concede 2 conferme al secondo (raffica di 10), e questa funzione gira dentro la
-// creazione della distinta, che l'utente aspetta: oltre TEMPO_MAX_MS non si comincia un'altra
-// conferma, e a "troppe chiamate" ci si ferma invece di aspettare. Il cron fulfill-retry riprende
-// gli ordini rimasti senza esito; `tentati` gli dice quali sono stati davvero mandati, perche'
-// solo quelli consumano un tentativo.
+// Amazon concede 2 conferme al secondo per account venditore (raffica di 10), e questa funzione
+// gira dentro la creazione della distinta, che l'utente aspetta: oltre TEMPO_MAX_MS (o la
+// `scadenza` passata da chi chiama, unica per tutto il suo giro) non si comincia un'altra
+// conferma. A "troppe chiamate" si riprova una volta dopo 2 secondi, poi si lasciano gli altri
+// ordini di QUEL venditore (il limite e' suo, non degli altri). Il cron fulfill-retry riprende gli
+// ordini rimasti senza esito; `tentati` gli dice quali sono stati davvero mandati, perche' solo
+// quelli consumano un tentativo.
 const TEMPO_MAX_MS = 30000
 
 // Letture a blocchi di 200 id: gli id finiscono nell'indirizzo della richiesta, e oltre ~450 la
@@ -34,9 +36,11 @@ async function leggiABlocchi(ids: string[], leggi: (blocco: string[]) => Promise
   return out
 }
 
-export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[], tentati?: Set<string>) {
+export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[], tentati?: Set<string>, scadenza?: number) {
   const esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
+  const fineTempo = scadenza ?? Date.now() + TEMPO_MAX_MS
+  if (Date.now() > fineTempo) return esiti
   const colonne = 'id,integrazione_id,ordine_esterno_id,numero_ordine,articoli,spedizione_id,unito_in,stato_pagamento,fulfillment_stato,created_at'
   const righeDirette = await leggiABlocchi(spedizioneIds, b => db.from('ordini_ecommerce').select(colonne)
     .in('spedizione_id', b).eq('piattaforma', 'amazon'))
@@ -69,10 +73,11 @@ export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[], 
 
   const token = new Map<string, string>()
   const integrazioni = new Map<string, any>()
-  const avvio = Date.now()
+  const limitate = new Set<string>()   // venditori che Amazon ha fermato in questo giro
 
   for (const { o: ordine, spedId } of restanti) {
-    if (Date.now() - avvio > TEMPO_MAX_MS) break
+    if (Date.now() > fineTempo) break
+    if (limitate.has(String(ordine.integrazione_id))) continue
     tentati?.add(String(ordine.id))
     const segna = async (stato: string, errore: string | null) => {
       await db.from('ordini_ecommerce').update({ fulfillment_stato: stato, fulfillment_errore: errore }).eq('id', ordine.id)
@@ -117,9 +122,9 @@ export async function fulfillSpedizioniAmazon(db: any, spedizioneIds: string[], 
       await spapi(token.get(iid)!, 'POST', `/orders/v0/orders/${encodeURIComponent(String(ordine.ordine_esterno_id))}/shipmentConfirmation`, { corpo, tentativi: 1 })
       await segna('ok', null)
     } catch (e: any) {
-      // Limite di Amazon: non e' un errore dell'ordine. Ci si ferma qui, e quest'ordine non conta
-      // come tentato: lo riprende il recupero senza consumargli un tentativo.
-      if (e instanceof LimiteAmazon) { tentati?.delete(String(ordine.id)); break }
+      // Limite di Amazon: non e' un errore dell'ordine. Per QUESTO venditore ci si ferma qui, e
+      // quest'ordine non conta come tentato: lo riprende il recupero senza consumargli un tentativo.
+      if (e instanceof LimiteAmazon) { tentati?.delete(String(ordine.id)); limitate.add(String(ordine.integrazione_id)); continue }
       await segna('errore', String(e?.message || e).slice(0, 150))
     }
   }

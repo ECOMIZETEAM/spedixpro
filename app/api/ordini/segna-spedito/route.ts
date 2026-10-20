@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     if ((cambiato || []).length) {
       await supabase.from('ordini_ecommerce')
         .update({ fulfillment_stato: null, fulfillment_errore: null, fulfillment_tentativi: 0 })
-        .eq('unito_in', ordineId).eq('cliente_id', utente.cliente_id).eq('piattaforma', 'amazon')
+        .eq('unito_in', ordineId).eq('cliente_id', utente.cliente_id).eq('piattaforma', 'amazon').is('spedizione_id', null)
     }
   }
   await supabase.from('ordini_ecommerce')

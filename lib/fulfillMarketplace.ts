@@ -13,8 +13,9 @@ import { fulfillSpedizioniAmazon } from '@/lib/amazonFulfill'
 // co. vengono SEMPRE marcati come spediti col tracking, a prescindere da chi crea la distinta.
 // `opz.tentatiAmazon`: chi lo passa (il cron fulfill-retry) ci trova gli ordini Amazon davvero
 // mandati ad Amazon — l'unica evasione con un limite di tempo, quindi l'unica che puo' lasciarne
-// indietro senza averli tentati. Gli altri chiamanti non lo passano e non cambia niente.
-export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: { tentatiAmazon?: Set<string> } = {}): Promise<any[]> {
+// indietro senza averli tentati. `opz.scadenzaAmazon`: quel limite, unico per chi chiama piu'
+// volte nello stesso giro. Gli altri chiamanti non li passano e non cambia niente.
+export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: { tentatiAmazon?: Set<string>; scadenzaAmazon?: number } = {}): Promise<any[]> {
   let esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
 
@@ -56,6 +57,6 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: 
   try { await fulfillSpedizioniEbay(adm, pronti) } catch {}
   try { await fulfillSpedizioniTiktok(adm, pronti) } catch {}
   try { await fulfillSpedizioniTemu(adm, pronti) } catch {}
-  try { await fulfillSpedizioniAmazon(adm, pronti, opz.tentatiAmazon) } catch {}
+  try { await fulfillSpedizioniAmazon(adm, pronti, opz.tentatiAmazon, opz.scadenzaAmazon) } catch {}
   return esiti
 }

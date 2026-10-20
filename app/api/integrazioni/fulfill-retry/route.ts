@@ -63,10 +63,13 @@ export async function GET(req: NextRequest) {
   // fulfillMarketplace filtra da sé le LDV provvisorie e salta i già evasi.
   // A blocchi di 200 spedizioni: dentro, ogni negozio le legge con un `.in()` solo, e con le 1000
   // del tetto qui sopra quelle letture tornerebbero "Bad Request" per tutti i negozi insieme.
+  // Amazon ha UN limite di tempo per tutto il giro, non uno per blocco: sette blocchi da 30 secondi
+  // supererebbero la durata massima della funzione e lascerebbero a meta' la contabilita' sotto.
   const tentatiAmazon = new Set<string>()
+  const scadenzaAmazon = Date.now() + 30000
   const esiti: any[] = []
   for (let i = 0; i < spedIds.length; i += 200) {
-    esiti.push(...await fulfillMarketplace(admin, spedIds.slice(i, i + 200), { tentatiAmazon }))
+    esiti.push(...await fulfillMarketplace(admin, spedIds.slice(i, i + 200), { tentatiAmazon, scadenzaAmazon }))
   }
   const ok = esiti.filter((e: any) => e?.stato === 'ok').length
 
@@ -103,7 +106,9 @@ export async function GET(req: NextRequest) {
       if (st === 'attesa') continue
       // Amazon ha un limite di tempo per giro (lib/amazonFulfill): un ordine che non e' stato
       // raggiunto non e' fallito. Senza questo, otto giri tagliati bastavano a toglierlo dai
-      // recuperi per sempre, con lo stato vuoto e nessun avviso.
+      // recuperi per sempre, con lo stato vuoto e nessun avviso. Vale anche per un ordine Amazon
+      // su una spedizione annullata (fulfillMarketplace non la evade): resta in attesa, perche' se
+      // la spedizione viene ripristinata deve partire la conferma, e la finestra di 10 giorni lo chiude.
       if (o.piattaforma === 'amazon' && !tentatiAmazon.has(String(o.id))) continue
       const n = Number(o.fulfillment_tentativi || 0) + 1
       await admin.from('ordini_ecommerce').update({ fulfillment_tentativi: n }).eq('id', o.id)
