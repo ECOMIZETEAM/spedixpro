@@ -1,10 +1,32 @@
 import { Resend } from 'resend'
+import { eIndirizzoInterno } from '@/lib/indirizzi-interni'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 // Mittente con NOME VISIBILE: se la env contiene solo l'indirizzo (noreply@...), Gmail mostrava
 // "noreply" come nome — qui garantiamo sempre "MoovExpress <indirizzo>".
 const FROM_RAW = process.env.EMAIL_FROM || 'MoovExpress <onboarding@resend.dev>'
 const FROM = FROM_RAW.includes('<') ? FROM_RAW : `MoovExpress <${FROM_RAW}>`
+
+// NON SCRIVIAMO MAI A UN INDIRIZZO INVENTATO DA NOI.
+//
+// I conti nati dall'installazione Shopify e i conti-ledger delle condivisioni hanno un indirizzo
+// costruito da noi (lib/indirizzi-interni.ts) che nessuno legge. Fino al 20/10/2026 stavano su
+// moovexpress.app, un dominio non nostro che chiunque poteva registrare: credenziali dal reset del
+// master, avviso dogana e recupero password sarebbero arrivati a lui. Sul sottodominio nuovo non li
+// riceve nessuno, ma ogni invio torna indietro, e i rimbalzi pesano sulla reputazione del dominio
+// d'invio. Sta qui perche' ogni email della piattaforma passa da questo modulo (fuori restano solo
+// supporto e contatti del sito, che scrivono a noi, e uno script d'annuncio ai master). Lancia invece
+// di rispondere: ogni funzione qui sotto lo intercetta gia' col suo try/catch e risponde ok:false.
+// Il reply-to invece NON si tocca: dove debbano arrivare le risposte dei compratori di un negozio
+// creato da Shopify non e' ancora deciso, e non lo decide un filtro.
+async function invia(msg: Parameters<typeof resend.emails.send>[0]) {
+  const destinatari = ([] as string[]).concat(msg.to).filter((e) => !eIndirizzoInterno(e))
+  if (!destinatari.length) {
+    console.warn('[EMAIL] destinatario inventato da noi: email non spedita —', msg.subject)
+    throw new Error('destinatario interno: email non spedita')
+  }
+  return resend.emails.send({ ...msg, to: destinatari })
+}
 
 // Intestazione/footer comuni MoovExpress
 function wrap(inner: string): string {
@@ -37,7 +59,7 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const colP = master.colore_primario || '#f97316'
-    const r: any = await resend.emails.send({
+    const r: any = await invia({
       from: FROM,
       to,
       subject: oggetto || `Preventivo${master.nome ? ' da ' + master.nome : ''}`,
@@ -56,7 +78,7 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
 // Email di prova (verifica dominio/mittente Resend). Ritorna esito + id Resend o errore.
 export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: string; id?: string | null; error?: string }> {
   try {
-    const r: any = await resend.emails.send({
+    const r: any = await invia({
       from: FROM,
       to,
       subject: 'Test email — MoovExpress ✅',
@@ -104,7 +126,7 @@ export async function inviaEmailDoganaFerma({ to, destNome, numero, paese, maste
       ${link ? `<p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#f97316;color:#fff;text-decoration:none;border-radius:8px;padding:12px 26px;font-size:14px;font-weight:700;display:inline-block">Apri il ticket e invia i documenti</a></p>` : ''}
     `
     const html = brand ? wrapBrand(inner, { logo: brand.logo, nome: brand.nome }) : wrap(inner)
-    const r: any = await resend.emails.send({ from, to, subject: `Spedizione ${numero} ferma in dogana — servono alcuni dati`, html })
+    const r: any = await invia({ from, to, subject: `Spedizione ${numero} ferma in dogana — servono alcuni dati`, html })
     if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
     return { ok: true }
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
@@ -115,7 +137,7 @@ export async function inviaRichiestaPartner({ to, nome, piano, link }: {
   to: string; nome?: string; piano?: string; link: string
 }): Promise<{ ok: boolean }> {
   try {
-    await resend.emails.send({
+    await invia({
       from: FROM, to,
       subject: 'Richiesta ricevuta — MoovExpress',
       html: wrap(`
@@ -134,7 +156,7 @@ export async function inviaRichiestaPartnerRifiutata({ to, nome, motivo }: {
   to: string; nome?: string; motivo?: string
 }): Promise<{ ok: boolean }> {
   try {
-    await resend.emails.send({
+    await invia({
       from: FROM, to,
       subject: 'Aggiornamento sulla tua richiesta — MoovExpress',
       html: wrap(`
@@ -152,7 +174,7 @@ export async function inviaRichiestaPartnerRifiutata({ to, nome, motivo }: {
 export async function inviaAllertaOneTracking(to: string, arretrato?: number): Promise<{ ok: boolean }> {
   if (!to) return { ok: false }
   try {
-    await resend.emails.send({
+    await invia({
       from: FROM, to,
       subject: '⚠️ OneTracking: sessione non valida — ripesature in pausa',
       html: wrap(`
@@ -182,7 +204,7 @@ export async function inviaControlloGiornaliero(to: string, righe: { area: strin
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;color:#9ca3af">${r.atteso}</td>
     </tr>`
   try {
-    await resend.emails.send({
+    await invia({
       from: FROM, to,
       subject: allarmi.length
         ? `⚠️ MoovExpress — ${allarmi.length} ${allarmi.length === 1 ? 'cosa da guardare' : 'cose da guardare'}`
@@ -225,7 +247,7 @@ export async function inviaCredenzialiCliente({
   const linkPortale = `https://${indirizzoPortale}`
   const testoPulsante = areaStaff ? 'Accedi al Control Center →' : 'Accedi al portale cliente →'
   try {
-    await resend.emails.send({
+    await invia({
       from: FROM,
       to: email,
       subject: `Benvenuto su ${masterNome} — Le tue credenziali di accesso`,
@@ -271,7 +293,7 @@ export async function inviaInvitoStaff({
   email: string; nome: string; link: string; masterNome: string
 }) {
   try {
-    await resend.emails.send({
+    await invia({
       from: FROM,
       to: email,
       subject: `${masterNome} — Invito ad accedere a MoovExpress`,
@@ -294,7 +316,7 @@ export async function inviaInvitoStaff({
 // per forza farsi risettare la password da qualcuno.
 export async function inviaRecuperoPassword({ email, link }: { email: string; link: string }) {
   try {
-    await resend.emails.send({
+    await invia({
       from: FROM,
       to: email,
       subject: 'MoovExpress — Reimposta la tua password',
@@ -393,7 +415,7 @@ export async function inviaEmailSpedizioneCreata(p: {
           ${bloccoTracking}
         `
     try {
-      await resend.emails.send({
+      await invia({
         from: fromBrand, to: dest, replyTo,
         subject: `Un pacco sta arrivando \ud83d\udce6 \u2014 spedizione ${p.numero}`,
         // header scuro col logo del master (colore default #1a1a1a di wrapBrand); fallback MoovExpress.
@@ -471,7 +493,7 @@ export async function inviaEmailGiacenza(p: {
   const replyTo = EMAIL_RE.test(String(p.mittEmail || '').trim().toLowerCase())
     ? String(p.mittEmail).trim().toLowerCase() : undefined
   try {
-    await resend.emails.send({
+    await invia({
       from: fromBrand, to: dest, replyTo,
       subject: `Il tuo pacco \u00e8 in attesa \u2014 spedizione ${p.numero}`,
       html: (brandLogo || brandNome) ? wrapBrand(corpo, { logo: brandLogo, nome: brandNome }) : wrap(corpo),

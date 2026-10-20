@@ -4,6 +4,8 @@ import { provisionShopifyCliente } from '@/lib/shopifyProvision'
 import { SHOPIFY_SCOPES_ESSENZIALI } from '@/lib/shopify'
 import { loginMerchantERedirect } from '@/lib/shopifyLogin'
 import crypto from 'crypto'
+import { conErrore, conCollegato } from '@/lib/esiti-collegamento'
+import { accessoDelCliente } from '@/lib/accesso-cliente'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,6 +27,11 @@ function verifyHmac(sp: URLSearchParams, secret: string): boolean {
   }
 }
 
+// OGNI USCITA D'ERRORE DI QUESTA ROTTA E' UN REDIRECT CON UN CODICE, MAI UNA FRASE NE' UN JSON.
+// Fino al 20/10/2026 nell'indirizzo finivano frasi italiane e perfino il testo dell'errore del database
+// (il codice cliente gia' preso di NMC-1), e tre rami rispondevano JSON 400/500: per chi installa sono
+// pagine d'errore, per Shopify un motivo di rifiuto. Il codice lo traduce lib/esiti-collegamento.ts,
+// in un posto solo per tutte le pagine; il motivo tecnico va nei log, non al negoziante.
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const sp = url.searchParams
@@ -37,13 +44,18 @@ export async function GET(req: NextRequest) {
   const appUrl = process.env.SHOPIFY_APP_URL || url.origin
 
   if (!apiKey || !apiSecret) {
-    return NextResponse.json({ error: 'Configurazione Shopify mancante (variabili ambiente)' }, { status: 500 })
+    console.error('[SHOPIFY][CALLBACK] variabili SHOPIFY_API_KEY/SHOPIFY_API_SECRET assenti')
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'shopify_non_configurato'), req.url))
   }
+  // Senza negozio, code o state non e' un ritorno di Shopify che si possa verificare: per chi lo apre
+  // vale la stessa indicazione della firma (riaprire l'app dall'admin del negozio).
   if (!SHOP_RE.test(shop) || !code || !state) {
-    return NextResponse.json({ error: 'Callback Shopify non valido' }, { status: 400 })
+    console.warn('[SHOPIFY][CALLBACK] richiesta incompleta', SHOP_RE.test(shop) ? shop : '(negozio assente o non valido)')
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'firma'), req.url))
   }
   if (!verifyHmac(sp, apiSecret)) {
-    return NextResponse.json({ error: 'Verifica HMAC fallita' }, { status: 400 })
+    console.warn('[SHOPIFY][CALLBACK] firma non valida', shop)
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'firma'), req.url))
   }
 
   // shopify_oauth_state è chiusa (RLS + no grant anon/authenticated) e al ritorno cross-site dall'OAuth
@@ -60,8 +72,9 @@ export async function GET(req: NextRequest) {
     // manda a una pagina utile per riprovare, non a un errore grezzo.
     const { data: gia } = await adminState.from('integrazioni').select('id')
       .eq('piattaforma', 'shopify').eq('identificativo', shop).eq('stato', 'attivo').maybeSingle()
-    if (gia?.id) return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=${encodeURIComponent(shop)}`)
-    return NextResponse.redirect(new URL('/cliente?error=collegamento_scaduto', req.url))
+    // `shop` ha gia' passato SHOP_RE: e' un dominio *.myshopify.com.
+    if (gia?.id) return NextResponse.redirect(`${appUrl}${conCollegato('/cliente/integrazioni', shop as `${string}.myshopify.com`)}`)
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'collegamento_scaduto'), req.url))
   }
   await adminState.from('shopify_oauth_state').delete().eq('state', state)
 
@@ -95,7 +108,7 @@ export async function GET(req: NextRequest) {
   } catch (e: any) {
     console.error('[SHOPIFY][CALLBACK] scambio token', shop, e?.message || e)
     // Non un 502 JSON grezzo (sembra "l'app non funziona"): pagina utile per riprovare.
-    return NextResponse.redirect(new URL('/cliente?error=collegamento_token', req.url))
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'collegamento_token'), req.url))
   }
 
   // COSA HA CONCESSO DAVVERO IL NEGOZIANTE.
@@ -111,8 +124,9 @@ export async function GET(req: NextRequest) {
   const concessi = String(scope || '').split(',').map((x) => x.trim())
   const mancanti = SHOPIFY_SCOPES_ESSENZIALI.filter((x) => !concessi.includes(x))
   if (mancanti.length) {
-    console.error('[SHOPIFY][CALLBACK] scope insufficienti', shop, scope)
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=${encodeURIComponent('Il negozio non ha concesso tutti i permessi necessari (' + mancanti.join(', ') + '). Rifai il collegamento accettando tutte le autorizzazioni.')}`)
+    // Quali permessi mancano lo dice il log, non l'indirizzo.
+    console.error('[SHOPIFY][CALLBACK] scope insufficienti', shop, scope, 'mancano:', mancanti.join(','))
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'permessi_mancanti')}`)
   }
 
   // Da qui in poi si scrive col client ADMIN, non con la sessione del browser.
@@ -146,11 +160,17 @@ export async function GET(req: NextRequest) {
   // finiva collegato a due clienti e da li' in poi ordini e token andavano al posto sbagliato.
   // Si cerca per NEGOZIO e si aggiorna quella riga: la reinstallazione riaggancia, non duplica.
   // Lo stesso vale per l'admin del CASO B piu' sotto, che gia' faceva cosi'.
-  const { data: existing } = await admin
+  const { data: existing, error: eEsistente } = await admin
     .from('integrazioni').select('id,cliente_id')
     .eq('piattaforma', 'shopify')
     .eq('identificativo', shop)
     .maybeSingle()
+  // Una lettura fallita non e' «negozio libero»: senza la riga non si sa di chi e', e il controllo qui
+  // sotto lascerebbe passare il negozio di un altro cliente con una seconda riga per lo stesso negozio.
+  if (eEsistente) {
+    console.error('[SHOPIFY][CALLBACK] lettura integrazione esistente', shop, eEsistente.message)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'collegamento_non_salvato')}`)
+  }
 
   // ...E UN NEGOZIO GIA' DI QUALCUN ALTRO NON SI PORTA VIA.
   //
@@ -161,7 +181,7 @@ export async function GET(req: NextRequest) {
   // libero: e' la reinstallazione, e deve funzionare.
   if (existing?.cliente_id && existing.cliente_id !== st.cliente_id) {
     console.error('[SHOPIFY][CALLBACK] negozio gia collegato ad altro cliente', shop)
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=${encodeURIComponent('Questo negozio risulta gia collegato a un altro account. Scollegalo da li, poi riprova.')}`)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'negozio_di_altro_account')}`)
   }
 
   // L'esito si guarda: al ritorno cross-site dall'OAuth il cookie di sessione puo' mancare (vedi il
@@ -172,18 +192,23 @@ export async function GET(req: NextRequest) {
     : await admin.from('integrazioni').insert(payload)
   if ((esito as any)?.error) {
     console.error('[SHOPIFY][CALLBACK] integrazione non salvata', shop, (esito as any).error.message)
-    return NextResponse.redirect(`${appUrl}/cliente/integrazioni?error=${encodeURIComponent('Collegamento non salvato, riprova dalle Integrazioni')}`)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'collegamento_non_salvato')}`)
   }
 
-  return NextResponse.redirect(`${appUrl}/cliente/integrazioni?connected=${encodeURIComponent(shop)}`)
+  return NextResponse.redirect(`${appUrl}${conCollegato('/cliente/integrazioni', shop as `${string}.myshopify.com`)}`)
   }
 
   // CASO B: install dallo store senza cliente identificato -> AUTO-CREAZIONE.
-  // Creo (o riuso) un cliente MoovExpress sotto il master di onboarding (default root),
-  // collego il negozio e porto il merchant nel portale GIÀ LOGGATO (modello redirect).
+  // Creo (o riuso) un cliente MoovExpress sotto il master di onboarding (SHOPIFY_ONBOARDING_MASTER_ID e
+  // SHOPIFY_ONBOARDING_LISTINO_ID: se mancano o non tornano, un negozio nuovo si ferma su
+  // onboarding_non_configurato e non nasce nessun conto), collego il negozio e porto il merchant nel
+  // portale GIÀ LOGGATO (modello redirect).
   const prov = await provisionShopifyCliente(admin, shop, token)
   if ('error' in prov) {
-    return NextResponse.redirect(`${appUrl}/cliente?error=${encodeURIComponent(prov.error)}`)
+    // Fino al 20/10 questo ramo non scriveva niente nei log e metteva nell'indirizzo il testo del
+    // database: cosi' NMC-1 (ogni negozio nuovo respinto) e' rimasto invisibile per tre mesi.
+    console.error('[SHOPIFY][CALLBACK] conto non creato', shop, prov.codice, prov.error)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente', prov.codice)}`)
   }
   const payload: any = {
     master_id: prov.masterId, cliente_id: prov.clienteId, piattaforma: 'shopify',
@@ -191,16 +216,27 @@ export async function GET(req: NextRequest) {
     credenziali: { access_token: token, scope, shop, refresh_token: refreshToken, expires_at: expiresAt, refresh_expires_at: refreshExpiresAt },
     stato: 'attivo', errore: null,
   }
-  const { data: existing } = await admin.from('integrazioni').select('id')
+  const { data: existing, error: eEsistente } = await admin.from('integrazioni').select('id')
     .eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
+  // Come nel CASO A: con la lettura fallita si inserirebbe una seconda riga per lo stesso negozio.
+  if (eEsistente) {
+    console.error('[SHOPIFY][CALLBACK] lettura integrazione esistente (auto-creazione)', shop, eEsistente.message)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente', 'collegamento_non_salvato')}`)
+  }
   const esitoB = existing?.id
     ? await admin.from('integrazioni').update(payload).eq('id', existing.id)
     : await admin.from('integrazioni').insert(payload)
   if ((esitoB as any)?.error) {
     console.error('[SHOPIFY][CALLBACK] integrazione non salvata (auto-creazione)', shop, (esitoB as any).error.message)
-    return NextResponse.redirect(`${appUrl}/cliente?error=${encodeURIComponent('Collegamento non salvato, riprova')}`)
+    return NextResponse.redirect(`${appUrl}${conErrore('/cliente', 'collegamento_non_salvato')}`)
   }
 
-  // login automatico nel portale MoovExpress
-  return loginMerchantERedirect(req, prov.email, '/cliente/dashboard')
+  // Login automatico nel portale con l'email del suo UTENTE DI LOGIN, non con clienti.email (vedi
+  // lib/accesso-cliente.ts): un magic link chiesto per un'email senza utente ne crea uno orfano.
+  const accesso = await accessoDelCliente(admin, prov.clienteId)
+  if (!accesso) {
+    console.error('[SHOPIFY][CALLBACK] cliente senza accesso, niente login automatico', shop, prov.clienteId)
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'login_shopify'), req.url))
+  }
+  return loginMerchantERedirect(req, accesso.email, '/cliente/dashboard')
 }

@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { masterVedeReteCompleta, eDiscendente } from '@/lib/rete-masters'
+import { accessoDelCliente, emailPerNuovoAccesso } from '@/lib/accesso-cliente'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // La response finale (redirect) DEVE portare i cookie della nuova sessione:
@@ -61,21 +62,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.redirect(new URL('/dashboard/clienti?error=non_autorizzato', req.url))
   }
 
-  // Account di accesso REALE del cliente (utenti -> auth.users): usiamo l'email effettiva
-  // del login, robusta anche se clienti.email è disallineata o non valida, e NON creiamo
-  // utenti fantasma. Se il cliente non ha un login valido, torniamo alla lista SENZA
-  // sloggare il master (altrimenti si finirebbe sulla pagina di login).
-  const { data: uCli } = await admin.from('utenti').select('id').eq('cliente_id', cliente.id).limit(1).maybeSingle()
-  let loginEmail: string | null = null
-  if (uCli?.id) {
-    const { data: au } = await admin.auth.admin.getUserById((uCli as any).id)
-    loginEmail = au?.user?.email || null
-  }
+  // Account di accesso REALE del cliente: la regola sta in lib/accesso-cliente.ts, la stessa
+  // dell'accesso automatico da Shopify. Se il cliente non ha un login valido, torniamo alla lista
+  // SENZA sloggare il master (altrimenti si finirebbe sulla pagina di login).
+  let loginEmail: string | null = (await accessoDelCliente(admin, cliente.id))?.email || null
   // Nessun account di accesso: lo creiamo al volo se l'email del cliente è valida e libera,
   // così ogni cliente con email valida è sempre accessibile (senza sloggare il master).
+  // Mai su un indirizzo inventato da noi (ledger, conti di prova, dominio vecchio): la regola sta in
+  // lib/accesso-cliente.ts, e il master legge che al cliente va data la sua email vera.
   if (!loginEmail) {
-    const email = (cliente.email || '').trim().toLowerCase()
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    const email = emailPerNuovoAccesso(cliente.email)
+    if (!email) {
       return NextResponse.redirect(new URL('/dashboard/clienti?erroreAccesso=cliente_email_non_valida', req.url))
     }
     const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'

@@ -3,6 +3,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { getPermessiUtente } from '@/lib/permessi'
 import { anagraficaMasterPerLedger } from '@/lib/condivisione-engine'
 import { tipoContrattoDaCreditoModo } from '@/lib/condivisione-credito'
+import { emailContoLedger } from '@/lib/indirizzi-interni'
 
 /* ACCETTA un collegamento ricevuto. Il COMPRATORE (acquirente = corrieri_condivisi.master_id) approva
  * il collegamento, e al consenso si crea solo il suo CLIENTE-LEDGER sotto il venditore, senza login:
@@ -36,7 +37,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { data: ledgerL, error: eLL } = await admin.from('clienti').insert({
     master_id: c.fornitore_master_id,
     ragione_sociale: `${nomeCompratore} (ingrosso)`,
-    email: `ledger-${c.id}@ledger.moovexpress.app`,
+    // Indirizzo inventato da noi, su un sottodominio nostro (lib/indirizzi-interni.ts): fino al
+    // 20/10/2026 nasceva su moovexpress.app, un dominio che non e' nostro.
+    email: emailContoLedger(c.id),
     codice_cliente: 'LDG-' + c.id.slice(0, 8).toUpperCase(),
     tipo_contratto: tipoContrattoDaCreditoModo(c.credito_modo),
     attivo: true, ledger: true,

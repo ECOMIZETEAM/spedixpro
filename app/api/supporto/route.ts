@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 import { Resend } from 'resend'
+import { recapitoEmail } from '@/lib/indirizzi-interni'
 
 /* SUPPORTO DELLA PIATTAFORMA — dal portale a info@moovexpress.com.
  *
@@ -56,8 +57,13 @@ export async function POST(req: NextRequest) {
     if (data?.signedUrl) links.push({ nome: String(a?.nome || 'allegato').slice(0, 120), url: data.signedUrl })
   }
 
+  // Un conto nato dall'installazione Shopify ha un indirizzo inventato da noi, che nessuno legge: il
+  // "Rispondi" di chi legge info@ andrebbe nel vuoto (o, finche' era su moovexpress.app, a chi avesse
+  // registrato quel dominio). Niente reply-to, e chi legge lo sa dalla riga qui sotto.
+  const rispondiA = recapitoEmail(user.email)
   const righe = [
     ['Da', `${esc(utente?.nome || '—')} (${esc(user.email || '—')})`],
+    ...(rispondiA ? [] : [['Risposta', 'conto senza casella email (indirizzo creato da noi): il Rispondi non arriverebbe a nessuno']]),
     ['Ruolo', esc(utente?.ruolo || '—')],
     ['Categoria', esc(categoria)],
     ['Oggetto', esc(oggetto)],
@@ -79,7 +85,7 @@ export async function POST(req: NextRequest) {
   const r: any = await resend.emails.send({
     from: daRaw.includes('<') ? daRaw : `MoovExpress <${daRaw}>`,
     to: A,
-    replyTo: user.email || undefined,
+    replyTo: rispondiA,
     subject: `Supporto — ${categoria}: ${oggetto}`.slice(0, 180),
     html,
   })

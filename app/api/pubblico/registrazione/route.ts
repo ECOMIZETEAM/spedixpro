@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomInt } from 'crypto'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { inviaCredenzialiCliente } from '@/lib/email'
+import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
 
 /* REGISTRAZIONE dal SITO PUBBLICO (www.moovexpress.com): un visitatore diventa cliente vero.
  *
@@ -117,46 +118,36 @@ export async function POST(req: NextRequest) {
   const { data: gia } = await admin.from('clienti').select('id').eq('email', email).maybeSingle()
   if (gia) return no('Questa email è già registrata. Accedi al portale o usa il recupero password.', 409)
 
-  // ── Inserimento cliente, con RIPROVA sul codice progressivo.
-  // Il codice e' unico per master e si alloca leggendo il massimo e sommando 1: sotto concorrenza
-  // (la normalita' di una registrazione pubblica) due richieste possono scegliere lo stesso numero.
-  // L'indice clienti_codice_master_unici respinge il secondo con 23505: qui si riprova col numero
-  // dopo, invece di sputare l'errore del database in faccia al visitatore.
-  let nuovoCliente: { id: string; codice: string } | null = null
-  for (let tentativo = 0; tentativo < 6 && !nuovoCliente; tentativo++) {
-    const { data: ultimi } = await admin.from('clienti')
-      .select('codice_cliente').eq('master_id', MULTIEXPRESS)
-      .order('codice_cliente', { ascending: false }).limit(1)
-    let prossimo = 1
-    const n = parseInt(String(ultimi?.[0]?.codice_cliente || '').replace(/\D/g, ''), 10)
-    if (!isNaN(n)) prossimo = n + 1 + tentativo   // il +tentativo salta i numeri gia' rubati da richieste parallele
-    const codice = `CLI-${String(prossimo).padStart(4, '0')}`
-
-    const { data, error } = await admin.from('clienti').insert({
-      master_id: MULTIEXPRESS,
-      ragione_sociale: ragioneSociale,
-      email,
-      telefono: telefono || null,
-      piva: tipo === 'azienda' ? piva : null,
-      cf: tipo === 'privato' ? cf : null,
-      rappresentante_legale: tipo === 'azienda' ? rappresentante : null,
-      // PERIMETRO FISSO — mai dal corpo:
-      listino_cliente_id: LISTINO_WEB,
-      tipo_contratto: 'credito_scalare',   // nasce a credito scalare: senza credito non spedisce
-      codice_cliente: codice,
-      attivo: true,
-      // credito NON impostato: default 0. api_* NON impostati: default esente/free.
-    }).select('id').single()
-
-    if (!error && data) { nuovoCliente = { id: data.id, codice }; break }
+  // ── Inserimento cliente. Il codice progressivo, e la riprova se due registrazioni simultanee
+  // (la normalita' di una porta pubblica) prendono lo stesso numero, e' la regola unica di
+  // lib/codice-cliente.ts. Qui prima c'era la formula alfabetica, che su MULTIEXPRESS reggeva solo
+  // perche' il suo ultimo codice in alfabeto era anche il piu' alto.
+  const { data: inserito, error } = await inserisciClienteConCodice(admin, {
+    master_id: MULTIEXPRESS,
+    ragione_sociale: ragioneSociale,
+    email,
+    telefono: telefono || null,
+    piva: tipo === 'azienda' ? piva : null,
+    cf: tipo === 'privato' ? cf : null,
+    rappresentante_legale: tipo === 'azienda' ? rappresentante : null,
+    // PERIMETRO FISSO — mai dal corpo:
+    listino_cliente_id: LISTINO_WEB,
+    tipo_contratto: 'credito_scalare',   // nasce a credito scalare: senza credito non spedisce
+    attivo: true,
+    // credito NON impostato: default 0. api_* NON impostati: default esente/free.
+  })
+  if (error || !inserito) {
     const msg = String(error?.message || '')
     if (error?.code === '23505' && msg.includes('clienti_email_key'))
       return no('Questa email è già registrata. Accedi al portale o usa il recupero password.', 409)
-    if (error?.code === '23505' && msg.includes('codice')) continue   // numero rubato: riprovo col successivo
+    if (indirizzoInternoRifiutato(error))
+      return no('Questo indirizzo email non può essere usato per registrarsi: usa la tua email.', 400)
+    if (codiceGiaPreso(error))   // numero preso anche dopo i tentativi
+      return no('Registrazione momentaneamente non disponibile. Riprova fra poco.', 503)
     console.error('[pubblico/registrazione] insert cliente', error)
     return no('Non siamo riusciti a completare la registrazione. Riprova o scrivici.', 500)
   }
-  if (!nuovoCliente) return no('Registrazione momentaneamente non disponibile. Riprova fra poco.', 503)
+  const nuovoCliente = { id: inserito.id as string }
 
   // ── Accesso: l'utente auth PRIMA delle credenziali. Se qui fallisce, la registrazione e' a
   // meta' (cliente senza login): cancello la riga appena creata — non ha storico attaccato, e'
@@ -167,7 +158,9 @@ export async function POST(req: NextRequest) {
   })
   if (aErr || !authUser?.user) {
     console.error('[pubblico/registrazione] createUser', aErr)
-    await admin.from('clienti').delete().eq('id', nuovoCliente.id)   // rollback della sola riga di questa richiesta
+    // rollback della sola riga di questa richiesta; l'esito si legge, un cliente rimasto a meta' va visto
+    const { error: dErr } = await admin.from('clienti').delete().eq('id', nuovoCliente.id)
+    if (dErr) console.error('[pubblico/registrazione] rollback cliente NON riuscito', nuovoCliente.id, dErr.message)
     // Email gia' presente in auth ma non fra i clienti: caso raro, lo trattiamo come "gia' registrata".
     if (String(aErr?.message || '').toLowerCase().includes('already'))
       return no('Questa email è già registrata. Accedi al portale o usa il recupero password.', 409)
@@ -182,8 +175,11 @@ export async function POST(req: NextRequest) {
   })
   if (uErr) {
     console.error('[pubblico/registrazione] insert utenti', uErr)
-    await admin.auth.admin.deleteUser(authUser.user.id).catch(() => {})
-    await admin.from('clienti').delete().eq('id', nuovoCliente.id)
+    // deleteUser restituisce l'errore, non lo lancia: un .catch() qui non prendeva niente.
+    const { error: duErr } = await admin.auth.admin.deleteUser(authUser.user.id)
+    if (duErr) console.error('[pubblico/registrazione] rollback utente di login NON riuscito', authUser.user.id, duErr.message)
+    const { error: dErr } = await admin.from('clienti').delete().eq('id', nuovoCliente.id)
+    if (dErr) console.error('[pubblico/registrazione] rollback cliente NON riuscito', nuovoCliente.id, dErr.message)
     return no('Non siamo riusciti ad attivare l’accesso. Riprova o scrivici.', 500)
   }
 

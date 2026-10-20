@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { conErrore } from '@/lib/esiti-collegamento'
 
 // Logga il merchant (via magic-link) e ritorna una redirect con i cookie di sessione
 // già attaccati, così il portale si apre GIÀ loggato (no login manuale, no App Bridge).
@@ -24,10 +25,16 @@ export async function loginMerchantERedirect(req: NextRequest, email: string, to
   const admin = createAdminSupabase()
   const { data: linkData, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email })
   const tokenHash = linkData?.properties?.hashed_token
-  if (error || !tokenHash) return NextResponse.redirect(new URL('/cliente?error=login_shopify', req.url))
+  if (error || !tokenHash) {
+    console.error('[SHOPIFY][LOGIN] magic link non generato', error?.message)
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'login_shopify'), req.url))
+  }
 
   const { data: s, error: vErr } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: tokenHash })
-  if (vErr || !s.session) return NextResponse.redirect(new URL('/cliente?error=login_shopify', req.url))
+  if (vErr || !s.session) {
+    console.error('[SHOPIFY][LOGIN] sessione non creata', vErr?.message)
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'login_shopify'), req.url))
+  }
 
   // PULIZIA CHUNK DI SESSIONE VECCHI. Supabase spezza la sessione in cookie `sb-...-auth-token.0/.1/...`;
   // a ogni nuovo login magic-link (auto-provision Shopify) i chunk della sessione precedente NON

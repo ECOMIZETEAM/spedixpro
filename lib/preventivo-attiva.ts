@@ -1,4 +1,5 @@
 import { randomInt } from 'crypto'
+import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
 
 // ATTIVAZIONE di un preventivo accettato: crea la POSIZIONE (cliente o sotto-master, nuovo o esistente)
 // + le credenziali d'accesso + aggancia il listino-bozza come listino reale, e mette stato='accettato'.
@@ -94,7 +95,11 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
         const { data: au, error: aErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true })
         if (!aErr && au?.user) {
           const { error: uErr } = await admin.from('utenti').insert({ id: au.user.id, ruolo: 'master', master_id: creato.id, cliente_id: null, nome, attivo: true })
-          if (uErr) { await admin.auth.admin.deleteUser(au.user.id).catch(() => {}) }
+          if (uErr) {
+            // deleteUser restituisce l'errore, non lo lancia: un .catch() qui non prendeva niente.
+            const { error: dErr } = await admin.auth.admin.deleteUser(au.user.id)
+            console.error('[preventivo/attiva] riga utenti non creata', uErr.message, dErr ? `— utente di login RIMASTO: ${dErr.message}` : '— utente di login tolto')
+          }
           else {
             try {
               const { inviaCredenzialiCliente } = await import('@/lib/email')
@@ -130,26 +135,35 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
     if (gia) {
       clienteId = gia.id
     } else {
+      // Codice progressivo e riprova sul numero gia' preso: regola unica in lib/codice-cliente.ts. Qui
+      // prima c'era la formula alfabetica: per MoovExpress ("TIKTOKREV") ogni preventivo accettato si
+      // sarebbe fermato sei volte su CLI-0001, gia' preso.
       let nuovo: { id: string } | null = null
-      for (let t = 0; t < 6 && !nuovo; t++) {
-        const { data: ultimi } = await admin.from('clienti').select('codice_cliente').eq('master_id', p.master_id).order('codice_cliente', { ascending: false }).limit(1)
-        let prossimo = 1; const n = parseInt(String(ultimi?.[0]?.codice_cliente || '').replace(/\D/g, ''), 10); if (!isNaN(n)) prossimo = n + 1 + t
-        const codice = `CLI-${String(prossimo).padStart(4, '0')}`
-        const { data, error } = await admin.from('clienti').insert({
-          master_id: p.master_id, ragione_sociale: p.dest_nome || email, email,
-          listino_cliente_id: draftId, tipo_contratto: 'credito_scalare', codice_cliente: codice, attivo: true,
-          // Preventivo fatto da un AGENTE → il cliente nasce sotto il MASTER ma con il tag agente
-          // (clienti.agente = nome+cognome): l'agente ci guadagna il margine, il cliente è del master.
-          agente: p.agente || null,
-          // Anagrafica dal preventivo → cliente completo/fatturabile. Sede legale e operativa uguali
-          // (il preventivo raccoglie un indirizzo solo); il cliente le affina dal suo profilo se serve.
-          piva: p.dest_piva || null, cod_sdi: p.dest_cod_sdi || null, pec: p.dest_pec || null, telefono: p.dest_telefono || null,
-          sl_indirizzo: p.dest_indirizzo || null, sl_cap: p.dest_cap || null, sl_citta: p.dest_citta || null, sl_provincia: p.dest_provincia || null, sl_paese: p.dest_paese || null,
-          so_indirizzo: p.dest_indirizzo || null, so_cap: p.dest_cap || null, so_citta: p.dest_citta || null, so_provincia: p.dest_provincia || null, so_paese: p.dest_paese || null,
-        }).select('id').single()
-        if (!error && data) { nuovo = data; break }
-        if (error?.code === '23505' && String(error.message).includes('email')) { const { data: g2 } = await admin.from('clienti').select('id').eq('email', email).maybeSingle(); if (g2) { clienteId = g2.id; break } }
-        if (error?.code === '23505' && String(error.message).includes('codice')) continue
+      const { data, error } = await inserisciClienteConCodice(admin, {
+        master_id: p.master_id, ragione_sociale: p.dest_nome || email, email,
+        listino_cliente_id: draftId, tipo_contratto: 'credito_scalare', attivo: true,
+        // Preventivo fatto da un AGENTE → il cliente nasce sotto il MASTER ma con il tag agente
+        // (clienti.agente = nome+cognome): l'agente ci guadagna il margine, il cliente è del master.
+        agente: p.agente || null,
+        // Anagrafica dal preventivo → cliente completo/fatturabile. Sede legale e operativa uguali
+        // (il preventivo raccoglie un indirizzo solo); il cliente le affina dal suo profilo se serve.
+        piva: p.dest_piva || null, cod_sdi: p.dest_cod_sdi || null, pec: p.dest_pec || null, telefono: p.dest_telefono || null,
+        sl_indirizzo: p.dest_indirizzo || null, sl_cap: p.dest_cap || null, sl_citta: p.dest_citta || null, sl_provincia: p.dest_provincia || null, sl_paese: p.dest_paese || null,
+        so_indirizzo: p.dest_indirizzo || null, so_cap: p.dest_cap || null, so_citta: p.dest_citta || null, so_provincia: p.dest_provincia || null, so_paese: p.dest_paese || null,
+      })
+      let riusato = false
+      if (!error && data) nuovo = data
+      else if (indirizzoInternoRifiutato(error)) {
+        return { error: 'L\'email del destinatario è un indirizzo interno della piattaforma: chiedi al destinatario la sua email vera.', status: 400 }
+      }
+      else if (error?.code === '23505' && String(error.message).includes('email')) {
+        // Email nata nel frattempo (doppio clic sulla riconferma): si riusa quel cliente, come prima.
+        const { data: g2 } = await admin.from('clienti').select('id').eq('email', email).maybeSingle()
+        if (g2) { clienteId = g2.id; riusato = true }
+      }
+      // Codice ancora preso dopo i tentativi: nuovo resta vuoto e si risponde "Non riusciamo a
+      // completare l'attivazione" piu' sotto, come quando i sei tentativi di prima si esaurivano.
+      if (!nuovo && !riusato && !codiceGiaPreso(error)) {
         console.error('[preventivo/attiva] insert cliente', error)
         return { error: 'Non riusciamo a creare l\'account del cliente.', status: 500 }
       }
@@ -159,7 +173,11 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
         const { data: au, error: aErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true })
         if (!aErr && au?.user) {
           const { error: uErr } = await admin.from('utenti').insert({ id: au.user.id, ruolo: 'cliente', master_id: p.master_id, cliente_id: nuovo.id, nome: p.dest_nome || email, attivo: true })
-          if (uErr) { await admin.auth.admin.deleteUser(au.user.id).catch(() => {}) }
+          if (uErr) {
+            // deleteUser restituisce l'errore, non lo lancia: un .catch() qui non prendeva niente.
+            const { error: dErr } = await admin.auth.admin.deleteUser(au.user.id)
+            console.error('[preventivo/attiva] riga utenti non creata', uErr.message, dErr ? `— utente di login RIMASTO: ${dErr.message}` : '— utente di login tolto')
+          }
           else {
             try {
               const { inviaCredenzialiCliente } = await import('@/lib/email')

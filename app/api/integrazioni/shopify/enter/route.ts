@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { loginMerchantERedirect } from '@/lib/shopifyLogin'
 import crypto from 'crypto'
+import { accessoDelCliente } from '@/lib/accesso-cliente'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -40,16 +41,19 @@ export async function GET(req: NextRequest) {
   // NIENTE EMBED `clienti(email)`: PostgREST risolve gli embed SOLO attraverso una foreign key, e
   // `integrazioni` non ne ha nessuna (verificato su pg_constraint: c'e' solo la chiave primaria).
   // Quella select falliva SEMPRE, quindi `integr` era sempre nullo e l'auto-login del merchant non
-  // ha mai funzionato: chi apriva l'app da Shopify finiva comunque sull'installazione. Due letture
-  // separate costano una query in piu' e funzionano.
+  // ha mai funzionato: chi apriva l'app da Shopify finiva comunque sull'installazione. L'email si
+  // legge a parte, qui sotto: costa qualche query in piu' e funziona.
   const { data: integr } = await admin.from('integrazioni')
     .select('cliente_id,stato,credenziali')
     .eq('piattaforma', 'shopify').eq('identificativo', shop).maybeSingle()
-  let emailCliente: string | null = null
-  if (integr?.cliente_id) {
-    const { data: cli } = await admin.from('clienti').select('email').eq('id', integr.cliente_id).maybeSingle()
-    emailCliente = (cli as any)?.email || null
-  }
+  // SI ENTRA COME L'UTENTE DI LOGIN DEL CLIENTE, la stessa regola del callback (lib/accesso-cliente.ts),
+  // non con clienti.email (NMC-14). Fino al 20/10/2026 qui il magic link si chiedeva per clienti.email: se
+  // e' l'email di login di un altro utente si entrava come lui; se non ha un utente, generateLink lo crea,
+  // orfano e senza riga in `utenti` (portale senza menu), e da li' l'installazione non riesce piu' a dare
+  // l'accesso al conto, perche' l'email risulta gia' presa. Senza accesso il negozio conta come non
+  // collegato e si riparte dall'OAuth: e' li' che nasce l'accesso del conto creato dall'installazione
+  // (lib/shopifyProvision.ts, assicuraAccesso).
+  const email = integr?.cliente_id ? (await accessoDelCliente(admin, integr.cliente_id))?.email || null : null
 
   // NEGOZIO NON COLLEGATO → si riparte dall'OAuth.
   //
@@ -68,7 +72,6 @@ export async function GET(req: NextRequest) {
   // Il callback e' gia' idempotente sul riaggancio (aggiorna la riga esistente per identificativo),
   // quindi ripassare dall'OAuth non crea doppioni. E con la managed installation il consenso e'
   // gia' dato: l'authorize torna subito il codice, il merchant non vede nessuna schermata in piu'.
-  const email = emailCliente
   const token = ((integr as any)?.credenziali || {}).access_token
   const vivo = !!integr?.cliente_id && !!email && (integr as any)?.stato === 'attivo' && !!token
   if (!vivo) {

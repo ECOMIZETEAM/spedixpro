@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { inviaCredenzialiCliente } from '@/lib/email'
 import { bloccaAgente } from '@/lib/agente'
+import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
 
 // Almeno 12 caratteri: sotto quella soglia Supabase RIFIUTA la password. Prima erano 10 e la
 // creazione dell'accesso falliva, con l'errore mai letto e l'email di credenziali spedita lo stesso.
@@ -39,33 +40,11 @@ export async function POST(req: NextRequest) {
       : 'Questa email è già usata da un altro account sulla piattaforma e non può essere riassegnata a un nuovo cliente. Usa un\'altra email.' },
       { status: 400 })
   }
-  // CODICE PROGRESSIVO PER MASTER, calcolato SOLO sui codici della serie e in NUMERICO.
-  //
-  // Prima si prendeva il massimo in ordine ALFABETICO su tutti i codici, comunque fossero fatti, e da
-  // quella stringa si tiravano fuori le cifre. Bastava un codice fuori serie per rompere tutto: Velox
-  // aveva "LDG-9F9FA70C" (un cliente d'ingrosso), che in alfabeto viene dopo ogni "CLI-…"; le sue
-  // cifre sono 9,9,7,0 -> 9970, quindi proponeva sempre CLI-9971, che esisteva gia'. Non una corsa:
-  // un blocco FISSO, a ogni tentativo, e il master non poteva piu' creare clienti. Stessa cosa per
-  // MoovExpress con "TIKTOKREV" (nessuna cifra -> ripartiva da CLI-0001, gia' preso).
-  //
-  // Quindi: si guardano solo i "CLI-<numero>", si confronta il NUMERO e non il testo, e i codici
-  // personalizzati restano fuori dalla serie — che e' quello che sono.
-  const { data: codici } = await supabase.from('clienti')
-    .select('codice_cliente').eq('master_id', utente.master_id).like('codice_cliente', 'CLI-%')
-  let prossimo = 1
-  for (const r of (codici || [])) {
-    const m = /^CLI-(\d+)$/.exec(String((r as any).codice_cliente || '').trim())
-    if (m) prossimo = Math.max(prossimo, parseInt(m[1], 10) + 1)
-  }
   const password = generaPassword()
-  // E SE DUE CREAZIONI SI SCONTRANO DAVVERO, si riprova col numero dopo invece di rimandare indietro
-  // l'utente: e' il caso che il messaggio raccontava gia' prima, ma senza farci niente.
-  let nuovoCliente: any = null
-  let error: any = null
-  let codice = ''
-  for (let tent = 0; tent < 5; tent++) {
-    codice = `CLI-${String(prossimo + tent).padStart(4, '0')}`
-    const res = await supabase.from('clienti').insert({
+  // Il codice cliente (CLI-0001...) e i tentativi se due creazioni prendono lo stesso numero: regola
+  // unica in lib/codice-cliente.ts, la stessa delle altre porte che creano clienti. Col client di
+  // SESSIONE, come prima: il numero lo decide la regola, il permesso di scrivere resta del master.
+  const { data: nuovoCliente, error, codice } = await inserisciClienteConCodice(supabase, {
     master_id: utente.master_id,
     ragione_sociale: ragioneSociale,
     piva: body.piva||null, cf: body.cf||null, pec: body.pec||null,
@@ -89,19 +68,16 @@ export async function POST(req: NextRequest) {
     rimborso_freq: body.rimborso_freq||null, rimborso_tipo: body.rimborso_tipo||null,
     iban: body.iban||null, abi: body.abi||null, cab: body.cab||null,
     bic_swift: body.bic_swift||null, note_rimborso: body.note_rimborso||null,
-    codice_cliente: codice, attivo: true,
-    }).select().single()
-    nuovoCliente = res.data; error = res.error
-    if (!error && nuovoCliente) break
-    const collisioneCodice = (res.error as any)?.code === '23505' && /codice/i.test(res.error?.message || '')
-    if (!collisioneCodice) break        // un altro errore non si risolve riprovando
-  }
+    attivo: true,
+  }, '*')
   if (error || !nuovoCliente) {
-    // L'email duplicata è già intercettata sopra. Sul codice si è già riprovato cinque volte qui
-    // sopra: se si arriva fin qui non è più "riprova", è qualcosa che non si sblocca da solo — e il
-    // messaggio non deve mandare l'utente a ritentare all'infinito come faceva prima.
+    // L'email duplicata è già intercettata sopra. Sul codice si è già riprovato cinque volte
+    // (lib/codice-cliente.ts): se si arriva fin qui non è più "riprova", è qualcosa che non si sblocca
+    // da solo — e il messaggio non deve mandare l'utente a ritentare all'infinito come faceva prima.
     console.error('[CLIENTE][CREA] insert KO', (error as any)?.code, error?.message)
-    const codiceInUso = (error as any)?.code === '23505' && /codice/i.test(error?.message || '')
+    if (indirizzoInternoRifiutato(error))
+      return NextResponse.json({ error: 'Questa email è un indirizzo interno della piattaforma e non può essere data a un cliente: usa l\'email vera del cliente.' }, { status: 400 })
+    const codiceInUso = codiceGiaPreso(error)
     return NextResponse.json({ error: codiceInUso
       ? 'Non sono riuscito ad assegnare un codice cliente libero. Riprova fra un istante; se continua, segnalalo all\'assistenza.'
       : 'Non è stato possibile creare il cliente. Riprova; se il problema persiste contatta l\'assistenza.' },
