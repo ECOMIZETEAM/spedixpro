@@ -23,6 +23,14 @@ export function gestisceLaRete(u: UtenteRuolo): boolean {
   return r(u) === 'master' || r(u) === 'admin' || r(u) === 'operatore'
 }
 
+/** Il titolare o un admin: i permessi pieni del master (isFull in lib/permessi). L'operatore NO.
+ *  Decisione di Lorenzo del 20/10/2026: l'operatore non cambia password, email di accesso e condizioni
+ *  d'acquisto dei sotto-master, e non si riscrive la tabella dei permessi (altrimenti si ridarebbe da
+ *  solo cio' che il titolare gli ha tolto). */
+export function eTitolareOAdmin(u: UtenteRuolo): boolean {
+  return r(u) === 'master' || r(u) === 'admin'
+}
+
 /** Puo' almeno GUARDARE le cose della rete: come sopra, piu' l'agente, che vede pero' soltanto i
  *  propri clienti — il filtro per cliente resta a carico di chi chiama. */
 export function vedeLaRete(u: UtenteRuolo): boolean {

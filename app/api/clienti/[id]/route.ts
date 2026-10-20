@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { gestisceLaRete } from '@/lib/ruoli'
+import { gestisceLaRete, eTitolareOAdmin } from '@/lib/ruoli'
 import { bloccaAgente, isAgente, clientiAgente, nomeAgente } from '@/lib/agente'
 
 // Assegnazione listino a un cliente/sotto-master: puo' innescare la propagazione a cascata.
@@ -62,7 +62,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // IL RUOLO, non la sola appartenenza: master_id ce l'hanno anche i clienti, e le regole per riga di
   // `clienti` lasciano al cliente la SUA riga — senza questo, un cliente poteva chiamare questa rotta
   // col proprio id e cambiarsi i campi che decide il master (a partire dai blocchi e dal listino).
-  if (!gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // E il master_id: senza, il confronto col padre del sotto-master (null === null) farebbe passare sulle radici.
+  if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
   const { resetPassword, email_conferma, ...datiCliente } = body
 
@@ -71,10 +72,44 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const targetId = id.slice(2)
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
-    const { data: m } = await admin.from('masters').select('id,parent_master_id,email').eq('id', targetId).single()
+    const { data: m } = await admin.from('masters').select('id,parent_master_id,email,parent_listino_id,tipo_contratto').eq('id', targetId).single()
     if (!m || m.parent_master_id !== utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    // L'OPERATORE non cambia email di accesso, tipo contratto e listino assegnato del sotto-master
+    // (decisione di Lorenzo, 20/10/2026): li cambiano il titolare e gli admin. Si guarda solo cio' che
+    // CAMBIA, perche' Impostazioni e Modifica rimandano ogni volta tutta la riga.
+    if (!eTitolareOAdmin(utente)) {
+      const emailCambiata = !!String(datiCliente.email || '').trim()
+        && String(datiCliente.email).trim().toLowerCase() !== String((m as any).email || '').trim().toLowerCase()
+      const tipoCambiato = !!datiCliente.tipo_contratto && datiCliente.tipo_contratto !== (m as any).tipo_contratto
+      const listinoCambiato = datiCliente.listino_cliente_id !== undefined
+        && (datiCliente.listino_cliente_id || null) !== ((m as any).parent_listino_id || null)
+      if (emailCambiata || tipoCambiato || listinoCambiato) {
+        return NextResponse.json({ error: 'Email di accesso e condizioni d\'acquisto le cambiano solo il titolare o un admin' }, { status: 403 })
+      }
+    }
     // Aggiorno solo i campi presenti nel body (così Anagrafica e Impostazioni non si sovrascrivono a vicenda)
     const upd: any = {}
+    // LE CONDIZIONI D'ACQUISTO DEL SOTTO-MASTER, con gli stessi controlli di /api/master/[id]: il listino
+    // dev'essere di CHI ASSEGNA (qui il padre diretto) e il tipo contratto uno dei due valori veri. Fino al
+    // 20/10/2026 il listino arrivava dal corpo senza controllo: si poteva assegnare a un figlio il listino
+    // di un altro master, e la propagazione qui sotto rimaterializzava anche le reti a cui e' assegnato.
+    // Si controllano PRIMA del cambio email: un rifiuto non deve lasciare l'accesso gia' cambiato in auth.
+    if (datiCliente.tipo_contratto) {
+      if (datiCliente.tipo_contratto !== 'credito_scalare' && datiCliente.tipo_contratto !== 'fattura_mensile') {
+        return NextResponse.json({ error: 'Tipo contratto non valido' }, { status: 400 })
+      }
+      upd.tipo_contratto = datiCliente.tipo_contratto
+    }
+    if (datiCliente.listino_cliente_id !== undefined) {
+      const lid = datiCliente.listino_cliente_id || null
+      // Si controlla solo quando CAMBIA (come /api/master/[id]): le pagine rimandano ogni volta il listino
+      // gia' assegnato, e se l'ha assegnato un antenato piu' in alto il padre non deve restare bloccato.
+      if (lid && lid !== (m as any).parent_listino_id) {
+        const { data: lisOk } = await admin.from('listini_clienti').select('id').eq('id', lid).eq('master_id', utente?.master_id).maybeSingle()
+        if (!lisOk) return NextResponse.json({ error: 'Listino non valido o non tuo' }, { status: 400 })
+      }
+      upd.parent_listino_id = lid
+    }
     // Cambio email di accesso del sotto-master (login = email su auth + utenti + masters)
     const emVecchia = ((m as any).email || '').trim().toLowerCase()
     const emNuova = (datiCliente.email || '').trim().toLowerCase()
@@ -96,8 +131,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (datiCliente.telefono !== undefined) upd.telefono = datiCliente.telefono || null
     if (datiCliente.piva !== undefined) upd.piva = datiCliente.piva || null
     if (datiCliente.attivo !== undefined) upd.attivo = datiCliente.attivo ?? true
-    if (datiCliente.tipo_contratto !== undefined) upd.tipo_contratto = datiCliente.tipo_contratto || null
-    if (datiCliente.listino_cliente_id !== undefined) upd.parent_listino_id = datiCliente.listino_cliente_id || null
     // Stesse impostazioni del cliente (colonne aggiunte a masters)
     if (datiCliente.impostazioni !== undefined) upd.impostazioni = datiCliente.impostazioni
     if (datiCliente.prezzi_in_distinta !== undefined) upd.prezzi_in_distinta = datiCliente.prezzi_in_distinta

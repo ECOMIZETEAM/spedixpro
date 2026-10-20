@@ -1,22 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { gestisceLaRete } from '@/lib/ruoli'
+import { gestisceLaRete, eTitolareOAdmin } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { eDiscendente } from '@/lib/rete-masters'
 
-// Il chiamante può gestire il master target se è admin, oppure se è un suo antenato
-async function puoGestire(admin: any, utente: any, targetId: string): Promise<boolean> {
-  if (utente?.ruolo === 'admin') return true
-  if (!utente?.master_id) return false
-  if (utente.master_id === targetId) return true
-  let cur: string | null = targetId
-  for (let i = 0; i < 20 && cur; i++) {
-    const { data: m } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-    if (!m) break
-    if (m.parent_master_id === utente.master_id) return true
-    cur = m.parent_master_id
-  }
-  return false
-}
+// CHI PUO' TOCCARE UN MASTER DA QUI: solo chi gli sta SOPRA nella rete (padre, nonno... fino alla
+// radice), con un ruolo da staff (il ruolo lo controlla gia' gestisceLaRete nelle due rotte). Su se
+// stesso un master puo' solo LEGGERE: le condizioni con cui compra (tipo contratto, listino assegnato)
+// le decide chi gli vende, ed email e password del titolare non si cambiano dalla scheda del padre.
+// Fino al 20/10/2026 qui c'erano due scorciatoie. `ruolo === 'admin'` passava su QUALSIASI master della
+// piattaforma: 45 utenti admin in 18 master, rivenditori compresi, potevano impostare con nuova_password
+// la password dell'account di MULTIEXPRESS o della radice. E il master passava su se stesso: poteva
+// mettersi a fattura mensile (niente piu' blocco del credito) o assegnarsi un suo listino come costo
+// d'acquisto, cioe' pagare a chi gli vende i prezzi decisi da lui.
+// "Sta sopra" e' eDiscendente di lib/rete-masters: la stessa risalita usata dalle altre rotte della rete.
 
 async function authUserIdDelMaster(admin: any, masterId: string): Promise<string | null> {
   const { data: u } = await admin.from('utenti').select('id').eq('master_id', masterId).eq('ruolo', 'master').limit(1).maybeSingle()
@@ -35,7 +32,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { puoGestireRete } = await import('@/lib/permessi')
   if (!(await puoGestireRete())) return NextResponse.json({ error: 'Gestione rete non abilitata per questo account' }, { status: 403 })
   const admin = createAdminSupabase()
-  if (!(await puoGestire(admin, utente, id))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // Leggere la propria anagrafica non fa danni; quella degli altri solo se gli stai sopra.
+  if (utente.master_id !== id && !(await eDiscendente(admin, id, utente.master_id))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const { data: m } = await admin.from('masters')
     .select('id,nome,email,telefono,piva,tipo_contratto,parent_master_id,parent_listino_id,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo').eq('id', id).single()
@@ -59,18 +57,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { puoGestireRete } = await import('@/lib/permessi')
   if (!(await puoGestireRete())) return NextResponse.json({ error: 'Gestione rete non abilitata per questo account' }, { status: 403 })
   const admin = createAdminSupabase()
-  if (!(await puoGestire(admin, utente, id))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (!(await eDiscendente(admin, id, utente.master_id))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const body = await req.json()
   const authId = await authUserIdDelMaster(admin, id)
 
   // Stato attuale: serve per capire se il LISTINO assegnato sta davvero CAMBIANDO. Solo in quel caso
   // va rimaterializzato (vedi sotto): rifarlo a ogni salvataggio anagrafica sarebbe inutile e costoso.
-  const { data: mAttuale } = await admin.from('masters').select('parent_listino_id').eq('id', id).maybeSingle()
+  const { data: mAttuale } = await admin.from('masters').select('parent_listino_id,tipo_contratto').eq('id', id).maybeSingle()
   const listinoInBody = 'parent_listino_id' in body
   const listinoNuovo = listinoInBody ? (body.parent_listino_id || null) : undefined
   const listinoAttuale = mAttuale?.parent_listino_id || null
   const listinoCambiato = listinoInBody && listinoNuovo !== listinoAttuale
+
+  // L'OPERATORE non cambia password, email di accesso, tipo contratto e listino assegnato di un
+  // sotto-master (decisione di Lorenzo, 20/10/2026): li cambiano il titolare e gli admin. Si guarda solo
+  // cio' che CAMBIA, perche' la scheda rimanda ogni volta tipo contratto e listino gia' impostati.
+  if (!eTitolareOAdmin(utente)) {
+    const tipoCambiato = (body.tipo_contratto === 'credito_scalare' || body.tipo_contratto === 'fattura_mensile')
+      && body.tipo_contratto !== (mAttuale as any)?.tipo_contratto
+    const credenziali = !!String(body.nuova_email || '').trim() || !!String(body.nuova_password || '').trim() || !!body.resetPassword
+    if (listinoCambiato || tipoCambiato || credenziali) {
+      return NextResponse.json({ error: 'Password, email di accesso e condizioni d\'acquisto le cambiano solo il titolare o un admin' }, { status: 403 })
+    }
+  }
 
   // Se si ASSEGNA un nuovo listino, dev'essere un listino di CHI assegna (come in /api/master/crea):
   // impedisce di puntare un sotto-master al listini_clienti di un altro (IDOR).

@@ -36,7 +36,12 @@ export default function StaffPage() {
 
   async function elimina(id: string) {
     if (!await dialog.confirm({ title: 'Eliminare l\'account?', danger: true, confirmText: 'Elimina' })) return
-    await fetch('/api/staff?id=' + id, { method: 'DELETE' })
+    // La risposta si legge: un rifiuto (per esempio un operatore che prova a togliere un admin) o un
+    // accesso rimasto attivo vanno detti, altrimenti la riga resta li' senza spiegazione.
+    const r = await fetch('/api/staff?id=' + id, { method: 'DELETE' })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) await dialog.alert({ title: 'Errore', message: j.error || 'Cancellazione non riuscita' })
+    else if (j.avviso) await dialog.alert({ title: 'Attenzione', message: j.avviso })
     carica()
   }
 

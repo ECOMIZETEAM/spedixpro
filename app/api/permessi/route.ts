@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { eTitolareOAdmin } from '@/lib/ruoli'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -17,6 +18,9 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
+  // La tabella dei permessi la salvano solo il titolare e gli admin. Prima bastava il master_id (e la RLS
+  // dello staff): un operatore poteva riscriversi la propria riga e ridarsi cio' che il titolare gli aveva tolto.
+  if (!eTitolareOAdmin(utente)) return NextResponse.json({ error: 'I permessi li modificano solo il titolare o un admin' }, { status: 403 })
   const body = await req.json()
   const permessi = body?.permessi
   if (!permessi || typeof permessi !== 'object') return NextResponse.json({ error: 'Permessi non validi' }, { status: 400 })

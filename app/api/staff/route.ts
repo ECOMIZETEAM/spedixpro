@@ -236,11 +236,25 @@ export async function DELETE(req: NextRequest) {
   if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
   // Si cancella solo un COLLABORATORE del mio master: il titolare e i login cliente hanno lo stesso
   // master_id e con il solo controllo sul master_id se ne cancellava l'accesso.
-  const { data: st } = await supabase.from('utenti').select('id,ruolo').eq('id', id).eq('master_id', me.master_id).maybeSingle()
+  const { data: st } = await supabase.from('utenti').select('id,ruolo,nome,cognome').eq('id', id).eq('master_id', me.master_id).maybeSingle()
   const ruoloSt = String((st as any)?.ruolo || '').toLowerCase()
   if (!st || !RUOLI_STAFF.includes(ruoloSt)) return NextResponse.json({ error: 'Account non trovato' }, { status: 404 })
   const admin = createAdminSupabase()
-  await admin.from('utenti').delete().eq('id', id).eq('master_id', me.master_id)
-  try { await admin.auth.admin.deleteUser(id) } catch {}
+  // I TICKET RESTANO: prima di togliere la riga si stacca il collegamento storico tickets.assegnato_id,
+  // scrivendo il nome dove mancasse (l'assegnazione viva sta in 'assegnazioni'). Cosi' la cancellazione
+  // non si blocca su quel vincolo e, se il vincolo fosse a cascata, non porta via i ticket.
+  const nomeStaff = [(st as any).nome, (st as any).cognome].filter(Boolean).join(' ').trim() || 'Collaboratore rimosso'
+  await admin.from('tickets').update({ assegnato_nome: nomeStaff }).eq('assegnato_id', id).is('assegnato_nome', null)
+  await admin.from('tickets').update({ assegnato_id: null }).eq('assegnato_id', id)
+  // L'account di accesso si toglie solo se e' stata tolta davvero la riga: prima deleteUser partiva
+  // comunque, e una cancellazione fallita lasciava in elenco un collaboratore senza piu' accesso.
+  const { data: tolti, error: eDel } = await admin.from('utenti').delete().eq('id', id).eq('master_id', me.master_id).select('id')
+  if (eDel || !tolti?.length) return NextResponse.json({ error: 'Account non cancellato' + (eDel ? ': ' + eDel.message : '') }, { status: 400 })
+  const { error: eAuth } = await admin.auth.admin.deleteUser(id)
+  if (eAuth) {
+    // La riga e' tolta ma il login no: va detto, altrimenti il titolare crede di aver tolto l'accesso.
+    console.error('[STAFF] cancellazione account di accesso non riuscita', id, eAuth.message)
+    return NextResponse.json({ success: true, avviso: 'Collaboratore rimosso, ma il suo accesso non è stato cancellato: scrivi all\'assistenza.' })
+  }
   return NextResponse.json({ success: true })
 }

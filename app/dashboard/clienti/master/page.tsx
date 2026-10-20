@@ -64,9 +64,11 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
         <span style={{ fontWeight: '700', fontSize: '13px', color: '#1a1a1a' }}>{nome}</span>
         {isRoot && <span style={{ fontSize: '10px', color: '#f97316', fontWeight: '700', background: '#fff7ed', padding: '2px 6px', borderRadius: '4px' }}>ROOT</span>}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-          <a href={`/dashboard/clienti/master/${masterId}`}
+          {/* Il proprio master si modifica da Impostazioni: la scheda del sotto-master e' di chi gli sta
+              sopra, e su se stessi non salva piu' (condizioni d'acquisto e credenziali le decide il padre). */}
+          <a href={isRoot ? '/dashboard/impostazioni' : `/dashboard/clienti/master/${masterId}`}
             onClick={e => e.stopPropagation()}
-            title="Modifica anagrafica / accesso"
+            title={isRoot ? 'Modifica il tuo profilo (Impostazioni)' : 'Modifica anagrafica / accesso'}
             style={{ fontSize: '11px', fontWeight: 700, color: '#1a1a1a', background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '5px', padding: '3px 8px', textDecoration: 'none' }}>
             ✎ Modifica
           </a>
