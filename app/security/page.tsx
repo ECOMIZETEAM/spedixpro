@@ -18,7 +18,7 @@ export default function SecurityPage() {
     <div style={{ background: '#fff', minHeight: '100vh' }}>
       <div style={box}>
         <h1 style={h1}>Sicurezza e risposta agli incidenti</h1>
-        <div style={small}>MoovExpress — Ultimo aggiornamento: 19 ottobre 2026</div>
+        <div style={small}>MoovExpress — Ultimo aggiornamento: 20 ottobre 2026</div>
 
         <h2 style={h2}>1. Titolare</h2>
         <p style={p}>
@@ -41,8 +41,9 @@ export default function SecurityPage() {
         <h2 style={h2}>3. Minimizzazione e conservazione</h2>
         <p style={p}>
           Trattiamo esclusivamente i dati necessari a generare le spedizioni (destinatario, ordine, contenuto).
-          Dagli ordini Amazon e Shopify già spediti i dati personali del compratore vengono cancellati in automatico
-          (Amazon: 30 giorni dopo l'importazione; Shopify: 31 giorni). Quando un negozio viene scollegato le sue
+          Dagli ordini Amazon i dati personali del compratore vengono cancellati in automatico 30 giorni dopo
+          l'importazione (quelli mai spediti vengono anche archiviati); dagli ordini Shopify spediti dopo 31 giorni.
+          I compratori Amazon non vengono proposti come contatti nella rubrica. Quando un negozio viene scollegato le sue
           credenziali vengono cancellate subito; per Amazon si cancellano anche gli ordini non spediti e i dati del
           compratore di quelli spediti; per Shopify i dati si cancellano secondo le richieste inviate da Shopify.
           Le spedizioni restano registrate per gli obblighi fiscali e di legge.
