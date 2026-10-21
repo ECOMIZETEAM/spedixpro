@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { contoNatoDaShopify } from '@/lib/conti-shopify'
+import { emailMittenteCliente } from '@/lib/dati-negozio'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,20 +17,25 @@ export async function GET() {
   }
 
   const { data: cliente, error } = await supabase
-    .from('clienti').select('*').eq('id', utente.cliente_id).single()
+    .from('clienti').select('ragione_sociale,so_indirizzo,so_citta,so_provincia,so_cap,email,telefono,impostazioni')
+    .eq('id', utente.cliente_id).single()
   if (error || !cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
 
-  // Legge i campi mittente: prima "sede operativa" (so_*), poi eventuali fallback
+  // Il mittente e' la sede operativa (so_*), e basta. C'era un ripiego su nome, indirizzo, citta,
+  // provincia e cap, colonne che in clienti non esistono: valeva sempre '' e faceva credere che ci
+  // fosse un secondo posto da cui l'indirizzo potesse arrivare.
   const c: any = cliente
   const mittente = {
-    nome: c.ragione_sociale || c.nome || '',
-    indirizzo: c.so_indirizzo || c.indirizzo || '',
-    citta: c.so_citta || c.citta || '',
-    provincia: c.so_provincia || c.provincia || '',
-    cap: c.so_cap || c.cap || '',
-    email: c.email || '',
+    nome: c.ragione_sociale || '',
+    indirizzo: c.so_indirizzo || '',
+    citta: c.so_citta || '',
+    provincia: c.so_provincia || '',
+    cap: c.so_cap || '',
+    email: emailMittenteCliente(c),
     telefono: c.telefono || '',
   }
 
-  return NextResponse.json({ mittente })
+  // conto_shopify: solo al conto nato dall'installazione dell'app la pagina offre di riaprire la
+  // schermata dei dati del negozio quando l'indirizzo manca.
+  return NextResponse.json({ mittente, conto_shopify: contoNatoDaShopify(c) })
 }

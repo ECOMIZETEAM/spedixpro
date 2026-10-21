@@ -1,15 +1,23 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import ClienteNav from './ClienteNav'
 import Moovy from '../components/Moovy'
 import TutorialCliente from './TutorialCliente'
 import MenuProfilo from '../components/MenuProfilo'
 import CampanellaNotifiche from '../components/CampanellaNotifiche'
 import SupportoButton from '../components/SupportoButton'
+import CompletaDatiNegozio, { EVENTO_APRI_DATI_NEGOZIO } from './CompletaDatiNegozio'
+import type { DatiSchermataNegozio } from '@/lib/dati-negozio'
 
-export default function ClienteShell({ cliente, children, brandLogo, brandNome }: { cliente: { ragione_sociale?: string | null; credito?: number | null }; children: React.ReactNode; brandLogo?: string | null; brandNome?: string | null }) {
+export default function ClienteShell({ cliente, children, brandLogo, brandNome, completaDati = null, versioneDati = null, contattoAiuto = null, soloEtichette = false }: {
+  cliente: { ragione_sociale?: string | null; credito?: number | null }; children: React.ReactNode; brandLogo?: string | null; brandNome?: string | null
+  // Dal layout, calcolati sul server (lib/dati-negozio, lib/conti-shopify): null / false per tutti i
+  // clienti che non sono un negozio Shopify appena installato.
+  completaDati?: DatiSchermataNegozio | null; versioneDati?: string | null; contattoAiuto?: string | null; soloEtichette?: boolean
+}) {
   const path = usePathname() || ''
+  const router = useRouter()
   const [isMobile, setIsMobile] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   // Desktop: sidebar richiudibile (preferenza ricordata per sessioni future)
@@ -28,6 +36,29 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome }
     window.addEventListener('moovx-apri-tutorial', chiudi)
     return () => window.removeEventListener('moovx-apri-tutorial', chiudi)
   }, [])
+
+  // LA SCHERMATA DEI DATI DEL NEGOZIO (primo accesso dei conti nati da Shopify).
+  // Se mostrarla lo decide il layout sul server; qui si ricorda solo che e' stata chiusa da un
+  // salvataggio, finche' il layout ricaricato non dice la sua. Il ricordo e' legato ai dati per cui e'
+  // stata chiusa: se il layout la richiede con dati diversi (salvataggio respinto perche' qualcuno li ha
+  // cambiati nel frattempo) si riapre con quelli nuovi.
+  // Il layout non si riesegue nelle navigazioni interne: per questo dopo il salvataggio, e quando una
+  // pagina chiede di riaprirla, si fa router.refresh(), che lo rifa' girare senza perdere lo stato.
+  // L'impronta dei dati (versioneDati) resta fuori dalla firma: se cambia senza che cambi niente a
+  // schermo la schermata non deve ripartire da capo, e quello che il negoziante ha scritto resta.
+  const firmaDati = completaDati ? JSON.stringify(completaDati) : ''
+  const [chiusaPer, setChiusaPer] = useState<string | null>(null)
+  const schermataAperta = !!completaDati && chiusaPer !== firmaDati
+  // Il perche' di un salvataggio respinto (i dati sono cambiati mentre si compilava) sta qui e non nella
+  // schermata: se i dati a schermo cambiano la schermata riparte da capo, e col suo stato se ne andava
+  // anche la spiegazione. Il negoziante si trovava davanti campi diversi da quelli scritti, senza sapere
+  // perche'.
+  const [avvisoDati, setAvvisoDati] = useState('')
+  useEffect(() => {
+    const riapri = () => { setChiusaPer(null); setAvvisoDati(''); router.refresh() }
+    window.addEventListener(EVENTO_APRI_DATI_NEGOZIO, riapri)
+    return () => window.removeEventListener(EVENTO_APRI_DATI_NEGOZIO, riapri)
+  }, [router])
 
   // overflow: hidden → scorre solo il <nav> di ClienteNav; brand/utente/Esci restano fissi
   const asideBase: React.CSSProperties = { width: '200px', background: '#1a1a1a', display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', zIndex: 1000 }
@@ -65,7 +96,7 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome }
           </div>
         </div>
 
-        <ClienteNav />
+        <ClienteNav soloEtichette={soloEtichette} />
 
         <div style={{ borderTop: '1px solid #2a2a2a', padding: '6px 0', flexShrink: 0 }}>
           <a href="/api/auth/logout" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 16px', color: '#555', fontSize: '12.5px', textDecoration: 'none' }}>
@@ -98,7 +129,14 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome }
         </main>
       </div>
       <Moovy />
-      <TutorialCliente brandNome={brandNome} />
+      {/* Il tutorial aspetta che i dati del negozio siano salvati: prima i dati, poi la visita guidata. */}
+      <TutorialCliente brandNome={brandNome} sospeso={schermataAperta} />
+      {schermataAperta && completaDati && (
+        <CompletaDatiNegozio key={firmaDati} dati={completaDati} versione={versioneDati} contatto={contattoAiuto}
+          avviso={avvisoDati} brandLogo={brandLogo} brandNome={brandNome}
+          onCambiati={setAvvisoDati}
+          onFatto={() => { setAvvisoDati(''); setChiusaPer(firmaDati); router.refresh() }} />
+      )}
     </div>
   )
 }

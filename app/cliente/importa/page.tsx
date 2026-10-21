@@ -6,6 +6,7 @@ import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { chiaveDestinatario, destinatarioDaImportato, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo, type TariffaAnteprima } from '@/app/cliente/anteprima-prezzi'
 import { colliDellOrdine, descriviColli } from '@/lib/colli-ordine'
+import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
 
 // Per quanti ordini A SCHERMO il prezzo si calcola da solo. Quelli SELEZIONATI si calcolano sempre
 // (fino al tetto sotto). Un import tipico sta sotto questi numeri e si vede tutto subito; ma c'e'
@@ -92,7 +93,8 @@ export default function ImportaOrdiniPage() {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  // completaDati: il messaggio offre di riaprire la schermata dei dati del negozio (solo conti Shopify).
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string; completaDati?: boolean } | null>(null)
   // Righe che NON sono entrate: per correggere il file il cliente deve sapere QUALI e PERCHE'.
   const [nonImportate, setNonImportate] = useState<{ riga: number | null; ordine: string | null; motivo: string }[]>([])
   const thNI = { textAlign: 'left' as const, padding: '7px 10px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const, letterSpacing: '.3px' }
@@ -118,6 +120,9 @@ export default function ImportaOrdiniPage() {
   // 'incompleto' (mancano CAP o provincia nel profilo) e 'fallito' (la lettura non e' riuscita) sono
   // due cose diverse e vanno dette in due modi: nel secondo caso il profilo puo' essere a posto.
   const [statoMittente, setStatoMittente] = useState<'attesa' | 'ok' | 'incompleto' | 'fallito'>('attesa')
+  // "Mio Account" non contiene l'indirizzo. Al negozio nato dall'app Shopify, che ha la schermata dei
+  // dati del negozio, i messaggi offrono di riaprirla; agli altri clienti restano quelli di sempre.
+  const [contoShopify, setContoShopify] = useState(false)
   const [pacchiPronti, setPacchiPronti] = useState(false)
   const [articoliPronti, setArticoliPronti] = useState(false)
   const [prezziASchermo, setPrezziASchermo] = useState(PREZZI_A_SCHERMO)
@@ -250,6 +255,7 @@ export default function ImportaOrdiniPage() {
       const r = await fetch('/api/cliente/mittente'); const d = await r.json()
       if (!r.ok) throw new Error('lettura mittente')
       setMittenteNome(d?.mittente?.nome || '')
+      setContoShopify(d?.conto_shopify === true)
       // Gli stessi due campi che "Spedisci selezionati" mette nel mittente della spedizione.
       const cap = d?.mittente?.cap || '', provincia = d?.mittente?.provincia || ''
       setMittente(cap && provincia ? { cap, provincia } : null)
@@ -257,6 +263,16 @@ export default function ImportaOrdiniPage() {
     } catch { setStatoMittente('fallito') }
   }
   useEffect(() => { loadOrdini(); loadCorrieri(); loadPacchi(); loadArticoli(); loadMittente() }, [])
+  // Salvati i dati del negozio, il mittente si rilegge: il messaggio a schermo e i prezzi mancanti erano
+  // quelli di prima del salvataggio.
+  useEffect(() => {
+    const riletto = () => { setMsg(m => (m?.completaDati ? null : m)); loadMittente() }
+    window.addEventListener(EVENTO_DATI_NEGOZIO_SALVATI, riletto)
+    return () => window.removeEventListener(EVENTO_DATI_NEGOZIO_SALVATI, riletto)
+  }, [])
+  // Il pulsante riapre la schermata e intanto rilegge il mittente: se nel frattempo i dati li ha
+  // completati il master, la schermata non si apre e il messaggio non deve restare a schermo.
+  function completaDatiNegozio() { setMsg(m => (m?.completaDati ? null : m)); apriCompletaDatiNegozio(); loadMittente() }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -405,11 +421,13 @@ export default function ImportaOrdiniPage() {
     // Mittente dal profilo cliente (route dedicata)
     setMsg(null)
     let mitt: any
+    let contoShop = false
     try {
       const res = await fetch('/api/cliente/mittente')
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || 'Errore')
       mitt = data.mittente
+      contoShop = data.conto_shopify === true
     } catch {
       setMsg({ type: 'err', text: 'Impossibile leggere i dati del mittente' }); return
     }
@@ -421,7 +439,9 @@ export default function ImportaOrdiniPage() {
       phone: mitt?.telefono || '', email: mitt?.email || '',
     }
     if (!shipFrom.street1 || !shipFrom.city || !shipFrom.state || !shipFrom.postalCode) {
-      setMsg({ type: 'err', text: 'Indirizzo mittente mancante: compila l\'indirizzo del cliente in Mio Account, poi riprova' })
+      setMsg(contoShop
+        ? { type: 'err', text: 'Manca l\'indirizzo di ritiro del tuo negozio: è il mittente di ogni spedizione.', completaDati: true }
+        : { type: 'err', text: 'Indirizzo mittente mancante: compila l\'indirizzo del cliente in Mio Account, poi riprova' })
       return
     }
 
@@ -889,8 +909,15 @@ export default function ImportaOrdiniPage() {
           border: `1px solid ${msg.type === 'ok' ? '#bbf7d0' : '#fecaca'}`,
           background: msg.type === 'ok' ? '#f0fdf4' : '#fef2f2',
           color: msg.type === 'ok' ? '#15803d' : '#b91c1c',
+          ...(msg.completaDati ? { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' as const } : {}),
         }}>
-          {msg.text}
+          {msg.completaDati ? <span style={{ flex: '1 1 240px' }}>{msg.text}</span> : msg.text}
+          {msg.completaDati && (
+            <button onClick={completaDatiNegozio}
+              style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+              Completa i dati del negozio
+            </button>
+          )}
         </div>
       )}
 
@@ -1125,11 +1152,19 @@ export default function ImportaOrdiniPage() {
         )}
 
         {/* PERCHE' NON SI VEDONO I PREZZI: va detto in chiaro, non in un suggerimento su un trattino. */}
-        {!loading && ordini.length > 0 && statoMittente === 'incompleto' && (
+        {!loading && ordini.length > 0 && statoMittente === 'incompleto' && (contoShopify ? (
+          <div style={{ marginBottom: '10px', fontSize: '12.5px', color: '#b45309' }}>
+            Per vedere i prezzi serve l'indirizzo di ritiro del tuo negozio.{' '}
+            <button onClick={completaDatiNegozio}
+              style={{ background: 'none', border: 'none', padding: 0, color: '#ea580c', fontWeight: 600, fontSize: '12.5px', cursor: 'pointer', textDecoration: 'underline' }}>
+              Completa i dati del negozio
+            </button>
+          </div>
+        ) : (
           <div style={{ marginBottom: '10px', fontSize: '12.5px', color: '#b45309' }}>
             Per vedere i prezzi serve l'indirizzo di partenza: completa CAP e provincia dell'indirizzo in Mio Account.
           </div>
-        )}
+        ))}
         {!loading && ordini.length > 0 && statoMittente === 'fallito' && (
           <div style={{ marginBottom: '10px', fontSize: '12.5px', color: '#b45309' }}>
             Non sono riuscito a leggere il tuo indirizzo di partenza, quindi i prezzi non sono calcolati.{' '}

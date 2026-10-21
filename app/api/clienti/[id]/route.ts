@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete, eTitolareOAdmin } from '@/lib/ruoli'
 import { bloccaAgente, isAgente, clientiAgente, nomeAgente } from '@/lib/agente'
+import { contoNatoDaShopify } from '@/lib/conti-shopify'
+import { COLONNE_DATI_NEGOZIO, fondiImpostazioniNegozio, versioneDatiNegozio, type ClienteNegozio } from '@/lib/dati-negozio'
 
 // Assegnazione listino a un cliente/sotto-master: puo' innescare la propagazione a cascata.
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
+
+// La risposta del PUT quando i dati del negozio sono cambiati dopo che il master ha aperto la scheda.
+const NEGOZIO_AGGIORNATO = 'Il negozio ha appena aggiornato i suoi dati: ricarica la scheda prima di salvare'
+
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -49,6 +55,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (isAgente(utente)) qCli = qCli.eq('agente', nomeAgente(utente))
   const { data: cliente } = await qCli.single()
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' },{ status: 404 })
+  // IL CONTO NATO DA SHOPIFY PORTA CON SE' L'IMPRONTA DEI DATI DEL NEGOZIO.
+  // Mentre il master ha la scheda aperta, il negoziante puo' completare la schermata del primo accesso
+  // (P.IVA, SDI, sede di ritiro, telefono, email vera), e il PUT qui sotto riscrive la riga intera con
+  // la copia letta adesso. I moduli rimandano l'impronta col salvataggio e il PUT la rifa' sulla riga
+  // riletta. E' la stessa della schermata (versioneDatiNegozio), non updated_at: quello cambia anche per
+  // una ricarica, e il master si vedrebbe rifiutare il salvataggio per un movimento di credito. Gli
+  // altri clienti non hanno la schermata, e la loro risposta resta quella di prima.
+  if (contoNatoDaShopify(cliente)) {
+    return NextResponse.json({ ...cliente, versione_dati_negozio: versioneDatiNegozio(cliente) })
+  }
   return NextResponse.json(cliente)
 }
 
@@ -187,15 +203,39 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     ticket_limite_giornaliero: (datiCliente.ticket_limite_giornaliero===''||datiCliente.ticket_limite_giornaliero==null) ? null : Math.max(0, parseInt(String(datiCliente.ticket_limite_giornaliero),10)||0),
     updated_at: new Date().toISOString(),
   }
-  if (datiCliente.impostazioni !== undefined) aggiornamento.impostazioni =datiCliente.impostazioni
 
-  // ── Cambio email di accesso (login) ────────────────────────────────
-  // L'email è anche lo username di login: se cambia va aggiornata su auth + utenti + clienti.
-  const { data: cliCorr } = await supabase.from('clienti').select('email,ledger').eq('id', id).eq('master_id', utente?.master_id).maybeSingle()
+  // La riga si rilegge prima di toccare qualunque cosa: serve al cambio dell'email di accesso qui sotto
+  // e, per i conti nati da Shopify, al controllo dei dati del negozio (COLONNE_DATI_NEGOZIO, updated_at).
+  const { data: rigaLetta } = await supabase.from('clienti').select('ledger,updated_at,' + COLONNE_DATI_NEGOZIO)
+    .eq('id', id).eq('master_id', utente?.master_id).maybeSingle()
+  const cliCorr = rigaLetta as (ClienteNegozio & { ledger?: unknown; updated_at?: string | null }) | null
   if (!cliCorr) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
   // Un master collegato (ledger condivisione) non si modifica/reset da qui: è lo specchio di un altro
   // master, senza login. Si gestisce dal collegamento (vedi CONDIVISIONE-CONTRATTI.md).
-  if ((cliCorr as any).ledger) return NextResponse.json({ error: 'Questo è un master collegato: si gestisce dal collegamento, non si modifica da qui.' }, { status: 400 })
+  if (cliCorr.ledger) return NextResponse.json({ error: 'Questo è un master collegato: si gestisce dal collegamento, non si modifica da qui.' }, { status: 400 })
+
+  // I DATI CHE IL MASTER HA VISTO SONO ANCORA QUELLI DI ADESSO? Solo per i conti nati da Shopify.
+  // Questo PUT riscrive anagrafica, sedi, telefono e impostazioni con la copia che il modulo ha letto
+  // all'apertura. Se intanto il negozio aveva completato la schermata del primo accesso
+  // (app/api/cliente/dati-negozio), il salvataggio del master gli riportava indietro P.IVA, SDI, sede di
+  // ritiro, telefono ed email vera, e la schermata gli ricompariva. Il modulo rimanda l'impronta che la
+  // GET gli ha dato: se non e' piu' quella della riga, qualcuno ha cambiato i dati dopo che il master li
+  // ha visti, e non si scrive niente, nemmeno l'email di accesso qui sotto. Senza impronta ci si ferma
+  // allo stesso modo: non si sa su quali dati e' stato compilato il modulo. Conta l'email della riga, non
+  // quella del modulo, che il master puo' aver appena cambiato.
+  const natoDaShopify = contoNatoDaShopify(cliCorr)
+  if (natoDaShopify) {
+    const vista = datiCliente.versione_dati_negozio
+    if (typeof vista !== 'string' || !vista || vista !== versioneDatiNegozio(cliCorr)) {
+      return NextResponse.json({ error: NEGOZIO_AGGIORNATO }, { status: 409 })
+    }
+  }
+  if (datiCliente.impostazioni !== undefined) {
+    aggiornamento.impostazioni = natoDaShopify ? fondiImpostazioniNegozio(cliCorr, datiCliente.impostazioni) : datiCliente.impostazioni
+  }
+
+  // ── Cambio email di accesso (login) ────────────────────────────────
+  // L'email è anche lo username di login: se cambia va aggiornata su auth + utenti + clienti.
   const emailVecchia = (cliCorr.email || '').trim().toLowerCase()
   const emailNuova = (datiCliente.email || '').trim().toLowerCase()
   const cambioEmail = !!emailNuova && emailNuova !== emailVecchia
@@ -217,9 +257,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     aggiornamento.email = emailNuova
   }
 
-  const { data: cliente, error } = await supabase.from('clienti').update(aggiornamento)
-    .eq('id', id).eq('master_id', utente?.master_id).select().single()
+  // SI SCRIVE SOLO SE NESSUNO HA TOCCATO LA RIGA DOPO LA RILETTURA (conti nati da Shopify).
+  // L'impronta copre i minuti in cui la scheda e' rimasta aperta; questo filtro i millisecondi fra la
+  // rilettura e la scrittura, in cui la schermata del negoziante puo' salvare (la sua rotta aggiorna
+  // updated_at). Per cosi' poco updated_at va bene: una ricarica proprio allora e' improbabile, e il
+  // master riprova. Non con un cambio di email: l'accesso e' gia' stato spostato qui sopra, e la riga va
+  // scritta comunque, o login e anagrafica resterebbero su due indirizzi diversi.
+  const condizionata = natoDaShopify && !cambioEmail
+  let scrittura = supabase.from('clienti').update(aggiornamento).eq('id', id).eq('master_id', utente?.master_id)
+  if (condizionata) scrittura = cliCorr.updated_at == null ? scrittura.is('updated_at', null) : scrittura.eq('updated_at', cliCorr.updated_at)
+  // Col filtro, nessuna riga scritta e' la corsa qui sopra e non un errore: maybeSingle la lascia vedere.
+  // Senza, resta .single() come prima.
+  const { data: cliente, error } = condizionata
+    ? await scrittura.select().maybeSingle()
+    : await scrittura.select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  if (condizionata && !cliente) return NextResponse.json({ error: NEGOZIO_AGGIORNATO }, { status: 409 })
   let emailInviata = false
   if (resetPassword) {
     try {
@@ -259,6 +312,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         emailInviata = true
       }
     } catch(e) { console.error('Reset password error:', e) }
+  }
+  // Al conto nato da Shopify torna l'impronta della riga appena scritta: il salvataggio stesso puo'
+  // cambiarla (l'email di accesso, un paese vuoto che diventa 'Italia'), e un secondo salvataggio dallo
+  // stesso modulo non deve vedersi rifiutare per colpa del primo.
+  if (cliente && contoNatoDaShopify(cliente)) {
+    return NextResponse.json({ success: true, emailInviata, versione_dati_negozio: versioneDatiNegozio(cliente) })
   }
   return NextResponse.json({ success: true, emailInviata })
 }

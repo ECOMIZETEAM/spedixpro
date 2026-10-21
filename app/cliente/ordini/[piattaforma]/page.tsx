@@ -10,6 +10,7 @@ import { numeriOrdine, numeroOrdineCorrisponde } from '@/lib/numero-ordine-negoz
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo } from '@/app/cliente/anteprima-prezzi'
 import { descriviColli } from '@/lib/colli-ordine'
+import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
@@ -118,6 +119,11 @@ export default function OrdiniPage() {
   // 'incompleto' (mancano CAP o provincia della sede operativa) e 'fallito' (lettura non riuscita)
   // si dicono in due modi diversi: nel secondo caso il profilo puo' essere a posto.
   const [statoMittente, setStatoMittente] = useState<'attesa' | 'ok' | 'incompleto' | 'fallito'>('attesa')
+  // "Scrivi al tuo referente" non porta da nessuna parte per il negozio nato dall'app Shopify: lui ha la
+  // schermata dei dati del negozio, e i messaggi qui sotto gli offrono di riaprirla. Agli altri clienti
+  // restano i messaggi di sempre.
+  const [contoShopify, setContoShopify] = useState(false)
+  const [msgDatiNegozio, setMsgDatiNegozio] = useState('')
 
   // IL NEGOZIO SELEZIONATO DEVE ESSERE DI QUESTA PIATTAFORMA.
   //
@@ -160,6 +166,7 @@ export default function OrdiniPage() {
     fetch('/api/cliente/dati').then(r=>r.json()).then(c=>{
       if (!c || c.error) throw new Error('lettura mittente')
       const cap=c.so_cap||'', provincia=c.so_provincia||''
+      setContoShopify(c.conto_shopify===true)
       setMittente(cap&&provincia?{cap,provincia}:null)
       setStatoMittente(cap&&provincia?'ok':'incompleto')
     }).catch(()=>setStatoMittente('fallito'))
@@ -169,6 +176,16 @@ export default function OrdiniPage() {
     fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchi(Array.isArray(d)?d:[])).catch(()=>{}).finally(()=>setPacchiPronti(true))
     leggiMittente()
   }, [])
+  // Salvati i dati del negozio, l'indirizzo di partenza si rilegge: il messaggio a schermo e i prezzi
+  // mancanti erano quelli di prima del salvataggio.
+  useEffect(()=>{
+    const riletto = () => { setMsgDatiNegozio(''); leggiMittente() }
+    window.addEventListener(EVENTO_DATI_NEGOZIO_SALVATI, riletto)
+    return () => window.removeEventListener(EVENTO_DATI_NEGOZIO_SALVATI, riletto)
+  }, [])
+  // Il pulsante riapre la schermata e intanto rilegge il mittente: se nel frattempo i dati li ha
+  // completati il master, la schermata non si apre e il messaggio non deve restare a schermo.
+  function completaDatiNegozio() { setMsgDatiNegozio(''); apriCompletaDatiNegozio(); leggiMittente() }
 
   // SKU -> peso/misure (catalogo articoli) e SKU -> pacco (scatola).
   //
@@ -210,7 +227,12 @@ export default function OrdiniPage() {
   async function sincronizza() {
     const attiva = integrazioni.find((i:any)=>i.stato==='attivo')
     const id = fStoreValido || attiva?.id
-    if (!id) { setMsg('Nessun negozio '+nome+' collegato'); return }
+    if (!id) {
+      // Un negozio col collegamento morto e' in 'errore', non sparito: si dice il motivo salvato (per Shopify
+      // e' "riapri MoovExpress dall'admin del tuo negozio"), non che il negozio non c'e'.
+      const inErrore = integrazioni.find((i:any)=>i.stato==='errore' && i.errore)
+      setMsg(inErrore ? String(inErrore.errore) : 'Nessun negozio '+nome+' collegato'); return
+    }
     setSincronizzando(true); setMsg('')
     try {
       // IL PERIODO SCELTO IN PAGINA DECIDE COSA SI IMPORTA: se metti "oggi", Sincronizza scarica SOLO
@@ -507,6 +529,7 @@ export default function OrdiniPage() {
 
   async function spedisciSelezionati(){
     if (spedendo) return   // guardia doppio-submit: un secondo click prima del re-render poteva partire due volte
+    setMsgDatiNegozio('')
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
     setSpedendo(true)
@@ -515,7 +538,8 @@ export default function OrdiniPage() {
     try {
       const cli = await fetch('/api/cliente/dati').then(r=>r.json())
       if (!cli || cli.error) { setMsg('Errore: dati cliente non disponibili'); setSpedendo(false); return }
-      const shipFrom = { name:cli.ragione_sociale||'', company:cli.ragione_sociale||'', street1:cli.so_indirizzo||'', street2:'', city:cli.so_citta||'', state:cli.so_provincia||'', postalCode:cli.so_cap||'', country:'IT', phone:cli.telefono||'', email:cli.email||'' }
+      // email_mittente, non email: il conto nato da Shopify ha un indirizzo nostro che non riceve posta.
+      const shipFrom = { name:cli.ragione_sociale||'', company:cli.ragione_sociale||'', street1:cli.so_indirizzo||'', street2:'', city:cli.so_citta||'', state:cli.so_provincia||'', postalCode:cli.so_cap||'', country:'IT', phone:cli.telefono||'', email:(cli.email_mittente??cli.email)||'' }
       // SENZA INDIRIZZO DI PARTENZA NON SI SPEDISCE: si dice qui, una volta, con parole chiare.
       //
       // Il mittente si costruisce dalla sede operativa del cliente. Se manca, la creazione risponde
@@ -523,12 +547,17 @@ export default function OrdiniPage() {
       // provincia ne' dove metterla, e per giunta lo dice una volta per ogni riga del lotto. Chi
       // arriva qui appena registrato (l'app dello store crea l'account da sola) si trova quel muro
       // senza nessuna indicazione.
+      // Il negozio nato dall'app Shopify non ha un referente a cui scrivere: ha la schermata dei dati del
+      // negozio, e il messaggio offre di riaprirla.
+      const contoShop = cli.conto_shopify===true
       if (!shipFrom.street1 || !shipFrom.city || !shipFrom.postalCode || !shipFrom.state) {
-        setMsg('Manca l\'indirizzo di partenza del tuo magazzino (via, città, CAP, provincia): è il mittente di ogni spedizione. Scrivi al tuo referente per farlo completare, poi riprova.')
+        if (contoShop) { setMsg(''); setMsgDatiNegozio('Manca l\'indirizzo di ritiro del tuo negozio (via, città, CAP, provincia): è il mittente di ogni spedizione.') }
+        else setMsg('Manca l\'indirizzo di partenza del tuo magazzino (via, città, CAP, provincia): è il mittente di ogni spedizione. Scrivi al tuo referente per farlo completare, poi riprova.')
         setSpedendo(false); return
       }
       if (String(shipFrom.phone||'').replace(/[^0-9]/g,'').length < 6) {
-        setMsg('Manca il tuo numero di telefono: alcuni corrieri lo richiedono per il ritiro. Scrivi al tuo referente per farlo aggiungere, poi riprova.')
+        if (contoShop) { setMsg(''); setMsgDatiNegozio('Manca il tuo numero di telefono: alcuni corrieri lo richiedono per il ritiro.') }
+        else setMsg('Manca il tuo numero di telefono: alcuni corrieri lo richiedono per il ritiro. Scrivi al tuo referente per farlo aggiungere, poi riprova.')
         setSpedendo(false); return
       }
 
@@ -768,6 +797,12 @@ export default function OrdiniPage() {
       </div>
 
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
+      {msgDatiNegozio && (
+        <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>
+          <span style={{flex:'1 1 240px'}}>{msgDatiNegozio}</span>
+          <button onClick={completaDatiNegozio} style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'8px',padding:'8px 14px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Completa i dati del negozio</button>
+        </div>
+      )}
 
       {/* Carrello: credito insufficiente per l'intero lotto → pagamento unico con la carta */}
       {creditoKO && (
@@ -852,9 +887,14 @@ export default function OrdiniPage() {
           </select>
           <div style={{flex:1}}/>
           {/* PERCHE' NON SI VEDONO I PREZZI: va detto in chiaro, non in un suggerimento al passaggio. */}
-          {!loading && ordini.length>0 && statoMittente==='incompleto' && (
+          {!loading && ordini.length>0 && statoMittente==='incompleto' && (contoShopify ? (
+            <span style={{fontSize:'13px',color:'#b45309'}}>
+              Per vedere i prezzi serve l'indirizzo di ritiro del tuo negozio.{' '}
+              <button onClick={completaDatiNegozio} style={{background:'none',border:'none',padding:0,color:'#ea580c',fontWeight:600,fontSize:'13px',cursor:'pointer',textDecoration:'underline'}}>Completa i dati del negozio</button>
+            </span>
+          ) : (
             <span style={{fontSize:'13px',color:'#b45309'}}>Per vedere i prezzi serve l'indirizzo di partenza del tuo magazzino (CAP e provincia): scrivi al tuo referente per farlo completare.</span>
-          )}
+          ))}
           {!loading && ordini.length>0 && statoMittente==='fallito' && (
             <span style={{fontSize:'13px',color:'#b45309'}}>
               Non sono riuscito a leggere il tuo indirizzo di partenza, quindi i prezzi non sono calcolati.{' '}
