@@ -88,6 +88,10 @@ export async function POST(req: NextRequest) {
   // Catena INCOMPLETA = non riprezzo a meta': meglio niente che una catena rotta (soldi tra master).
   if (esito.catenaCompleta === false)
     return NextResponse.json({ error: 'Catena del contratto incompleta: correzione non applicata' }, { status: 400 })
+  // Stessa regola per un salto 'codice' senza il suo ledger: dove scrivere quel livello non si sa, e
+  // ripiegare sul conto verso il padre e' proprio l'errore del 13/10. Si ferma tutto PRIMA di scrivere.
+  if ((esito.livelli || []).some(l => l.ruolo === 'codice' && (!l.ledgerClienteId || !l.fornitore)))
+    return NextResponse.json({ error: 'Conto presso il fornitore non trovato: correzione non applicata' }, { status: 400 })
   // Il cliente e' davvero mio (il resto della catena viene dalla struttura reale del contratto).
   const { data: cli } = await admin.from('clienti').select('id')
     .eq('master_id', utente!.master_id).eq('id', (sped as any).cliente_id).maybeSingle()
@@ -121,6 +125,13 @@ export async function POST(req: NextRequest) {
       if (lv.clienteId) {
         await registraMovimento(admin, { masterId: creatore, clienteId: lv.clienteId, tipo: 'rettifica', descrizione: descr, importo: imp, riferimento: await rifPer(lv.clienteId), spedizioneId, createdBy: user.id })
         applicati.push({ chi: 'cliente', importo: imp })
+      } else if (lv.masterId && lv.ruolo === 'codice') {
+        // CONTRATTO COMPRATO DA UN ALTRO MASTER: si paga sul ledger presso chi lo vende, come alla
+        // creazione e nella conferma delle rettifiche. Prima finiva sul conto verso il padre: il 13/10
+        // la rettifica di 282343J006009 ha scalato Wave sul conto MULTIEXPRESS invece che su quello
+        // presso LOGIXIA, e MULTIEXPRESS sul suo conto principale invece che su quello presso Wave.
+        await registraMovimento(admin, { masterId: lv.fornitore!, clienteId: lv.ledgerClienteId!, tipo: 'rettifica', descrizione: descr, importo: imp, riferimento: await rifPer(lv.masterId), spedizioneId, createdBy: user.id })
+        applicati.push({ chi: 'master', importo: imp })
       } else if (lv.masterId) {
         const idx = cat.indexOf(lv.masterId)
         const owner = idx >= 0 && idx + 1 < cat.length ? cat[idx + 1] : null

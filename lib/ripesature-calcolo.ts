@@ -29,6 +29,13 @@ export type LivelloRettifica = {
   pagato: number               // quanto risulta addebitato nei movimenti
   dovuto: number | null        // quanto sarebbe col collo ripesato (null = non calcolabile)
   differenza: number | null
+  // SOLO sui contratti condivisi: com'e' fatto il salto di questo master verso chi gli vende. Chi
+  // scrive il movimento DEVE leggerlo: su un salto 'codice' i soldi stanno sul ledger presso il
+  // fornitore, non sul conto verso il padre. La correzione peso/misure li indovinava dall'albero e il
+  // 13/10 ha messo due rettifiche di 282343J006009 sui conti sbagliati (Wave e MULTIEXPRESS).
+  ruolo?: 'albero' | 'codice' | 'owner'
+  fornitore?: string | null
+  ledgerClienteId?: string | null
 }
 
 export type EsitoRipesatura = {
@@ -347,7 +354,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         }
         // masterId = il master del livello (così l'upload/propagazione lo trova per figlio); per i codice
         // il DENARO va sul ledger ma la rettifica è indirizzata al master, e la conferma risolve il ledger.
-        livelli.push({ chi: String(nomeM.get(liv.master) || liv.master), clienteId: null, masterId: liv.master, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag) })
+        livelli.push({ chi: String(nomeM.get(liv.master) || liv.master), clienteId: null, masterId: liv.master, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag),
+          ruolo: liv.ruolo, fornitore: liv.fornitore, ledgerClienteId: liv.ledgerClienteId })
       }
       return { livelli, zone: [] as (string | null)[], pesoVolumeDopo: null as number | null, motivo: undefined as string | undefined, catenaDalBasso: catena.map(l => l.master), catenaCompleta, bloccato: false }
     }
