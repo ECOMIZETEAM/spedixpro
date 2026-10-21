@@ -3,6 +3,7 @@ import { erroreSvincoloPulito } from '@/lib/errore-corriere'
 import { registraMovimento } from '@/lib/movimenti'
 import { addebitaServizioGiacenza, totaleResoAddebitato, pianoServizioGiacenzaCondivisione } from '@/lib/giacenza-cascata'
 import { gambePerTracking } from '@/lib/condivisione-catena'
+import { prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
 
 // LA PORTA UNICA DELLO SVINCOLO. La usano tutte le strade — il portale (GiacenzaDettaglio →
 // conferma_svincolo), l'svincolo massivo, l'API v1 — così la regola che decide CHI PAGA COSA e che
@@ -295,12 +296,14 @@ export async function eseguiSvincolo(
   // resi non riaddebita.
   let numeroDistintaReso: number | null = null
   if (rich.operazione === 'reso' && sped.cliente_id) {
-    const { data: esistenti } = await admin.from('distinte_resi').select('voci').eq('master_id', sped.master_id)
-    const gia = new Set<string>()
-    for (const d of (esistenti || [])) for (const v of (Array.isArray((d as any).voci) ? (d as any).voci : [])) if (v?.id) gia.add(v.id)
-    if (!gia.has(id)) {
-      const { count } = await admin.from('distinte_resi').select('id', { count: 'exact', head: true }).eq('master_id', sped.master_id)
-      numeroDistintaReso = (count || 0) + 1
+    // Si cerca solo questo pacco, non si leggono tutte le distinte del master: oltre le 1.000 la lettura
+    // intera si fermava a meta' senza dirlo (vedi lib/distinte-resi).
+    const { data: gia, error: errGia } = await admin.from('distinte_resi').select('id')
+      .eq('master_id', sped.master_id).contains('voci', JSON.stringify([{ id }])).limit(1)
+    // Qui il corriere e l'addebito sono gia' fatti: se il numero non si legge si salta solo il documento,
+    // non si fa fallire lo svincolo (l'operatore riproverebbe tutto).
+    numeroDistintaReso = !errGia && !gia?.length ? await prossimoNumeroDistintaResi(admin, sped.master_id).catch(() => null) : null
+    if (numeroDistintaReso) {
       // Il totale dai movimenti, come tutte le distinte di reso: se il reso era gia' stato addebitato
       // (dalla coda del tracking), l'esito dello svincolo non ha importo e la distinta usciva a 0.
       await admin.from('distinte_resi').insert({

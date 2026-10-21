@@ -6,6 +6,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { gambePerTracking } from '@/lib/condivisione-catena'
+import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
 
 // Il master accetta un RESO ricevuto dalla rete e lo PROPAGA:
 // - spedizioni dei propri clienti -> distinta reso verso il cliente (addebito nolo)
@@ -55,9 +56,8 @@ export async function POST(req: NextRequest) {
   }
 
   // anti-duplicato: spedizioni già in una MIA distinta reso
-  const { data: mieResi } = await admin.from('distinte_resi').select('voci').eq('master_id', mio)
-  const giaResi = new Set<string>()
-  for (const d of (mieResi || [])) for (const v of (Array.isArray(d.voci) ? d.voci : [])) if (v?.id) giaResi.add(v.id)
+  // (a pagine: una lettura sola si ferma a 1.000 distinte, vedi lib/distinte-resi)
+  const giaResi = await pacchiGiaInDistintaResi(admin, [mio])
 
   const clientGroups: Record<string, any[]> = {}
   const masterGroups: Record<string, any[]> = {}
@@ -90,10 +90,7 @@ export async function POST(req: NextRequest) {
   let create = 0
   const { totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
   const vociDi = (arr: any[]) => arr.map(s => voci.find(v => v.id === s.id) || { id: s.id, numero: s.numero })
-  const nextNum = async () => {
-    const { count } = await admin.from('distinte_resi').select('id', { count: 'exact', head: true }).eq('master_id', mio)
-    return (count || 0) + 1
-  }
+  const nextNum = () => prossimoNumeroDistintaResi(admin, mio)
 
   // ── Gruppi CLIENTE: addebito nolo al cliente ──
   for (const [clienteId, arr] of Object.entries(clientGroups)) {

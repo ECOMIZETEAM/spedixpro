@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { resoAddebitatoPerSpedizione } from '@/lib/giacenza-cascata'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -16,21 +18,31 @@ export async function GET(req: NextRequest) {
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
   const { data } = await query
-  // Numero e destinatario dalla spedizione: le distinte nate dal cron delle 23 nelle voci hanno solo l'id,
-  // e nel PDF e nell'Excel le righe uscivano vuote. Si leggono solo spedizioni di questo cliente.
+  // LE RIGHE DI OGNI DISTINTA, LETTE DALLA SPEDIZIONE E DAI MOVIMENTI. Le distinte nate dal cron delle 23
+  // nelle voci hanno solo l'id della spedizione: nella lista il cliente vedeva "3 LDV" senza sapere quali, e
+  // l'assistenza non riusciva a dire a quale spedizione corrispondesse un reso (21/10/2026). Numero,
+  // destinatario, citta' e data si leggono dalle spedizioni di QUESTO cliente; il costo di ogni riga e'
+  // quanto e' stato addebitato a lui per quel reso (lo stesso conto del totale della distinta). Le voci
+  // salvate dalla scansione portano anche il prezzo dell'andata: non si rimanda, in una distinta di reso
+  // confondeva.
   const lista = data || []
-  const ids = [...new Set(lista.flatMap((d: any) => (Array.isArray(d.voci) ? d.voci : []).map((v: any) => v?.id)).filter(Boolean))]
+  const ids = [...new Set(lista.flatMap((d: any) => (Array.isArray(d.voci) ? d.voci : []).map((v: any) => v?.id)).filter(Boolean))] as string[]
   const spedDi = new Map<string, any>()
   for (let i = 0; i < ids.length; i += 300) {
-    const { data: ss } = await supabase.from('spedizioni').select('id,numero,dest_nome')
+    const { data: ss } = await supabase.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at')
       .eq('cliente_id', clienteId).in('id', ids.slice(i, i + 300))
     for (const s of (ss || [])) spedDi.set((s as any).id, s)
   }
+  const resoDi = ids.length ? await resoAddebitatoPerSpedizione(createAdminSupabase(), ids, { clienteId }) : new Map<string, number>()
   for (const d of lista as any[]) {
-    if (!Array.isArray(d.voci)) continue
+    if (!Array.isArray(d.voci)) { d.voci = []; continue }
     d.voci = d.voci.map((v: any) => {
-      const s = spedDi.get(v?.id)
-      return s ? { ...v, numero: v?.numero || s.numero, dest_nome: v?.dest_nome || s.dest_nome } : v
+      const s = spedDi.get(v?.id) || {}
+      return {
+        id: v?.id, numero: s.numero || v?.numero || null, dest_nome: s.dest_nome || v?.dest_nome || null,
+        dest_citta: s.dest_citta || v?.dest_citta || null, spedita_il: s.created_at || null,
+        reso_addebitato: resoDi.get(v?.id) ?? 0,
+      }
     })
   }
   return NextResponse.json(lista)

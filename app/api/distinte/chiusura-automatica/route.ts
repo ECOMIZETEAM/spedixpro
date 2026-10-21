@@ -3,6 +3,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
+import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
@@ -88,24 +89,27 @@ export async function GET(req: NextRequest) {
   try {
     // Resi rientrati (stato reso_mittente) di un cliente, non ancora in una distinta_resi, ultimi 30gg.
     // Le proprie del master (cliente_id NULL) non hanno flusso di distinta reso, come nel POST manuale.
-    const { data: resi } = await supabase.from('spedizioni')
-      .select('id,numero,master_id,cliente_id')
-      .eq('stato', 'reso_mittente')
-      .not('cliente_id', 'is', null)
-      .not('master_id', 'is', null)
-      .gte('created_at', inizio.toISOString())
+    // A pagine anche questi: i resi del mese sono ~800 e oltre i 1.000 i restanti sparirebbero senza avviso.
+    const resi: any[] = []
+    for (let da = 0; ; da += 1000) {
+      const { data, error } = await supabase.from('spedizioni')
+        .select('id,numero,master_id,cliente_id')
+        .eq('stato', 'reso_mittente')
+        .not('cliente_id', 'is', null)
+        .not('master_id', 'is', null)
+        .gte('created_at', inizio.toISOString())
+        .order('id', { ascending: true }).range(da, da + 999)
+      if (error) throw new Error('Lettura resi non riuscita: ' + error.message)
+      resi.push(...(data || []))
+      if (!data || data.length < 1000) break
+    }
 
-    if (resi?.length) {
-      // Voci gia' chiuse (anti-doppia distinta, come escludiGiaInDistinta) + ultimo numero per master.
+    if (resi.length) {
+      // Voci gia' chiuse (anti-doppia distinta, come escludiGiaInDistinta), lette a pagine: con una lettura
+      // sola, oltre le 1.000 distinte, ogni sera si rimettevano in distinta i resi gia' chiusi (vedi
+      // lib/distinte-resi). I resi presi qui sono degli ultimi 30 giorni: bastano le distinte da allora.
       const masterIds = [...new Set(resi.map((r: any) => r.master_id))]
-      const { data: drEsistenti } = await supabase.from('distinte_resi').select('master_id,numero,voci').in('master_id', masterIds)
-      const giaInDistinta = new Set<string>()
-      const maxNumPerMaster = new Map<string, number>()
-      for (const d of (drEsistenti || [])) {
-        for (const v of (Array.isArray((d as any).voci) ? (d as any).voci : [])) if (v?.id) giaInDistinta.add(v.id)
-        const mid = (d as any).master_id, n = Number((d as any).numero || 0)
-        if (n > (maxNumPerMaster.get(mid) || 0)) maxNumPerMaster.set(mid, n)
-      }
+      const giaInDistinta = await pacchiGiaInDistintaResi(supabase, masterIds, { dal: inizio.toISOString() })
 
       // Raggruppo per master DIRETTO + cliente: la distinta_resi e' per cliente, come nel flusso manuale.
       const gruppiResi: Record<string, any[]> = {}
@@ -125,8 +129,7 @@ export async function GET(req: NextRequest) {
         // la gamba del venditore (LOGIXIA verso "Wave ship (ingrosso)"): lo cerca totaleResoAddebitato.
         const { totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
         const totale = await totaleResoAddebitato(supabase, righe.map(r => r.id), { clienteId })
-        const numero = (maxNumPerMaster.get(masterId) || 0) + 1
-        maxNumPerMaster.set(masterId, numero)
+        const numero = await prossimoNumeroDistintaResi(supabase, masterId)
         const { error: errR } = await supabase.from('distinte_resi').insert({
           master_id: masterId, cliente_id: clienteId, numero,
           // Il numero accanto all'id, come nelle distinte di reso nate dalle altre porte: l'elenco, la pagina

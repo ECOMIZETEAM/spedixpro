@@ -6,6 +6,7 @@ import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pr
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { pacchiGiaInDistintaResi } from '@/lib/distinte-resi'
 
 // L'ordinamento per MARGINE (sotto) calcola sul MOVIMENTI di tutto il periodo filtrato: sul network
 // intero legge molte righe, quindi serve più della finestra breve di default.
@@ -506,8 +507,14 @@ export async function GET(req: NextRequest) {
     const adminR = admin
     const mastersDelleSped = Array.from(new Set((spedizioni || []).map((s: any) => s.master_id).filter(Boolean)))
     if (mastersDelleSped.length) {
-      const { data: dr } = await adminR.from('distinte_resi').select('numero,voci').in('master_id', mastersDelleSped)
-      for (const d of (dr || [])) for (const v of (((d as any).voci) || [])) if (v?.id) distintaReso.set(v.id, (d as any).numero)
+      // A pagine e solo dalla spedizione piu' vecchia della pagina in poi: con una lettura sola, oltre le
+      // 1.000 distinte, a molti resi mancava il numero (vedi lib/distinte-resi). Se la lettura non riesce
+      // manca solo l'etichetta, l'elenco esce lo stesso.
+      const dal = (spedizioni || []).reduce((m: string | undefined, s: any) => s.created_at && (!m || s.created_at < m) ? s.created_at : m, undefined)
+      try {
+        const numeroDi = await pacchiGiaInDistintaResi(adminR, mastersDelleSped as string[], { dal })
+        for (const s of (spedizioni || [])) { const n = numeroDi.get((s as any).id); if (n != null) distintaReso.set((s as any).id, n) }
+      } catch (e: any) { console.error('[LISTA] distinte di reso:', e?.message) }
     }
   }
 

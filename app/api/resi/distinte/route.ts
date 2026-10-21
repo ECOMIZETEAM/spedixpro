@@ -6,6 +6,7 @@ import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -100,10 +101,9 @@ async function righeCatenaPropria(adminDb: any, mioMasterId: string, voci: any[]
 // Senza questo, un secondo invio dello stesso elenco — il POST che va in timeout su una distinta
 // lunga e l'operatore che riclicca — creava una seconda distinta e riaddebitava tutto. L'indice
 // unico nel database impedisce il doppio movimento, ma la distinta doppia restava.
+// Le distinte del master si leggono a pagine (lib/distinte-resi): una lettura sola si ferma a 1.000.
 async function escludiGiaInDistinta(adminDb: any, masterId: string, voci: any[]): Promise<any[]> {
-  const { data } = await adminDb.from('distinte_resi').select('voci').eq('master_id', masterId)
-  const gia = new Set<string>()
-  for (const d of (data || [])) for (const v of (Array.isArray(d?.voci) ? d.voci : [])) if (v?.id) gia.add(v.id)
+  const gia = await pacchiGiaInDistintaResi(adminDb, [masterId])
   return (voci || []).filter((v: any) => !gia.has(v?.id))
 }
 
@@ -156,10 +156,9 @@ export async function POST(req: NextRequest) {
         let distC: any = null
         if (vociBridgeNuove.length) {
           const { addebitaResoCondivisione, totaleResoAddebitato } = await import('@/lib/giacenza-cascata')
-          const { count: cC } = await supabase.from('distinte_resi').select('*', { count: 'exact', head: true }).eq('master_id', utente?.master_id)
           const { data: nuova } = await supabase.from('distinte_resi').insert({
             master_id: utente?.master_id, cliente_id: clienteId || null, target_master_id: targetMasterId || null,
-            numero: (cC || 0) + 1, totale_ldv: vociBridgeNuove.length, totale: 0, voci: vociBridgeNuove, stato: 'chiusa',
+            numero: await prossimoNumeroDistintaResi(adminDb, utente!.master_id!), totale_ldv: vociBridgeNuove.length, totale: 0, voci: vociBridgeNuove, stato: 'chiusa',
           }).select().single()
           distC = nuova
           for (const v of vociBridgeNuove) {
@@ -230,8 +229,7 @@ export async function POST(req: NextRequest) {
       voci = await escludiGiaInDistinta(adminDb, utente!.master_id!, voci)
       if (!voci.length) return NextResponse.json({ error: 'Queste LDV sono già in una distinta di reso' }, { status: 409 })
     }
-    const { count: cM } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
-    const numeroM = (cM||0) + 1
+    const numeroM = await prossimoNumeroDistintaResi(adminDb, utente!.master_id!)
     // Il totale della distinta di RETE = quanto viene ADDEBITATO al sotto-master (il prezzo che
     // LUI aveva pagato), NON il prezzo del cliente finale: ogni livello vede il proprio prezzo.
     // Si legge dai movimenti alla fine (vedi sotto), non dagli esiti di questo addebito.
@@ -290,8 +288,7 @@ export async function POST(req: NextRequest) {
     voci = await escludiGiaInDistinta(adminDb, utente!.master_id!, voci)
     if (!voci.length) return NextResponse.json({ error: 'Queste LDV sono già in una distinta di reso' }, { status: 409 })
   }
-  const { count } = await supabase.from('distinte_resi').select('*', {count:'exact',head:true}).eq('master_id', utente?.master_id)
-  const numero = (count||0) + 1
+  const numero = await prossimoNumeroDistintaResi(adminDb, utente!.master_id!)
   const { data: cliRec } = await supabase.from('clienti').select('listino_cliente_id').eq('id', clienteId).single()
   // Il NOLO lo calcola il motore tariffe (qui), la PERCENTUALE e l'addebito li fa il database:
   // stessa regola dello svincolo giacenza, e tutte le voci in una transazione sola.
