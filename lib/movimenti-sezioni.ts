@@ -97,12 +97,18 @@ export async function sezioniDelMaster(admin: any, io: string): Promise<{
       })
     }
   }
-  // Movimenti del conto proprio su contratti che oggi non sono piu' suoi (cancellati, rinominati, prove
-  // dei primi di ottobre): lo storico non si cancella, e senza questa sezione le somme non tornerebbero.
+  // Movimenti del conto proprio su contratti che NON sono suoi propri: le prove dei primi di ottobre (Wave
+  // su SDA EXPRESS L, che e' suo ma comprato da LOGIXIA) e le spedizioni fatte dal padre per suo conto
+  // prima della correzione di fn_conto_di del 22/09 (CF GROUP, spedizioni 2000). Lo storico non si
+  // cancella, e senza questa sezione le somme non tornerebbero. Il titolo dice QUALI contratti: "non piu'
+  // tuoi" era falso per Wave. Le righe sono poche (al massimo sette per master): i nomi si leggono da li'.
   const altri = [...rp.entries()].filter(([k]) => !chiaviPropri.has(k))
   if (altri.length) {
+    const { data: righeAltri, error: eAltri } = await admin.rpc('movimenti_sezione_v1', { p_master: io, p_sezione: 'altri', p_limit: 200 })
+    if (eAltri) throw new Error(eAltri.message)
+    const nomi = Array.from(new Set(((righeAltri || []) as any[]).map(r => String(r.corriere || '').trim() || 'senza contratto'))).sort()
     sezioni.push({
-      id: 'altri', tipo: 'altri', etichetta: 'Storico', titolo: 'Contratti non più tuoi', sottotitolo: 'Movimenti passati sul tuo conto',
+      id: 'altri', tipo: 'altri', etichetta: 'Conto proprio', titolo: 'Altri contratti', sottotitolo: nomi.join(', '),
       saldo: r2(altri.reduce((a, [, r]) => a + r.somma, 0)), movimenti: altri.reduce((a, [, r]) => a + r.n, 0),
     })
   }
