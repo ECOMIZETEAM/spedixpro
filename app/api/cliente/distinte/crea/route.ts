@@ -65,5 +65,10 @@ export async function POST(req: NextRequest) {
   try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(_adminChiusura, distinta.id) } catch {}
   try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_adminChiusura, distinta.id) } catch {}
   try { const { chiudiDistintaFedex } = await import('@/lib/fedex'); await chiudiDistintaFedex(_adminChiusura, distinta.id) } catch {}
+  // Ponti dei contratti condivisi e tipi senza borderò (easyparcel, interno, inpost, poste, dielle): niente
+  // da trasmettere, si attesta. Mancavano qui e nell'API v1: dal 04/10 al 21/10/2026 1.931 distinte nate da
+  // queste due porte sono rimaste "In attesa" per sempre (lib/distinte-chiusura).
+  try { const { chiudiDistintaMoovexpress } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMoovexpress(_adminChiusura, distinta.id) } catch {}
+  try { const { chiudiDistintaSenzaManifest } = await import('@/lib/distinte-chiusura'); await chiudiDistintaSenzaManifest(_adminChiusura, distinta.id) } catch {}
   return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length }, fulfill: fulfillEsiti })
 }

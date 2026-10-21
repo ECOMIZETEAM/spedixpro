@@ -84,6 +84,14 @@ export async function POST(req: NextRequest) {
     const { chiudiDistintaFedex } = await import('@/lib/fedex')
     await chiudiDistintaFedex(admin, distinta.id)
   } catch (e) { console.error('API close-day fedex:', e) }
+  // Ponti dei contratti condivisi e tipi senza borderò (easyparcel, interno, inpost, poste, dielle): niente
+  // da trasmettere, si attesta. Mancavano qui e nella creazione del portale cliente: dal 04/10 al 21/10/2026
+  // 1.931 distinte nate da queste due porte sono rimaste "In attesa" per sempre (lib/distinte-chiusura).
+  try {
+    const { chiudiDistintaMoovexpress, chiudiDistintaSenzaManifest } = await import('@/lib/distinte-chiusura')
+    await chiudiDistintaMoovexpress(admin, distinta.id)
+    await chiudiDistintaSenzaManifest(admin, distinta.id)
+  } catch (e) { console.error('API close-day senza manifest:', e) }
 
   // Rileggo il borderò eventualmente prodotto (spedisci): lo restituisco come PDF base64.
   // NB: non esiste un endpoint /pdf per le distinte via API — restituisco direttamente il documento del corriere.
