@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { stripeConfigurato, stripeClient } from '@/lib/stripe'
+import { RICARICHE_CARTA_SOSPESE } from '@/lib/ricarica-carta'
 
 /* ADDEBITO SU CARTA SALVATA, senza uscire dal portale.
  *
@@ -21,13 +22,12 @@ import { stripeConfigurato, stripeClient } from '@/lib/stripe'
 const MIN = 1        // qui non c'e' minimo di ricarica: si copre l'esatto mancante di UNA spedizione
 const MAX = 5000
 
-// SOSPESE su decisione del super master: niente addebito carta self-service (né ricarica né
-// pagamento della singola spedizione con carta). Per riattivare: rimettere a false.
-const RICARICHE_SOSPESE = true
-
 export async function POST(req: NextRequest) {
-  if (RICARICHE_SOSPESE) {
-    return NextResponse.json({ error: 'Il pagamento con carta è temporaneamente sospeso.' }, { status: 503 })
+  // Sospesa su decisione del super master (lib/ricarica-carta). Il riquadro non chiama piu' questa
+  // rotta; la raggiunge solo una scheda aperta prima del rilascio, col vecchio pulsante, che mostra
+  // questo testo sotto il riquadro: deve dire dove si ricarica, non solo che la carta non va.
+  if (RICARICHE_CARTA_SOSPESE) {
+    return NextResponse.json({ error: 'Il pagamento con carta è sospeso. Per ricaricare il credito apri Mio Account → Ricarica Credito.' }, { status: 503 })
   }
   if (!stripeConfigurato()) {
     return NextResponse.json({ error: 'Il pagamento con carta non è ancora attivo.' }, { status: 400 })

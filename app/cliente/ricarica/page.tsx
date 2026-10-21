@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { RICARICHE_CARTA_SOSPESE } from '@/lib/ricarica-carta'
+import DatiBonifico from '../DatiBonifico'
 
 // Pagina RICARICA CREDITO del cliente. Sceglie un importo, paga con carta su Stripe (Checkout) e
 // torna qui: il credito NON si aggiorna a schermo subito, si accredita nel webhook quando il
@@ -17,6 +19,14 @@ const card: React.CSSProperties = {
 }
 
 export default function RicaricaCredito() {
+  // La scelta si fa qui, prima di montare la cassa: montata anche con la carta sospesa, leggeva il saldo
+  // da /api/cliente/dashboard (tre aggregazioni sul database) a ogni apertura, per una schermata che
+  // poi non mostrava.
+  if (RICARICHE_CARTA_SOSPESE) return <RicaricaBonifico />
+  return <RicaricaCarta />
+}
+
+function RicaricaCarta() {
   const [importo, setImporto] = useState(50)
   const [credito, setCredito] = useState<number | null>(null)
   const [invio, setInvio] = useState(false)
@@ -77,20 +87,6 @@ export default function RicaricaCredito() {
     } catch {
       setErrore('Errore di rete. Riprova.'); setInvio(false)
     }
-  }
-
-  // SOSPESE (decisione super master): niente ricarica self-service. Deve combaciare col blocco lato
-  // rotta in app/api/cliente/ricarica. Per riattivare: rimettere a false qui e nella rotta.
-  const SOSPESE = true
-  if (SOSPESE) {
-    // RICARICA CON BONIFICO.
-    //
-    // Con la carta sospesa questa pagina diceva soltanto "contatta il tuo referente": un vicolo
-    // cieco. Chi si e' appena iscritto non puo' spedire finche' non ha credito, e non trovava
-    // scritto da nessuna parte DOVE versarlo — nemmeno la voce di menu, che era nascosta.
-    // Chi incassa e' il MASTER del cliente, non noi: i dati bancari sono i suoi, e la causale porta
-    // il codice cliente cosi' l'accredito si riconosce da solo.
-    return <RicaricaBonifico card={card} />
   }
 
   return (
@@ -180,65 +176,18 @@ export default function RicaricaCredito() {
   )
 }
 
-// ── Istruzioni per il bonifico ────────────────────────────────────────────────
-function RicaricaBonifico({ card }: { card: React.CSSProperties }) {
-  const [d, setD] = useState<any>(null)
-  const [caricato, setCaricato] = useState(false)
-  const [copiato, setCopiato] = useState('')
-  useEffect(() => {
-    fetch('/api/cliente/ricarica-bonifico').then(r => r.json())
-      .then(j => setD(j?.error ? null : j)).catch(() => setD(null))
-      .finally(() => setCaricato(true))
-  }, [])
-  const copia = (v: string, k: string) => {
-    try { navigator.clipboard.writeText(v); setCopiato(k); setTimeout(() => setCopiato(''), 1500) } catch { }
-  }
-  const riga = (etichetta: string, valore: string, k?: string) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid #f2f2f2' }}>
-      <span style={{ fontSize: 12, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', fontWeight: 600 }}>{etichetta}</span>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 14, color: '#1a1a1a', fontWeight: 600, fontFamily: k === 'iban' ? 'monospace' : undefined }}>{valore}</span>
-        {k ? <button onClick={() => copia(valore, k)} style={{ fontSize: 11, padding: '3px 9px', border: '1px solid #e5e5e5', background: '#fff', borderRadius: 5, cursor: 'pointer', fontWeight: 700, color: '#555' }}>{copiato === k ? '✓' : 'copia'}</button> : null}
-      </span>
-    </div>
-  )
-
+// ── Ricarica con bonifico ─────────────────────────────────────────────────────
+// Con la carta sospesa questa pagina diceva soltanto "contatta il tuo referente": un vicolo cieco. Chi
+// si e' appena iscritto non puo' spedire finche' non ha credito, e non trovava scritto da nessuna parte
+// DOVE versarlo — nemmeno la voce di menu, che era nascosta. Chi incassa e' il MASTER del cliente, non
+// noi: i dati bancari sono i suoi, e la causale porta il codice cliente cosi' l'accredito si riconosce
+// da solo. Saldo, coordinate e ripiego stanno in DatiBonifico, lo stesso che mostra il riquadro
+// "credito insufficiente": la pagina e il riquadro non possono dire due cose diverse.
+function RicaricaBonifico() {
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a', margin: '4px 0 4px' }}>Ricarica credito</h1>
-      <p style={{ color: '#666', fontSize: 13.5, margin: '0 0 14px', lineHeight: 1.6 }}>
-        Le spedizioni si pagano con il credito: si ricarica con <strong>bonifico bancario</strong>.
-        Appena il bonifico arriva, il credito viene accreditato e puoi spedire.
-      </p>
-
-      {!caricato ? <div style={{ ...card }}>Caricamento…</div>
-        : d?.pronto ? (
-          <>
-            <div style={{ ...card }}>
-              {riga('Intestatario', d.intestatario || '—')}
-              {riga('IBAN', d.iban, 'iban')}
-              {d.banca ? riga('Banca', d.banca) : null}
-              {riga('Causale', d.causale, 'causale')}
-            </div>
-            <div style={{ ...card, marginTop: 12, background: '#fff7ed', borderColor: '#fed7aa' }}>
-              <div style={{ fontSize: 13, color: '#7c2d12', lineHeight: 1.6 }}>
-                <strong>Metti la causale esatta</strong>: contiene il tuo codice cliente ed è quello che
-                fa riconoscere il versamento. Senza, l'accredito richiede più tempo.
-                {d.contatto ? <> Per qualsiasi cosa: <strong>{d.contatto}</strong>.</> : null}
-              </div>
-            </div>
-          </>
-        ) : (
-          // Il master non ha ancora inserito i suoi dati bancari: si dice com'e', con un contatto
-          // vero, invece di mostrare campi vuoti che sembrano un guasto.
-          <div style={{ ...card, background: '#fff7ed', borderColor: '#fed7aa' }}>
-            <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 15 }}>Dati per il bonifico non ancora disponibili</div>
-            <div style={{ color: '#9a3412', fontSize: 13, marginTop: 6, lineHeight: 1.6 }}>
-              {d?.master ? <>{d.master} non ha ancora pubblicato le coordinate bancarie. </> : null}
-              Scrivi a <strong>{d?.contatto || 'assistenza'}</strong> per ricaricare il credito: ti rispondono con le istruzioni.
-            </div>
-          </div>
-        )}
+      <DatiBonifico variante="pagina" />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { stripeConfigurato, stripeClient } from '@/lib/stripe'
+import { RICARICHE_CARTA_SOSPESE } from '@/lib/ricarica-carta'
 
 /* RICARICA DEL CREDITO con carta.
  *
@@ -16,12 +17,10 @@ import { stripeConfigurato, stripeClient } from '@/lib/stripe'
 const MIN = 10       // ricarica minima concordata
 const MAX = 5000     // oltre, meglio parlarne: bonifico o pratica dedicata
 
-// SOSPESE su decisione del super master: i clienti NON possono ricaricarsi da soli con carta al
-// momento. Per riattivare: rimettere a false.
-const RICARICHE_SOSPESE = true
-
 export async function POST(req: NextRequest) {
-  if (RICARICHE_SOSPESE) {
+  // Sospesa su decisione del super master (lib/ricarica-carta): con la carta sospesa la pagina
+  // Ricarica mostra solo il bonifico e non chiama questa rotta.
+  if (RICARICHE_CARTA_SOSPESE) {
     return NextResponse.json({ error: 'Le ricariche del credito sono temporaneamente sospese.' }, { status: 503 })
   }
   if (!stripeConfigurato()) {
