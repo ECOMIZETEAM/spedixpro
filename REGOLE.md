@@ -24,6 +24,7 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | Ogni cliente vede solo i propri dati | RLS per-tenant su tutte le tabelle (`mia_rete_master`) |
 | Il credito si muove solo dalle funzioni dei movimenti | trigger `fn_credito_solo_via_rpc` su `clienti` e `masters` |
 | Un reso non si addebita due volte | indici unici parziali `uniq_mov_reso_cliente` / `uniq_mov_reso_master` |
+| ...nemmeno su due gambe dello stesso pacco: lo stesso pagatore, sullo stesso conto, paga il reso di un tracking una volta sola | trigger `trg_reso_una_volta_per_pacco` (rifiuta col codice del vincolo unico: per `fn_addebita_resi` è "già addebitato"). Dall'8 al 14/10/2026 sono passati 54 doppi così, stornati. Script: `scripts/reso-una-volta-per-pacco.sql` |
 | Il prezzo del reso: percentuale, ripiego, transazione unica | `fn_addebita_resi` |
 | Una giacenza la apre solo il fornitore, mai una lettura di Poste | trigger `trg_giacenza_solo_dal_fornitore`: `in_giacenza` senza `giacenza_data` non passa (fuori il circuito interno) |
 | Una giacenza aperta va addebitata, sempre | trigger `trg_giacenza_da_addebitare` → coda `giacenze_da_addebitare` |
