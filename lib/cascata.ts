@@ -326,8 +326,11 @@ export async function haContoProprio(masterId: string | null | undefined): Promi
   const admin = createAdminSupabase()
   const { data: m } = await admin.from('masters').select('parent_master_id').eq('id', masterId).maybeSingle()
   if (!m?.parent_master_id) return false
-  const { data: radice } = await admin.from('masters').select('id').is('parent_master_id', null).maybeSingle()
-  if (radice?.id && m.parent_master_id === radice.id) return false
+  // VERTICE = il padre non ha padre, la regola di fn_conto_di. Prima si cercava "la" radice con una
+  // lettura da una riga sola: le radici sono sette (la piattaforma e sei demo), la lettura falliva in
+  // silenzio, e MULTIEXPRESS si vedeva in Lista Movimenti un conto proprio che il vertice non ha.
+  const { data: padre } = await admin.from('masters').select('parent_master_id').eq('id', m.parent_master_id).maybeSingle()
+  if (!padre?.parent_master_id) return false
   const { count } = await admin.from('corrieri')
     .select('id', { count: 'exact', head: true }).eq('master_id', masterId).eq('proprio', true)
   return (count || 0) > 0

@@ -13,6 +13,12 @@ type Movimento = {
   created_at: string
   corriere?: string | null
 }
+// Un conto, una lista: il master sopra, ogni contratto comprato da un altro master, ogni contratto tuo,
+// le commissioni. La rotta li calcola e decide quali spettano a chi guarda.
+type Sezione = {
+  id: string; tipo: 'rete' | 'fornitore' | 'proprio' | 'altri' | 'commissioni'
+  etichetta: string; titolo: string; sottotitolo: string; saldo: number; movimenti: number | null
+}
 type Gruppo = {
   gruppo: string; portale: string; label: string
   ricariche: number; rimesseCod: number; speso: number; residuo: number
@@ -42,18 +48,14 @@ export default function MovimentiMasterPage() {
   const dialog = useDialog()
   const [movimenti, setMovimenti] = useState<Movimento[]>([])
   const [saldo, setSaldo] = useState(0)
-  // null = un conto solo (quasi tutti). Valorizzato solo per chi porta contratti suoi.
-  const [saldoProprio, setSaldoProprio] = useState<number|null>(null)
-  // Commissioni MoovExpress accumulate sui contratti propri (0,05 €/spedizione). null = non applicabile.
-  const [saldoCommissioni, setSaldoCommissioni] = useState<number|null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [cerca, setCerca] = useFiltriPersistenti('movimenti-master:cerca', '')
   const [corriereFiltro, setCorriereFiltro] = useFiltriPersistenti('movimenti-master:corriere', '')
   const [gruppoFiltro, setGruppoFiltro] = useFiltriPersistenti('movimenti-master:gruppo', '')       // E&A: filtra la lista per portale/sotto-account
-  // CONDIVISIONE: conti selezionabili (rete/albero + un conto-CODICE per fornitore). Vuoto/1 voce = nessun selettore.
-  const [conti, setConti] = useState<{ id: string; label: string }[]>([])
-  const [contoFiltro, setContoFiltro] = useFiltriPersistenti('movimenti-master:conto', 'rete')
+  // Le sezioni (una per conto) e quella aperta. Con una sola sezione la pagina resta com'era.
+  const [sezioni, setSezioni] = useState<Sezione[]>([])
+  const [sezione, setSezione] = useFiltriPersistenti('movimenti-master:sezione', 'rete')
   const [perPage, setPerPage] = useFiltriPersistenti('movimenti-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [total, setTotal] = useState(0)
@@ -124,26 +126,28 @@ export default function MovimentiMasterPage() {
       try {
         const params = new URLSearchParams({ self: '1', page: String(pagina), perPage: String(perPage), somma: '1' })
         if (cercaDeb) params.set('cerca', cercaDeb)
-        if (corriereFiltro) params.set('corriere', corriereFiltro)
-        if (gruppoFiltro) params.set('gruppo', gruppoFiltro)
-        params.set('conto', contoFiltro || 'rete')
+        params.set('sezione', sezione || 'rete')
+        // Corriere e gruppo dividono i contratti del master sopra: nelle altre sezioni il contratto e' uno.
+        if (corriereFiltro && (sezione || 'rete') === 'rete') params.set('corriere', corriereFiltro)
+        if (gruppoFiltro && (sezione || 'rete') === 'rete') params.set('gruppo', gruppoFiltro)
         const res = await fetch('/api/movimenti/lista?' + params.toString())
         const data = await res.json()
         if (annulla) return
         if (res.ok) {
           setMovimenti(data.movimenti || []); setSaldo(Number(data.saldo || 0))
-          setSaldoProprio(data.saldoProprio == null ? null : Number(data.saldoProprio))
-          setSaldoCommissioni(data.saldoCommissioni == null ? null : Number(data.saldoCommissioni))
           setTotal(Number(data.total || 0)); setSomma(Number(data.somma || 0))
           if (Array.isArray(data.corrieriDisponibili)) setCorrieriOpts(data.corrieriDisponibili)
-          if (Array.isArray(data.conti)) setConti(data.conti)
+          if (Array.isArray(data.sezioni)) setSezioni(data.sezioni)
+          // Sezione ricordata che non c'e' piu' (contratto tolto, altro utente sullo stesso browser): il
+          // server ha risposto con quella principale, la pagina si allinea.
+          if (data.sezione && data.sezione !== sezione) setSezione(data.sezione)
           setErr(null)
         } else setErr(data.error || 'Errore nel caricamento')
       } catch { if (!annulla) setErr('Errore di rete') }
       finally { if (!annulla) setLoading(false) }
     })()
     return () => { annulla = true }
-  }, [pagina, perPage, cercaDeb, corriereFiltro, gruppoFiltro, contoFiltro])
+  }, [pagina, perPage, cercaDeb, corriereFiltro, gruppoFiltro, sezione])
   useEffect(() => { caricaPortali() }, [])
 
   const corrieri = corrieriOpts
@@ -233,31 +237,48 @@ export default function MovimentiMasterPage() {
         </div>
       )}
 
+      {sezioni.length > 1 && (
+        <div style={{...card, marginBottom:'16px'}}>
+          <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'4px'}}>I tuoi conti</div>
+          <div style={{fontSize:'12px',color:'#999',marginBottom:'14px'}}>Un conto per il master che ti vende i contratti, uno per ogni contratto che compri da un altro master e uno per ogni contratto tuo. Apri un conto per vederne i movimenti: il totale speso è la somma dei conti.</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))',gap:'12px'}}>
+            {sezioni.map(sz => {
+              const aperta = sz.id === sezione
+              const colore = sz.tipo === 'commissioni' ? (sz.saldo < 0 ? '#b45309' : '#15803d') : (sz.saldo < 0 ? '#b91c1c' : '#15803d')
+              return (
+                <button key={sz.id} type="button" aria-pressed={aperta} onClick={() => { setSezione(sz.id); setPagina(1) }}
+                  style={{textAlign:'left',cursor:'pointer',font:'inherit',background:aperta?'#fff7ed':'#fff',border:`1px solid ${aperta?'#f97316':'#eee'}`,borderRadius:'8px',padding:'14px',minWidth:0}}>
+                  <div style={{fontSize:'10.5px',fontWeight:700,color:aperta?'#ea580c':'#999',textTransform:'uppercase',letterSpacing:'.04em'}}>{sz.etichetta}</div>
+                  <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'4px',overflowWrap:'anywhere'}}>{sz.titolo}</div>
+                  <div style={{fontSize:'12px',color:'#888',marginTop:'2px'}}>{sz.sottotitolo}</div>
+                  <div style={{fontSize:'20px',fontWeight:800,color:colore,marginTop:'8px'}}>{fmtEuro(sz.saldo)}</div>
+                  {sz.movimenti === 0 && <div style={{fontSize:'11.5px',color:'#aaa',marginTop:'2px'}}>Ancora nessun movimento</div>}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div style={{...card,marginBottom:'16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
         <div style={{display:'flex',gap:'28px',flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{(()=>{ if(contoFiltro!=='rete') return `Credito · ${conti.find(c=>c.id===contoFiltro)?.label||'fornitore'}`; const rl=conti.find(c=>c.id==='rete')?.label; return rl&&rl!=='Rete'?`Credito · ${rl}`:(saldoProprio!=null?'Credito · conto rete':'Credito disponibile'); })()}</div>
-            <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{(()=>{
+              const sz = sezioni.find(x => x.id === sezione)
+              if (!sz) return 'Credito disponibile'
+              if (sz.tipo === 'proprio' || sz.tipo === 'altri') return `Costi · ${sz.titolo}`
+              if (sz.tipo === 'commissioni') return 'Commissioni MoovExpress'
+              return sz.titolo && sz.titolo !== 'Rete' ? `Credito · ${sz.titolo}` : 'Credito disponibile'
+            })()}</div>
+            <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?(sezione==='commissioni'?'#b45309':'#b91c1c'):'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
           </div>
-          {saldoProprio!=null && (
-            <div>
-              <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Credito · contratti tuoi</div>
-              <div style={{fontSize:'26px',fontWeight:700,color:saldoProprio<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtEuro(saldoProprio)}</div>
-            </div>
-          )}
-          {saldoCommissioni!=null && (
-            <div title="0,05 € per spedizione sui tuoi contratti. Si accumula e si salda a parte: non blocca mai le spedizioni.">
-              <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Commissioni MoovExpress</div>
-              <div style={{fontSize:'26px',fontWeight:700,color:saldoCommissioni<0?'#b45309':'#15803d',marginTop:'4px'}}>{fmtEuro(saldoCommissioni)}</div>
-            </div>
-          )}
           <div>
-            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Totale movimenti{gruppoFiltro?` · gruppo`:corriereFiltro?` · ${corriereFiltro}`:''}</div>
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Totale movimenti{sezione==='rete'&&gruppoFiltro?` · gruppo`:sezione==='rete'&&corriereFiltro?` · ${corriereFiltro}`:''}</div>
             <div style={{fontSize:'26px',fontWeight:700,color:totaleFiltrato<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtImporto(totaleFiltrato)}</div>
           </div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
-          {gruppi && gruppi.length>0 && (
+          {gruppi && gruppi.length>0 && sezione==='rete' && (
             <>
               <span style={{fontSize:'12.5px',color:'#666'}}>Gruppo</span>
               <select value={gruppoFiltro} onChange={e=>{setGruppoFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'190px'}}>
@@ -266,19 +287,15 @@ export default function MovimentiMasterPage() {
               </select>
             </>
           )}
-          {conti.length > 1 && (
+          {sezione==='rete' && corrieri.length>0 && (
             <>
-              <span style={{fontSize:'12.5px',color:'#666'}}>Conto</span>
-              <select value={contoFiltro} onChange={e=>{setContoFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'190px'}}>
-                {conti.map(c=><option key={c.id} value={c.id}>{c.id==='rete'?c.label:`Fornitore · ${c.label}`}</option>)}
+              <span style={{fontSize:'12.5px',color:'#666'}}>Corriere</span>
+              <select value={corriereFiltro} onChange={e=>{setCorriereFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'180px'}}>
+                <option value="">Tutti i corrieri</option>
+                {corrieri.map(c=><option key={c} value={c}>{c}</option>)}
               </select>
             </>
           )}
-          <span style={{fontSize:'12.5px',color:'#666'}}>Corriere</span>
-          <select value={corriereFiltro} onChange={e=>{setCorriereFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'180px'}}>
-            <option value="">Tutti i corrieri</option>
-            {corrieri.map(c=><option key={c} value={c}>{c}</option>)}
-          </select>
           <span style={{fontSize:'12.5px',color:'#666'}}>Mostra</span>
           <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
           <span style={{fontSize:'12.5px',color:'#666'}}>Cerca:</span>
@@ -295,7 +312,7 @@ export default function MovimentiMasterPage() {
         ) : !visibili.length ? (
           <div style={{padding:'50px',textAlign:'center'}}>
             <div style={{fontSize:'40px',marginBottom:'12px'}}>📄</div>
-            <div style={{fontSize:'14px',fontWeight:500,color:'#999'}}>Nessun movimento{gruppoFiltro?' per questo gruppo':''}</div>
+            <div style={{fontSize:'14px',fontWeight:500,color:'#999'}}>Nessun movimento{sezione==='rete'&&gruppoFiltro?' per questo gruppo':cercaDeb?' per questa ricerca':' su questo conto'}</div>
           </div>
         ) : (
           <div style={{overflowX:'auto'}}>
@@ -314,7 +331,11 @@ export default function MovimentiMasterPage() {
                   return (
                     <tr key={m.id}>
                       <td style={{...td,color:'#666',fontSize:'12px'}}>{fmtData(m.created_at)}</td>
-                      <td style={{...td,color:'#1a1a1a',whiteSpace:'normal'}}>{m.descrizione}</td>
+                      <td style={{...td,color:'#1a1a1a',whiteSpace:'normal'}}>
+                        {m.descrizione}
+                        {/* Nello storico i contratti sono piu' d'uno: si dice quale. */}
+                        {sezione==='altri' && m.corriere && <div style={{fontSize:'11.5px',color:'#999',marginTop:'2px'}}>{m.corriere}</div>}
+                      </td>
                       <td style={{...td,textAlign:'right',fontWeight:600,color:positivo?'#15803d':'#b91c1c'}}>{fmtImporto(Number(m.importo))}</td>
                       <td style={{...td,textAlign:'right',color:'#1a1a1a'}}>{fmtEuro(Number(m.saldo_dopo))}</td>
                     </tr>

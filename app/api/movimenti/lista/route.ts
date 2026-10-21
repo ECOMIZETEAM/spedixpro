@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
+import { sezioniDelMaster, leggiSezione } from '@/lib/movimenti-sezioni'
 export const dynamic = 'force-dynamic'
 
 // Lista movimenti con PAGINAZIONE SERVER (?page=1&perPage=25): i target grandi hanno migliaia di
@@ -73,101 +74,66 @@ export async function GET(req: NextRequest) {
     return { movimenti: data || [], total, somma }
   }
 
-  // Arricchimento nome corriere (solo sulle righe restituite: poche).
-  const conCorriere = async (movs: any[]) => {
-    const spedIds = Array.from(new Set(movs.map((mv: any) => mv.spedizione_id).filter(Boolean)))
-    if (!spedIds.length) return movs.map((mv: any) => ({ ...mv, corriere: null }))
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const admin = createAdminSupabase()
-    const nomePerSped = new Map<string, string | null>()
-    for (let i = 0; i < spedIds.length; i += 300) {
-      const { data: speds } = await admin.from('spedizioni').select('id,corrieri(nome_contratto)').in('id', spedIds.slice(i, i + 300))
-      for (const s of (speds || [])) nomePerSped.set(s.id, (s.corrieri as any)?.nome_contratto || null)
+  // UNA SEZIONE = UN CONTO (lib/movimenti-sezioni): per i master la lista legge solo il conto scelto.
+  const lim = page ? perPage : 200
+  const opzioniSezione = (conFiltriCorriere: boolean) => ({
+    page: page || 1, perPage: lim, cerca: cerca || null, conSomma,
+    corriereNome: conFiltriCorriere ? (corriere || null) : null,
+    corriereIds: conFiltriCorriere ? corriereIdsGruppo : null,
+  })
+
+  // SCHEDA DI UN SOTTO-MASTER vista da sopra: SOLO il conto fra loro due. I contratti propri del
+  // sotto-master e le sue commissioni non sono del master sopra (decisione del 4/8: "MULTIEXPRESS non
+  // vede quelle spedizioni, solo Davide vede il conteggio totale"). Prima arrivava tutto: MULTIEXPRESS
+  // nella scheda di Wave leggeva le spedizioni GLS di Wave, col saldo del conto proprio di Wave.
+  // Dalla piattaforma (MoovExpress, la radice vera) si continua a vedere tutto, come prima.
+  const movimentiSottoMaster = async (admin: any, targetId: string, sub: any) => {
+    const { data: io } = await admin.from('masters').select('parent_master_id,demo').eq('id', utente?.master_id).maybeSingle()
+    const dallaPiattaforma = !!io && !(io as any).parent_master_id && !(io as any).demo
+    try {
+      const { movimenti, total, somma } = dallaPiattaforma
+        ? await carica(admin, 'master_target_id', targetId)
+        : await leggiSezione(admin, { master: targetId, sezione: 'rete' }, opzioniSezione(true))
+      return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+    } catch (e: any) {
+      console.error('[MOVIMENTI] sotto-master', { targetId, errore: e?.message })
+      return NextResponse.json({ error: 'Movimenti non caricati, riprova.' }, { status: 500 })
     }
-    return movs.map((mv: any) => ({ ...mv, corriere: mv.spedizione_id ? (nomePerSped.get(mv.spedizione_id) || null) : null }))
   }
 
   if (self === '1') {
     if (utente?.ruolo === 'cliente' || !utente?.master_id) {
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     }
+    const io: string = utente.master_id
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const adminM = createAdminSupabase()
     // Filtro per GRUPPO (E&A): i movimenti-spedizione del portale/sotto-account scelto. Il gruppo è
     // il tipo del corriere (spediamopro/easyparcel/gls/interno) o, per Spedisci, il master_domain.
     if (gruppo) {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const adm = createAdminSupabase()
-      const { data: cs } = await adm.from('corrieri').select('id,tipo,credenziali').eq('master_id', utente.master_id)
+      const { data: cs } = await adminM.from('corrieri').select('id,tipo,credenziali').eq('master_id', io)
       corriereIdsGruppo = (cs || []).filter((c: any) =>
         ['spediamopro', 'easyparcel', 'gls', 'interno'].includes(gruppo)
           ? c.tipo === gruppo
           : c.tipo === 'spedisci' && ((c.credenziali as any)?.master_domain === gruppo)
       ).map((c: any) => c.id)
     }
-    // CONDIVISIONE (due grafi): oltre al conto ALBERO (masters.credito, movimenti master_target=io), un
-    // master connesso via CODICE ha un conto su un LEDGER "(ingrosso)" sotto ogni FORNITORE (clienti.credito,
-    // movimenti cliente_id=ledger). La RLS li nasconde al master stesso -> admin. La proprieta' si ricava
-    // SOLO da corrieri_condivisi (master=loggato, attiva): il `conto` scelto dal client e' un FORNITORE id,
-    // mappato qui al ledger posseduto — mai un ledgerId/clienteId dal client.
-    const { createAdminSupabase: _adm } = await import('@/lib/supabase-admin')
-    const adminM = _adm()
-    const { data: legamiCod } = await adminM.from('corrieri_condivisi')
-      .select('fornitore_master_id,cliente_ledger_id').eq('master_id', utente.master_id).eq('stato', 'attiva').not('cliente_ledger_id', 'is', null)
-    const ledgerPerForn = new Map<string, string>()
-    for (const l of (legamiCod || [])) {
-      if (l.fornitore_master_id && l.cliente_ledger_id && !ledgerPerForn.has(l.fornitore_master_id)) ledgerPerForn.set(l.fornitore_master_id, l.cliente_ledger_id)
-    }
-    const fornIds = [...ledgerPerForn.keys()]
-    const { data: fornMasters } = fornIds.length ? await adminM.from('masters').select('id,nome').in('id', fornIds) : { data: [] as any[] }
-    const nomeForn = new Map((fornMasters || []).map((f: any) => [f.id, f.nome]))
-    const { data: mioParent } = await adminM.from('masters').select('parent_master_id').eq('id', utente.master_id).maybeSingle()
-    const { data: parentM } = (mioParent as any)?.parent_master_id
-      ? await adminM.from('masters').select('nome').eq('id', (mioParent as any).parent_master_id).maybeSingle() : { data: null as any }
-    // Lista dei conti selezionabili: 'rete' (albero) + uno per fornitore-codice. Per i master senza
-    // legami-codice resta [{rete}] e la pagina non mostra alcun selettore -> comportamento invariato.
-    const conti = [
-      { id: 'rete', label: (parentM as any)?.nome || 'Rete' },
-      ...fornIds.map((fid) => ({ id: fid, label: nomeForn.get(fid) || '—' })),
-    ]
-    const conto = (p.get('conto') || 'rete').trim()
-    const ledgerScelto = conto !== 'rete' && ledgerPerForn.has(conto) ? ledgerPerForn.get(conto)! : null
 
-    // Opzioni del filtro corriere: i nomi contratto sono condivisi in rete → bastano i MIEI.
-    const { data: miei } = await supabase.from('corrieri').select('nome_contratto').eq('master_id', utente.master_id)
-    const corrieriDisponibili = Array.from(new Set((miei || []).map((c: any) => c.nome_contratto).filter(Boolean))).sort()
-
-    if (ledgerScelto) {
-      // CONTO CODICE: movimenti del ledger (cliente_id), saldo da clienti.credito. Via admin (RLS nasconde).
-      const { movimenti, total, somma } = await carica(adminM, 'cliente_id', ledgerScelto)
-      const { data: led } = await adminM.from('clienti').select('credito').eq('id', ledgerScelto).maybeSingle()
+    try {
+      const { sezioni, argsDi, corrieriRete } = await sezioniDelMaster(adminM, io)
+      // Sezione chiesta che non c'e' (contratto tolto, altro utente sullo stesso browser): la principale.
+      const chiesta = (p.get('sezione') || 'rete').trim()
+      const scelta = argsDi(chiesta) ? chiesta : 'rete'
+      const { movimenti, total, somma } = await leggiSezione(adminM, argsDi(scelta)!, opzioniSezione(scelta === 'rete'))
       return NextResponse.json({
-        movimenti: await conCorriere(movimenti),
-        total, somma, page: page || undefined, perPage,
-        corrieriDisponibili, conti, conto,
-        saldo: Number((led as any)?.credito || 0),
-        cliente: `Conto ${nomeForn.get(conto) || ''}`.trim(),
+        movimenti, total, somma, page: page || undefined, perPage,
+        sezioni, sezione: scelta, corrieriDisponibili: scelta === 'rete' ? corrieriRete : [],
+        saldo: sezioni.find(s => s.id === scelta)?.saldo ?? 0,
       })
+    } catch (e: any) {
+      console.error('[MOVIMENTI] sezioni', { master: io, errore: e?.message })
+      return NextResponse.json({ error: 'Movimenti non caricati, riprova.' }, { status: 500 })
     }
-
-    // CONTO RETE (albero): comportamento storico.
-    const { movimenti, total, somma } = await carica(supabase, 'master_target_id', utente.master_id)
-    const { data: m } = await supabase
-      .from('masters').select('credito, nome, credito_proprio, commissioni_moovexpress').eq('id', utente.master_id).single()
-    // Chi porta contratti SUOI ha due conti, e finora ne vedeva uno: i costi dei suoi contratti
-    // scendevano da un saldo che nessuna pagina mostrava. Il secondo si manda solo a chi ce l'ha
-    // davvero, cosi' per tutti gli altri la pagina resta identica.
-    const { haContoProprio } = await import('@/lib/cascata')
-    const dueConti = await haContoProprio(utente.master_id)
-    return NextResponse.json({
-      movimenti: await conCorriere(movimenti),
-      total, somma, page: page || undefined, perPage,
-      corrieriDisponibili, conti, conto: 'rete',
-      saldo: Number(m?.credito || 0),
-      saldoProprio: dueConti ? Number((m as any)?.credito_proprio || 0) : undefined,
-      // Commissioni MoovExpress accumulate sui contratti propri (0,05 €/spedizione): lista/saldo a
-      // parte, si mostra solo a chi ha contratti propri. Negativo = dovuto a MoovExpress.
-      saldoCommissioni: dueConti ? Number((m as any)?.commissioni_moovexpress || 0) : undefined,
-      cliente: m?.nome || null,
-    })
   }
 
   let clienteId: string | null = null
@@ -201,8 +167,7 @@ export async function GET(req: NextRequest) {
         console.warn('[MOVIMENTI][403] sotto-master', { viewer: utente?.master_id, ruolo: utente?.ruolo, targetId })
         return NextResponse.json({ error: `I movimenti di ${sub?.nome || 'questo master'} sono visibili solo a chi lo ha nella propria rete.` }, { status: 403 })
       }
-      const { movimenti, total, somma } = await carica(admin, 'master_target_id', targetId)
-      return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+      return movimentiSottoMaster(admin, targetId, sub)
     }
 
     const { data: cli } = await supabase
@@ -221,8 +186,7 @@ export async function GET(req: NextRequest) {
           cur = pm?.parent_master_id || null
         }
         if (autorizzato) {
-          const { movimenti, total, somma } = await carica(admin, 'master_target_id', clienteId)
-          return NextResponse.json({ movimenti, total, somma, page: page || undefined, perPage, saldo: Number(sub.credito || 0), cliente: sub.nome || null })
+          return movimentiSottoMaster(admin, clienteId, sub)
         }
       }
       // Messaggio esplicito: il cliente di un sotto-master NON è leggibile da chi sta più in
