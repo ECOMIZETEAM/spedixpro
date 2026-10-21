@@ -90,14 +90,28 @@ const NAV_BASE: NavItem[] = [
   { id: 'introduzione', label: 'Introduzione', icon: '?', href: '#' },
 ]
 
-export default function ClienteNav() {
+// I NEGOZI DEL MASTER DELL'APP STORE NON VEDONO GLI SMS.
+//
+// soloEtichette arriva gia' calcolato dal layout (pagaSoloEtichette, lib/conti-shopify.ts): quei negozi
+// pagano solo etichette, ed e' la condizione dell'esenzione dal Billing di Shopify. Gli SMS si pagano a
+// parte (0,10 € l'uno, con carta): per Shopify sarebbero un incasso dell'app fuori dal suo sistema, e
+// per loro la pagina non avrebbe niente da offrire (decisione di Lorenzo del 21/10/2026). Il rifiuto
+// vero sta in /api/sms/acquista: qui si toglie solo una porta che per loro non porta da nessuna parte.
+// "API Key" resta: le chiavi sono gratuite, ed e' PianoApi a non mostrare loro i pacchetti a pagamento.
+const VOCI_A_PAGAMENTO = ['sms']
+
+export default function ClienteNav({ soloEtichette = false }: { soloEtichette?: boolean }) {
   const pathname = usePathname() || ''
   // Sottovoci dinamiche "Ordini {Piattaforma}" per ogni integrazione attiva del cliente
   const [integrazioni, setIntegrazioni] = useState<any[]>([])
   useEffect(() => {
     fetch('/api/integrazioni/lista').then(r=>r.json()).then(d=>{
       const lista = Array.isArray(d) ? d : (d?.integrazioni || [])
-      setIntegrazioni(lista.filter((i:any)=>i.stato==='attivo'))
+      // Anche il negozio Shopify in 'errore': dal 21/10/2026 ci va quando il suo accesso a Shopify e' morto
+      // (lib/shopify.ts), e gli ordini gia' importati da spedire devono restare raggiungibili finche' il
+      // negoziante non riapre l'app. Prima una riga Shopify non andava mai in 'errore'; le altre piattaforme
+      // restano come prima.
+      setIntegrazioni(lista.filter((i:any)=>i.stato==='attivo' || (i.piattaforma==='shopify' && i.stato==='errore')))
     }).catch(()=>{})
   }, [])
   // Badge notifiche assistenza (aggiornamenti ai propri ticket)
@@ -114,7 +128,7 @@ export default function ClienteNav() {
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
   const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
   const piattAttive = Array.from(new Set(integrazioni.map((i:any)=>i.piattaforma)))
-  const NAV: NavItem[] = NAV_BASE.map(sec => {
+  const NAV: NavItem[] = NAV_BASE.filter(sec => !(soloEtichette && VOCI_A_PAGAMENTO.includes(sec.id))).map(sec => {
     if (sec.id !== 'importa') return sec
     const extra = piattAttive.map((p:string)=> ({ label: 'Ordini '+(NOMI_PIATT[p]||p), href: '/cliente/ordini/'+p }))
     return { ...sec, sub: [ ...(sec.sub||[]), ...extra ] }

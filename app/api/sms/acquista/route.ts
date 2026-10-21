@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { COSTO_SMS_EUR } from '@/lib/sms'
 import { stripeConfigurato, stripeClient } from '@/lib/stripe'
+import { pagaSoloEtichette } from '@/lib/conti-shopify'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,14 +17,55 @@ export const dynamic = 'force-dynamic'
 // firmato (/api/stripe/webhook), mai aprendo la pagina — altrimenti basterebbe aprirla e chiuderla.
 const PACCHETTI = [1000, 5000, 10000]   // ≥1000, come deciso
 
-export async function POST(req: NextRequest) {
-  if (!stripeConfigurato()) return NextResponse.json({ error: 'Pagamento con carta non ancora attivo.' }, { status: 400 })
+// I NEGOZI DEL MASTER DELL'APP STORE NON COMPRANO SMS.
+//
+// Pagano solo etichette (pagaSoloEtichette, lib/conti-shopify.ts): e' la condizione dell'esenzione dal
+// Billing di Shopify, che copre le etichette e nient'altro. Un pacchetto SMS pagato qui con la carta
+// sarebbe un incasso dell'app fuori dal sistema di Shopify (decisione di Lorenzo del 21/10/2026). La
+// regola sta qui e non solo nel menu del portale, perche' il menu si aggira con una chiamata diretta.
+// Vale solo per il CLIENTE: il master e il suo staff comprano gli SMS come prima.
+const NON_PER_I_NEGOZI_SHOPIFY = 'Acquisto SMS non disponibile per i negozi collegati da Shopify.'
+const CONTO_ILLEGGIBILE = 'Non riesco a leggere il tuo conto in questo momento. Riprova.'
 
+// Si guarda il master scritto sulla riga del CLIENTE, quello che decide il suo listino e il suo conto.
+// Una lettura fallita non e' un via libera: null, e chi chiama si ferma invece di aprire la cassa.
+async function clienteSoloEtichette(admin: any, clienteId: string): Promise<boolean | null> {
+  const { data, error } = await admin.from('clienti').select('master_id').eq('id', clienteId).maybeSingle()
+  if (error) return null
+  return pagaSoloEtichette(data?.master_id)
+}
+
+// Il portale cliente chiede se per lui l'acquisto esiste, per non mostrare prezzi e inviti a farsi
+// ricaricare a chi non puo' averli. La risposta esce dalla stessa regola che ferma il POST: pagina e
+// guardia non possono dire due cose diverse.
+export async function GET() {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: u } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).maybeSingle()
+  if (!u?.cliente_id) return NextResponse.json({ disponibile: true })
+  const solo = await clienteSoloEtichette(createAdminSupabase(), u.cliente_id)
+  if (solo === null) return NextResponse.json({ error: CONTO_ILLEGGIBILE }, { status: 503 })
+  return NextResponse.json(solo ? { disponibile: false, motivo: NON_PER_I_NEGOZI_SHOPIFY } : { disponibile: true })
+}
+
+export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: u } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).maybeSingle()
   const ruolo = (u?.ruolo || '').toLowerCase()
+
+  // Prima di ogni altro controllo, compreso quello sulla carta: a un negozio Shopify la risposta deve
+  // essere sempre questa, qualunque pacchetto abbia chiesto e comunque sia configurato il pagamento.
+  const admin = createAdminSupabase()
+  if (u?.cliente_id) {
+    const solo = await clienteSoloEtichette(admin, u.cliente_id)
+    if (solo === null) return NextResponse.json({ error: CONTO_ILLEGGIBILE }, { status: 503 })
+    if (solo) return NextResponse.json({ error: NON_PER_I_NEGOZI_SHOPIFY }, { status: 403 })
+  }
+
+  if (!stripeConfigurato()) return NextResponse.json({ error: 'Pagamento con carta non ancora attivo.' }, { status: 400 })
 
   const body = await req.json().catch(() => ({} as any))
   const quantita = Math.floor(Number(body?.quantita))
@@ -31,7 +73,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Pacchetto non valido (minimo 1000 SMS).' }, { status: 400 })
   }
 
-  const admin = createAdminSupabase()
   const s = stripeClient()
   const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
   const importoCent = Math.round(quantita * COSTO_SMS_EUR * 100)   // 1000 × 0,10 € = 100,00 €
