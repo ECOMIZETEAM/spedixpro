@@ -5,6 +5,13 @@ import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
 
+// Una sera porta ~7.000 spedizioni da chiudere in ~700 distinte (20/10/2026), e ogni distinta parla col
+// corriere: in un passaggio solo non ci stanno. Il giro gira piu' volte a sera (vercel.json) e ogni
+// passaggio si ferma in tempo; il successivo riprende da dove e' rimasto, perche' legge solo le
+// spedizioni ancora senza distinta.
+export const maxDuration = 300
+const TEMPO_PER_PASSAGGIO_MS = 200_000
+
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
   if (process.env.CRON_SECRET && auth !== 'Bearer ' + process.env.CRON_SECRET) {
@@ -12,19 +19,38 @@ export async function GET(req: NextRequest) {
   }
   const supabase = createAdminSupabase()
 
+  const avvio = Date.now()
   const ora = new Date()
-  // FINESTRA: prima prendeva solo le create nelle ultime ~22h (created_at >= ieri 23:00): chi saltava
-  // un giro (annullo→ripristino 48h, cron fallito, creata tra le 23 e l'1) usciva dalla finestra PER
-  // SEMPRE e restava aperta. Ora riprende TUTTO l'arretrato senza distinta degli ultimi 30 giorni,
-  // escludendo le annullate/in annullo (non vanno mai in distinta).
+  // Finestra dei RESI (sotto): gli ultimi 30 giorni, sono solo documenti.
   const inizio = new Date(ora)
   inizio.setDate(inizio.getDate() - 30)
 
-  const { data: speds } = await supabase.from('spedizioni')
-    .select('id,master_id,cliente_id,corriere_id,colli,peso_reale,costo_totale')
-    .is('distinta_id', null)
-    .not('stato', 'in', '(annullata,annullamento_pending,annullamento_manuale)')
-    .gte('created_at', inizio.toISOString())
+  // FINESTRA DELLE SPEDIZIONI: gli ultimi 3 giorni, cosi' rientra chi ha saltato un giro (cron fallito,
+  // annullo ripristinato entro 48h). Era di 30 giorni, ma la lettura senza pagine si fermava a 1.000
+  // righe: ogni sera si chiudevano 1.000 spedizioni a caso del giorno e le altre ~6.000 restavano senza
+  // distinta per sempre — anche BRT diretti che senza conferma non vengono ritirati (2 di HYDROEXPERT del
+  // 05/10). L'arretrato piu' vecchio NON si chiude da solo: trasmetterebbe oggi ai corrieri etichette di
+  // settimane fa, e una GLS trasmessa non si annulla piu' in automatico (scelta di Lorenzo, 21/10/2026).
+  const inizioSpedizioni = new Date(ora.getTime() - 3 * 864e5)
+  // Solo le create prima delle 21:00 UTC di stasera (l'ora del primo passaggio): i passaggi successivi
+  // non prendono le etichette fatte nel frattempo, che restano per la sera dopo come sempre.
+  const taglio = new Date(Date.UTC(ora.getUTCFullYear(), ora.getUTCMonth(), ora.getUTCDate(), 21))
+  if (taglio > ora) taglio.setUTCDate(taglio.getUTCDate() - 1)
+
+  const speds: any[] = []
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await supabase.from('spedizioni')
+      .select('id,master_id,cliente_id,corriere_id,colli,peso_reale,costo_totale,created_at')
+      .is('distinta_id', null)
+      .not('stato', 'in', '(annullata,annullamento_pending,annullamento_manuale)')
+      .gte('created_at', inizioSpedizioni.toISOString())
+      .lt('created_at', taglio.toISOString())
+      .order('created_at', { ascending: true }).order('id', { ascending: true })
+      .range(da, da + 999)
+    if (error) { console.error('[DISTINTE][CRON] lettura spedizioni:', error.message); break }
+    speds.push(...(data || []))
+    if (!data || data.length < 1000) break
+  }
 
   // NB: niente uscita anticipata se non ci sono spedizioni — sotto vanno comunque chiusi i RESI.
 
@@ -44,8 +70,11 @@ export async function GET(req: NextRequest) {
     gruppi[key].push(s)
   }
 
-  let distinteCreate = 0
+  let distinteCreate = 0, spedizioniChiuse = 0, gruppiRimandati = 0
+  // I gruppi in ordine di spedizione piu' vecchia (le spedizioni sono lette cosi'): se il tempo finisce,
+  // restano indietro le piu' recenti, che il passaggio dopo o la sera dopo riprendono.
   for (const key in gruppi) {
+    if (Date.now() - avvio > TEMPO_PER_PASSAGGIO_MS) { gruppiRimandati++; continue }
     const [masterId, clienteRaw, corriereId] = key.split('|')
     const clienteId = clienteRaw === 'PROPRIA' ? null : clienteRaw
     const righe = gruppi[key]
@@ -61,14 +90,22 @@ export async function GET(req: NextRequest) {
       totale_colli: totaleColli, totale_peso: totalePeso, totale_ldv: righe.length, prezzo_totale: prezzoTotale,
     }).select().single()
     if (distinta?.id) {
-      await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', righe.map(r => r.id))
-      // Distinta = consegnate al corriere → "spedita" (solo le "in lavorazione", per non sovrascrivere
-      // in_transito/consegnata). Come le chiusure manuali: si distinguono dalle etichette create dopo.
-      await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', righe.map(r => r.id)).eq('stato', 'in_lavorazione')
+      // A blocchi di 300: un gruppo puo' avere migliaia di righe, e un elenco di id troppo lungo nella
+      // richiesta fallisce senza dirlo. Solo le righe ancora senza distinta: un passaggio non ruba le
+      // spedizioni a un altro.
+      const ids = righe.map(r => r.id)
+      for (let i = 0; i < ids.length; i += 300) {
+        const blocco = ids.slice(i, i + 300)
+        const { data: prese } = await supabase.from('spedizioni').update({ distinta_id: distinta.id }).in('id', blocco).is('distinta_id', null).select('id')
+        spedizioniChiuse += (prese || []).length
+        // Distinta = consegnate al corriere → "spedita" (solo le "in lavorazione", per non sovrascrivere
+        // in_transito/consegnata). Come le chiusure manuali: si distinguono dalle etichette create dopo.
+        await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', blocco).eq('distinta_id', distinta.id).eq('stato', 'in_lavorazione')
+      }
       distinteCreate++
       // Tracking ai marketplace collegati (best-effort). UNICA porta: fulfillMarketplace applica la
       // guardia "mai evadere col numero provvisorio" per tutte le piattaforme.
-      try { await fulfillMarketplace(supabase, righe.map(r => r.id)) } catch {}
+      for (let i = 0; i < ids.length; i += 200) { try { await fulfillMarketplace(supabase, ids.slice(i, i + 200)) } catch {} }
       try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
       try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
       try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(supabase, distinta.id) } catch {}
@@ -141,5 +178,6 @@ export async function GET(req: NextRequest) {
     }
   } catch (e: any) { console.error('[DISTINTE-RESI][CRON] errore:', e?.message) }
 
-  return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse: (speds?.length || 0), distinteResiCreate })
+  if (gruppiRimandati) console.warn('[DISTINTE][CRON] tempo finito: distinte rimandate al passaggio successivo', gruppiRimandati)
+  return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse, gruppiRimandati, distinteResiCreate })
 }
