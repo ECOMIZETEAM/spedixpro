@@ -31,6 +31,7 @@ export default function ResiDistinteCliente() {
   const totPagine = Math.max(1, Math.ceil(filtrate.length / perPagina))
   const paginaCorr = Math.min(pagina, totPagine)
   const visibili = filtrate.slice((paginaCorr-1)*perPagina, paginaCorr*perPagina)
+  const giaAltrove = (voci: any[]) => voci.reduce((t: number, v: any) => t + (v?.gia_in_distinta ? Number(v.reso_addebitato || 0) : 0), 0)
   function estraiVoci(v:any):any[] {
     if (!v) return []
     if (Array.isArray(v)) return v
@@ -55,13 +56,14 @@ export default function ResiDistinteCliente() {
           r.dest_nome || '',
           r.dest_citta || '',
           r.spedita_il ? new Date(r.spedita_il).toLocaleDateString('it-IT') : '',
-          '€ ' + Number(r.reso_addebitato || 0).toFixed(2),
+          '€ ' + Number(r.reso_addebitato || 0).toFixed(2) + (r.gia_in_distinta ? ' (già nella distinta ' + r.gia_in_distinta + ')' : ''),
         ]) : [['—','Nessun dettaglio disponibile','','','']],
       })
       let y = (doc as any).lastAutoTable.finalY + 10
       doc.setFont('helvetica','bold'); doc.setFontSize(11)
       doc.text('Totale LDV: '+(d.totale_ldv||0), 14, y); y+=7
       doc.text('Totale: € '+Number(d.totale||0).toFixed(2), 14, y)
+      if (giaAltrove(voci) > 0.004) { y+=7; doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.text('di cui € '+giaAltrove(voci).toFixed(2)+' già in distinte precedenti (stesso reso, addebitato una volta sola)', 14, y) }
       doc.save('distinta_reso_'+d.numero+'.pdf')
     } catch(e){ await dialog.alert({ title: 'Errore', message: 'Errore nella stampa del PDF.' }) }
     setBusy('')
@@ -77,7 +79,8 @@ export default function ResiDistinteCliente() {
         'Città': r.dest_citta || '',
         'Spedita il': r.spedita_il ? new Date(r.spedita_il).toLocaleDateString('it-IT') : '',
         'Costo reso': Number(r.reso_addebitato || 0),
-      })) : [{ Spedizione:'', Destinatario:'', 'Città':'', 'Spedita il':'', 'Costo reso':0 }]
+        Note: r.gia_in_distinta ? 'Già nella distinta ' + r.gia_in_distinta + ': stesso reso, addebitato una volta' : '',
+      })) : [{ Spedizione:'', Destinatario:'', 'Città':'', 'Spedita il':'', 'Costo reso':0, Note:'' }]
       const ws = utils.json_to_sheet(rows)
       const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Reso')
       writeFile(wb, 'distinta_reso_'+d.numero+'.xlsx')
@@ -144,12 +147,18 @@ export default function ResiDistinteCliente() {
                         <div key={v.id} style={{lineHeight:1.35}}>
                           <span style={{fontWeight:700,fontFamily:'monospace',color:trovate.includes(v)?'#c2410c':'#1a1a1a'}}>{v.numero || '—'}</span>
                           {v.dest_nome && <span style={{color:'#6b7280'}}> · {v.dest_nome}</span>}
+                          {v.gia_in_distinta && <span style={{color:'#9ca3af',fontSize:'11px'}}> · già nella {v.gia_in_distinta}</span>}
                         </div>
                       ))}
                       {inLista.length > 3 && <div style={{color:'#f97316',fontWeight:600}}>+{inLista.length - 3} altre — clicca per vederle</div>}
                     </td>
                     <td style={td}>{d.totale_ldv||0}</td>
-                    <td style={td}>€ {Number(d.totale||0).toFixed(2)}</td>
+                    <td style={td}>
+                      € {Number(d.totale||0).toFixed(2)}
+                      {/* Le distinte miste del giro delle 23 ripetevano i pacchi delle sere prima: quella parte del
+                          totale e' gia' nelle distinte precedenti, e sommandola sembrava un secondo addebito. */}
+                      {giaAltrove(voci) > 0.004 && <div style={{fontSize:'11px',color:'#6b7280',whiteSpace:'normal' as const,maxWidth:'170px'}}>di cui € {giaAltrove(voci).toFixed(2)} già in distinte precedenti</div>}
+                    </td>
                     <td style={td} onClick={e=>e.stopPropagation()}>
                       <button onClick={apri} title="Dettaglio" style={{padding:'6px 10px',border:'1px solid #fdba74',borderRadius:'6px',background:'#fff7ed',color:'#c2410c',cursor:'pointer',marginRight:'6px',fontSize:'12px',fontWeight:700}}>{aperta===d.id?'Chiudi':'Dettaglio'}</button>
                       <button onClick={()=>stampa(d)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{padding:'6px 10px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',cursor:'pointer',marginRight:'6px',fontSize:'12px'}}>{busy===d.id+'-pdf'?'...':'🖨'}</button>
@@ -170,11 +179,17 @@ export default function ResiDistinteCliente() {
                                 <td style={td}>{v.dest_nome || '—'}</td>
                                 <td style={td}>{v.dest_citta || '—'}</td>
                                 <td style={td}>{v.spedita_il ? new Date(v.spedita_il).toLocaleDateString('it-IT') : '—'}</td>
-                                <td style={td}>€ {Number(v.reso_addebitato || 0).toFixed(2)}</td>
+                                <td style={td}>
+                                  € {Number(v.reso_addebitato || 0).toFixed(2)}
+                                  {v.gia_in_distinta && <span style={{marginLeft:'8px',fontSize:'11px',fontWeight:600,color:'#6b7280',background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:'999px',padding:'1px 8px'}}>già nella distinta {v.gia_in_distinta}</span>}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
+                        {voci.some((v:any) => v.gia_in_distinta) && (
+                          <div style={{fontSize:'11.5px',color:'#6b7280',marginTop:'6px'}}>Le spedizioni segnate &quot;già nella distinta&quot; erano già in una distinta precedente: è lo stesso reso, addebitato una volta sola.</div>
+                        )}
                         {Number(d.totale||0) === 0 && voci.length > 0 && (
                           <div style={{fontSize:'11.5px',color:'#6b7280',marginTop:'6px'}}>Totale 0,00 €: per questi resi non è stato addebitato nulla.</div>
                         )}

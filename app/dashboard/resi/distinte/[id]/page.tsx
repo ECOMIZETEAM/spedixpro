@@ -24,7 +24,7 @@ export default function DettaglioDistintaReso() {
     let totale = 0
     const body = vv.map((v: any) => {
       const cr = Number(v.reso_addebitato || 0); totale += cr
-      return [v.numero || '', v.mitt_nome || '', (v.dest_nome || '') + ', ' + (v.dest_citta || ''), Number(v.peso_reale || v.peso || 0).toFixed(0), '0', v.colli || 1, Number(v.contrassegno || 0).toFixed(2) + ' €', cr.toFixed(2) + ' €']
+      return [v.numero || '', v.mitt_nome || '', (v.dest_nome || '') + ', ' + (v.dest_citta || ''), Number(v.peso_reale || v.peso || 0).toFixed(0), '0', v.colli || 1, Number(v.contrassegno || 0).toFixed(2) + ' €', cr.toFixed(2) + ' €' + (v.gia_in_distinta ? ' (già nella distinta ' + v.gia_in_distinta + ')' : '')]
     })
     autoTable(doc, {
       startY: 28,
@@ -81,7 +81,11 @@ export default function DettaglioDistintaReso() {
                   <td style={td}>{Number(v.peso_reale || v.peso || 0).toFixed(2)}</td>
                   <td style={td}>{v.colli || 1}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>{v.data_scansione ? new Date(v.data_scansione).toLocaleDateString('it-IT') : '-'}</td>
-                  <td style={td}>{Number(v.reso_addebitato || 0).toFixed(2)} EUR</td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                    {Number(v.reso_addebitato || 0).toFixed(2)} EUR
+                    {/* Pacco gia' in una distinta precedente (il giro delle 23 lo rimetteva): stesso reso, addebitato una volta. */}
+                    {v.gia_in_distinta && <span title="Stesso reso, addebitato una volta sola" style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 600, color: '#6b7280', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: '999px', padding: '1px 8px' }}>già nella distinta {v.gia_in_distinta}</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

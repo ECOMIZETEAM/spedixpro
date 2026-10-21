@@ -6,7 +6,7 @@ import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
-import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
+import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi, FILTRO_SENZA_DOPPIONI } from '@/lib/distinte-resi'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
   let query = supabase.from('distinte_resi')
     .select('*, clienti(ragione_sociale)')
     .eq('master_id', utente?.master_id)
+    .or(FILTRO_SENZA_DOPPIONI)   // le distinte doppie del giro delle 23 non si mostrano (lib/distinte-resi)
     .order('created_at', { ascending: false })
   if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
   if (masterSel) query = query.eq('target_master_id', masterSel)

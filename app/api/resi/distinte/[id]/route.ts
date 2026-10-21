@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vedeLaRete } from '@/lib/ruoli'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { resoAddebitatoPerSpedizione } from '@/lib/giacenza-cascata'
+import { ripetuteDiUnaDistinta } from '@/lib/distinte-resi'
 
 export async function GET(req: NextRequest, context: any) {
   const supabase = await createServerSupabase()
@@ -43,6 +44,10 @@ export async function GET(req: NextRequest, context: any) {
     ? { clienteId: (data as any).cliente_id }
     : { masterTargetId: (data as any).target_master_id }
   const resoDi = await resoAddebitatoPerSpedizione(admin, ids, pagatore)
+  // Il pacco gia' in una distinta precedente verso lo stesso destinatario (le distinte doppie del giro
+  // delle 23, lib/distinte-resi): si segna, cosi' non sembra un secondo addebito. Se la lettura non
+  // riesce manca solo la scritta.
+  const giaIn = await ripetuteDiUnaDistinta(admin, data).catch(() => new Map<string, number>())
   const arricchite = voci.map(v => {
     const s = spedDi.get(v?.id) || {}
     return {
@@ -52,6 +57,7 @@ export async function GET(req: NextRequest, context: any) {
       dest_cap: s.dest_cap ?? null, dest_provincia: s.dest_provincia ?? null,
       peso_reale: s.peso_reale ?? null, colli: s.colli ?? null, contrassegno: s.contrassegno ?? null,
       reso_addebitato: resoDi.get(v?.id) ?? 0,
+      gia_in_distinta: giaIn.get(v?.id) ?? null,
     }
   })
   return NextResponse.json({ ...data, voci: arricchite })

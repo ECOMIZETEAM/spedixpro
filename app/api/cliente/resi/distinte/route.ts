@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { resoAddebitatoPerSpedizione } from '@/lib/giacenza-cascata'
+import { FILTRO_SENZA_DOPPIONI, ripetuteNellElenco } from '@/lib/distinte-resi'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest) {
   let query = supabase.from('distinte_resi')
     .select('*, clienti(ragione_sociale)')
     .eq('cliente_id', clienteId)
+    .or(FILTRO_SENZA_DOPPIONI)   // le distinte doppie del giro delle 23 non si mostrano (lib/distinte-resi)
     .order('created_at', { ascending: false })
   if (dal) query = query.gte('created_at', dal)
   if (al) query = query.lte('created_at', al)
@@ -34,14 +36,18 @@ export async function GET(req: NextRequest) {
     for (const s of (ss || [])) spedDi.set((s as any).id, s)
   }
   const resoDi = ids.length ? await resoAddebitatoPerSpedizione(createAdminSupabase(), ids, { clienteId }) : new Map<string, number>()
+  const ripetute = ripetuteNellElenco(lista)
   for (const d of lista as any[]) {
     if (!Array.isArray(d.voci)) { d.voci = []; continue }
+    const giaIn = ripetute.get(d.id)
     d.voci = d.voci.map((v: any) => {
       const s = spedDi.get(v?.id) || {}
       return {
         id: v?.id, numero: s.numero || v?.numero || null, dest_nome: s.dest_nome || v?.dest_nome || null,
         dest_citta: s.dest_citta || v?.dest_citta || null, spedita_il: s.created_at || null,
         reso_addebitato: resoDi.get(v?.id) ?? 0,
+        // Pacco gia' in una distinta precedente: lo stesso reso, addebitato una volta sola.
+        gia_in_distinta: giaIn?.get(v?.id) ?? null,
       }
     })
   }

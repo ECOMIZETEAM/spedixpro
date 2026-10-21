@@ -43,3 +43,50 @@ export async function prossimoNumeroDistintaResi(admin: any, masterId: string): 
   if (error) throw new Error('Numero distinta di reso non disponibile: ' + error.message)
   return (Number(data?.[0]?.numero) || 0) + 1
 }
+
+// LE DISTINTE DOPPIE DEL GUASTO SOPRA. Le 1.778 distinte nate tra il 22/09 e il 21/10/2026 con dentro
+// solo pacchi gia' messi in distinte precedenti restano nel database (lo storico non si cancella) con
+// questo stato, e le liste di cliente e master non le mostrano (scelta di Lorenzo, 21/10/2026). Ogni
+// pacco resta visibile nella prima distinta che lo contiene, che per costruzione non e' mai un doppione.
+export const STATO_DOPPIONE = 'doppione'
+export const FILTRO_SENZA_DOPPIONI = `stato.is.null,stato.neq.${STATO_DOPPIONE}`
+
+const chiaveDestinatario = (d: any) => (d.master_id || '') + '|' + (d.cliente_id || '') + '|' + (d.target_master_id || '')
+
+// Nelle distinte rimaste visibili ma con dentro anche pacchi ripetuti (267 al 21/10), il pacco ripetuto
+// porta il numero della distinta in cui era gia': stesso master, stesso destinatario, creata prima.
+// Su un elenco gia' letto (il portale del cliente legge tutte le sue): voce.id -> numero, per distinta.
+export function ripetuteNellElenco(lista: any[]): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>()
+  const prima = new Map<string, number>()
+  const inOrdine = [...lista].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)))
+  for (const d of inOrdine) {
+    const qui = new Map<string, number>()
+    for (const v of (Array.isArray(d.voci) ? d.voci : [])) {
+      if (!v?.id) continue
+      const k = chiaveDestinatario(d) + '|' + v.id
+      if (prima.has(k)) qui.set(v.id, prima.get(k)!)
+      else prima.set(k, d.numero)
+    }
+    out.set(d.id, qui)
+  }
+  return out
+}
+
+// Lo stesso per una distinta sola (il dettaglio del master): si leggono, a pagine, le distinte dello
+// stesso master verso lo stesso destinatario create prima di lei.
+export async function ripetuteDiUnaDistinta(admin: any, d: any): Promise<Map<string, number>> {
+  const ids = new Set<string>((Array.isArray(d?.voci) ? d.voci : []).map((v: any) => v?.id).filter(Boolean))
+  const out = new Map<string, number>()
+  if (!ids.size || !d?.master_id || !d?.created_at) return out
+  for (let da = 0; ; da += PAGINA) {
+    let q = admin.from('distinte_resi').select('id,numero,voci').eq('master_id', d.master_id).lt('created_at', d.created_at)
+    q = d.cliente_id ? q.eq('cliente_id', d.cliente_id) : q.is('cliente_id', null)
+    q = d.target_master_id ? q.eq('target_master_id', d.target_master_id) : q.is('target_master_id', null)
+    const { data, error } = await q.order('created_at', { ascending: true }).order('id', { ascending: true }).range(da, da + PAGINA - 1)
+    if (error) throw new Error('Lettura distinte di reso non riuscita: ' + error.message)
+    for (const p of (data || [])) for (const v of (Array.isArray(p.voci) ? p.voci : [])) if (v?.id && ids.has(v.id) && !out.has(v.id)) out.set(v.id, p.numero)
+    if (!data || data.length < PAGINA) break
+  }
+  return out
+}
