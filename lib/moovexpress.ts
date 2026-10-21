@@ -104,13 +104,32 @@ export async function creaSpedizioneMoovexpress(cred: MoovexpressCred, dati: Moo
   return { id: String(j.id || ''), tracking: String(j.tracking), prezzo: Number(j.prezzo) || 0, label_url: String(j.label_url || ''), ritiro: j.ritiro }
 }
 
-// Scarica l'etichetta (PDF) dal venditore. `labelUrl` è quello tornato dalla create (relativo o assoluto).
-export async function etichettaMoovexpress(cred: MoovexpressCred, labelUrl: string): Promise<Buffer> {
+// Scarica l'etichetta dal venditore. `labelUrl` è quello tornato dalla create (relativo o assoluto).
+//
+// Torna anche il TIPO del file, perché non è sempre un PDF: UPS (Europa e Italia) dà un'immagine GIF.
+// Chi salvava scriveva sempre `data:application/pdf`: il 20/10 le due UPS Europa di Atlantik srl (prime
+// UPS passate da un ponte) sono finite su Storage come sped.pdf con dentro una GIF, e al download il
+// cliente riceveva un "PDF" che non si apriva. Il tipo si legge dai BYTE, non dall'intestazione: la riga
+// del venditore può essere a sua volta un ponte con lo stesso errore, e l'intestazione lo ripeterebbe.
+export async function etichettaMoovexpress(cred: MoovexpressCred, labelUrl: string): Promise<{ buffer: Buffer; mime: string }> {
   if (!labelUrl) throw new Error('Nessuna etichetta da scaricare.')
   const url = /^https?:\/\//i.test(labelUrl) ? labelUrl : `${baseUrl(cred)}${labelUrl}`
   const r = await fetch(url, { headers: { Authorization: `Bearer ${cred.api_key}` } })
   if (!r.ok) throw new Error(`Etichetta non disponibile dal fornitore (${r.status})`)
-  return Buffer.from(await r.arrayBuffer())
+  const buffer = Buffer.from(await r.arrayBuffer())
+  const dichiarato = String(r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  return { buffer, mime: mimeDaiByte(buffer) || dichiarato || 'application/pdf' }
+}
+
+function mimeDaiByte(b: Buffer): string | null {
+  if (b.length < 4) return null
+  const testa = b.subarray(0, 8).toString('latin1')
+  if (testa.startsWith('%PDF')) return 'application/pdf'
+  if (testa.startsWith('GIF8')) return 'image/gif'
+  if (testa.startsWith('\x89PNG')) return 'image/png'
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
+  if (testa.startsWith('PK\x03\x04')) return 'application/zip'
+  return null
 }
 
 export type MoovexpressTracking = {

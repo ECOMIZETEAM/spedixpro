@@ -3156,12 +3156,12 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       const costoCorrente = ris.prezzo
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
-      // Etichetta del venditore (il PDF del corriere reale, propagato su per ogni salto): scaricata subito e
-      // salvata come data URL, così non dipende da una chiamata live dopo.
+      // Etichetta del venditore (quella del corriere reale, propagata su per ogni salto): scaricata subito e
+      // salvata come data URL, così non dipende da una chiamata live dopo. Col suo tipo: UPS è una GIF.
       let etichettaUrl: string | null = null
       try {
         const lab = await etichettaMoovexpress(credMv, ris.label_url)
-        if (lab?.length) etichettaUrl = `data:application/pdf;base64,${lab.toString('base64')}`
+        if (lab.buffer.length) etichettaUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}`
       } catch (e) { console.error('[CREA][MOOVEXPRESS] etichetta:', (e as any)?.message) }
 
       const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))

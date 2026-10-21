@@ -630,7 +630,7 @@ export async function POST(req: NextRequest) {
       // Prenotato solo se lo conferma il venditore: per SDA EXPRESS L la catena finisce su un contratto
       // Poste diretto, che alla creazione non prenota, e la sua risposta torna richiesto:false.
       ritiroPrenotato = _vuoleRitiro && risMv.ritiro?.richiesto === true
-      try { const lab = await etichettaMoovexpress(credMv, risMv.label_url); if (lab?.length) etichettaUrl = `data:application/pdf;base64,${lab.toString('base64')}` } catch (e) { console.error('[V1][MOOVEXPRESS] etichetta:', (e as any)?.message) }
+      try { const lab = await etichettaMoovexpress(credMv, risMv.label_url); if (lab.buffer.length) etichettaUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}` } catch (e) { console.error('[V1][MOOVEXPRESS] etichetta:', (e as any)?.message) }
       // _ritiroPrenotato: sul ponte e' l'unico posto da cui il dettaglio (GET) puo' rileggerlo.
       raw = { _moovexpress: true, tracking: numero, venditore_spedizione_id: risMv.id || null, label_url: risMv.label_url || null, _ritiroPrenotato: ritiroPrenotato, _codiceRitiro: codiceRitiro }
     } catch (e: any) {
