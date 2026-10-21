@@ -19,8 +19,10 @@ export const PARAM_ERRORE = 'error'
 export const PARAM_COLLEGATO = 'connected'
 
 // Shopify: l'azione giusta e' sempre riaprire l'app dall'admin del negozio, che rifa' da sola accesso
-// e collegamento. Mai «ricollega dalle Integrazioni»: li' c'e' il campo del dominio scritto a mano,
-// che il requisito 2.3.1 vieta.
+// e collegamento. Mai «ricollega dalle Integrazioni»: dal 21/10/2026 li' non c'e' piu' il campo del
+// dominio scritto a mano (il requisito 2.3.1 lo vieta). Gli errori dei moduli della scelta dell'account
+// dopo l'installazione (password sbagliata, conto dello staff...) non passano da qui: restano sulla sua
+// pagina (lib/shopify-pagina-scelta.ts).
 const SHOPIFY = {
   firma: "Non siamo riusciti a verificare che la richiesta arrivasse da Shopify. Apri MoovExpress dall'admin del tuo negozio Shopify (menu App) per entrare.",
   link_scaduto: "Il link per aprire MoovExpress da Shopify è scaduto e non siamo riusciti a rinnovarlo. Riapri MoovExpress dall'admin del tuo negozio Shopify (menu App); se si ripete, contatta l'assistenza.",
@@ -37,6 +39,19 @@ const SHOPIFY = {
   // e non nasce nessun conto. Decisione di Lorenzo del 20/10: mai un master o un listino di ripiego
   // scelti a caso, che appendevano il negozio sotto la rete sbagliata.
   onboarding_non_configurato: "Installazione non ancora disponibile: stiamo completando la configurazione. Riprova più tardi o scrivi all'assistenza.",
+  // Il negozio e' collegato a un conto che esisteva gia' (collegato con «Ho già un account»): aprendo l'app
+  // da Shopify non si entra da soli, si mette la password (decisione di Lorenzo del 21/10/2026, vedi
+  // lib/conti-shopify.ts). Il codice arriva anche a chi e' gia' dentro con un altro conto: il middleware lo
+  // porta sulla sua dashboard, e la seconda frase e' per lui.
+  accedi_per_continuare: "Questo negozio Shopify è collegato al tuo account MoovExpress: per entrare accedi con email e password. Se sei già dentro con un altro account, esci (voce «Esci» del menu) e accedi con quello del negozio.",
+  // Il negozio e' collegato a un conto nato dall'installazione di un ALTRO negozio («Collega al conto …»
+  // dalla pagina della scelta). Da qui non si entra da soli (lib/accesso-cliente.ts), e quel conto non ha una
+  // password da mettere: si entra aprendo l'app dal negozio da cui e' nato. Il nome di quel negozio non si
+  // scrive: qui arriva solo un codice, e lo legge anche chi del conto non sa niente.
+  apri_dal_negozio_del_conto: "Questo negozio Shopify è collegato a un account MoovExpress creato da un altro negozio Shopify: per entrare apri MoovExpress dall'admin di quel negozio (menu App). Se sei già dentro con un altro account, esci prima (voce «Esci» del menu).",
+  // Una lettura o una scrittura non riuscita all'apertura dell'app (database che non risponde): l'ingresso
+  // si ferma invece di indovinare, e riaprendo si riprova da capo.
+  ingresso_non_riuscito: "Non siamo riusciti ad aprire MoovExpress per un problema temporaneo. Riapri MoovExpress dall'admin del tuo negozio Shopify (menu App) tra qualche minuto; se si ripete, contatta l'assistenza.",
 } as const
 
 // Amazon: le rotte amazon/accesso e amazon/callback mandano al modulo di accesso chi arriva da Seller

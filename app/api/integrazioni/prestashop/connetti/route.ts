@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { psPermessiMancanti } from '@/lib/prestashop'
+import { COME_SI_COLLEGA_SHOPIFY } from '@/lib/shopify-scheda-app'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -31,7 +32,8 @@ export async function POST(req: NextRequest) {
     // (come per WooCommerce/connetti). Una PrestaShop reale contiene sempre "prestashop" nella risposta.
     if (!/prestashop/i.test(txt)) {
       if (/storeden/i.test(txt)) return NextResponse.json({ error: 'Questo sito è realizzato con Storeden, non con PrestaShop: non ha il Webservice PrestaShop da collegare. Le integrazioni supportano WooCommerce, Shopify e PrestaShop.' }, { status: 400 })
-      if (/cdn\.shopify|myshopify|x-shopify/i.test(txt)) return NextResponse.json({ error: 'Questo sito sembra Shopify, non PrestaShop: collegalo dalla sezione Shopify.' }, { status: 400 })
+      // Shopify non si collega scrivendo il sito (requisito 2.3.1): la frase sta con la scheda dell'app.
+      if (/cdn\.shopify|myshopify|x-shopify/i.test(txt)) return NextResponse.json({ error: 'Questo sito sembra Shopify, non PrestaShop: ' + COME_SI_COLLEGA_SHOPIFY }, { status: 400 })
       if (/wp-content|wp-json|woocommerce/i.test(txt)) return NextResponse.json({ error: 'Questo sito sembra WordPress/WooCommerce, non PrestaShop: collegalo dalla sezione WooCommerce.' }, { status: 400 })
       if (/<!doctype|<html[\s>]/i.test(txt)) return NextResponse.json({ error: 'Questo indirizzo non espone il Webservice PrestaShop (risponde con una pagina web, non con i dati XML). Controlla che sia davvero un sito PrestaShop e che il Webservice sia attivo su /api.' }, { status: 400 })
       return NextResponse.json({ error: 'La risposta non sembra quella di un Webservice PrestaShop. Verifica che l\'URL sia quello del negozio e che il Webservice sia attivo su /api.' }, { status: 400 })

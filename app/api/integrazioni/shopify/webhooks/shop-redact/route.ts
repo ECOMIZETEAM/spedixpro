@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyShopifyWebhook } from '@/lib/shopifyWebhook'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { cancellaSospesiDelNegozio } from '@/lib/shopifyCollega'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,6 +27,9 @@ export async function POST(req: NextRequest) {
   if (shop) {
     try {
       const admin = createAdminSupabase()
+      // Anche l'installazione che aspettava la scelta dell'account, come in webhooks/compliance.
+      const { error: eSospeso } = await cancellaSospesiDelNegozio(admin, shop)
+      if (eSospeso) console.error('shop/redact: installazione in sospeso non cancellata', eSospeso.message)
       const { data: ints } = await admin
         .from('integrazioni').select('id')
         .eq('piattaforma', 'shopify').eq('identificativo', shop)

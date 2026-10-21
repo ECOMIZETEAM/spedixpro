@@ -3,10 +3,16 @@ import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { conErrore } from '@/lib/esiti-collegamento'
 
+// 307 dopo una GET (l'ingresso da Shopify, il ritorno dall'OAuth); 303 dopo un POST (il modulo della
+// scelta dopo l'installazione). Un 307 dopo un POST fa ripetere al browser il POST sulla pagina di arrivo:
+// al login master e' gia' successo, e la homepage rispondeva 405 (app/api/auth/login/route.ts).
+export type StatoRedirect = 303 | 307
+
 // Logga il merchant (via magic-link) e ritorna una redirect con i cookie di sessione
 // già attaccati, così il portale si apre GIÀ loggato (no login manuale, no App Bridge).
-export async function loginMerchantERedirect(req: NextRequest, email: string, to: string): Promise<NextResponse> {
-  const redirect = NextResponse.redirect(new URL(to, req.url))
+// Lo stesso `status` vale anche per le uscite d'errore: anche quelle seguono la richiesta che le ha fatte.
+export async function loginMerchantERedirect(req: NextRequest, email: string, to: string, status: StatoRedirect = 307): Promise<NextResponse> {
+  const redirect = NextResponse.redirect(new URL(to, req.url), status)
   // Nomi dei cookie della NUOVA sessione: servono per NON cancellarli nella pulizia qui sotto.
   const nuoviNomi = new Set<string>()
   const supabase = createServerClient(
@@ -27,13 +33,13 @@ export async function loginMerchantERedirect(req: NextRequest, email: string, to
   const tokenHash = linkData?.properties?.hashed_token
   if (error || !tokenHash) {
     console.error('[SHOPIFY][LOGIN] magic link non generato', error?.message)
-    return NextResponse.redirect(new URL(conErrore('/cliente', 'login_shopify'), req.url))
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'login_shopify'), req.url), status)
   }
 
   const { data: s, error: vErr } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: tokenHash })
   if (vErr || !s.session) {
     console.error('[SHOPIFY][LOGIN] sessione non creata', vErr?.message)
-    return NextResponse.redirect(new URL(conErrore('/cliente', 'login_shopify'), req.url))
+    return NextResponse.redirect(new URL(conErrore('/cliente', 'login_shopify'), req.url), status)
   }
 
   // PULIZIA CHUNK DI SESSIONE VECCHI. Supabase spezza la sessione in cookie `sb-...-auth-token.0/.1/...`;

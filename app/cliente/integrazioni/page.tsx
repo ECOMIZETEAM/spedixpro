@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { isAppNativa } from '@/lib/app-nativa'
+import { URL_SCHEDA_APP_SHOPIFY } from '@/lib/shopify-scheda-app'
 
 const ACCENT = '#f97316'
 
@@ -18,7 +19,7 @@ type Integrazione = {
   stati_ordini?: string   // solo WooCommerce: stati ordine da importare (custom compresi)
 }
 
-// Piattaforme del popup — solo Shopify attivo, resto "Prossimamente"
+// Piattaforme del popup: quelle con attivo:false si vedono con "Prossimamente" e non si aprono
 const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; dominio: string }[] = [
   { id: 'shopify',     nome: 'Shopify',      attivo: true,  colore: '#95BF47', dominio: 'shopify.com' },
   { id: 'woocommerce', nome: 'WooCommerce',  attivo: true,  colore: '#96588a', dominio: 'woocommerce.com' },
@@ -62,7 +63,6 @@ export default function IntegrazioniPage() {
   const [step, setStep] = useState<'platforms' | 'shopify' | 'prestashop' | 'woocommerce'>('platforms')
   const [psForm, setPsForm] = useState({ nome_negozio: '', url: '', webservice_key: '' })
   const [wooForm, setWooForm] = useState({ nome_negozio: '', url: '', consumer_key: '', consumer_secret: '' })
-  const [shop, setShop] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [statiEdit, setStatiEdit] = useState<Record<string, string>>({})
   const [salvandoStati, setSalvandoStati] = useState('')
@@ -120,7 +120,7 @@ export default function IntegrazioniPage() {
     window.history.replaceState(null, '', window.location.pathname + (resto ? '?' + resto : ''))
   }, [])
 
-  function openModal() { setStep('platforms'); setShop(''); setModal(true) }
+  function openModal() { setStep('platforms'); setModal(true) }
   function closeModal() { setModal(false) }
 
   function pickPlatform(id: string, attivo: boolean) {
@@ -179,16 +179,14 @@ export default function IntegrazioniPage() {
     }
   }
 
-  function connectShopify() {
-    // Normalizza il dominio: accetta "nome", "nome.myshopify.com", "https://nome.myshopify.com/"
-    let d = shop.trim().toLowerCase()
-    d = d.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-    if (!d) { setMsg({ type: 'err', text: 'Inserisci il dominio del tuo negozio Shopify' }); return }
-    if (!d.includes('.myshopify.com')) d = `${d.replace(/\..*$/, '')}.myshopify.com`
-    setConnecting(true)
-    // Avvia l'OAuth Shopify (la route install arriva nel blocco successivo)
-    window.location.href = `/api/integrazioni/shopify/install?shop=${encodeURIComponent(d)}`
+  // SHOPIFY NELL'APP iOS/ANDROID: come per Amazon, niente scheda dell'App Store dentro l'app. Il giro
+  // passa dall'App Store e dal login di Shopify dentro la WebView e deve tornare sul portale: non e' mai
+  // stato provato, e se si interrompe a meta' il negozio resta con l'app installata ma non collegato.
+  async function shopifyDalBrowser() {
+    closeModal()
+    await dialog.alert({ title: 'Shopify si collega dal browser', message: 'Apri moovexpress.com dal computer o da Safari/Chrome, accedi e da Importa Ordini → Negozi collegati scegli «+ Collega negozio» → Shopify.' })
   }
+
   async function connettiPrestashop() {
     if (!psForm.url || !psForm.webservice_key) { setMsg({ type: 'err', text: 'URL e Webservice Key obbligatori' }); return }
     setConnecting(true)
@@ -208,11 +206,20 @@ export default function IntegrazioniPage() {
     }
   }
 
-  async function rimuovi(id: string, nome: string, piattaforma?: string) {
+  async function rimuovi(id: string, nome: string, piattaforma?: string, stato?: string) {
     // Amazon: le sue regole sui dati vogliono cancellati gli ordini di un account scollegato.
+    // Shopify: da qui si cancella solo la riga, l'app resta installata sul negozio e chi la riapre
+    // dall'admin lo ricollega. Non sempre allo stesso conto: quello nato da Shopify si ritrova da solo
+    // (per indirizzo), uno che esisteva gia' ripassa dalla scelta «Hai già un account MoovExpress?», dove
+    // senza la sua sessione si puo' anche aprire un conto nuovo (lib/shopifyProvision.ts,
+    // trovaContoDelNegozio). Per questo la frase dice «può ricollegarlo» e non «torna a collegarsi». Va
+    // detto prima, non dopo: chi scollega per smettere se lo ritroverebbe collegato. Non sul negozio
+    // disconnesso, dove l'app e' gia' disinstallata.
     const message = piattaforma === 'amazon'
       ? 'Gli ordini Amazon non ancora spediti spariscono dal portale; quelli spediti restano, senza i dati del compratore. Ricollegando l\'account tornano gli ordini ancora da spedire.'
-      : undefined
+      : piattaforma === 'shopify' && stato !== 'disconnesso'
+        ? 'MoovExpress resta installata sul negozio Shopify: chi la riapre dall\'admin del negozio può ricollegarlo. Per scollegarlo del tutto disinstalla MoovExpress dall\'admin del negozio Shopify.'
+        : undefined
     if (!await dialog.confirm({ title: `Scollegare "${nome || 'questo negozio'}"?`, message, danger: true, confirmText: 'Scollega' })) return
     try {
       const res = await fetch('/api/integrazioni/elimina', {
@@ -295,13 +302,21 @@ export default function IntegrazioniPage() {
             {items.map(it => {
               const p = PLATFORMS.find(x => x.id === it.piattaforma)
               const s = STATO[it.stato] || STATO.disconnesso
+              // Un negozio Shopify diventa 'disconnesso' solo quando il negoziante disinstalla l'app: il
+              // webhook app/uninstalled svuota le credenziali e la riga resta per lo storico. Da li' si
+              // riparte solo reinstallando l'app sul negozio, non da questa pagina.
+              const shopify = it.piattaforma === 'shopify'
+              const shopifyDisinstallato = shopify && it.stato === 'disconnesso'
               return (
                 <div key={it.id} style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '14px', border: '1px solid #eee', borderRadius: '8px' }}>
-                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                 {/* Sul telefono stato e pulsanti vanno a capo: senza, la colonna del negozio si
+                     stringeva a poche decine di pixel e gli avvisi uscivano una parola per riga, sopra
+                     il badge dello stato. Sul computer la riga resta com'era. */}
+                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
                   <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: (p?.colore || '#999') + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 800, color: p?.colore || '#666', flexShrink: 0 }}>
                     {(p?.nome || it.piattaforma).slice(0, 2).toUpperCase()}
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: '1 1 160px', minWidth: 0 }}>
                     <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#1a1a1a' }}>
                       {it.nome_negozio || it.identificativo || (p?.nome || it.piattaforma)}
                     </div>
@@ -319,23 +334,62 @@ export default function IntegrazioniPage() {
                     {it.stato === 'attivo' && it.piattaforma === 'prestashop' && it.errore && (
                       <div style={{ fontSize: '11.5px', color: '#b45309', marginTop: '2px', lineHeight: 1.45 }}>⚠ {it.errore}</div>
                     )}
+                    {/* Il motivo si mostrava solo con stato 'errore': il negozio disinstallato compariva
+                        grigio e muto, con un «Sincronizza» che rispondeva solo «Credenziali Shopify
+                        mancanti». La frase e' fissa, non il testo salvato: per Shopify 'disconnesso' lo
+                        scrive solo app/uninstalled, ma `errore` lo riscrive il cron senza guardare lo stato,
+                        e una sincronizzazione partita prima della disinstallazione puo' lasciarci «Riapri
+                        MoovExpress dall'admin», che con l'app disinstallata non si puo' fare. */}
+                    {shopifyDisinstallato && (
+                      <div style={{ fontSize: '11.5px', color: '#6b7280', marginTop: '2px', lineHeight: 1.45 }}>
+                        App disinstallata dal negozio Shopify. Per ricollegarlo installa di nuovo MoovExpress dal tuo negozio Shopify.
+                      </div>
+                    )}
+                    {/* Una sincronizzazione Shopify fallita lascia il negozio «Attivo»: l'errore finisce
+                        in `errore` e l'ultimo sync si aggiorna lo stesso (sync-cron), quindi si vedeva un
+                        negozio verde che non portava ordini. La frase e' fissa e non il testo tecnico
+                        salvato: quello lo legge il controllo «Log & Errori» (lib/controllo-log-errori.ts).
+                        Niente «riapri MoovExpress dall'admin»: su una riga 'attivo' /enter fa solo entrare e
+                        non rifa' l'autorizzazione, quindi riaprire l'app non cambiava niente. Il token morto,
+                        che l'autorizzazione ripara, porta la riga in 'errore' (lib/shopify.ts) e li' lo dice
+                        gia' il testo rosso qui sopra; sull'attivo restano guasti che si riprovano da soli
+                        (Shopify lento o fuori servizio, un rinnovo andato in 5xx) o che sistemiamo noi (il
+                        403 sui dati protetti). «Ordini importati, ma:» (lib/shopifySync.ts) e' una
+                        sincronizzazione riuscita a meta': gli ordini sono arrivati, «non riuscita» era falso. */}
+                    {it.stato === 'attivo' && shopify && it.errore && (
+                      <div style={{ fontSize: '11.5px', color: '#b45309', marginTop: '2px', lineHeight: 1.45 }}>
+                        ⚠ {it.errore.startsWith('Ordini importati, ma:')
+                          ? 'Ordini importati, ma annullamenti ed evasioni fatti sul negozio non sono ancora aggiornati qui: si riprova al prossimo giro automatico. Se dura, contatta l\'assistenza.'
+                          : 'Ultima sincronizzazione non riuscita: si riprova da sola al prossimo giro automatico. Se dura, contatta l\'assistenza.'}
+                      </div>
+                    )}
                   </div>
                   <span style={{ fontSize: '11.5px', fontWeight: 600, padding: '3px 9px', borderRadius: '999px', color: s.c, background: s.bg }}>
                     {s.t}
                   </span>
+                  {!shopifyDisinstallato && (
+                    <button
+                      onClick={() => sincronizza(it)}
+                      style={{ background: '#fff', border: '1px solid #ddd', borderRadius: '7px', padding: '7px 12px', fontSize: '12.5px', cursor: 'pointer', color: '#333' }}
+                    >
+                      Sincronizza
+                    </button>
+                  )}
                   <button
-                    onClick={() => sincronizza(it)}
-                    style={{ background: '#fff', border: '1px solid #ddd', borderRadius: '7px', padding: '7px 12px', fontSize: '12.5px', cursor: 'pointer', color: '#333' }}
-                  >
-                    Sincronizza
-                  </button>
-                  <button
-                    onClick={() => rimuovi(it.id, it.nome_negozio || '', it.piattaforma)}
+                    onClick={() => rimuovi(it.id, it.nome_negozio || '', it.piattaforma, it.stato)}
                     style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '7px', padding: '7px 12px', fontSize: '12.5px', cursor: 'pointer', color: '#b91c1c' }}
                   >
                     Scollega
                   </button>
                  </div>
+                 {/* «Scollega» cancella la riga ma non tocca l'app installata sul negozio: chi la riapre
+                     dall'admin di Shopify puo' ricollegarlo (vedi rimuovi). Lo scollegamento che dura e'
+                     la disinstallazione, che arriva dal webhook app/uninstalled. */}
+                 {shopify && !shopifyDisinstallato && (
+                   <div style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'right', lineHeight: 1.4 }}>
+                     Per scollegarlo del tutto disinstalla MoovExpress dall&apos;admin del negozio Shopify.
+                   </div>
+                 )}
                  {it.piattaforma === 'woocommerce' && (
                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
                      <label style={{ fontSize: '11.5px', color: '#6b7280', fontWeight: 600 }}>Stati ordine da importare</label>
@@ -414,37 +468,73 @@ export default function IntegrazioniPage() {
                 ))}
               </div>
             ) : step === 'shopify' ? (
+              // SHOPIFY SI COLLEGA DA SHOPIFY. Qui non si chiede il dominio del negozio: Shopify lo vieta
+              // anche ad app gia' installata (requisito 2.3.1), e il campo che c'era fino al 21/10/2026
+              // non ha mai collegato un negozio vero (520 tentativi da luglio). L'unico collegamento verso
+              // Shopify e' la scheda dell'app sull'App Store, e finche' l'app non e' approvata non c'e'
+              // (lib/shopify-scheda-app.ts): intanto si rimanda all'import da file, che legge gia'
+              // l'export ordini di Shopify.
               <div style={{ padding: '20px' }}>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>
-                  Dominio del tuo negozio Shopify
-                </label>
-                <input
-                  value={shop}
-                  onChange={e => setShop(e.target.value)}
-                  placeholder="nome-negozio.myshopify.com"
-                  autoFocus
-                  onKeyDown={e => { if (e.key === 'Enter') connectShopify() }}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }}
-                />
-                <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>
-                  Lo trovi nell'URL del tuo admin Shopify. Ti reindirizzeremo a Shopify per autorizzare MoovExpress,
-                  poi tornerai qui col negozio collegato.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
-                  <button
-                    onClick={() => setStep('platforms')}
-                    style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}
-                  >
-                    ← Indietro
-                  </button>
-                  <button
-                    onClick={connectShopify}
-                    disabled={connecting}
-                    style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, cursor: connecting ? 'default' : 'pointer', opacity: connecting ? .6 : 1 }}
-                  >
-                    {connecting ? 'Reindirizzamento…' : 'Collega'}
-                  </button>
-                </div>
+                {URL_SCHEDA_APP_SHOPIFY ? (
+                  <>
+                    <p style={{ fontSize: '13px', color: '#374151', lineHeight: 1.6, margin: 0 }}>
+                      Installa MoovExpress dallo Shopify App Store e scegli il negozio da collegare: al termine torni qui con il negozio collegato a questo account. Non serve scrivere il dominio.
+                    </p>
+                    {/* I nomi fra «» sono quelli della pagina della scelta (lib/shopify-pagina-scelta.ts),
+                        che sta fuori dal portale: se cambiano la', vanno cambiati qui. «No, crea il mio
+                        account» darebbe al negozio un conto nuovo sotto il master dei negozi Shopify, non
+                        questo (decisione D1). */}
+                    <p style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.5, margin: '10px 0 0' }}>
+                      Al ritorno da Shopify conferma il collegamento a questo account. Se invece ti chiediamo «Hai già un account MoovExpress?», scegli «Sì, accedo» con email e password di questo account: «No, crea il mio account» ne aprirebbe uno nuovo.
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
+                      <button
+                        onClick={() => setStep('platforms')}
+                        style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}
+                      >
+                        ← Indietro
+                      </button>
+                      {/* Un link alla scheda, come la guida di Shopify chiede ai siti esterni ("embedded
+                          hyperlinks to your app listing page"), e nella stessa scheda del browser: niente
+                          finestre nuove per i passaggi essenziali come l'OAuth (best practices). */}
+                      <a
+                        href={URL_SCHEDA_APP_SHOPIFY}
+                        onClick={e => { if (isAppNativa()) { e.preventDefault(); shopifyDalBrowser() } }}
+                        style={{ display: 'inline-flex', alignItems: 'center', background: ACCENT, color: '#fff', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, textDecoration: 'none' }}
+                      >
+                        Collega da Shopify
+                      </a>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px 16px', fontSize: '13px', color: '#374151', lineHeight: 1.6 }}>
+                      <p style={{ margin: 0 }}>
+                        Shopify si collega da Shopify: installerai l&apos;app MoovExpress dal tuo negozio Shopify e tornerai qui con il negozio collegato al tuo account; non serve scrivere il dominio.
+                      </p>
+                      <p style={{ margin: '10px 0 0' }}>
+                        L&apos;app per Shopify è in arrivo: nel frattempo puoi caricare gli ordini con l&apos;export di Shopify da Importa Ordini.
+                      </p>
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.5, margin: '10px 0 0' }}>
+                      Hai già installato MoovExpress sul tuo negozio? Aprila dall&apos;admin di Shopify (menu App).
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
+                      <button
+                        onClick={() => setStep('platforms')}
+                        style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}
+                      >
+                        ← Indietro
+                      </button>
+                      <a
+                        href="/cliente/importa"
+                        style={{ display: 'inline-flex', alignItems: 'center', background: ACCENT, color: '#fff', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, textDecoration: 'none' }}
+                      >
+                        Vai a Importa Ordini
+                      </a>
+                    </div>
+                  </>
+                )}
               </div>
             ) : step === 'woocommerce' ? (
               <div style={{ padding: '20px' }}>

@@ -107,6 +107,10 @@ export async function GET(req: NextRequest) {
       // UN NEGOZIO ROTTO NON DEVE FERMARE GLI ALTRI, e nemmeno bloccare la rotazione: si scrive
       // l'errore E si timbra comunque il passaggio. Senza il timbro, un negozio con le credenziali
       // scadute tornerebbe primo a ogni giro e gli altri non arriverebbero mai.
+      // Lo STATO qui non si tocca: un errore qualunque (rete, Shopify lento, un ordine strano) non deve
+      // togliere il negozio dal giro. Il token morto di Shopify — rinnovo rifiutato o 401 — mette la riga
+      // in 'errore' da se', in lib/shopify.ts, solo se il token e' ancora quello rifiutato: e' da li' che
+      // passano tutte le porte (cron, Sincronizza, evasioni, annulli), e /enter allora rifa' l'autorizzazione.
       falliti.push({ negozio: it.nome_negozio || it.id, errore: String(e?.message || e).slice(0, 200) })
       await admin.from('integrazioni')
         .update({ ultimo_sync: new Date().toISOString(), errore: String(e?.message || e).slice(0, 500) })
