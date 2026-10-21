@@ -6,6 +6,7 @@ import Moovy from './Moovy'
 import MenuProfilo from './MenuProfilo'
 import CampanellaNotifiche from './CampanellaNotifiche'
 import SupportoButton from './SupportoButton'
+import ContiTendina from './ContiTendina'
 import { useAppNativa } from '@/lib/app-nativa'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
@@ -232,7 +233,8 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
 
   // Credito del master in topbar (solo staff di rete). All'avvio, a ogni cambio pagina e ogni 2 min:
   // dopo una spedizione o un addebito il numero si aggiorna da solo.
-  const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; reteLabel?: string | null; proprio: number; ledger?: { fornitore_master_id: string; fornitore: string; saldo: number }[] } | null>(null)
+  // conti = quanti conti ha il master (quelli della Lista Movimenti): da due in su, tendina.
+  const [creditoTop, setCreditoTop] = useState<{ mostra: boolean; rete: number; reteLabel?: string | null; conti: number } | null>(null)
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/master/credito').then(r => r.json()).then(d => { if (d && d.mostra) setCreditoTop(d) }).catch(() => {})
@@ -398,7 +400,8 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
             {isMobile && <span style={{fontSize:'14px',fontWeight:800,color:'#1a1a1a'}}>{user?.brandNome || 'MoovExpress'}</span>}
           </div>
           <div style={{display:'flex',alignItems:'center',gap:isMobile?'6px':'10px'}}>
-            {creditoTop?.mostra && (() => {
+            {creditoTop?.mostra && creditoTop.conti > 1 && <ContiTendina conti={creditoTop.conti} compatto={isMobile} />}
+            {creditoTop?.mostra && !(creditoTop.conti > 1) && (() => {
               const rete = Number(creditoTop.rete || 0)
               const pos = rete >= 0
               return (
@@ -410,19 +413,6 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 </a>
               )
             })()}
-            {/* CONDIVISIONE: conti-CODICE separati (uno per fornitore). Il credito verso un fornitore non-padre
-                vive su un ledger "(ingrosso)" sotto di lui, invisibile a masters.credito: qui una pillola a parte. */}
-            {(creditoTop?.ledger || []).map((lg) => {
-              const pos = Number(lg.saldo || 0) >= 0
-              return (
-                <a key={lg.fornitore_master_id} href="/dashboard/movimenti" title={`Credito verso ${lg.fornitore} — vai ai movimenti`}
-                  style={{display:'flex',alignItems:'center',gap:'6px',textDecoration:'none',background:pos?'#f0fdf4':'#fef2f2',border:`1px solid ${pos?'#bbf7d0':'#fecaca'}`,borderRadius:'8px',padding:'5px 10px'}}>
-                  <span style={{fontSize:'13px'}}>💳</span>
-                  {!isMobile && <span style={{fontSize:'10px',fontWeight:700,textTransform:'uppercase' as const,letterSpacing:'0.4px',color:'#6b7280'}}>{lg.fornitore}</span>}
-                  <span style={{fontSize:'13px',fontWeight:800,color:pos?'#16a34a':'#dc2626',whiteSpace:'nowrap' as const}}>€ {Number(lg.saldo||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-                </a>
-              )
-            })}
             {['master', 'admin', 'operatore'].includes(ruolo) && (
               <a href="/dashboard/reports/storico-sms" title="SMS — credito e acquisto"
                 style={{ display: 'flex', alignItems: 'center', gap: '5px', textDecoration: 'none', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '8px', padding: '5px 10px' }}>

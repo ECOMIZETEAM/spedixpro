@@ -33,7 +33,11 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 // Una riga del conto proprio che appartiene al contratto di un'altra sezione (vedi fuoriConto).
 export type RigaFuoriConto = { id: string; tipo: string; descrizione: string; riferimento: string | null; importo: number; created_at: string; corriere: string | null }
 
-export async function sezioniDelMaster(admin: any, io: string): Promise<{
+// saldiPropri=false: salta la somma dei contratti propri (la query piu' pesante: LOGIXIA ha 30.000 righe su
+// SDA EXPRESS L) e le righe fuori conto. Serve all'intestazione, che a ogni cambio pagina deve solo sapere
+// QUANTI conti ci sono; i saldi li chiede quando si apre la tendina. In quel modo i saldi dei contratti
+// propri valgono 0: chi lo usa non li mostra.
+export async function sezioniDelMaster(admin: any, io: string, o: { saldiPropri?: boolean } = {}): Promise<{
   sezioni: Sezione[]
   argsDi: (id: string) => ArgsSezione | null
   fuoriContoDi: (id: string) => RigaFuoriConto[]
@@ -45,7 +49,7 @@ export async function sezioniDelMaster(admin: any, io: string): Promise<{
     admin.from('corrieri_condivisi').select('id,stato,fornitore_master_id,cliente_ledger_id,corriere_id')
       .eq('master_id', io).not('cliente_ledger_id', 'is', null).order('created_at', { ascending: true }),
     admin.from('corrieri').select('id,nome_contratto,proprio,collegamento_id').eq('master_id', io).order('nome_contratto', { ascending: true }),
-    admin.rpc('movimenti_sezioni_proprio_v1', { p_master: io }),
+    o.saldiPropri === false ? Promise.resolve({ data: [] as any[], error: null }) : admin.rpc('movimenti_sezioni_proprio_v1', { p_master: io }),
   ])
   if (eRiep) throw new Error(eRiep.message)
 

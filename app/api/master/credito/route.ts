@@ -1,11 +1,20 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { sezioniDelMaster } from '@/lib/movimenti-sezioni'
 
 export const dynamic = 'force-dynamic'
 
-// Credito del MASTER (leggero): serve alla pillola in topbar, aggiornata ogni tanto. Solo staff di
-// rete (master/admin/operatore): il cliente ha il suo credito nel proprio portale, l'agente non ne ha.
-export async function GET() {
+// Credito del MASTER in topbar. Solo staff di rete (master/admin/operatore): il cliente ha il suo
+// credito nel proprio portale, l'agente non ne ha.
+//
+// I CONTI SONO QUELLI DELLA LISTA MOVIMENTI (lib/movimenti-sezioni), non una lista a parte: l'intestazione
+// e la pagina devono dire la stessa cosa. Prima qui c'erano solo il conto verso il padre e i ledger dei
+// fornitori, e Wave vedeva due pillole (MULTIEXPRESS, LOGIXIA) senza i suoi GLS e BRT. Con un conto solo
+// resta la pillola di sempre; da due in su, una tendina sola (Lorenzo, 21/10).
+//
+// Senza ?dettaglio=1 (a ogni cambio pagina e ogni 2 minuti) si contano solo i conti, senza sommare i
+// contratti propri; i saldi completi si chiedono quando si apre la tendina.
+export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
@@ -16,53 +25,19 @@ export async function GET() {
   }
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
-  const { data: m } = await admin.from('masters').select('credito,credito_proprio,parent_master_id').eq('id', utente.master_id).maybeSingle()
-  // Etichetta del conto RETE: quando ci sono anche conti-codice, "Credito" diventa ambiguo -> si mostra
-  // il nome del livello verso cui va quel conto (il padre in rete, es. MULTIEXPRESS). Senza padre resta "Credito".
-  let reteLabel: string | null = null
-  if ((m as any)?.parent_master_id) {
-    const { data: pm } = await admin.from('masters').select('nome').eq('id', (m as any).parent_master_id).maybeSingle()
-    reteLabel = (pm as any)?.nome || null
-  }
-
-  // CONDIVISIONE (due grafi): oltre al credito ALBERO (masters.credito, verso il padre), un master che
-  // compra un contratto via CODICE ha il suo conto su un LEDGER "(ingrosso)" sotto il FORNITORE
-  // (clienti.credito). E' invisibile a masters.credito e la RLS lo nasconde al client del master stesso
-  // -> va letto via admin. La proprieta' si ricava SOLO da corrieri_condivisi (master=loggato, attiva):
-  // mai un id dal client. Un conto per fornitore (somma dei ledger DISTINTI di quel fornitore).
-  let ledger: { fornitore_master_id: string; fornitore: string; saldo: number }[] = []
+  const dettaglio = req.nextUrl.searchParams.get('dettaglio') === '1'
   try {
-    const { data: legami } = await admin.from('corrieri_condivisi')
-      .select('fornitore_master_id,cliente_ledger_id')
-      .eq('master_id', utente.master_id).eq('stato', 'attiva').not('cliente_ledger_id', 'is', null)
-    const ledgerIds = [...new Set((legami || []).map((l: any) => l.cliente_ledger_id))]
-    if (ledgerIds.length) {
-      const fornIds = [...new Set((legami || []).map((l: any) => l.fornitore_master_id).filter(Boolean))]
-      const [cliRes, fornRes] = await Promise.all([
-        admin.from('clienti').select('id,credito').in('id', ledgerIds),
-        admin.from('masters').select('id,nome').in('id', fornIds),
-      ])
-      const saldoLedger = new Map((cliRes.data || []).map((c: any) => [c.id, Number(c.credito || 0)]))
-      const nomeForn = new Map((fornRes.data || []).map((f: any) => [f.id, f.nome]))
-      const ledgerPerForn = new Map<string, Set<string>>()
-      for (const l of (legami || [])) {
-        if (!l.cliente_ledger_id || !l.fornitore_master_id) continue
-        if (!ledgerPerForn.has(l.fornitore_master_id)) ledgerPerForn.set(l.fornitore_master_id, new Set())
-        ledgerPerForn.get(l.fornitore_master_id)!.add(l.cliente_ledger_id)
-      }
-      ledger = [...ledgerPerForn.entries()].map(([fid, lids]) => ({
-        fornitore_master_id: fid,
-        fornitore: nomeForn.get(fid) || '—',
-        saldo: [...lids].reduce((s, id) => s + (saldoLedger.get(id) || 0), 0),
-      }))
-    }
-  } catch (e) { console.error('[master/credito] ledger codice:', e) }
-
-  return NextResponse.json({
-    mostra: true,
-    rete: Number((m as any)?.credito || 0),
-    reteLabel,
-    proprio: Number((m as any)?.credito_proprio || 0),
-    ledger,
-  })
+    const { sezioni } = await sezioniDelMaster(admin, utente.master_id, { saldiPropri: dettaglio })
+    const rete = sezioni.find(s => s.id === 'rete')
+    return NextResponse.json({
+      mostra: true,
+      rete: Number(rete?.saldo || 0),
+      reteLabel: rete && rete.titolo !== 'Rete' ? rete.titolo : null,
+      conti: sezioni.length,
+      sezioni: dettaglio ? sezioni : undefined,
+    })
+  } catch (e: any) {
+    console.error('[master/credito] conti:', e?.message)
+    return NextResponse.json({ mostra: false })
+  }
 }

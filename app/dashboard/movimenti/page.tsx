@@ -59,6 +59,15 @@ export default function MovimentiMasterPage() {
   // Righe di questo contratto finite sul conto dei contratti propri (prove, spedizioni del padre prima del
   // 22/09): stanno con il loro contratto, ma fuori dalla lista e dal saldo di questo conto.
   const [fuoriConto, setFuoriConto] = useState<Movimento[]>([])
+  // Arrivando dalla tendina dei conti in intestazione (?sezione=...) si apre quel conto. Questo effetto
+  // viene dopo quello che rilegge la sezione ricordata, quindi vince lui.
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get('sezione')
+      if (q) { setSezione(q); setPagina(1) }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [perPage, setPerPage] = useFiltriPersistenti('movimenti-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [total, setTotal] = useState(0)
