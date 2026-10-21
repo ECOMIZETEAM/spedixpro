@@ -17,7 +17,7 @@ import { haContoProprio } from '@/lib/cascata'
 
 export type Sezione = {
   id: string
-  tipo: 'rete' | 'fornitore' | 'proprio' | 'altri' | 'commissioni'
+  tipo: 'rete' | 'fornitore' | 'proprio' | 'commissioni'
   etichetta: string
   titolo: string
   sottotitolo: string
@@ -25,15 +25,19 @@ export type Sezione = {
   movimenti: number | null   // solo dove costa poco saperlo (contratti propri); null = non contato
 }
 
-export type ArgsSezione = { master: string; sezione: 'rete' | 'ledger' | 'proprio' | 'altri' | 'commissioni'; ledger?: string; nome?: string }
+export type ArgsSezione = { master: string; sezione: 'rete' | 'ledger' | 'proprio' | 'commissioni'; ledger?: string; nome?: string }
 
 const norm = (s: any) => String(s || '').trim().toLowerCase()
 const r2 = (n: number) => Math.round(n * 100) / 100
+
+// Una riga del conto proprio che appartiene al contratto di un'altra sezione (vedi fuoriConto).
+export type RigaFuoriConto = { id: string; tipo: string; descrizione: string; riferimento: string | null; importo: number; created_at: string; corriere: string | null }
 
 export async function sezioniDelMaster(admin: any, io: string): Promise<{
   sezioni: Sezione[]
   argsDi: (id: string) => ArgsSezione | null
   corrieriRete: string[]
+  fuoriContoDi: (id: string) => RigaFuoriConto[]
 }> {
   const [{ data: me }, { data: legami }, { data: miei }, { data: riep, error: eRiep }] = await Promise.all([
     admin.from('masters').select('nome,parent_master_id,credito,commissioni_moovexpress').eq('id', io).single(),
@@ -97,20 +101,29 @@ export async function sezioniDelMaster(admin: any, io: string): Promise<{
       })
     }
   }
-  // Movimenti del conto proprio su contratti che NON sono suoi propri: le prove dei primi di ottobre (Wave
-  // su SDA EXPRESS L, che e' suo ma comprato da LOGIXIA) e le spedizioni fatte dal padre per suo conto
-  // prima della correzione di fn_conto_di del 22/09 (CF GROUP, spedizioni 2000). Lo storico non si
-  // cancella, e senza questa sezione le somme non tornerebbero. Il titolo dice QUALI contratti: "non piu'
-  // tuoi" era falso per Wave. Le righe sono poche (al massimo sette per master): i nomi si leggono da li'.
-  const altri = [...rp.entries()].filter(([k]) => !chiaviPropri.has(k))
-  if (altri.length) {
-    const { data: righeAltri, error: eAltri } = await admin.rpc('movimenti_sezione_v1', { p_master: io, p_sezione: 'altri', p_limit: 200 })
-    if (eAltri) throw new Error(eAltri.message)
-    const nomi = Array.from(new Set(((righeAltri || []) as any[]).map(r => String(r.corriere || '').trim() || 'senza contratto'))).sort()
-    sezioni.push({
-      id: 'altri', tipo: 'altri', etichetta: 'Conto proprio', titolo: 'Altri contratti', sottotitolo: nomi.join(', '),
-      saldo: r2(altri.reduce((a, [, r]) => a + r.somma, 0)), movimenti: altri.reduce((a, [, r]) => a + r.n, 0),
-    })
+  // RIGHE DEL CONTO PROPRIO SU UN CONTRATTO CHE IL MASTER COMPRA. La sezione la decide il CONTRATTO, non
+  // il conto su cui la riga e' finita: SDA EXPRESS L e' il contratto di LOGIXIA, e le prove del 2-3/10
+  // che l'hanno messo sul conto proprio di Wave vanno nella sezione LOGIXIA, non in una card "conto
+  // proprio" che faceva credere a Wave di avere un SDA EXPRESS L suo (Lorenzo, 21/10). Stesso per le
+  // spedizioni fatte dal padre per conto del figlio prima della correzione di fn_conto_di del 22/09
+  // (CF GROUP, spedizioni 2000): vanno nella sezione del padre. Restano FUORI dalla lista e dal saldo
+  // progressivo di quel conto, perche' quel saldo non le contiene: la pagina le mostra a parte, dette
+  // per quello che sono. Sono poche (al massimo sette per master).
+  const fuoriConto = new Map<string, RigaFuoriConto[]>()
+  if ([...rp.keys()].some(k => !chiaviPropri.has(k))) {
+    const { data: estranee, error: eEst } = await admin.rpc('movimenti_sezione_v1', { p_master: io, p_sezione: 'altri', p_limit: 200 })
+    if (eEst) throw new Error(eEst.message)
+    for (const r of (estranee || []) as any[]) {
+      const k = norm(r.corriere)
+      // comprato per codice da un altro master → la sezione di quel fornitore; altrimenti viene dal padre
+      const copia = ((miei || []) as any[]).find(c => c.collegamento_id && norm(c.nome_contratto) === k)
+      const dove = copia && ledgerDi.has(`l:${copia.collegamento_id}`) ? `l:${copia.collegamento_id}` : 'rete'
+      if (!fuoriConto.has(dove)) fuoriConto.set(dove, [])
+      fuoriConto.get(dove)!.push({
+        id: r.id, tipo: r.tipo, descrizione: r.descrizione, riferimento: r.riferimento,
+        importo: Number(r.importo), created_at: r.created_at, corriere: r.corriere || null,
+      })
+    }
   }
   const commissioni = Number((me as any)?.commissioni_moovexpress || 0)
   if (dueConti || Math.abs(commissioni) >= 0.005) {
@@ -122,7 +135,7 @@ export async function sezioniDelMaster(admin: any, io: string): Promise<{
 
   const argsDi = (id: string): ArgsSezione | null => {
     if (!sezioni.some(s => s.id === id)) return null
-    if (id === 'rete' || id === 'altri' || id === 'commissioni') return { master: io, sezione: id }
+    if (id === 'rete' || id === 'commissioni') return { master: io, sezione: id }
     if (id.startsWith('l:')) return { master: io, sezione: 'ledger', ledger: ledgerDi.get(id)! }
     if (id.startsWith('p:')) return { master: io, sezione: 'proprio', nome: id.slice(2) }
     return null
@@ -131,7 +144,7 @@ export async function sezioniDelMaster(admin: any, io: string): Promise<{
   // sono i contratti che stanno su quel conto; per il vertice anche i suoi.
   const corrieriRete = Array.from(new Set(((miei || []) as any[])
     .filter(c => !c.collegamento_id && (!dueConti || !c.proprio)).map(c => c.nome_contratto).filter(Boolean))).sort()
-  return { sezioni, argsDi, corrieriRete }
+  return { sezioni, argsDi, corrieriRete, fuoriContoDi: (id: string) => fuoriConto.get(id) || [] }
 }
 
 // Una pagina di una sezione. Oltre l'ultima pagina non torna nessuna riga, e con lei il totale: lo si

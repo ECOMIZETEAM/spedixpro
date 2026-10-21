@@ -120,7 +120,7 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const { sezioni, argsDi, corrieriRete } = await sezioniDelMaster(adminM, io)
+      const { sezioni, argsDi, corrieriRete, fuoriContoDi } = await sezioniDelMaster(adminM, io)
       // Sezione chiesta che non c'e' (contratto tolto, altro utente sullo stesso browser): la principale.
       const chiesta = (p.get('sezione') || 'rete').trim()
       const scelta = argsDi(chiesta) ? chiesta : 'rete'
@@ -128,6 +128,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         movimenti, total, somma, page: page || undefined, perPage,
         sezioni, sezione: scelta, corrieriDisponibili: scelta === 'rete' ? corrieriRete : [],
+        fuoriConto: fuoriContoDi(scelta),
         saldo: sezioni.find(s => s.id === scelta)?.saldo ?? 0,
       })
     } catch (e: any) {

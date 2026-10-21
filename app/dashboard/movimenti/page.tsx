@@ -16,7 +16,7 @@ type Movimento = {
 // Un conto, una lista: il master sopra, ogni contratto comprato da un altro master, ogni contratto tuo,
 // le commissioni. La rotta li calcola e decide quali spettano a chi guarda.
 type Sezione = {
-  id: string; tipo: 'rete' | 'fornitore' | 'proprio' | 'altri' | 'commissioni'
+  id: string; tipo: 'rete' | 'fornitore' | 'proprio' | 'commissioni'
   etichetta: string; titolo: string; sottotitolo: string; saldo: number; movimenti: number | null
 }
 type Gruppo = {
@@ -56,6 +56,9 @@ export default function MovimentiMasterPage() {
   // Le sezioni (una per conto) e quella aperta. Con una sola sezione la pagina resta com'era.
   const [sezioni, setSezioni] = useState<Sezione[]>([])
   const [sezione, setSezione] = useFiltriPersistenti('movimenti-master:sezione', 'rete')
+  // Righe di questo contratto finite sul conto dei contratti propri (prove, spedizioni del padre prima del
+  // 22/09): stanno con il loro contratto, ma fuori dalla lista e dal saldo di questo conto.
+  const [fuoriConto, setFuoriConto] = useState<Movimento[]>([])
   const [perPage, setPerPage] = useFiltriPersistenti('movimenti-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [total, setTotal] = useState(0)
@@ -138,6 +141,7 @@ export default function MovimentiMasterPage() {
           setTotal(Number(data.total || 0)); setSomma(Number(data.somma || 0))
           if (Array.isArray(data.corrieriDisponibili)) setCorrieriOpts(data.corrieriDisponibili)
           if (Array.isArray(data.sezioni)) setSezioni(data.sezioni)
+          setFuoriConto(Array.isArray(data.fuoriConto) ? data.fuoriConto : [])
           // Sezione ricordata che non c'e' piu' (contratto tolto, altro utente sullo stesso browser): il
           // server ha risposto con quella principale, la pagina si allinea.
           if (data.sezione && data.sezione !== sezione) setSezione(data.sezione)
@@ -266,7 +270,7 @@ export default function MovimentiMasterPage() {
             <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>{(()=>{
               const sz = sezioni.find(x => x.id === sezione)
               if (!sz) return 'Credito disponibile'
-              if (sz.tipo === 'proprio' || sz.tipo === 'altri') return `Costi · ${sz.titolo}`
+              if (sz.tipo === 'proprio') return `Costi · ${sz.titolo}`
               if (sz.tipo === 'commissioni') return 'Commissioni MoovExpress'
               return sz.titolo && sz.titolo !== 'Rete' ? `Credito · ${sz.titolo}` : 'Credito disponibile'
             })()}</div>
@@ -306,6 +310,27 @@ export default function MovimentiMasterPage() {
       </div>
 
       <div style={card}>
+        {fuoriConto.length > 0 && (() => {
+          const netto = Math.round(fuoriConto.reduce((a, m) => a + Number(m.importo || 0), 0) * 100) / 100
+          const contratti = Array.from(new Set(fuoriConto.map(m => m.corriere).filter(Boolean))).join(', ')
+          return (
+            <div style={{marginBottom:'16px',padding:'12px 14px',borderRadius:'8px',border:'1px solid #fed7aa',background:'#fff7ed'}}>
+              <div style={{fontSize:'13px',fontWeight:700,color:'#9a3412'}}>Registrati per errore sul conto dei tuoi contratti</div>
+              <div style={{fontSize:'12px',color:'#9a3412',marginTop:'4px'}}>
+                Questi movimenti riguardano {contratti || 'questo contratto'}, ma sono stati scritti sul conto dei tuoi contratti invece che qui. Non fanno parte del saldo di questo conto. Netto: <b>{fmtImporto(netto)}</b>.
+              </div>
+              <div style={{marginTop:'8px'}}>
+                {fuoriConto.map(m => (
+                  <div key={m.id} style={{display:'flex',justifyContent:'space-between',gap:'12px',fontSize:'12px',padding:'5px 0',borderTop:'1px solid #fde3c8'}}>
+                    <span style={{color:'#666',whiteSpace:'nowrap'}}>{fmtData(m.created_at)}</span>
+                    <span style={{color:'#1a1a1a',flex:1,minWidth:0}}>{m.descrizione}{m.corriere ? <span style={{color:'#999'}}> · {m.corriere}</span> : null}</span>
+                    <span style={{fontWeight:600,whiteSpace:'nowrap',color:Number(m.importo)>0?'#15803d':'#b91c1c'}}>{fmtImporto(Number(m.importo))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         {err && <div style={{marginBottom:'12px',padding:'10px 14px',borderRadius:'8px',fontSize:'13px',border:'1px solid #fecaca',background:'#fef2f2',color:'#b91c1c'}}>{err}</div>}
         {loading ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento…</div>
@@ -333,8 +358,6 @@ export default function MovimentiMasterPage() {
                       <td style={{...td,color:'#666',fontSize:'12px'}}>{fmtData(m.created_at)}</td>
                       <td style={{...td,color:'#1a1a1a',whiteSpace:'normal'}}>
                         {m.descrizione}
-                        {/* Nello storico i contratti sono piu' d'uno: si dice quale. */}
-                        {sezione==='altri' && m.corriere && <div style={{fontSize:'11.5px',color:'#999',marginTop:'2px'}}>{m.corriere}</div>}
                       </td>
                       <td style={{...td,textAlign:'right',fontWeight:600,color:positivo?'#15803d':'#b91c1c'}}>{fmtImporto(Number(m.importo))}</td>
                       <td style={{...td,textAlign:'right',color:'#1a1a1a'}}>{fmtEuro(Number(m.saldo_dopo))}</td>
