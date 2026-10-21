@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
 import { pickupTimeSpedisci } from '@/lib/spedisci'
+import { ritiroPrenotabileConPickups, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
 
 // API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key.
 // Auth: Authorization: Bearer <api_key>
@@ -31,6 +32,28 @@ export async function POST(req: NextRequest) {
   const _b = rispostaBlocco(ctx); if (_b) return _b
   const body = await req.json().catch(() => ({}))
   const admin = createAdminSupabase()
+
+  // IL CONTRATTO PRIMA DI TUTTO. Chi chiama un ritiro su un contratto dove questa rotta non puo'
+  // prenotarlo deve saperlo subito, non dopo aver corretto data, mittente e telefono per poi
+  // sentirsi dire una cosa sbagliata: sui ponti e su Poste diretto rispondeva "Impossibile
+  // recuperare il corriere dalla spedizione", che manda a cercare il guasto dalla parte sbagliata.
+  {
+    const { data: contratto } = await admin.from('corrieri').select('tipo').eq('id', ctx.corriereId).maybeSingle()
+    // ── SU QUESTI CONTRATTI IL RITIRO NON SI AGGIUNGE DOPO ──
+    // Non c'e' un ramo per questo tipo, e senza un'uscita esplicita la richiesta finiva nel ramo
+    // spedisci: cercava un codice corriere che quelle spedizioni non hanno MAI (verificato: assente
+    // su tutte e 1.264) e rispondeva "Impossibile recuperare il corriere dalla spedizione", mandando
+    // a cercare il guasto dalla parte sbagliata. Il fornitore non ha proprio una chiamata per
+    // prenotare un ritiro dopo l'ordine: si chiede alla creazione o non si chiede piu'.
+    // Stesso rifiuto di /api/ritiri/crea. Chi l'ha chiesto alla creazione ce l'ha gia': lo dice il
+    // testo, perche' un integratore leggeva questo 400 come un ritiro perso (19/10/2026).
+    if (contratto?.tipo === 'easyparcel') {
+      return NextResponse.json({ error: 'Per questo contratto il ritiro va richiesto al momento della creazione della spedizione: non puo\' essere aggiunto dopo. Se lo hai chiesto alla creazione e\' gia\' prenotato (vedi GET /api/v1/shipments/{id}); per le spedizioni create senza ritiro contatta l\'assistenza.' }, { status: 400 })
+    }
+    if (contratto && !ritiroPrenotabileConPickups(contratto.tipo)) {
+      return NextResponse.json({ error: messaggioRitiroNonPrenotabileViaApi(contratto.tipo) }, { status: 400 })
+    }
+  }
 
   const shipmentIds = body.shipmentIds
   if (!Array.isArray(shipmentIds) || !shipmentIds.length) return NextResponse.json({ error: 'shipmentIds obbligatorio' }, { status: 400 })
@@ -65,7 +88,7 @@ export async function POST(req: NextRequest) {
   const fascia = fasciaOraria(body.timeFrom, body.timeTo)
 
   async function salvaRitiro(pickupCode: string, dataRitiro: string = body.date) {
-    return await admin.from('ritiri').insert({
+    const r = await admin.from('ritiri').insert({
       master_id: ctx!.masterId, cliente_id: ctx!.clienteId, corriere_id: corriere!.id,
       tracking_ritiro: pickupCode || null, cod_ritiro: pickupCode || null,
       mitt_nome: from.name, mitt_indirizzo: from.street1, mitt_citta: from.city,
@@ -73,6 +96,13 @@ export async function POST(req: NextRequest) {
       colli: colliTotali, peso: pesoTotale, contenuto: body.notes || null,
       data_ritiro: dataRitiro, stato: 'richiesto',
     }).select('id').single()
+    // Come il portale: le spedizioni si legano al ritiro. Senza, il dettaglio via API non poteva
+    // mostrarne il codice e nel portale restavano fra le "da ritirare", pronte per un doppione.
+    if (r.data?.id) {
+      const { error: linkErr } = await admin.from('spedizioni').update({ ritiro_id: r.data.id }).in('id', spedizioni!.map((s: any) => s.id))
+      if (linkErr) console.error('[API][PICKUP] collegamento spedizioni al ritiro fallito:', r.data.id, linkErr.message)
+    }
+    return r
   }
 
   // ── SPEDIAMOPRO ──
@@ -106,16 +136,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── SU QUESTI CONTRATTI IL RITIRO NON SI AGGIUNGE DOPO ──
-  // Non c'e' un ramo per questo tipo, e senza un'uscita esplicita la richiesta finiva nel ramo
-  // qui sotto: cercava un codice corriere che quelle spedizioni non hanno MAI (verificato: assente
-  // su tutte e 1.264) e rispondeva "Impossibile recuperare il corriere dalla spedizione", mandando
-  // a cercare il guasto dalla parte sbagliata. Il fornitore non ha proprio una chiamata per
-  // prenotare un ritiro dopo l'ordine: si chiede alla creazione o non si chiede piu'.
-  // Stesso testo di /api/ritiri/crea, che lo rifiuta gia' per la stessa ragione.
-  if (corriere.tipo === 'easyparcel') {
-    return NextResponse.json({ error: 'Per questo contratto il ritiro va richiesto al momento della creazione della spedizione: non puo\' essere aggiunto dopo.' }, { status: 400 })
-  }
+  // I contratti che questa rotta non sa prenotare (easyparcel, ponti, Poste diretto, …) sono gia'
+  // usciti in cima: da qui in giu' resta solo SPEDISCI.
 
   // ── SPEDISCI ──
   const primaSped: any = spedizioni[0]
@@ -165,7 +187,8 @@ export async function POST(req: NextRequest) {
     })
   } catch {
     clearTimeout(toId)
-    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova; se persiste, quel contratto va gestito dal portale del corriere (es. Poste).' }, { status: 504 })
+    // Chi integra parla solo con noi: niente rimandi al portale del corriere.
+    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto; se persiste, contatta l\'assistenza.' }, { status: 504 })
   }
   clearTimeout(toId)
   let text = await res.text()

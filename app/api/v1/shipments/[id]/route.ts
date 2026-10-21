@@ -3,6 +3,8 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { trovaOwnerContratto } from '@/lib/annullaSpedizione'
 import { registraAudit } from '@/lib/audit'
+import { ritiroInRisposta } from '@/lib/ritiro-api'
+import { codiceRitiroValido } from '@/lib/easyparcel'
 
 // Dettaglio/stato di una spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -14,9 +16,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data: s } = await admin.from('spedizioni')
     // rif_ordine anche qui: chi si integra legge la lista e poi il dettaglio, e in entrambi i posti
     // deve poter riagganciare la spedizione all'ordine del proprio gestionale (6/10/2026).
-    .select('id,numero,tracking_number,rif_ordine,stato,costo_totale,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,peso_reale,colli,contrassegno,note,created_at,cliente_id,corriere_id,corrieri(nome_contratto)')
+    .select('id,numero,tracking_number,rif_ordine,stato,costo_totale,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,peso_reale,colli,contrassegno,note,created_at,cliente_id,corriere_id,corrieri(nome_contratto,tipo),richiedi_ritiro,data_ritiro,intervallo_ritiro,ritiro_id,cod_ritiro:raw_response->>_codiceRitiro,ritiro_ponte:raw_response->>_ritiroPrenotato')
     .eq('id', id).maybeSingle()
   if (!s || s.cliente_id !== ctx.clienteId) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
+
+  // IL RITIRO SI RILEGGE QUI. Sui contratti "V" il codice del corriere arriva quasi sempre dopo la
+  // risposta di creazione, e prima nessuna chiamata lo restituiva: chi integra restava con
+  // codice:null per sempre. Qui compare solo un ritiro che esiste; senza, `ritiro` e' null.
+  const tipo = (s.corrieri as any)?.tipo || null
+  let ritiro: any = null
+  if (s.ritiro_id) {
+    // Prenotato dopo, da /api/v1/pickups o dalla sezione Ritiri del portale.
+    const { data: r } = await admin.from('ritiri').select('cod_ritiro,data_ritiro,cliente_id').eq('id', s.ritiro_id).maybeSingle()
+    if (r && r.cliente_id === ctx.clienteId) {
+      ritiro = ritiroInRisposta({ prenotato: true, data: r.data_ritiro, intervallo: s.intervallo_ritiro, codice: r.cod_ritiro, tipo, spedizioneId: s.id })
+    }
+  }
+  // Chiesto alla creazione: vale solo dove la creazione lo prenota davvero. Prima del 21/10/2026
+  // richiedi_ritiro restava acceso anche sugli altri contratti, dove non partiva niente; e i ritiri
+  // fatti allora con /api/v1/pickups non erano legati alla spedizione. Su quelle vecchie righe non
+  // si sa: meglio null che un "prenotato" o un "non prenotato" non veri.
+  const prenotatoAllaCreazione = tipo === 'easyparcel' || (tipo === 'moovexpress' && (s as any).ritiro_ponte === 'true')
+  if (!ritiro && s.richiedi_ritiro && prenotatoAllaCreazione) {
+    ritiro = ritiroInRisposta({ prenotato: true, data: s.data_ritiro, intervallo: s.intervallo_ritiro, codice: codiceRitiroValido((s as any).cod_ritiro), tipo, spedizioneId: s.id })
+  }
   // Registro degli accessi ai dati personali anche per l'API (il dettaglio porta il destinatario).
   after(() => registraAudit({ ruolo: 'api', azione: 'api_spedizione', risorsa: s.numero, dettaglio: `cliente ${ctx.clienteId}` }))
   return NextResponse.json({
@@ -26,6 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     colli: s.colli, peso: s.peso_reale, contrassegno: Number(s.contrassegno || 0),
     notes: s.note || null,
     label_url: `/api/v1/shipments/${s.id}/label`, created_at: s.created_at,
+    ritiro,
   })
 }
 

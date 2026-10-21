@@ -119,13 +119,15 @@ export function erroreRitiroPulito(raw: any): string {
     if (/poste/i.test(msg)) {
       return 'Il ritiro a domicilio con Poste non è prenotabile da qui in questo momento (la spedizione resta regolare, è solo la richiesta di ritiro a non essere disponibile ora). Riprova più tardi, oppure consegna il pacco in un ufficio Poste.'
     }
-    return 'Il corriere non ha una tariffa di ritiro per questo contratto/peso: programma il ritiro dal portale del corriere.'
+    // Chi spedisce parla solo con noi (regola di Lorenzo, 21/10/2026): il portale del corriere non
+    // e' suo e non deve cercarlo. Il ritiro lo fa prenotare l'assistenza.
+    return 'Il corriere non ha una tariffa di ritiro per questo contratto/peso: contatta l\'assistenza per farlo prenotare.'
   }
   if (/non idonea al ritiro/i.test(msg)) {
     return 'Il corriere non ha ancora finalizzato questa spedizione (etichetta in generazione): riprova il ritiro tra qualche minuto.'
   }
   if (/generic error/i.test(msg)) {
-    return 'Il corriere ha rifiutato il ritiro per questa spedizione (spesso Poste in giornata o area non coperta): riprova con una data futura o programma dal portale del corriere.'
+    return 'Il corriere ha rifiutato il ritiro per questa spedizione (spesso Poste in giornata o area non coperta): riprova con una data futura o contatta l\'assistenza.'
   }
   if (!msg || msg.startsWith('{') || /^\(?\d{3}\)?$/.test(msg) || /validation failed/i.test(msg)) {
     // Se il corriere ha indicato i campi problematici, meglio mostrarli che un generico "non

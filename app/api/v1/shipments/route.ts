@@ -12,6 +12,7 @@ import { validaCittaCap } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
 import { spedizioneDoppioneAttiva, messaggioDoppione } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
+import { ritiroInRisposta } from '@/lib/ritiro-api'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
@@ -55,7 +56,8 @@ export async function GET(req: NextRequest) {
 //         pickup?: { requested: true, date: 'AAAA-MM-GG', time?: 'mattina'|'pomeriggio' } }
 // Il RITIRO va chiesto QUI: su alcuni contratti si prenota solo insieme all'ordine e non si puo'
 // aggiungere dopo — /api/v1/pickups per quei contratti risponde 400 apposta. Se il ritiro e' stato
-// preso, la risposta contiene `ritiro: { richiesto, data, intervallo, codice }`.
+// chiesto, la risposta contiene `ritiro: { richiesto, data, intervallo, codice, avviso? }`, dove
+// richiesto=true vuol dire prenotato; sugli altri contratti richiesto=false e l'avviso dice come fare.
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
@@ -260,6 +262,10 @@ export async function POST(req: NextRequest) {
   let numero = '', costoCorrente = 0, etichettaUrl: string | null = null, raw: any = null
   // Il codice del ritiro prenotato dal corriere: va restituito a chi integra, come fa il portale.
   let codiceRitiro: string | null = null
+  // Se il ritiro chiesto e' PARTITO davvero verso il corriere. Lo accendono solo i rami che lo
+  // prenotano (easyparcel dentro l'ordine, ponte se il venditore conferma): prima la risposta diceva
+  // richiesto:true su ogni contratto, anche dove non si prenotava niente (vedi lib/ritiro-api).
+  let ritiroPrenotato = false
   // MULTICOLLO: l'etichetta di OGNI collo. Il portale la salva qui e la label route la unisce; questa
   // porta invece salvava solo il primo collo -> chi stampa da API riceveva una etichetta sola su un
   // pacco da N colli. Resta null sul mono-collo e su spediamopro (che gia' consegna il PDF unito).
@@ -459,6 +465,8 @@ export async function POST(req: NextRequest) {
         contrassegno: codReq, assicurazione: assReq,
         ...(dogana ? { dogana } : {}),
       })
+      // Ordine accettato col blocco ritiro dentro: il ritiro e' prenotato, anche se il codice arriva dopo.
+      if (_vuoleRitiro) ritiroPrenotato = true
       let ldv: string | null = null
       try {
         // QUANTO SI ASPETTA LA LETTERA DI VETTURA.
@@ -619,8 +627,12 @@ export async function POST(req: NextRequest) {
       numero = risMv.tracking
       costoCorrente = risMv.prezzo   // W: costo esterno (come spedisci), NON 0
       codiceRitiro = risMv.ritiro?.codice || null
+      // Prenotato solo se lo conferma il venditore: per SDA EXPRESS L la catena finisce su un contratto
+      // Poste diretto, che alla creazione non prenota, e la sua risposta torna richiesto:false.
+      ritiroPrenotato = _vuoleRitiro && risMv.ritiro?.richiesto === true
       try { const lab = await etichettaMoovexpress(credMv, risMv.label_url); if (lab?.length) etichettaUrl = `data:application/pdf;base64,${lab.toString('base64')}` } catch (e) { console.error('[V1][MOOVEXPRESS] etichetta:', (e as any)?.message) }
-      raw = { _moovexpress: true, tracking: numero, venditore_spedizione_id: risMv.id || null, label_url: risMv.label_url || null }
+      // _ritiroPrenotato: sul ponte e' l'unico posto da cui il dettaglio (GET) puo' rileggerlo.
+      raw = { _moovexpress: true, tracking: numero, venditore_spedizione_id: risMv.id || null, label_url: risMv.label_url || null, _ritiroPrenotato: ritiroPrenotato, _codiceRitiro: codiceRitiro }
     } catch (e: any) {
       console.error('[V1][MOOVEXPRESS]', e?.message)
       return errore(erroreCorrierePulito(e?.message))
@@ -658,9 +670,12 @@ export async function POST(req: NextRequest) {
     contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
     tracking_number: numero, etichetta_url: etichettaUrl, colli_dettaglio: colliDettaglio, raw_response: raw, stato: 'in_lavorazione',
     costo_spedizione: costoCorrente, costo_totale: costoCliente, note: body.notes || null, contenuto: body.contenuto || null,
-    richiedi_ritiro: _vuoleRitiro || false,
-    data_ritiro: _vuoleRitiro ? _dataRitiro : null,
-    intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
+    // Il ritiro si segna sulla spedizione solo se e' stato prenotato: il portale mostra "Ritiro
+    // richiesto" da questo campo, e un ritiro mai partito faceva credere al master che il corriere
+    // sarebbe passato (TK-06400, 18/10/2026).
+    richiedi_ritiro: ritiroPrenotato,
+    data_ritiro: ritiroPrenotato ? _dataRitiro : null,
+    intervallo_ritiro: ritiroPrenotato ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
     canale: 'api',
   }).select('id').single()
   // Qui NON si storna: il pacco dal corriere esiste gia' e va pagato. Il messaggio del database
@@ -750,7 +765,10 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     id: inserted?.id || null, tracking: numero, contratto: corriere.nome_contratto,
     prezzo: costoCliente, valuta: 'EUR', label_url: `/api/v1/shipments/${inserted?.id}/label`, stato: 'in_lavorazione',
-    // Se il ritiro e' stato chiesto, chi integra deve poterlo dimostrare al corriere.
-    ...(_vuoleRitiro ? { ritiro: { richiesto: true, data: _dataRitiro, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00', codice: codiceRitiro } } : {}),
+    // Se il ritiro e' stato chiesto, la risposta dice se e' stato PRENOTATO e, se no, cosa fare.
+    ...(_vuoleRitiro ? { ritiro: ritiroInRisposta({
+      prenotato: ritiroPrenotato, data: _dataRitiro, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
+      codice: codiceRitiro, tipo: corriere.tipo, spedizioneId: inserted?.id || null,
+    }) } : {}),
   })
 }

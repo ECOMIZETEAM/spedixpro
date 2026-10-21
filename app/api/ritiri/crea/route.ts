@@ -451,7 +451,8 @@ export async function POST(req: NextRequest) {
     })
   } catch (e: any) {
     clearTimeout(to)
-    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova; se persiste, quel contratto non gestisce il ritiro via app (es. Poste): programma il ritiro dal portale del corriere.' }, { status: 504 })
+    // Niente rimandi al portale del corriere: chi spedisce parla solo con noi.
+    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto; se persiste, contatta l\'assistenza.' }, { status: 504 })
   }
   clearTimeout(to)
   let text = await res.text()

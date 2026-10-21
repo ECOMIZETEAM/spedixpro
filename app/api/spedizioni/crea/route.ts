@@ -2744,7 +2744,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       if (insertError) {
         console.error('[CREA][DIELLE][INSERT]', numeroFinale, insertError.message)
         return NextResponse.json({
-          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale} (Dielle non si annulla via API, va annullata dal portale del fornitore).`,
+          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale}: questo contratto non si annulla in automatico, l'annullo lo fa l'assistenza.`,
           numero: numeroFinale,
         }, { status: 500 })
       }
@@ -2897,7 +2897,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       if (insertError) {
         console.error('[CREA][POSTE][INSERT]', numeroFinale, insertError.message)
         return NextResponse.json({
-          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale} (questo contratto non si annulla via API, va annullato dal portale del fornitore).`,
+          error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale}: questo contratto non si annulla in automatico, l'annullo lo fa l'assistenza.`,
           numero: numeroFinale,
         }, { status: 500 })
       }
