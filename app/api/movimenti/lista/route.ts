@@ -120,14 +120,21 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const { sezioni, argsDi, corrieriRete, fuoriContoDi } = await sezioniDelMaster(adminM, io)
+      const { sezioni, argsDi, corrieriDi, fuoriContoDi } = await sezioniDelMaster(adminM, io)
       // Sezione chiesta che non c'e' (contratto tolto, altro utente sullo stesso browser): la principale.
       const chiesta = (p.get('sezione') || 'rete').trim()
       const scelta = argsDi(chiesta) ? chiesta : 'rete'
-      const { movimenti, total, somma } = await leggiSezione(adminM, argsDi(scelta)!, opzioniSezione(scelta === 'rete'))
+      // Il filtro corriere vale solo se quel contratto sta in questa sezione: passando da una sezione
+      // all'altra il browser puo' rimandare quello della precedente, e svuoterebbe la lista.
+      const corrieriSezione = corrieriDi(scelta)
+      const filtroValido = !corriere || corrieriSezione.includes(corriere)
+      const { movimenti, total, somma } = await leggiSezione(adminM, argsDi(scelta)!, {
+        ...opzioniSezione(scelta === 'rete'),
+        corriereNome: filtroValido ? (corriere || null) : null,
+      })
       return NextResponse.json({
         movimenti, total, somma, page: page || undefined, perPage,
-        sezioni, sezione: scelta, corrieriDisponibili: scelta === 'rete' ? corrieriRete : [],
+        sezioni, sezione: scelta, corrieriDisponibili: corrieriSezione,
         fuoriConto: fuoriContoDi(scelta),
         saldo: sezioni.find(s => s.id === scelta)?.saldo ?? 0,
       })

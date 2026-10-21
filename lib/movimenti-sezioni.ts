@@ -36,8 +36,8 @@ export type RigaFuoriConto = { id: string; tipo: string; descrizione: string; ri
 export async function sezioniDelMaster(admin: any, io: string): Promise<{
   sezioni: Sezione[]
   argsDi: (id: string) => ArgsSezione | null
-  corrieriRete: string[]
   fuoriContoDi: (id: string) => RigaFuoriConto[]
+  corrieriDi: (id: string) => string[]
 }> {
   const [{ data: me }, { data: legami }, { data: miei }, { data: riep, error: eRiep }] = await Promise.all([
     admin.from('masters').select('nome,parent_master_id,credito,commissioni_moovexpress').eq('id', io).single(),
@@ -74,11 +74,17 @@ export async function sezioniDelMaster(admin: any, io: string): Promise<{
     saldo: Number((me as any)?.credito || 0), movimenti: null,
   }]
   const ledgerDi = new Map<string, string>()
+  const contrattiDi = new Map<string, string[]>([['rete', []]])
   for (const l of leg) {
-    // Il nome del contratto e' quello della riga del venditore; se il legame non la punta (Wave→MULTI
-    // ha corriere_id vuoto) si prende la mia copia agganciata al legame.
-    const contratto = nomeCorrV.get(l.corriere_id) || ((miei || []) as any[]).find(c => c.collegamento_id === l.id)?.nome_contratto || 'Contratto'
+    // I contratti di questo conto: la riga del venditore e le mie copie agganciate al legame. Possono essere
+    // piu' d'uno sullo stesso ledger (spedizioni 2000 compra da GTS sia GTS EXPRESS sia GLS CASERTA Consegna
+    // Diretta, un conto solo): come per il master sopra, una sezione sola che li nomina tutti, col filtro
+    // corriere dentro. Il legame Wave→MULTI ha corriere_id vuoto: li' contano solo le copie.
+    const nomi = Array.from(new Set([nomeCorrV.get(l.corriere_id), ...((miei || []) as any[]).filter(c => c.collegamento_id === l.id).map(c => c.nome_contratto)]
+      .map(n => String(n || '').trim()).filter(Boolean))).sort()
+    const contratto = nomi.join(', ') || 'Contratto'
     ledgerDi.set(`l:${l.id}`, l.cliente_ledger_id)
+    contrattiDi.set(`l:${l.id}`, nomi.length > 1 ? nomi : [])
     sezioni.push({
       id: `l:${l.id}`, tipo: 'fornitore', etichetta: 'Comprato da', titolo: nomeForn.get(l.fornitore_master_id) || 'Fornitore',
       sottotitolo: l.stato === 'attiva' ? contratto : `${contratto} · revocato`,
@@ -140,11 +146,15 @@ export async function sezioniDelMaster(admin: any, io: string): Promise<{
     if (id.startsWith('p:')) return { master: io, sezione: 'proprio', nome: id.slice(2) }
     return null
   }
-  // Il filtro corriere ha senso dove i contratti sono piu' d'uno: la sezione del master sopra. Le opzioni
-  // sono i contratti che stanno su quel conto; per il vertice anche i suoi.
-  const corrieriRete = Array.from(new Set(((miei || []) as any[])
-    .filter(c => !c.collegamento_id && (!dueConti || !c.proprio)).map(c => c.nome_contratto).filter(Boolean))).sort()
-  return { sezioni, argsDi, corrieriRete, fuoriContoDi: (id: string) => fuoriConto.get(id) || [] }
+  // Il filtro corriere della sezione del master sopra: i contratti che stanno su quel conto; per il vertice
+  // anche i suoi.
+  contrattiDi.set('rete', Array.from(new Set(((miei || []) as any[])
+    .filter(c => !c.collegamento_id && (!dueConti || !c.proprio)).map(c => c.nome_contratto).filter(Boolean))).sort())
+  return {
+    sezioni, argsDi, fuoriContoDi: (id: string) => fuoriConto.get(id) || [],
+    // Le opzioni del filtro corriere di una sezione: vuoto dove il contratto e' uno solo.
+    corrieriDi: (id: string) => contrattiDi.get(id) || [],
+  }
 }
 
 // Una pagina di una sezione. Oltre l'ultima pagina non torna nessuna riga, e con lei il totale: lo si

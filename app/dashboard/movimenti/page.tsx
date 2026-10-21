@@ -130,8 +130,8 @@ export default function MovimentiMasterPage() {
         const params = new URLSearchParams({ self: '1', page: String(pagina), perPage: String(perPage), somma: '1' })
         if (cercaDeb) params.set('cerca', cercaDeb)
         params.set('sezione', sezione || 'rete')
-        // Corriere e gruppo dividono i contratti del master sopra: nelle altre sezioni il contratto e' uno.
-        if (corriereFiltro && (sezione || 'rete') === 'rete') params.set('corriere', corriereFiltro)
+        // Il gruppo divide i portali di E&A (sezione principale). Il corriere lo valida il server sulla sezione.
+        if (corriereFiltro) params.set('corriere', corriereFiltro)
         if (gruppoFiltro && (sezione || 'rete') === 'rete') params.set('gruppo', gruppoFiltro)
         const res = await fetch('/api/movimenti/lista?' + params.toString())
         const data = await res.json()
@@ -277,7 +277,7 @@ export default function MovimentiMasterPage() {
             <div style={{fontSize:'26px',fontWeight:700,color:saldo<0?(sezione==='commissioni'?'#b45309':'#b91c1c'):'#15803d',marginTop:'4px'}}>{fmtEuro(saldo)}</div>
           </div>
           <div>
-            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Totale movimenti{sezione==='rete'&&gruppoFiltro?` · gruppo`:sezione==='rete'&&corriereFiltro?` · ${corriereFiltro}`:''}</div>
+            <div style={{fontSize:'11px',fontWeight:600,color:'#888',textTransform:'uppercase',letterSpacing:'.03em'}}>Totale movimenti{sezione==='rete'&&gruppoFiltro?` · gruppo`:corriereFiltro&&corrieri.includes(corriereFiltro)?` · ${corriereFiltro}`:''}</div>
             <div style={{fontSize:'26px',fontWeight:700,color:totaleFiltrato<0?'#b91c1c':'#15803d',marginTop:'4px'}}>{fmtImporto(totaleFiltrato)}</div>
           </div>
         </div>
@@ -291,7 +291,7 @@ export default function MovimentiMasterPage() {
               </select>
             </>
           )}
-          {sezione==='rete' && corrieri.length>0 && (
+          {corrieri.length>0 && (
             <>
               <span style={{fontSize:'12.5px',color:'#666'}}>Corriere</span>
               <select value={corriereFiltro} onChange={e=>{setCorriereFiltro(e.target.value);setPagina(1)}} style={{padding:'6px 8px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',maxWidth:'180px'}}>
