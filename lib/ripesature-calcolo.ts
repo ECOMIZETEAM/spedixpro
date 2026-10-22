@@ -65,6 +65,13 @@ export type EsitoRipesatura = {
   // listino, una destinazione fuori tariffa) i livelli sopra quel punto MANCANO — e chi carica
   // rischia di non trovarsi dentro e di scambiare "non sono nella catena" per "sono l'ultimo".
   catenaCompleta?: boolean
+  // IL COSTO DEL DETENTORE, a parte dai livelli. Chi ha il contratto proprio paga il fornitore da se':
+  // quando carica le rettifiche del fornitore deve essere il PRIMO a pagarle, e solo dopo girarle
+  // sotto (regola di Lorenzo, 22/10/2026). Nei file con l'importo del fornitore il suo costo e' quello;
+  // nei file senza importo (XL di Poste, file pesi) e' il prezzo del SUO listino di costo al peso nuovo
+  // meno quanto ha gia' pagato. Sta FUORI da `livelli` di proposito: i livelli li legge anche la modifica
+  // spedizione, che addebita ogni livello — con il costo dentro, una modifica addebiterebbe il detentore.
+  costoDetentore?: { masterId: string; pagato: number; dovuto: number; differenza: number } | null
   // I colli come li ha rimisurati il fornitore. Viaggiano con la rettifica perche' chi la ricevera'
   // dovra' riprezzarli col PROPRIO listino per girarli al livello sotto: la cifra in euro non
   // scende lungo la catena, e col solo peso il volume — che e' quello che fa il supplemento — si
@@ -167,9 +174,35 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // e l'owner sono sulle gambe create dal dispatch, non sull'originante. Leggo i movimenti di TUTTE le
     // gambe, se no i livelli codice/owner risultano "pagato 0" e la differenza esce come prezzo pieno
     // invece dell'incremento. Per una spedizione normale `legs` è una riga sola → identico a prima.
-    const { data: mov } = await admin.from('movimenti')
-      .select('importo,cliente_id,master_id,master_target_id,tipo')
-      .in('spedizione_id', (legs || []).map((x: any) => x.id)).in('tipo', ['spedizione', 'rettifica'])
+    // NON OGNI "RETTIFICA" E' NOLO. Col tipo 'rettifica' passano anche i costi del fornitore per resi e
+    // giacenze (RESOFORN-, GIACFORN-) coi loro storni (STORNOFORN-), e gli STORNI DEI RESI addebitati per
+    // sbaglio: il 15/10/2026 un reso addebitato due volte a Wave e LOGIXIA (pacco condiviso) e' stato
+    // restituito con +3,85 di tipo 'rettifica', e qui sembrava un rimborso del nolo — ricaricando il file
+    // LOGIXIA del 12/10 a Wave si sarebbero richiesti 3,85 € su 13 pacchi che non erano cambiati di peso
+    // (282224J031018: da 1 a 0,02 kg). Uno storno di reso si riconosce dai soldi, non dalla descrizione (che
+    // un lavoro pianificato riscrive): stesso pagante, stesso riferimento, importo esattamente opposto a un
+    // addebito 'reso' o 'giacenza'. Le correzioni di peso a mano (MAN-), gli allineamenti di margine e i
+    // riaddebiti dopo un annullo restano: quelli sono nolo.
+    const { data: movTutti } = await admin.from('movimenti')
+      .select('importo,cliente_id,master_id,master_target_id,tipo,riferimento')
+      .in('spedizione_id', (legs || []).map((x: any) => x.id)).in('tipo', ['spedizione', 'rettifica', 'reso', 'giacenza'])
+    const paganteDi = (m: any) => m.cliente_id ? 'c:' + m.cliente_id : 'm:' + (m.master_target_id || m.master_id)
+    const addebitiResi = new Map<string, number>()
+    for (const m of (movTutti || []) as any[]) {
+      if (m.tipo !== 'reso' && m.tipo !== 'giacenza') continue
+      const k = `${paganteDi(m)}|${m.riferimento || ''}|${Math.round(-Number(m.importo || 0) * 100)}`
+      addebitiResi.set(k, (addebitiResi.get(k) || 0) + 1)
+    }
+    const mov = ((movTutti || []) as any[]).filter((m: any) => {
+      if (m.tipo === 'spedizione') return true
+      if (m.tipo !== 'rettifica') return false
+      const rif = String(m.riferimento || '')
+      if (/^(RESOFORN|GIACFORN|STORNOFORN)-/.test(rif)) return false
+      const k = `${paganteDi(m)}|${rif}|${Math.round(Number(m.importo || 0) * 100)}`
+      const n = addebitiResi.get(k) || 0
+      if (n > 0) { addebitiResi.set(k, n - 1); return false }
+      return true
+    })
     const quantoPesa = (m: any) => m.tipo === 'spedizione'
       ? Math.abs(Number(m.importo || 0))
       : -Number(m.importo || 0)
@@ -207,6 +240,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       let catenaDalBasso: string[] = []
       let catenaCompleta = true
       let bloccato = false   // un livello CHE HA il listino ma non prezza la zona (Italia potrebbe sbloccarlo)
+      let costoDetentore: EsitoRipesatura['costoDetentore'] = null
 
       // ── IL CLIENTE ──
       if (s.cliente_id) {
@@ -287,13 +321,18 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           // Il detentore del contratto paga il costo reale del fornitore, non un listino: per lui la
           // differenza e' quella che ci ha addebitato il fornitore, che sta nel file.
           const dovuto = liv.isProprietario ? arrotonda(pagato + r.addebitoFornitore) : arrotonda(liv.prezzo)
+          // Il suo costo vero dal suo listino (prezzo 0 = non ha un listino di costo per questo contratto:
+          // si ripiega sul costo della spedizione, che qui e' 0, quindi il costo non si conosce).
+          if (liv.isProprietario && liv.prezzo > 0) {
+            costoDetentore = { masterId: liv.masterId, pagato, dovuto: arrotonda(liv.prezzo), differenza: arrotonda(liv.prezzo - pagato) }
+          }
           livelli.push({
             chi: liv.nome, clienteId: null, masterId: liv.masterId,
             pagato, dovuto, differenza: arrotonda(dovuto - pagato),
           })
         }
       }
-      return { livelli, zone, pesoVolumeDopo, motivo, catenaDalBasso, catenaCompleta, bloccato }
+      return { livelli, zone, pesoVolumeDopo, motivo, catenaDalBasso, catenaCompleta, bloccato, costoDetentore }
     }
 
     // ── CONDIVISIONE: livelli sulla catena-FORNITORE (non l'albero), senza toccare costruisciCatena
@@ -357,7 +396,11 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         livelli.push({ chi: String(nomeM.get(liv.master) || liv.master), clienteId: null, masterId: liv.master, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag),
           ruolo: liv.ruolo, fornitore: liv.fornitore, ledgerClienteId: liv.ledgerClienteId })
       }
-      return { livelli, zone: [] as (string | null)[], pesoVolumeDopo: null as number | null, motivo: undefined as string | undefined, catenaDalBasso: catena.map(l => l.master), catenaCompleta, bloccato: false }
+      // Il detentore e' l'ultimo della fila: il suo livello e' gia' prezzato sul suo contratto reale.
+      const top = livelli.find(l => l.masterId === catena[catena.length - 1]?.master)
+      const costoDetentore: EsitoRipesatura['costoDetentore'] = top && top.dovuto != null && top.masterId
+        ? { masterId: top.masterId, pagato: top.pagato, dovuto: top.dovuto, differenza: arrotonda(top.dovuto - top.pagato) } : null
+      return { livelli, zone: [] as (string | null)[], pesoVolumeDopo: null as number | null, motivo: undefined as string | undefined, catenaDalBasso: catena.map(l => l.master), catenaCompleta, bloccato: false, costoDetentore }
     }
 
     // PASSO 1: normale (ogni livello con la sua zona). PASSO 2 (solo se serve): stessa fascia 'Italia'
@@ -377,6 +420,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     if (res.motivo) base.motivo = res.motivo
     base.catenaDalBasso = res.catenaDalBasso
     base.catenaCompleta = res.catenaCompleta
+    base.costoDetentore = res.costoDetentore ?? null
 
     return base
   }

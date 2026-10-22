@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   for (let i = 0; i < ids.length; i += 500) {
     const { data, error } = await adminDb.from('rettifiche')
       .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma,supplementi_nomi')
-      .in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).eq('confermata', true)
+      .in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true)
     if (error) { console.error('[NETWORK] lettura rettifiche selezionate:', error.message); break }
     tutteMie.push(...(data || []))
   }
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
   const attesaSopra: any[] = []
   for (let i = 0; i < ids.length; i += 500) {
     const { data } = await adminDb.from('rettifiche')
-      .select('numero_spedizione').in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).eq('confermata', false)
+      .select('numero_spedizione').in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).neq('master_id', mio).eq('confermata', false)
     attesaSopra.push(...(data || []))
   }
   const attesaLdv = attesaSopra.map((r: any) => r.numero_spedizione)

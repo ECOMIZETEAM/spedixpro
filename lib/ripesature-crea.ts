@@ -11,6 +11,50 @@ import type { EsitoRipesatura } from '@/lib/ripesature-calcolo'
 //    rettifica per spedizione, confermata o in attesa.
 export type EsitoCrea = { creata: boolean; rettificaId?: string; recupero?: number; motivo?: string }
 
+// UNA RETTIFICA ANNULLATA NON OCCUPA IL POSTO. rif_fornitore e' unico sul database (39.361 valori il
+// 22/10, mai ripetuto, nemmeno fra master diversi): una riga annullata — addebito stornato perche' il
+// file era falso, come i 3.706 di LOGIXIA del 12-16/10 — lo terrebbe occupato per sempre, e il file
+// giusto della stessa spedizione verrebbe respinto come "gia' caricata". Se l'inserimento sbatte contro
+// una riga annullata, quella cede il riferimento (resta nello storico, col suo id in coda) e si riprova
+// una volta. Contro una riga viva il 23505 resta: e' il doppione vero.
+export async function inserisciRettifica(admin: any, riga: any, select?: string): Promise<{ data: any; error: any }> {
+  const prova = () => select ? admin.from('rettifiche').insert(riga).select(select).single() : admin.from('rettifiche').insert(riga)
+  let res = await prova()
+  if (res.error?.code === '23505' && riga.rif_fornitore) {
+    const { data: annullate } = await admin.from('rettifiche').select('id')
+      .eq('rif_fornitore', riga.rif_fornitore).eq('propagazione', 'annullata')
+    if (annullate && annullate.length) {
+      for (const a of annullate) {
+        await admin.from('rettifiche').update({ rif_fornitore: `${riga.rif_fornitore}#annullata-${String(a.id).slice(0, 8)}` })
+          .eq('id', a.id).eq('propagazione', 'annullata')
+      }
+      res = await prova()
+    }
+  }
+  return { data: res.data ?? null, error: res.error ?? null }
+}
+
+// LA FATTURA DEL FORNITORE E' GIA' PAGATA? Per ogni riga del file la chiave e' RIPFORN-<riga>: fino al
+// 22/10/2026 si registrava al caricamento, ora alla conferma. Un export cumulativo (E&A lo e') porta di
+// nuovo righe gia' pagate da un caricamento precedente: quelle non vanno ripresentate come costo da
+// confermare. Pagata = esiste una chiave (RIPFORN-x, -2, -3) senza il suo STORNO-; stornata del tutto =
+// da pagare di nuovo (come chiaveLibera nella conferma). Torna l'insieme dei riferimenti gia' pagati.
+export async function fattureGiaPagate(admin: any, rif: string[]): Promise<Set<string>> {
+  const pagate = new Set<string>()
+  const unici = Array.from(new Set(rif.filter(Boolean)))
+  for (let i = 0; i < unici.length; i += 40) {
+    const fetta = unici.slice(i, i + 40)
+    const chiavi: string[] = []
+    for (const r of fetta) for (const suf of ['', '-2', '-3']) { chiavi.push(`RIPFORN-${r}${suf}`, `STORNO-RIPFORN-${r}${suf}`) }
+    const { data } = await admin.from('movimenti').select('riferimento').in('riferimento', chiavi)
+    const ci = new Set(((data || []) as any[]).map(m => m.riferimento))
+    for (const r of fetta) {
+      if (['', '-2', '-3'].some(suf => ci.has(`RIPFORN-${r}${suf}`) && !ci.has(`STORNO-RIPFORN-${r}${suf}`))) pagate.add(r)
+    }
+  }
+  return pagate
+}
+
 export async function creaRettificaDaEsito(
   admin: any, masterId: string, esito: EsitoRipesatura
 ): Promise<EsitoCrea> {
@@ -30,12 +74,16 @@ export async function creaRettificaDaEsito(
   if (liv.differenza < 0.01) return { creata: false, motivo: 'nessun recupero' }
 
   // Anti-doppio per SPEDIZIONE: gia' rettificata (confermata o in attesa) da qualunque strada.
-  const { data: gia } = await admin.from('rettifiche')
-    .select('id').eq('spedizione_id', esito.spedizioneId)
-    .or('confermata.eq.true,stato.eq.da_rettificare').limit(1)
-  if (gia && gia.length) return { creata: false, motivo: 'gia rettificata' }
+  // Non contano le ANNULLATE (addebito stornato: la spedizione torna da rettificare) ne' il costo che
+  // un detentore ha registrato su se' stesso senza addebitare nessuno sotto (master_id = target):
+  // prima quella riga non esisteva, e il flusso di qui non deve cambiare per colpa sua.
+  const { data: giaTutte } = await admin.from('rettifiche')
+    .select('id,master_id,target_master_id,propagazione').eq('spedizione_id', esito.spedizioneId)
+    .or('confermata.eq.true,stato.eq.da_rettificare')
+  const gia = (giaTutte || []).filter((g: any) => g.propagazione !== 'annullata' && !(g.target_master_id && g.target_master_id === g.master_id))
+  if (gia.length) return { creata: false, motivo: 'gia rettificata' }
 
-  const { data: ins, error } = await admin.from('rettifiche').insert({
+  const { data: ins, error } = await inserisciRettifica(admin, {
     master_id: masterId, file_id: null,
     spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
     cliente_id: figlio ? null : liv.clienteId,
@@ -47,7 +95,7 @@ export async function creaRettificaDaEsito(
     stato: 'da_rettificare',
     rif_fornitore: esito.idOrdine,        // = la LDV (anti-doppione secondario, indice unico DB)
     colli_ripesati: esito.colli_ripesati || null,
-  }).select('id').single()
+  }, 'id')
 
   // 23505 = l'indice unico rif_fornitore ha respinto: gia' fatta, non e' un errore.
   if (error) return { creata: false, motivo: error.code === '23505' ? 'gia rettificata' : ('errore: ' + error.message) }

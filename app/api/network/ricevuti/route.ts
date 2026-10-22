@@ -28,7 +28,7 @@ export async function GET(_req: NextRequest) {
   // "da decidere". Best-effort, idempotente, non muove denaro (solo il flag propagazione).
   try {
     const { data: candid } = await adminDb.from('rettifiche')
-      .select('id').eq('target_master_id', mio).eq('confermata', true).is('propagazione', null)
+      .select('id').eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).is('propagazione', null)
     const ids = (candid || []).map((r: any) => r.id)
     if (ids.length) {
       const { data: figlie } = await adminDb.from('rettifiche').select('origine_rettifica_id').in('origine_rettifica_id', ids)
@@ -54,12 +54,15 @@ export async function GET(_req: NextRequest) {
     // che non vede non puo' accettarle, quindi non puo' nemmeno girarle ai suoi clienti: il
     // recupero si ferma li'. Le righe DA DECIDERE si prendono TUTTE, pagina per pagina; le
     // storiche (gia' decise) restano col loro tetto, che li' serve solo a mostrare lo scorso.
+    // IL COSTO DI CHI CARICA NON E' UNA RETTIFICA RICEVUTA. Il detentore di un contratto proprio paga
+    // per primo: quando sotto di lui non c'e' niente da recuperare, il suo costo resta in una riga
+    // intestata a se' stesso (master_id = target_master_id). Non viene da sopra, non si gira a nessuno.
     (async () => {
       const daDecidere: any[] = []
       for (let da = 0; ; da += 1000) {
         const { data, error } = await adminDb.from('rettifiche')
           .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
-          .eq('target_master_id', mio).eq('confermata', true).is('propagazione', null)
+          .eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).is('propagazione', null)
           .order('created_at', { ascending: false }).range(da, da + 999)
         if (error) { console.error('[NETWORK] rettifiche da decidere:', error.message); break }
         daDecidere.push(...(data || []))
@@ -67,7 +70,7 @@ export async function GET(_req: NextRequest) {
       }
       const { data: storiche } = await adminDb.from('rettifiche')
         .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
-        .eq('target_master_id', mio).eq('confermata', true).not('propagazione', 'is', null)
+        .eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).not('propagazione', 'is', null)
         .order('created_at', { ascending: false }).limit(500)
       return { data: [...daDecidere, ...(storiche || [])], error: null }
     })(),

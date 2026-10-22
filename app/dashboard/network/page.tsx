@@ -84,11 +84,33 @@ export default function NetworkRicevutiPage() {
     carica(); setPropagando('')
   }
 
-  // ACCETTARE NON E' CARICARE.
-  // Accettare vuol dire "va bene, me la prendo in carico": le righe finiscono nella MIA pagina
+  // SCARICA: le righe del blocco in Excel, cosi' chi le riceve puo' controllarle (o girarle a chi
+  // misura) prima di decidere. Sono gia' addebitate: scaricarle non cambia niente.
+  async function scaricaBlocco(b: any) {
+    const { utils, writeFile } = await import('xlsx')
+    const righe = b.righe.map((r: any) => {
+      const vol = Number(r.peso_volume_reale) || 0, reale = Number(r.peso_reale) || 0
+      return {
+        'LDV': r.numero_spedizione,
+        'Peso dichiarato (kg)': Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0),
+        'Peso rilevato (kg)': Math.max(reale, vol),
+        'Volumetrico': vol > reale ? 'si' : '',
+        'Costo prima (€)': Number(r.costo_iniziale) || 0,
+        'Costo dopo (€)': Number(r.costo_finale) || 0,
+        'Addebito (€)': Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100,
+        'di cui supplementi (€)': Number(r.fuori_sagoma) || 0,
+        'Stato': r.propagazione === 'propagata' ? 'Caricata' : r.propagazione === 'assorbita' ? 'Assorbita' : r.propagazione === 'annullata' ? 'Annullata' : 'Da decidere',
+      }
+    })
+    const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Rettifiche')
+    writeFile(wb, `rettifiche-da-${String(b.da || 'network').replace(/[^\w-]+/g, '_')}-${String(b.giorno || '').replace(/\//g, '-')}.xlsx`)
+  }
+
+  // CARICARE (prima si chiamava "Accetta") NON E' ADDEBITARE.
+  // Caricare vuol dire "va bene, me la prendo in carico": le righe finiscono nella MIA pagina
   // Rettifica Costi, riprezzate col MIO listino e gia' divise per cliente e sotto-master. Li'
   // guardo, scelgo a CHI caricarle, e solo premendo Conferma il credito scende di un gradino.
-  // Sono due gesti distinti, come per i contrassegni: chi accetta non sta ancora addebitando
+  // Sono due gesti distinti, come per i contrassegni: chi carica non sta ancora addebitando
   // nessuno, e finche' non carica non e' uscito un euro dalla sua rete.
   async function decidiBlocco(b: any, decisione: 'propagata' | 'assorbita') {
     if (!b.daDecidere.length) return
@@ -132,7 +154,7 @@ export default function NetworkRicevutiPage() {
         setAvanz(a => a ? { ...a, fatti: Math.min(i + BATCH, ids.length) } : a)
       }
       const parti: string[] = []
-      if (create > 0) parti.push(`✓ Accettate ${create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
+      if (create > 0) parti.push(`✓ Caricate ${create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
       // A zero: il livello sotto non deve niente, ma chi sta sotto di lui si'. Si dice perche' esistono.
       if (aZero > 0) parti.push(`✓ Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma più sotto qualcuno deve ancora pagare la differenza — caricale insieme alle altre, servono a farla arrivare fin lì.`)
       // Scartate = il cliente pagherebbe uguale (stesso scaglione): niente da recuperare. NON è un
@@ -145,7 +167,7 @@ export default function NetworkRicevutiPage() {
         const CAP = 100
         const elenco = dettaglio.slice(0, CAP).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
         const extra = dettaglio.length > CAP ? `\n• … e altre ${dettaglio.length - CAP}` : ''
-        parti.push(`⚠️ ${nonProp} non girate — il motivo di ognuna (dove dice "aggiungi la fascia", alzala sul listino del cliente e ripremi Accetta):\n• ${elenco}${extra}`)
+        parti.push(`⚠️ ${nonProp} non girate — il motivo di ognuna (dove dice "aggiungi la fascia", alzala sul listino del cliente e ripremi Carica):\n• ${elenco}${extra}`)
       }
       if (inAttesa) parti.push(`⏳ ${inAttesa} in attesa che il livello sopra le confermi: NON sono perse — riprova quando saranno confermate.`)
       if (!create && !nonProp && !inAttesa && !scart) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
@@ -231,7 +253,7 @@ export default function NetworkRicevutiPage() {
                         🔧 {daAlzare.clienti.length} {daAlzare.clienti.length===1?'cliente':'clienti'} col listino da alzare · <span style={{color:'#dc2626'}}>€ {Math.abs(daAlzare.totaleImporto).toFixed(2)}</span> bloccati
                       </div>
                       <div style={{fontSize:'12px',color:'#8a5a2b',marginTop:'3px',maxWidth:'680px'}}>
-                        Questi tuoi clienti hanno spedito colli più pesanti dell'ultima fascia del loro listino: il recupero non passa finché non alzi la fascia. Alza il listino del cliente, poi ripremi <strong>Accetta</strong>.
+                        Questi tuoi clienti hanno spedito colli più pesanti dell'ultima fascia del loro listino: il recupero non passa finché non alzi la fascia. Alza il listino del cliente, poi ripremi <strong>Carica</strong>.
                       </div>
                     </div>
                     <button onClick={()=>setApriAlzare(v=>!v)}
@@ -305,13 +327,13 @@ export default function NetworkRicevutiPage() {
                     <div>
                       <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
                         Da {b.da} · {b.daDecidere.length > 0
-                          ? <><span style={{color:ACCENT}}>{b.daDecidere.length} da accettare</span> · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totaleDaDecidere).toFixed(2)}</span></>
+                          ? <><span style={{color:ACCENT}}>{b.daDecidere.length} da caricare</span> · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totaleDaDecidere).toFixed(2)}</span></>
                           : <>{b.righe.length} rettifiche · <span style={{color:'#999'}}>già decise</span></>}
                       </div>
                       <div style={{fontSize:'12px',color:'#8a8a8a',marginTop:'3px'}}>
                         Ricevute il {b.giorno} · già scalate dal tuo credito.
                         {b.daDecidere.length
-                          ? (b.righe.length > b.daDecidere.length ? ` Le altre ${b.righe.length - b.daDecidere.length} le hai già decise.` : '') + ' Accettandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi caricarle.'
+                          ? (b.righe.length > b.daDecidere.length ? ` Le altre ${b.righe.length - b.daDecidere.length} le hai già decise.` : '') + ' Caricandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi addebitarle.'
                           : ' Già decise.'}
                       </div>
                     </div>
@@ -323,19 +345,23 @@ export default function NetworkRicevutiPage() {
                       {b.daDecidere.length>0 && <>
                         <button onClick={()=>decidiBlocco(b,'propagata')} disabled={propagando===b.k}
                           style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:propagando===b.k?.6:1}}>
-                          {propagando===b.k?(avanz&&avanz.k===b.k?`${avanz.fatti}/${avanz.totale}…`:'…'):'Accetta ('+b.daDecidere.length+')'}
+                          {propagando===b.k?(avanz&&avanz.k===b.k?`${avanz.fatti}/${avanz.totale}…`:'…'):'Carica ('+b.daDecidere.length+')'}
                         </button>
                         <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={propagando===b.k}
                           style={{background:'#f0fdf4',color:'#166534',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
-                          ✓ Le assorbo io
+                          ✓ Assorbi
                         </button>
                       </>}
+                      <button onClick={()=>scaricaBlocco(b)}
+                        style={{background:'#fff',color:'#1a1a1a',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
+                        ⬇ Scarica
+                      </button>
                     </div>
                   </div>
                   {propagando===b.k && avanz && avanz.k===b.k && (
                     <div style={{padding:'0 16px 14px'}}>
                       <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da}
-                        etichetta="Accetto le rettifiche"
+                        etichetta="Carico le rettifiche"
                         sottotitolo="Ogni spedizione viene riprezzata sul listino del livello sotto." />
                     </div>
                   )}
@@ -375,7 +401,7 @@ export default function NetworkRicevutiPage() {
                             })()}
                             <td style={td}>
                               {r.propagazione === 'propagata' ? (
-                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Accettata — è in Rettifica Costi</span>
+                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Caricata — è in Rettifica Costi</span>
                               ) : r.propagazione === 'assorbita' ? (
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
                               ) : r.propagazione === 'annullata' ? (

@@ -138,6 +138,9 @@ export async function GET(req: NextRequest) {
   // costo_fornitore NULL/0 (file-pesi senza costo, es. Velox, o righe caricate prima della colonna) =
   // sempre buona: non c'e' un costo fornitore da coprire, e' solo un riprezzo.
   const classeDi = (r: any) => {
+    // SOLO A TUO CARICO: il costo di chi ha caricato, senza nessuno sotto a cui girarlo. Non e' un
+    // sotto-recupero da sistemare col listino: sotto non c'e' niente da chiedere.
+    if (r.target_master_id && r.target_master_id === r.master_id) return { classe: 'solo_mio', motivo: null, manca: 0 }
     const daGirare = (-Number(r.differenza || 0)) + Number(r.fuori_sagoma || 0)
     const costoForn = Number(r.costo_fornitore || 0)
     if (costoForn <= 0.01 || daGirare >= costoForn - 0.01) return { classe: 'buona', motivo: null, manca: 0 }
@@ -159,13 +162,31 @@ export async function GET(req: NextRequest) {
   // all'agente arrivava sia grezzo sia dentro il motivo ("il corriere ha addebitato X€ ... mancano Y€").
   // Per lui la riga si legge come se il costo fornitore non ci fosse: niente cifra, niente motivo.
   const agente = isAgente(utente)
+  // IL TUO COSTO E' GIA' PAGATO? Le righe caricate prima del 22/10/2026 (e quelle di un export cumulativo
+  // gia' pagato a un caricamento precedente) hanno la fattura del fornitore gia' registrata: alla conferma
+  // non si ripaga, e la pagina non deve presentarla come un costo ancora da pagare.
+  const giaPagate = new Set<string>()
+  if (!agente) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { fattureGiaPagate } = await import('@/lib/ripesature-crea')
+    const daGuardare = righeGrezze.filter((r: any) => Number(r.costo_fornitore) > 0.005 && r.rif_fornitore).map((r: any) => r.rif_fornitore)
+    const admin = createAdminSupabase()
+    const fette: string[][] = []
+    for (let i = 0; i < daGuardare.length; i += 400) fette.push(daGuardare.slice(i, i + 400))
+    for (let i = 0; i < fette.length; i += 4) {
+      const esiti = await Promise.all(fette.slice(i, i + 4).map(f => fattureGiaPagate(admin, f)))
+      for (const e of esiti) for (const x of e) giaPagate.add(x)
+    }
+  }
   const righe = righeGrezze.map((r0: any) => {
     const r = agente ? { ...r0, costo_fornitore: null } : r0
     const b = baseDi(r)
     return {
       ...r,
-      destinatario_nome: nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null,
-      destinatario_tipo: r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null),
+      costo_gia_pagato: !!(r.rif_fornitore && giaPagate.has(r.rif_fornitore)),
+      destinatario_nome: (r.target_master_id && r.target_master_id === r.master_id) ? 'Solo a tuo carico (niente da rettificare sotto)'
+        : (nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null),
+      destinatario_tipo: (r.target_master_id && r.target_master_id === r.master_id) ? 'proprio' : (r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null)),
       blocco: bloccoDi(r),
       base_prima: b.prima,     // 'reale' | 'volume': su cosa si pagava DAVVERO
       base_dopo: b.dopo,       // e su cosa si paga ora
@@ -224,6 +245,8 @@ export async function POST(req: NextRequest) {
   // `rettifiche` (la tabella e' esposta) sceglie destinatario e cifra. Quindi qui si verifica che il
   // master destinatario stia DAVVERO sotto di me — e siccome la mappa non contiene me stesso, una
   // riga intestata a se' stessi non passa — e che il cliente sia DAVVERO un mio cliente.
+  // (Le righe "solo a tuo carico" del 22/10, intestate a se' stessi, escono prima di qui: muovono
+  // soltanto il costo di chi conferma, sul suo stesso conto, e a nessun altro arriva niente.)
   const { mappaPrimaLinea } = await import('@/lib/prima-linea')
   const discendenti = await mappaPrimaLinea(adminDb, utente!.master_id)
   const idClienti = [...new Set(rettifiche.map((r: any) => r.cliente_id).filter(Boolean))]
@@ -361,6 +384,21 @@ export async function POST(req: NextRequest) {
 
   const { registraMovimentoMaster } = await import('@/lib/movimenti')
   let mosse = 0
+  let costiMiei = 0   // costo di chi conferma (detentore / chi ha caricato il file del fornitore)
+  // LA CHIAVE ANTI-DOPPIONE, TENENDO CONTO DEGLI STORNI. Se la chiave non c'e' si usa; se c'e' ed e'
+  // stata STORNATA (movimento STORNO-<chiave>, es. il file LOGIXIA 12-16/10 annullato il 22/10) si passa
+  // alla successiva (-2, -3…), perche' quell'addebito non esiste piu'; se c'e' e NON e' stornata torna
+  // null: gia' pagato, non si ripaga.
+  const chiaveLibera = async (base: string): Promise<string | null> => {
+    for (let n = 1; n <= 9; n++) {
+      const k = n === 1 ? base : `${base}-${n}`
+      const { data: c } = await adminDb.from('movimenti').select('id').eq('riferimento', k).limit(1).maybeSingle()
+      if (!c) return k
+      const { data: st } = await adminDb.from('movimenti').select('id').eq('riferimento', 'STORNO-' + k).limit(1).maybeSingle()
+      if (!st) return null
+    }
+    return null
+  }
   const spedizioniDaAggiornare: any[] = []
 
   for (const r of rettifiche as any[]) {
@@ -378,6 +416,36 @@ export async function POST(req: NextRequest) {
       .eq('id', r.id).eq('master_id', utente!.master_id).eq('confermata', false)
       .select('id')
     if (!presa?.length) { saltate.push({ id: r.id, perche: 'gia\' confermata da un altro invio' }); continue }
+
+    // ── PRIMA PAGA CHI CONFERMA (regola di Lorenzo, 22/10/2026) ──
+    // Chi ha caricato il file del suo fornitore ha gia' pagato il fornitore: il suo costo (costo_fornitore
+    // della riga, vedi il caricamento) gli si registra QUI, prima di addebitare il livello sotto. Stesso
+    // riferimento che il caricamento usava per la fattura del fornitore (RIPFORN-<riga del file>): un file
+    // caricato prima di questa regola l'ha gia' pagato al caricamento, e qui non si ripaga.
+    const costoMio = Math.round(Number(r.costo_fornitore || 0) * 100) / 100
+    const soloMio = !!r.target_master_id && r.target_master_id === utente!.master_id
+    if (costoMio > 0.005 && r.rif_fornitore && r.spedizione_id) {
+      if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
+      const rifCosto = await chiaveLibera(`RIPFORN-${r.rif_fornitore}`)
+      if (rifCosto) {
+        try {
+          await registraMovimentoMaster(adminDb, {
+            masterOwnerId: utente!.master_id, masterTargetId: utente!.master_id, tipo: 'rettifica',
+            descrizione: `Ripesatura ${r.numero_spedizione} - costo del fornitore`,
+            importo: -costoMio, riferimento: rifCosto, spedizioneId: r.spedizione_id, createdBy: user.id,
+          })
+          costiMiei += costoMio
+        } catch (e: any) {
+          // gia' registrato da un invio parallelo: il costo c'e', si prosegue col livello sotto
+          if (!/23505|duplicate key|unique/i.test(String(e?.message || ''))) {
+            console.error('[RETTIFICHE] costo di chi conferma non registrato', r.numero_spedizione, e?.message)
+            await riapriRiga(r, 'il tuo costo non e\' stato registrato'); continue
+          }
+        }
+      }
+    }
+    // SOLO A TUO CARICO: niente da addebitare a nessuno sotto, la riga e' chiusa col suo costo.
+    if (soloMio) { mosse++; continue }
 
     // SEGNO: differenza = costo_iniziale - costo_finale, quindi negativa = addebito e positiva =
     // accredito. Il ramo dei master lo rispettava, quello dei clienti prendeva il valore assoluto e
@@ -407,11 +475,9 @@ export async function POST(req: NextRequest) {
     // PESI di Velox (reale 5,65) -> due addebiti. La riga resta CHIUSA (gia' presa atomicamente), come
     // per il caso diff>=0: NON si riapre, altrimenti tornerebbe in elenco per sempre. La garanzia vera
     // e' l'indice unico su movimenti(riferimento) per 'RIP-%'; questo pre-controllo evita solo il throw.
-    const rifRett = r.spedizione_id ? `RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}` : null
-    if (rifRett) {
-      const { data: giaRett } = await adminDb.from('movimenti').select('id').eq('riferimento', rifRett).limit(1).maybeSingle()
-      if (giaRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); continue }
-    }
+    // Con gli STORNI: se l'addebito di prima e' stato stornato, la chiave successiva (vedi chiaveLibera).
+    const rifRett = r.spedizione_id ? await chiaveLibera(`RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}`) : null
+    if (r.spedizione_id && !rifRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); continue }
 
     try {
       if (r.target_master_id) {
@@ -485,7 +551,7 @@ export async function POST(req: NextRequest) {
     }).eq('id', r.spedizione_id)
   }
 
-  return NextResponse.json({ success: true, rettificate: mosse, nonEseguite: saltate.length, dettaglio: saltate })
+  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, nonEseguite: saltate.length, dettaglio: saltate })
 }
 
 export async function DELETE(req: NextRequest) {
