@@ -56,10 +56,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     return NextResponse.json({ error: 'Etichetta non disponibile' }, { status: 404 })
   }
+  const nomeFile = `ldv_${s.numero || s.id}.${et.ext}`
+
+  // L'ETICHETTA ANCHE COME TESTO (base64 dentro un JSON), SOLO SE CHIESTA ESPLICITAMENTE: ?format=base64.
+  // Il portale di CONTORNO SRL rovina ogni PDF che riceve da noi, Poste e SDA: il 22/10/2026 3UW1WLJ085420
+  // e' uscita di qui intera (130.313 byte, verificata) ed e' arrivata al loro utente come file che Acrobat
+  // non apre. Il resto della nostra API (JSON) lo leggono bene: e' il file binario che il loro programma
+  // tratta come testo. Il base64 e' testo puro, quindi passa intatto.
+  // Solo col parametro e non con "Accept: application/json": molti programmi mandano quell'intestazione
+  // di default, e chi oggi riceve il PDF si ritroverebbe un JSON senza averlo chiesto. Senza parametro la
+  // risposta resta il PDF byte per byte: la catena della condivisione lo SALVA cosi' com'e'.
+  if ((req.nextUrl.searchParams.get('format') || '').toLowerCase() === 'base64') {
+    return NextResponse.json({
+      id: s.id,
+      tracking: s.numero,
+      filename: nomeFile,
+      content_type: et.mime,
+      label_base64: et.buffer.toString('base64'),
+    })
+  }
   return new NextResponse(et.buffer as any, {
     headers: {
       'Content-Type': et.mime,
-      'Content-Disposition': `attachment; filename="ldv_${s.numero || s.id}.${et.ext}"`,
+      'Content-Disposition': `attachment; filename="${nomeFile}"`,
     },
   })
 }
