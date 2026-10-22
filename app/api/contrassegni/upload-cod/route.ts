@@ -72,13 +72,19 @@ export async function POST(req: NextRequest) {
     const riga: any = {}
     for (const kk in rigaRaw) { riga[String(kk).trim().toLowerCase()] = (rigaRaw as any)[kk] }
     // 'shipment' = export contrassegni SpediamoPro (codice spedizione del provider, es. 6A54B0F9AB03D)
-    const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || '').trim()
+    // 'nr. ldv' = Distinta Contrassegni di SDA (la carica LOGIXIA per SDA EXPRESS L, vedi lib/cod-file-righe.ts)
+    const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || riga['nr. ldv'] || '').trim()
     // Importo VERSATO dal corriere. Nei file Ecomize/Em express c'e' 'pagato' (quanto il corriere ha
     // davvero versato) accanto a 'contrassegno' (il nominale): a scendere al cliente e' il PAGATO.
     // Restano gli alias storici + 'COD amount [EUR]' (SpediamoPro). Virgola decimale gestita.
+    // Distinta SDA: 'Incasso COR (€)' e' quanto SDA ha incassato e rimborsato ('Importo CTR' e' il nominale).
     let importoRaw = riga['pagato'] ?? riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno']
     if (importoRaw == null) { const k = Object.keys(riga).find(x => x.startsWith('cod amount')); if (k) importoRaw = riga[k] }
-    const importoCod = parseFloat(String(importoRaw ?? 0).replace(',', '.')) || 0
+    const colIncassoSda = Object.keys(riga).find(x => x.startsWith('incasso cor'))
+    if (importoRaw == null && colIncassoSda) importoRaw = riga[colIncassoSda]
+    // Al centesimo: dal foglio Excel l'importo arriva come numero e porta i resti della virgola mobile
+    // (84,90 letto 84.90000000000001), che finirebbero cosi' nell'area di sosta e nei totali.
+    const importoCod = Math.round((parseFloat(String(importoRaw ?? 0).replace(',', '.')) || 0) * 100) / 100
     if (!ldv) { segnaErrore('', 'riga senza LDV'); continue }
     // Colonna Status (SpediamoPro): in distinta vanno SOLO i contrassegni gia' PAGATI dal corriere.
     const statusRiga = String(riga['status'] ?? '').trim().toLowerCase()
@@ -86,6 +92,10 @@ export async function POST(req: NextRequest) {
     // Formato Ecomize/Em express: se c'e' la colonna 'pagato' ed e' 0 (o vuota) il corriere non ha
     // ancora versato quel contrassegno → si salta, esattamente come lo status non-pagato di sopra.
     if (('pagato' in riga) && !(importoCod > 0)) { saltateNonPagate++; continue }
+    // Distinta SDA: stessa regola. Senza incasso, o senza la data in 'Rimborso SDA il', SDA quel
+    // contrassegno non l'ha ancora rimborsato → si salta.
+    if (colIncassoSda && !(importoCod > 0)) { saltateNonPagate++; continue }
+    if (('rimborso sda il' in riga) && !String(riga['rimborso sda il'] ?? '').trim()) { saltateNonPagate++; continue }
     codFile += importoCod
 
     // Match ESATTO per primo (usa l'indice su numero → veloce): copre la stragrande maggioranza.
