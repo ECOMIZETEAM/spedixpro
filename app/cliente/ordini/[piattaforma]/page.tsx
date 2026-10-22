@@ -1040,8 +1040,17 @@ export default function OrdiniPage() {
                             {(o.unito_in || piattaforma==='shopify') ? badgeEvasione(o) : null}
                           </span>
                         : <span style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-end',gap:'3px'}}>
-                            <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>
+                            {/* SPEDITO DA NOI: il tracking al posto di «Crea spedizione», e la possibilita' di
+                                rifarla solo dopo una conferma (Lorenzo, 22/10/2026). Prima c'era solo «✓ Spedito»,
+                                e chi cercava il numero doveva andarlo a pescare in Spedizioni. */}
+                            {o.spedizione?.numero
+                              ? (o.spedizione.token
+                                  ? <a href={'/traccia/'+o.spedizione.token} target="_blank" rel="noopener noreferrer" title="Apri il tracking della spedizione" style={{color:'#166534',fontSize:'12.5px',fontWeight:700,textDecoration:'none',fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace'}}>✓ {o.spedizione.numero} ↗</a>
+                                  : <span style={{color:'#166534',fontSize:'12.5px',fontWeight:700,fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace'}}>✓ {o.spedizione.numero}</span>)
+                              : <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>}
+                            {o.spedizione?.stato==='annullamento_pending' && <span style={{fontSize:'10.5px',fontWeight:600,color:'#6b7280'}}>annullo in corso</span>}
                             {badgeEvasione(o)}
+                            <button onClick={async()=>{ if (await dialog.confirm({ title:'Spedirlo di nuovo?', message:'Quest\'ordine è già stato spedito'+(o.spedizione?.numero?' con '+o.spedizione.numero:'')+'. Crei una seconda spedizione, con un nuovo addebito: fallo solo se il primo pacco non è partito o va rifatto.', confirmText:'Crea un\'altra spedizione' })) creaSpedizione(o) }} style={{background:'none',border:'none',padding:0,color:'#9ca3af',fontSize:'11px',textDecoration:'underline',cursor:'pointer'}}>Ricrea spedizione</button>
                           </span>}
                     </td>
                   </tr>

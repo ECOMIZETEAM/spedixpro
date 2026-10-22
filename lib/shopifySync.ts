@@ -65,6 +65,12 @@ export async function sincronizzaOrdiniShopify(db: any, integr: any, range?: { d
   // Senza sapere quali righe sono nuove si tornerebbe a sovrascrivere tutto: meglio una sync fallita,
   // che si riprova al giro dopo.
   const esistenti = await righeShopifyEsistenti(db, integr.id, ordini.map((o: any) => String(o.legacyResourceId)))
+  // Gli ordini di un negozio ricollegato allo stesso cliente riprendono le loro righe (vedi la funzione).
+  // Best-effort: se non riesce, l'ordine nasce su una riga nuova come prima, e si riprova al giro dopo.
+  try {
+    const riprese = await riprendiRigheOrfane(db, integr, ordini.map((o: any) => String(o.legacyResourceId)).filter((id: string) => !esistenti.has(id)))
+    for (const r of riprese) esistenti.set(String(r.ordine_esterno_id), r)
+  } catch (e: any) { console.error('[SHOPIFY SYNC] ripresa righe orfane (best-effort):', integr.id, String(e?.message || e).slice(0, 200)) }
 
   let importati = 0
   for (const o of ordini) {
@@ -208,6 +214,56 @@ async function righeShopifyEsistenti(db: any, integrazioneId: string, idsEsterni
     for (const r of data || []) m.set(String(r.ordine_esterno_id), r as RigaShopify)
   }
   return m
+}
+
+// UN NEGOZIO RICOLLEGATO ALLO STESSO CLIENTE RIPRENDE LE SUE RIGHE, CON LA SPEDIZIONE ATTACCATA.
+// «Scollega» cancella la riga dell'integrazione e lascia gli ordini, col dominio del negozio (shop) ma col
+// vecchio integrazione_id. Riaprendo l'app da Shopify nasce un'integrazione nuova, e la sync salva per
+// (integrazione_id, ordine_esterno_id): ogni ordine rinasceva su una riga nuova, senza la spedizione con cui
+// l'avevamo evaso. La pagina offriva di nuovo «Crea spedizione» su un ordine gia' spedito da noi (Lorenzo,
+// 22/10/2026, ordine #1028 del negozio di prova evaso con 282343J010995), e sul negozio di prova lo stesso
+// ordine era arrivato a 5 righe (#1019). Qui, prima di salvare, un ordine senza riga nell'integrazione nuova
+// riprende quella rimasta orfana: stesso negozio, stesso cliente, integrazione che non esiste piu'. Fra piu'
+// orfane si prende quella con la spedizione, poi la piu' recente. MAI fra clienti diversi: se il negozio
+// passa a un altro conto, gli ordini del conto di prima restano suoi.
+async function riprendiRigheOrfane(db: any, integr: any, idsEsterni: string[]): Promise<RigaShopify[]> {
+  if (!idsEsterni.length || !integr?.identificativo || !integr?.cliente_id) return []
+  const candidate: any[] = []
+  for (let i = 0; i < idsEsterni.length; i += 200) {
+    const { data, error } = await db.from('ordini_ecommerce')
+      .select('id,ordine_esterno_id,integrazione_id,stato,spedizione_id,unito_in,fulfillment_stato,created_at')
+      .eq('piattaforma', 'shopify').eq('shop', integr.identificativo).eq('cliente_id', integr.cliente_id)
+      .neq('integrazione_id', integr.id).in('ordine_esterno_id', idsEsterni.slice(i, i + 200))
+    if (error) throw new Error('lettura righe orfane: ' + error.message)
+    candidate.push(...(data || []))
+  }
+  if (!candidate.length) return []
+  // Solo le righe la cui integrazione non c'e' piu': quelle di un'integrazione viva non si toccano.
+  const integrIds = Array.from(new Set(candidate.map(r => String(r.integrazione_id))))
+  const vive = new Set<string>()
+  for (let i = 0; i < integrIds.length; i += 200) {
+    const { data, error } = await db.from('integrazioni').select('id').in('id', integrIds.slice(i, i + 200))
+    if (error) throw new Error('lettura integrazioni delle righe orfane: ' + error.message)
+    for (const r of data || []) vive.add(String(r.id))
+  }
+  const migliore = new Map<string, any>()
+  for (const r of candidate) {
+    if (vive.has(String(r.integrazione_id))) continue
+    const k = String(r.ordine_esterno_id)
+    const m = migliore.get(k)
+    const meglio = !m || (!!r.spedizione_id && !m.spedizione_id) || (!!r.spedizione_id === !!m.spedizione_id && String(r.created_at) > String(m.created_at))
+    if (meglio) migliore.set(k, r)
+  }
+  const riprese: RigaShopify[] = []
+  for (const r of migliore.values()) {
+    // La condizione sull'integrazione vecchia: se un altro giro l'ha gia' ripresa, non si scrive due volte.
+    const { data, error } = await db.from('ordini_ecommerce').update({ integrazione_id: integr.id, master_id: integr.master_id })
+      .eq('id', r.id).eq('integrazione_id', r.integrazione_id).select('id,ordine_esterno_id,stato,spedizione_id,unito_in,fulfillment_stato')
+    if (error) throw new Error('ripresa riga orfana: ' + error.message)
+    if (data?.[0]) riprese.push(data[0] as RigaShopify)
+  }
+  if (riprese.length) console.log('[SHOPIFY SYNC] righe orfane riprese:', integr.id, riprese.length)
+  return riprese
 }
 
 // Gli ordini ANNULLATI sul negozio aggiornati nella finestra: solo id e data d'annullo, niente dati
