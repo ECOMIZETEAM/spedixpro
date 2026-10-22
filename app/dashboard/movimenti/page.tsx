@@ -59,6 +59,16 @@ export default function MovimentiMasterPage() {
   // Righe di questo contratto finite sul conto dei contratti propri (prove, spedizioni del padre prima del
   // 22/09): stanno con il loro contratto, ma fuori dalla lista e dal saldo di questo conto.
   const [fuoriConto, setFuoriConto] = useState<Movimento[]>([])
+  // VOCI DEL CONTO CON IL CORRIERE (solo contratti propri, solo titolare/admin): pagamenti, contrassegni
+  // compensati, note di credito, costi extra in fattura. Senza, il conto di un contratto proprio poteva
+  // solo scendere (GTS su BRT EXPRESS ITA: −23.929,91 € di costi, nessuna fattura pagata registrata).
+  const [puoScrivereVoci, setPuoScrivereVoci] = useState(false)
+  const [vociAnnullate, setVociAnnullate] = useState<Set<string>>(new Set())
+  const [ricarica, setRicarica] = useState(0)
+  const [voce, setVoce] = useState('pagamento_fattura')
+  const [voceImporto, setVoceImporto] = useState('')
+  const [voceNota, setVoceNota] = useState('')
+  const [salvandoVoce, setSalvandoVoce] = useState(false)
   // Arrivando dalla tendina dei conti in intestazione (?sezione=...) si apre quel conto. Questo effetto
   // viene dopo quello che rilegge la sezione ricordata, quindi vince lui.
   useEffect(() => {
@@ -151,6 +161,8 @@ export default function MovimentiMasterPage() {
           if (Array.isArray(data.corrieriDisponibili)) setCorrieriOpts(data.corrieriDisponibili)
           if (Array.isArray(data.sezioni)) setSezioni(data.sezioni)
           setFuoriConto(Array.isArray(data.fuoriConto) ? data.fuoriConto : [])
+          setPuoScrivereVoci(!!data.puoScrivereVoci)
+          setVociAnnullate(new Set(Array.isArray(data.vociAnnullate) ? data.vociAnnullate : []))
           // Sezione ricordata che non c'e' piu' (contratto tolto, altro utente sullo stesso browser): il
           // server ha risposto con quella principale, la pagina si allinea.
           if (data.sezione && data.sezione !== sezione) setSezione(data.sezione)
@@ -160,8 +172,50 @@ export default function MovimentiMasterPage() {
       finally { if (!annulla) setLoading(false) }
     })()
     return () => { annulla = true }
-  }, [pagina, perPage, cercaDeb, corriereFiltro, gruppoFiltro, sezione])
+  }, [pagina, perPage, cercaDeb, corriereFiltro, gruppoFiltro, sezione, ricarica])
   useEffect(() => { caricaPortali() }, [])
+
+  const VOCI: Record<string, { label: string; segno: 1 | -1 }> = {
+    pagamento_fattura: { label: 'Pagamento fattura', segno: 1 },
+    cod_compensati: { label: 'Contrassegni compensati', segno: 1 },
+    nota_credito: { label: 'Nota di credito', segno: 1 },
+    costo_extra: { label: 'Costo extra in fattura', segno: -1 },
+  }
+  async function registraVoce() {
+    const sz = sezioni.find(x => x.id === sezione)
+    if (!sz || sz.tipo !== 'proprio') return
+    // Stesso parsing delle ricariche dei portali: "1.234,56" → 1234.56, "1234,56" → 1234.56.
+    let raw = voceImporto.trim().replace(/[^0-9.,]/g, '')
+    if (raw.includes('.') && raw.includes(',')) raw = raw.replace(/\./g, '').replace(',', '.')
+    else if (raw.includes(',')) raw = raw.replace(',', '.')
+    const imp = Math.round(parseFloat(raw) * 100) / 100
+    if (!isFinite(imp) || imp <= 0) { await dialog.alert({ title: 'Importo non valido', message: `Scrivi un importo maggiore di zero (hai scritto: "${voceImporto}").` }); return }
+    const v = VOCI[voce]
+    const dopo = Math.round((sz.saldo + v.segno * imp) * 100) / 100
+    if (!await dialog.confirm({
+      title: `${v.label} su ${sz.titolo}?`,
+      message: `${v.segno > 0 ? 'Aggiungi' : 'Togli'} ${fmtEuro(imp)} al conto ${sz.titolo}${voceNota.trim() ? ` (${voceNota.trim()})` : ''}. Il saldo passa da ${fmtEuro(sz.saldo)} a ${fmtEuro(dopo)}. Se sbagli si annulla con una riga opposta.`,
+      confirmText: 'Registra',
+    })) return
+    setSalvandoVoce(true)
+    try {
+      const res = await fetch('/api/movimenti/voce-corriere', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'registra', sezione, voce, importo: imp, nota: voceNota }) })
+      const d = await res.json().catch(() => ({} as any))
+      if (!res.ok) { await dialog.alert({ title: 'Voce non registrata', message: d.error || `Errore ${res.status}` }); return }
+      setVoceImporto(''); setVoceNota(''); setPagina(1); setRicarica(n => n + 1)
+    } finally { setSalvandoVoce(false) }
+  }
+  async function annullaVoce(m: Movimento) {
+    if (!await dialog.confirm({
+      title: 'Annullare questa voce?',
+      message: `"${m.descrizione}" (${fmtImporto(Number(m.importo))}). Si aggiunge la riga opposta: la voce resta nello storico come annullata.`,
+      confirmText: 'Annulla la voce', danger: true,
+    })) return
+    const res = await fetch('/api/movimenti/voce-corriere', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'annulla', movimentoId: m.id }) })
+    const d = await res.json().catch(() => ({} as any))
+    if (!res.ok) { await dialog.alert({ title: 'Voce non annullata', message: d.error || `Errore ${res.status}` }); return }
+    setRicarica(n => n + 1)
+  }
 
   const corrieri = corrieriOpts
   const visibili = movimenti
@@ -318,6 +372,24 @@ export default function MovimentiMasterPage() {
         </div>
       </div>
 
+      {puoScrivereVoci && sezioni.find(x => x.id === sezione)?.tipo === 'proprio' && (
+        <div style={{...card, marginBottom:'16px'}}>
+          <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a'}}>Registra con il corriere</div>
+          <div style={{fontSize:'12px',color:'#999',marginTop:'4px',marginBottom:'12px'}}>Segna quello che regoli con il corriere: le fatture che paghi, i contrassegni che ti compensa, le note di credito e i costi extra che mette in fattura. Il saldo di questo conto diventa quanto gli devi ancora.</div>
+          <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}}>
+            <select value={voce} onChange={e=>setVoce(e.target.value)} style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}>
+              {Object.entries(VOCI).map(([k, v]) => <option key={k} value={k}>{v.label} ({v.segno > 0 ? '+' : '−'})</option>)}
+            </select>
+            <input value={voceImporto} onChange={e=>setVoceImporto(e.target.value)} placeholder="Importo €" inputMode="decimal"
+              style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',width:'130px',color:'#1a1a1a',background:'#fff'}}/>
+            <input value={voceNota} onChange={e=>setVoceNota(e.target.value)} placeholder="N. fattura o nota (es. Fattura 123 di settembre)" maxLength={200}
+              style={{padding:'7px 10px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'13px',flex:'1 1 220px',minWidth:0,color:'#1a1a1a',background:'#fff'}}/>
+            <button onClick={registraVoce} disabled={salvandoVoce}
+              style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'8px 14px',fontSize:'13px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',opacity:salvandoVoce?0.6:1}}>Registra</button>
+          </div>
+        </div>
+      )}
+
       <div style={card}>
         {fuoriConto.length > 0 && (() => {
           const netto = Math.round(fuoriConto.reduce((a, m) => a + Number(m.importo || 0), 0) * 100) / 100
@@ -367,6 +439,11 @@ export default function MovimentiMasterPage() {
                       <td style={{...td,color:'#666',fontSize:'12px'}}>{fmtData(m.created_at)}</td>
                       <td style={{...td,color:'#1a1a1a',whiteSpace:'normal'}}>
                         {m.descrizione}
+                        {m.tipo === 'conto_corriere' && String(m.riferimento || '').startsWith('VOCE-') && (
+                          vociAnnullate.has(m.id)
+                            ? <span style={{marginLeft:'8px',fontSize:'11px',color:'#999',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'1px 6px'}}>annullata</span>
+                            : puoScrivereVoci && <button onClick={() => annullaVoce(m)} style={{marginLeft:'8px',fontSize:'11px',color:'#dc2626',background:'#fff',border:'1px solid #fecaca',borderRadius:'4px',padding:'1px 6px',cursor:'pointer'}}>Annulla</button>
+                        )}
                       </td>
                       <td style={{...td,textAlign:'right',fontWeight:600,color:positivo?'#15803d':'#b91c1c'}}>{fmtImporto(Number(m.importo))}</td>
                       <td style={{...td,textAlign:'right',color:'#1a1a1a'}}>{fmtEuro(Number(m.saldo_dopo))}</td>

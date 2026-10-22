@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
 import { sezioniDelMaster, leggiSezione } from '@/lib/movimenti-sezioni'
+import { eTitolareOAdmin } from '@/lib/ruoli'
 export const dynamic = 'force-dynamic'
 
 // Lista movimenti con PAGINAZIONE SERVER (?page=1&perPage=25): i target grandi hanno migliaia di
@@ -132,11 +133,20 @@ export async function GET(req: NextRequest) {
         ...opzioniSezione(scelta === 'rete'),
         corriereNome: filtroValido ? (corriere || null) : null,
       })
+      // Voci del conto con il corriere (contratti propri): quali di quelle in pagina sono gia' annullate,
+      // per non offrire di annullarle due volte. Le scrive solo il titolare o un admin.
+      const idVoci = movimenti.filter(m => m.tipo === 'conto_corriere' && String(m.riferimento || '').startsWith('VOCE-')).map(m => m.id)
+      let vociAnnullate: string[] = []
+      if (idVoci.length) {
+        const { data: st } = await adminM.from('movimenti').select('riferimento').in('riferimento', idVoci.map(id => `STORNOVOCE-${id}`))
+        vociAnnullate = ((st || []) as any[]).map(r => String(r.riferimento).slice('STORNOVOCE-'.length))
+      }
       return NextResponse.json({
         movimenti, total, somma, page: page || undefined, perPage,
         sezioni, sezione: scelta, corrieriDisponibili: corrieriSezione,
         fuoriConto: fuoriContoDi(scelta),
         saldo: sezioni.find(s => s.id === scelta)?.saldo ?? 0,
+        puoScrivereVoci: eTitolareOAdmin(utente as any), vociAnnullate,
       })
     } catch (e: any) {
       console.error('[MOVIMENTI] sezioni', { master: io, errore: e?.message })
