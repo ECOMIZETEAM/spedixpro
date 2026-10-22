@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { colorePubblico, eventoPubblico, luogoLeggibile } from '@/lib/tracking-pubblico'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,10 +74,11 @@ export async function GET(req: NextRequest) {
 
   // WHITE-LABEL: il destinatario vede il marchio del master della spedizione (come nel portale
   // cliente), con ripiego su MoovExpress. Non espone il mittente/cliente, solo il brand di piattaforma.
-  let brand: { nome: string; logo: string | null } = { nome: 'MoovExpress', logo: null }
+  // Anche il colore del master: la pagina si tinge del suo marchio, come il suo portale.
+  let brand: { nome: string; logo: string | null; colore: string | null } = { nome: 'MoovExpress', logo: null, colore: null }
   if (s.master_id) {
-    const { data: m } = await admin.from('masters').select('nome,logo_url').eq('id', s.master_id).maybeSingle()
-    if (m?.nome) brand = { nome: m.nome, logo: m.logo_url || null }
+    const { data: m } = await admin.from('masters').select('nome,logo_url,colore_primario').eq('id', s.master_id).maybeSingle()
+    if (m?.nome) brand = { nome: m.nome, logo: m.logo_url || null, colore: colorePubblico(m.colore_primario) }
   }
 
   const { data: ev } = await admin
@@ -92,13 +94,10 @@ export async function GET(req: NextRequest) {
     stato_label: STATO_LABEL[s.stato] || 'In lavorazione',
     // Numero visibile: il tracking del corriere se c'è, altrimenti il nostro numero interno.
     riferimento: s.tracking_number || s.numero || null,
-    citta: s.dest_citta || null,
+    citta: s.dest_citta ? luogoLeggibile(String(s.dest_citta)) : null,
     provincia: s.dest_provincia || null,
     aggiornato_il: s.updated_at || s.created_at,
-    eventi: (ev || []).map((e: any) => ({
-      descrizione: e.descrizione || 'Aggiornamento',
-      luogo: e.luogo || '',
-      data: e.data_evento || '',
-    })),
+    creata_il: s.created_at || null,
+    eventi: (ev || []).map((e: any) => ({ ...eventoPubblico(e.descrizione, e.luogo), data: e.data_evento || '' })),
   })
 }
