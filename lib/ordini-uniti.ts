@@ -30,6 +30,25 @@ export function eInContrassegno(r: any): boolean {
   return FIRMA_CONTRASSEGNO.test(JSON.stringify([r?.p1, r?.p2, r?.p3, r?.p4, r?.p5, r?.p6]))
 }
 
+// IL METODO DI PAGAMENTO LEGGIBILE, da qualunque negozio («Bonifico bancario», «Cash on Delivery (COD)»...).
+// Serve a dirlo accanto allo stato del pagamento e, soprattutto, a separare due casi che fino al 22/10/2026 la
+// pagina ordini confondeva: un ordine NON pagato con un metodo (un bonifico in attesa: e' il metodo a dire se e'
+// contrassegno, e qui non lo e') e un ordine senza nessun metodo (creato a mano nel pannello del negozio col
+// pagamento «da ricevere»: solo li' il contrassegno va verificato a mano). Per Shopify il metodo sta in
+// paymentGatewayNames, che la lista prima non leggeva: ogni ordine Shopify non pagato e non in contrassegno
+// usciva «contrassegno? da verificare». Stesso ordine di prima per Woo e PrestaShop.
+export function metodoPagamentoDi(r: any): string | null {
+  const testo = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
+  const diretto = testo(r?.p2) || testo(r?.p1) || testo(r?.p4) || testo(r?.p3)
+  if (diretto) return diretto
+  // «manual» e' il nome che Shopify da' a un ordine segnato pagato a mano dal negoziante.
+  const shopify: string[] = Array.isArray(r?.p6) ? r.p6.map(testo).filter(Boolean).map((s: string) => (s === 'manual' ? 'Pagamento manuale' : s)) : []
+  if (shopify.length) return [...new Set(shopify)].join(', ')
+  const ebay: string[] = Array.isArray(r?.p5?.payments) ? r.p5.payments.map((p: any) => testo(p?.paymentMethod)).filter(Boolean) : []
+  if (ebay.length) return [...new Set(ebay)].join(', ')
+  return null
+}
+
 // Contrassegno del SOLO ordine della riga: il suo totale se e' in contrassegno, altrimenti niente.
 export const contrassegnoDi = (r: any): number => eInContrassegno(r) ? (Number(r?.totale) || 0) : 0
 

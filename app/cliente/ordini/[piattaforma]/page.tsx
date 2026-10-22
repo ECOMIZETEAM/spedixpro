@@ -986,7 +986,7 @@ export default function OrdiniPage() {
                         ))}
                       </span>
                     )}] : []),
-                    { l:'Pagamento', v:<span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span> },
+                    { l:'Pagamento', v:<span style={{display:'inline-flex',alignItems:'center',gap:'6px',flexWrap:'wrap' as const}}><span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span>{o.metodo_pagamento && <span style={{fontSize:'11.5px',color:'#6b7280'}}>{o.metodo_pagamento}</span>}</span> },
                     { l:'Totale', v:<span style={{fontWeight:700,color:'#1a1a1a'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}{cod>0 && <span title="Ordine in contrassegno: l'importo verrà applicato alla spedizione" style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa'}}>COD</span>}
                       {/* NON PAGATO E SENZA METODO DI PAGAMENTO: qui si perdono soldi in silenzio.
                           Il contrassegno lo riconosciamo dal metodo che il negozio ci dice (per un
@@ -996,8 +996,13 @@ export default function OrdiniPage() {
                           possiamo sapere se e' in contrassegno, e mettere l'importo a indovinare
                           sarebbe peggio (si chiederebbero soldi al destinatario di un ordine gia'
                           pagato). Prima non si diceva niente e l'ordine partiva come prepagato: chi
-                          spediva scopriva di non aver incassato a consegna avvenuta. */}
-                      {cod===0 && ['pending','unpaid','partially_paid','authorized'].includes(String(o.stato_pagamento||'')) && <span title={"Il negozio non indica il metodo di pagamento di quest'ordine, e risulta non pagato. Se e' in contrassegno l'importo NON viene applicato da solo: apri \u00ab Crea spedizione \u00bb su questa riga e scrivilo a mano, altrimenti il pacco parte come prepagato e non incassi niente alla consegna."} style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',color:'#b45309',border:'1px solid #fde68a',cursor:'help'}}>contrassegno? da verificare</span>}</span> },
+                          spediva scopriva di non aver incassato a consegna avvenuta.
+                          SOLO SENZA METODO, E IN GRIGIO (Lorenzo, 22/10/2026). Fino ad allora la scritta
+                          era \u00abcontrassegno? da verificare\u00bb su QUALUNQUE ordine non pagato e non in
+                          contrassegno, anche con un metodo chiaro come un bonifico in attesa (907 ordini
+                          WooCommerce col bonifico in 90 giorni), e per Shopify sempre, perche' la lista
+                          non passava il suo metodo. Con un metodo, e' il metodo a decidere: niente scritta. */}
+                      {cod===0 && !o.metodo_pagamento && ['pending','unpaid','partially_paid','authorized'].includes(String(o.stato_pagamento||'')) && <span title={"Il negozio non indica il metodo di pagamento di quest'ordine (succede con gli ordini creati a mano nel pannello del negozio). Se e' in contrassegno l'importo NON viene applicato da solo: apri \u00ab Crea spedizione \u00bb su questa riga e scrivilo a mano, altrimenti il pacco parte come prepagato e non incassi niente alla consegna."} style={{marginLeft:'6px',fontSize:'10px',fontWeight:600,padding:'2px 6px',borderRadius:'999px',background:'#f3f4f6',color:'#6b7280',border:'1px solid #e5e7eb',cursor:'help'}}>metodo non indicato</span>}</span> },
                     // Quanto costera' spedirlo, PRIMA di spedire. "Totale" qui sopra e' il valore della merce.
                     ...(costoSped != null ? [{ l:'Costo spedizione', v:costoSped }] : []),
                     ...(getTags(o) ? [{ l:'Tags', v:<span style={{color:'#6b7280'}}>{getTags(o)}</span> }] : []),

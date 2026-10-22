@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 import { registraAudit } from '@/lib/audit'
-import { COLONNE_PAGAMENTO, assorbitiDelCliente, componiPacco, contrassegnoDi } from '@/lib/ordini-uniti'
+import { COLONNE_PAGAMENTO, assorbitiDelCliente, componiPacco, contrassegnoDi, metodoPagamentoDi } from '@/lib/ordini-uniti'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
     // (1.416 ordini su 5.205 in 30 giorni, 19/10/2026: "citofono rotto", "lasciare al vicino"...).
     // CONTRASSEGNO: Woo payment_method 'cod', PrestaShop modulo cashondelivery, eBay paymentSummary
     // CASH_ON_DELIVERY/PICKUP. Importo = totale dell'ordine (lib/ordini-uniti).
-    return { ...o, data_ordine: t || o.created_at, data_spedizione: o.spedizione_id ? (dataSpedizione.get(String(o.spedizione_id)) || null) : null, cod: contrassegnoDi(o), nota: n1 || n2 || null, metodo_pagamento: o.p2 || o.p1 || o.p4 || o.p3 || null }
+    return { ...o, data_ordine: t || o.created_at, data_spedizione: o.spedizione_id ? (dataSpedizione.get(String(o.spedizione_id)) || null) : null, cod: contrassegnoDi(o), nota: n1 || n2 || null, metodo_pagamento: metodoPagamentoDi(o) }
   })
 
   // ORDINI UNITI: il capofila mostra e spedisce il PACCO — articoli, valore e note di tutti, e come
