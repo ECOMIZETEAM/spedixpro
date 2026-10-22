@@ -108,6 +108,9 @@ export async function GET(req: NextRequest) {
       // corrieri che passano SOLO di qui, senza webhook). Questo flag dice "la giacenza l'abbiamo
       // vista", a prescindere da chi vince la classifica degli stati.
       let vistaGiacenza = false
+      // ...e questo dice "la giacenza e' ancora in corso", quando lo afferma il corriere stesso con i
+      // suoi eventi (oggi solo KSync, vedi il ramo poste): allora non si chiede all'ultimo evento salvato.
+      let giacenzaInCorso = false
       // Contesto SpediamoPro per il recupero di numero/etichetta rimasti indietro (vedi sotto).
       let spAuth: string | null = null
       let spId: number | null = null
@@ -405,6 +408,18 @@ export async function GET(req: NextRequest) {
         if (stati.some((str) => mapStatoKsync(str) === 'in_giacenza')) vistaGiacenza = true
         // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
         if (stati.some((str) => mapStatoKsync(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+        // GIACENZA CHE CONTINUA. Dopo "INIZIO GIACENZA" Poste ripete ogni notte "DESTIN. ASSENTE-SVINCOLA
+        // ONLINE PER NUOVA CONSEGNA", che da sola si legge 'non_consegnato' (e' la stessa frase del
+        // tentativo fallito). Cosi' l'ultimo evento non era mai una giacenza e la giacenza non si apriva:
+        // 282343J002458 e' rimasta invisibile dal 14 al 22/10/2026, con altri 21 pacchi SDA EXPRESS L.
+        // Se dopo l'ultima giacenza il corriere ha scritto SOLO quella frase, il pacco e' ancora fermo;
+        // qualunque altro evento (rimessa in consegna, in consegna, reso…) dice che si e' mosso.
+        if (nuovo !== 'reso_mittente' && nuovo !== 'consegnata') {
+          const ordinati = [...poEventi].sort((a, b) => a.data.localeCompare(b.data))   // "YYYY-MM-DD HH:mm:ss"
+          let iGiac = -1
+          ordinati.forEach((ev, i) => { if (mapStatoKsync(ev.descrizione) === 'in_giacenza') iGiac = i })
+          if (iGiac >= 0 && ordinati.slice(iGiac + 1).every((ev) => /svincola online/i.test(ev.descrizione))) giacenzaInCorso = true
+        }
 
         try {
           const cambiatoPo = nuovo !== s.stato
@@ -523,7 +538,8 @@ export async function GET(req: NextRequest) {
         // Se lo stato del corriere e' gia' 'in_giacenza' basta quello; altrimenti decide l'ultimo
         // evento della cronologia. Una "mancata consegna" arrivata DOPO la giacenza non basta: non e'
         // certo che il pacco sia tornato in giacenza, e qui si apre solo cio' che e' sicuro.
-        let apertaAdesso = nuovo === 'in_giacenza'
+        // Fa eccezione la frase che il corriere ripete ogni giorno DURANTE la giacenza (`giacenzaInCorso`).
+        let apertaAdesso = nuovo === 'in_giacenza' || giacenzaInCorso
         if (!apertaAdesso) {
           const { data: ult } = await admin.from('tracking_events').select('stato,descrizione')
             .eq('spedizione_id', s.id).order('data_evento', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
