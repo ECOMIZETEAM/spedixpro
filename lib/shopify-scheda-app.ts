@@ -25,10 +25,22 @@
 // finche' e' vuota non li vede nessuno, e una prima stesura nominava un pulsante che la' non c'era.
 export const URL_SCHEDA_APP_SHOPIFY: string = ''
 
+// IL LINK D'INSTALLAZIONE DI SHOPIFY, CHE NON CHIEDE NESSUN DOMINIO. Si apre admin.shopify.com: il cliente
+// entra col suo account Shopify, sceglie il negozio e installa; poi Shopify lo rimanda a /enter e da li' alla
+// conferma del collegamento (app/api/integrazioni/shopify/collega). Lorenzo il 22/10/2026: «io cliente se
+// seleziono Shopify devo poter configurarlo da qui; tanto dopo devo fare accesso su Shopify, quindi non collego
+// negozi a caso ma per forza il mio». L'installazione parte comunque su una pagina di Shopify, come vuole il
+// requisito 2.3.1, e nessuno scrive il dominio. Provato da Lorenzo il 22/10/2026 sul negozio di sviluppo: dal
+// link si arriva alla conferma del collegamento. Prima dell'approvazione Shopify lo lascia usare solo ai negozi
+// di sviluppo; ai negozi veri risponde Shopify stesso. client_id e' l'identificativo PUBBLICO dell'app
+// (shopify.app.toml), non un segreto.
+const LINK_INSTALLAZIONE_SHOPIFY = 'https://admin.shopify.com/oauth/install?client_id=f7dfecdb8cb05f8874cd0db742121578'
+
+// Dove porta il pulsante «Collega da Shopify»: la scheda dell'App Store quando ci sara', fino ad allora il link
+// d'installazione.
+export const LINK_COLLEGA_SHOPIFY: string = URL_SCHEDA_APP_SHOPIFY || LINK_INSTALLAZIONE_SHOPIFY
+
 // Per chi prova a collegare un sito Shopify come WooCommerce o PrestaShop. Non «collegalo dalla sezione
-// Shopify»: li' non si scrive piu' niente. E finche' l'app non e' sull'App Store dirgli solo di
-// installarla lo manderebbe a cercare un'app che non trova: si indica l'import da file, come fa la
-// pagina Integrazioni.
+// Shopify» col dominio: li' non si scrive piu' niente, si passa da Shopify col pulsante.
 export const COME_SI_COLLEGA_SHOPIFY: string =
-  "Shopify si collega installando l'app MoovExpress dal tuo negozio Shopify."
-  + (URL_SCHEDA_APP_SHOPIFY ? '' : " L'app per Shopify è in arrivo: nel frattempo puoi caricare gli ordini con l'export di Shopify da Importa Ordini.")
+  "Shopify si collega dalla sezione Shopify delle Integrazioni: premi «Collega da Shopify», entra con il tuo account Shopify e scegli il negozio."

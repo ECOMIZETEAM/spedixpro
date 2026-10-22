@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { isAppNativa } from '@/lib/app-nativa'
-import { URL_SCHEDA_APP_SHOPIFY } from '@/lib/shopify-scheda-app'
+import { LINK_COLLEGA_SHOPIFY } from '@/lib/shopify-scheda-app'
 
 const ACCENT = '#f97316'
 
@@ -468,24 +468,22 @@ export default function IntegrazioniPage() {
                 ))}
               </div>
             ) : step === 'shopify' ? (
-              // SHOPIFY SI COLLEGA DA SHOPIFY. Qui non si chiede il dominio del negozio: Shopify lo vieta
-              // anche ad app gia' installata (requisito 2.3.1), e il campo che c'era fino al 21/10/2026
-              // non ha mai collegato un negozio vero (520 tentativi da luglio). L'unico collegamento verso
-              // Shopify e' la scheda dell'app sull'App Store, e finche' l'app non e' approvata non c'e'
-              // (lib/shopify-scheda-app.ts): intanto si rimanda all'import da file, che legge gia'
-              // l'export ordini di Shopify.
+              // SHOPIFY SI COLLEGA DA QUI, PASSANDO DA SHOPIFY. Qui non si chiede il dominio del negozio: Shopify
+              // lo vieta anche ad app gia' installata (requisito 2.3.1), e il campo che c'era fino al 21/10/2026
+              // non ha mai collegato un negozio vero (520 tentativi da luglio). Il pulsante apre il link
+              // d'installazione di Shopify (lib/shopify-scheda-app.ts): il cliente entra col suo account
+              // Shopify, sceglie il negozio, e torna qui a confermare. Decisione di Lorenzo del 22/10/2026.
               <div style={{ padding: '20px' }}>
-                {URL_SCHEDA_APP_SHOPIFY ? (
-                  <>
+                <>
                     <p style={{ fontSize: '13px', color: '#374151', lineHeight: 1.6, margin: 0 }}>
-                      Installa MoovExpress dallo Shopify App Store e scegli il negozio da collegare: al termine torni qui con il negozio collegato a questo account. Non serve scrivere il dominio.
+                      Entra su Shopify con il tuo account, scegli il negozio da collegare e installa MoovExpress: al termine confermi il collegamento a questo account. Non serve scrivere il dominio.
                     </p>
                     {/* I nomi fra «» sono quelli della pagina della scelta (lib/shopify-pagina-scelta.ts),
-                        che sta fuori dal portale: se cambiano la', vanno cambiati qui. «No, crea il mio
-                        account» darebbe al negozio un conto nuovo sotto il master dei negozi Shopify, non
-                        questo (decisione D1). */}
+                        che sta fuori dal portale: se cambiano la', vanno cambiati qui. «Crea il mio account»
+                        darebbe al negozio un conto nuovo sotto il master dei negozi Shopify, non questo
+                        (decisione D1). */}
                     <p style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.5, margin: '10px 0 0' }}>
-                      Al ritorno da Shopify conferma il collegamento a questo account. Se invece ti chiediamo «Hai già un account MoovExpress?», scegli «Sì, accedo» con email e password di questo account: «No, crea il mio account» ne aprirebbe uno nuovo.
+                      Al ritorno da Shopify premi «Collega il negozio». Se invece ti chiediamo «Hai già un account MoovExpress?», usa «Accedi e collega» con email e password di questo account: «Crea il mio account» ne aprirebbe uno nuovo.
                     </p>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
                       <button
@@ -494,47 +492,18 @@ export default function IntegrazioniPage() {
                       >
                         ← Indietro
                       </button>
-                      {/* Un link alla scheda, come la guida di Shopify chiede ai siti esterni ("embedded
-                          hyperlinks to your app listing page"), e nella stessa scheda del browser: niente
-                          finestre nuove per i passaggi essenziali come l'OAuth (best practices). */}
+                      {/* Un link a una pagina di Shopify (link d'installazione, poi la scheda dell'App
+                          Store), nella stessa scheda del browser: niente finestre nuove per i passaggi
+                          essenziali come l'OAuth (best practices). */}
                       <a
-                        href={URL_SCHEDA_APP_SHOPIFY}
+                        href={LINK_COLLEGA_SHOPIFY}
                         onClick={e => { if (isAppNativa()) { e.preventDefault(); shopifyDalBrowser() } }}
                         style={{ display: 'inline-flex', alignItems: 'center', background: ACCENT, color: '#fff', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, textDecoration: 'none' }}
                       >
                         Collega da Shopify
                       </a>
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px 16px', fontSize: '13px', color: '#374151', lineHeight: 1.6 }}>
-                      <p style={{ margin: 0 }}>
-                        Shopify si collega da Shopify: installerai l&apos;app MoovExpress dal tuo negozio Shopify e tornerai qui con il negozio collegato al tuo account; non serve scrivere il dominio.
-                      </p>
-                      <p style={{ margin: '10px 0 0' }}>
-                        L&apos;app per Shopify è in arrivo: nel frattempo puoi caricare gli ordini con l&apos;export di Shopify da Importa Ordini.
-                      </p>
-                    </div>
-                    <p style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.5, margin: '10px 0 0' }}>
-                      Hai già installato MoovExpress sul tuo negozio? Aprila dall&apos;admin di Shopify (menu App).
-                    </p>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
-                      <button
-                        onClick={() => setStep('platforms')}
-                        style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}
-                      >
-                        ← Indietro
-                      </button>
-                      <a
-                        href="/cliente/importa"
-                        style={{ display: 'inline-flex', alignItems: 'center', background: ACCENT, color: '#fff', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, textDecoration: 'none' }}
-                      >
-                        Vai a Importa Ordini
-                      </a>
-                    </div>
-                  </>
-                )}
+                </>
               </div>
             ) : step === 'woocommerce' ? (
               <div style={{ padding: '20px' }}>
