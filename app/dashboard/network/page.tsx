@@ -378,6 +378,11 @@ export default function NetworkRicevutiPage() {
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Accettata — è in Rettifica Costi</span>
                               ) : r.propagazione === 'assorbita' ? (
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
+                              ) : r.propagazione === 'annullata' ? (
+                                // ANNULLATA non e' ASSORBITA: chi l'ha ricevuta non la paga affatto, l'addebito gli e' stato
+                                // restituito con uno storno (file di rettifiche sbagliato, 22/10/2026). Scriverla "assorbita"
+                                // diceva che il costo era rimasto a lui.
+                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#f3f4f6',color:'#4b5563'}}>✕ Annullata — addebito restituito</span>
                               ) : (
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fef3c7',color:'#92400e'}}>Da decidere</span>
                               )}
