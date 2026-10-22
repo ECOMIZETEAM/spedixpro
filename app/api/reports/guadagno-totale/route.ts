@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { leggiCostiGestione, puoGestireCosti, riepilogoCosti } from '@/lib/costi-gestione'
 
 // REPORT GUADAGNO TOTALE — "il calderone": TUTTO il guadagno del master in un periodo, UNA cifra.
 //
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const M = utente?.master_id
   if (!M || ['cliente', 'agente'].includes((utente?.ruolo || '').toLowerCase())) return NextResponse.json({ guadagno: 0, ricavi: 0, costi: 0 })
 
@@ -89,5 +90,19 @@ export async function GET(req: NextRequest) {
 
   ricavi = r2(ricavi)
   costi = r2(costi)
-  return NextResponse.json({ guadagno: r2(ricavi - costi), ricavi, costi, periodo })
+  const guadagno = r2(ricavi - costi)
+
+  // COSTI DI GESTIONE (lib/costi-gestione): personale, affitto, mezzi... che il master segna a parte.
+  // Il Guadagno Totale resta quello operativo e combacia ancora col Report Guadagno; sotto si aggiunge
+  // l'utile netto. Solo al titolare e ai suoi admin (ci sono gli stipendi): l'operatore vede la card
+  // come prima. Se la lettura non riesce la card resta quella di sempre, senza le due righe.
+  if (puoGestireCosti(utente as any)) {
+    try {
+      const giornoDal = dal.slice(0, 10), giornoAl = alEnd.slice(0, 10)
+      const voci = await leggiCostiGestione(admin, M, giornoDal, giornoAl)
+      const costiGestione = riepilogoCosti(voci, giornoDal, giornoAl).totale
+      return NextResponse.json({ guadagno, ricavi, costi, periodo, costiGestione, utileNetto: r2(guadagno - costiGestione) })
+    } catch { /* senza costi di gestione */ }
+  }
+  return NextResponse.json({ guadagno, ricavi, costi, periodo })
 }

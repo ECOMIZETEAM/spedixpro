@@ -73,6 +73,8 @@ export default function StatProfittoPage() {
                 <Kpi label="Margine" value={`${t.margine}%`} color={NERO} />
                 <Kpi label="Spedizioni" value={Number(d.spedizioni).toLocaleString('it-IT')} color={NERO} />
                 <Kpi label="Guadagno medio / sped." value={eur(d.guadagnoMedio)} color={col(d.guadagnoMedio)} />
+                {d.costiGestione && <Kpi label="Costi di gestione" value={eur(d.costiGestione.totale)} color={ROSSO} />}
+                {d.costiGestione && <Kpi label="Utile netto" value={eur(d.utileNetto)} color={col(d.utileNetto)} big />}
               </div>
 
               {/* Per voce (il calderone scomposto) */}
@@ -89,6 +91,33 @@ export default function StatProfittoPage() {
                   {!d.perVoce.length && <div style={{ color: '#9ca3af', fontSize: '13px' }}>Nessun movimento nel periodo.</div>}
                 </div>
               </div>
+
+              {/* Costi di gestione: arrivano solo al titolare e ai suoi admin (lib/costi-gestione) */}
+              {d.costiGestione && (
+                <div style={card}>
+                  <div style={{ ...titolo, display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                    <span>Costi di gestione: dal Guadagno Totale all'utile netto</span>
+                    <a href="/dashboard/costi-gestione" style={{ color: ARANCIO, fontWeight: 600, fontSize: '12px', textDecoration: 'none' }}>Gestisci i costi →</a>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#6b7280', marginBottom: '10px' }}>
+                    Guadagno Totale <b style={{ color: col(t.guadagno) }}>{eur(t.guadagno)}</b> − costi di gestione <b style={{ color: ROSSO }}>{eur(d.costiGestione.totale)}</b> = utile netto <b style={{ color: col(d.utileNetto) }}>{eur(d.utileNetto)}</b>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '10px' }}>
+                    {d.costiGestione.perCategoria.map((c: any) => (
+                      <div key={c.categoria} style={{ border: '1px solid #eee', borderRadius: '9px', padding: '11px 13px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#6b7280' }}>{c.categoria}</div>
+                        <div style={{ fontSize: '17px', fontWeight: 800, color: ROSSO, marginTop: '3px' }}>{eur(c.importo)}</div>
+                        {c.voci.map((v: any) => (
+                          <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '10.5px', color: '#9ca3af', marginTop: '2px' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.descrizione}</span><span>{eur(v.importo)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {!d.costiGestione.perCategoria.length && <div style={{ color: '#9ca3af', fontSize: '13px' }}>Nessun costo di gestione nel periodo.</div>}
+                  </div>
+                </div>
+              )}
 
               {/* Per contratto */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }} className="grid2">

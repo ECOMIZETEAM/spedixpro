@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import ReportGuadagno from '@/app/components/ReportGuadagno'
+import CostiGestioneCard from '@/app/components/CostiGestioneCard'
 import GuadagnoChart from '@/app/components/GuadagnoChart'
 import BannerSms from '@/app/components/BannerSms'
 import GuadagnoAgente from '@/app/components/GuadagnoAgente'
@@ -394,6 +395,8 @@ export default function Dashboard() {
             <ReportGuadagno titolo="Giacenze" endpoint="/api/reports/guadagno-giacenze" icona="📦" />
             <ReportGuadagno titolo="Logistica" endpoint="/api/reports/guadagno-logistica" icona="🏬" />
             <ReportGuadagno titolo="Consumabili" endpoint="/api/reports/guadagno-consumabili" icona="🧾" />
+            {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
+            {['master', 'admin'].includes(String(data?.ruolo || '').toLowerCase()) && <CostiGestioneCard />}
           </div>
         </>
       )}
