@@ -1,43 +1,22 @@
 import { randomBytes } from 'crypto'
-import { API_VERSION } from '@/lib/shopify'
-import { inserisciClienteConCodice } from '@/lib/codice-cliente'
 import { leggiAccessoDelCliente } from '@/lib/accesso-cliente'
 import { emailContoShopify } from '@/lib/indirizzi-interni'
 import { masterDeiNegoziShopify } from '@/lib/conti-shopify'
 import type { CodiceErrore } from '@/lib/esiti-collegamento'
 
-// IL CONTO DI UN NEGOZIO SHOPIFY: QUALE E', E COME NASCE.
+// IL CONTO DI UN NEGOZIO SHOPIFY: QUALE E'.
 //
-// Due domande separate, perche' dal 21/10/2026 hanno due momenti diversi (decisione D1 di Lorenzo):
-// - trovaContoDelNegozio: il negozio e' gia' legato a un conto? Lo chiede il callback subito dopo
-//   l'autorizzazione. Se si', il negozio si riaggancia li' senza domande (requisito 2.3.4: chi reinstalla
-//   rientra subito).
-// - creaContoShopify: il conto nuovo sotto il master dei negozi (MOOVY). Solo il ramo «No, crea il mio
-//   account» della scelta (app/api/integrazioni/shopify/collega) arriva qui. Fino al 21/10 lo faceva il
-//   callback da solo per ogni negozio mai visto: chi aveva gia' un conto se ne ritrovava un secondo, vuoto
-//   e sotto un altro master.
-
-// Info negozio via GraphQL Admin API (allineato al requisito app pubblica). Solo quello che si usa: il nome
-// e l'indirizzo di fatturazione, che diventa la sede legale da confermare. Email e telefono del negozio non
-// si chiedono piu': la sede operativa, il telefono e un'email vera li chiede la schermata del primo accesso
-// (lib/dati-negozio.ts), e un dato che non si usa non si legge. `country` e' il NOME del paese, il codice e'
-// countryCodeV2 (doc ShopAddress): e' quello che decide se l'indirizzo e' italiano.
-async function fetchShopInfo(shop: string, token: string) {
-  try {
-    const r = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
-      method: 'POST',
-      headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: `{ shop { name billingAddress { address1 city province provinceCode zip country countryCodeV2 } } }` }),
-    })
-    const d = await r.json()
-    return d?.data?.shop || null
-  } catch { return null }
-}
+// trovaContoDelNegozio: il negozio e' gia' legato a un conto? Lo chiede il callback subito dopo
+// l'autorizzazione. Se si', il negozio si riaggancia li' senza domande (requisito 2.3.4: chi reinstalla rientra
+// subito); se no, il negoziante sceglie il SUO conto nella pagina di collegamento (app/api/integrazioni/shopify/
+// collega). Da Shopify non nascono conti: fino al 23/10/2026 qui c'era anche creaContoShopify, il conto nuovo
+// sotto MOOVY per «Crea il mio account», tolto da Lorenzo («accessibile solo ai già clienti MoovExpress»).
+// I tre conti nati dall'installazione a luglio (indirizzo <negozio>@shopify.moovexpress.com) restano, e qui
+// sotto si continua a ritrovarli e a riparargli l'accesso.
 
 // L'errore porta il codice che le rotte scrivono nell'indirizzo (lib/esiti-collegamento.ts); il motivo
 // tecnico va solo nei log.
-type Errore = { error: string; codice: Extract<CodiceErrore, 'onboarding_non_configurato' | 'account_non_creato' | 'collegamento_non_salvato'> }
-type Esito = { clienteId: string; masterId: string } | Errore
+type Errore = { error: string; codice: Extract<CodiceErrore, 'account_non_creato' | 'collegamento_non_salvato'> }
 type Conto = { id: string; master_id: string; email: string; ragione_sociale?: string | null }
 
 // Il conto a cui va un negozio gia' noto, e, a parte, com'e' il suo accesso: null se e' pronto, altrimenti il
@@ -59,68 +38,6 @@ type StatoAccesso = { esito: 'pronto' } | { esito: 'preparato' | 'mancante'; err
 // stesso negozio (maybeSingle da' errore): meglio fermo e scritto nei log che agganciato a caso.
 const letturaFallita = (cosa: string, e: { message?: string } | null): Errore =>
   ({ error: `lettura ${cosa}: ${e?.message || 'errore'}`, codice: 'collegamento_non_salvato' })
-
-// MASTER E LISTINO DEI NEGOZI NUOVI: solo dalle variabili d'ambiente, senza ripieghi.
-//
-// Fino al 20/10/2026, senza SHOPIFY_ONBOARDING_MASTER_ID il master era «la prima radice», letta senza
-// ordine: delle 7 radici, 6 erano demo, e usciva il super master solo per l'ordine fisico delle righe.
-// Su una demo scaduta il negozio avrebbe preso 402 a ogni scrittura, su una attiva le integrazioni
-// vietate, e in tutti e due i casi il titolare della demo avrebbe visto gli ordini del negozio. Senza
-// SHOPIFY_ONBOARDING_LISTINO_ID il listino si cercava per nome ("standard shopify"). Decisione di
-// Lorenzo del 20/10: se ne manca una, l'installazione si ferma e non nasce nessun conto.
-//
-// I due valori si scrivono a mano su Vercel, quindi si controllano anche quando ci sono: il master deve
-// esistere e non essere una demo, il listino deve essere SUO e attivo. Il motore dei prezzi usa il
-// listino del cliente senza guardare di chi e': con quello di un'altra rete il cliente pagherebbe i
-// prezzi di quella, il suo master pagherebbe il padre col proprio listino (anche sotto costo) e non lo
-// troverebbe fra i listini che gestisce. Il 20/10 tutti i 1.833 clienti con un listino avevano quello
-// del proprio master, attivo: e' la regola che i dati gia' rispettano.
-//
-// ...E DEVONO POTER SPEDIRE (21/10/2026). Un conto nato sotto un master spento, o con un listino senza
-// nemmeno una fascia, entra nel portale e non vede nessuna tariffa; un master con un padre ma senza listino
-// d'acquisto (parent_listino_id) fa rispondere «configurazione incompleta» a ogni spedizione dei suoi
-// clienti. Il 21/10 due master attivi con un padre non avevano il listino d'acquisto, e il listino dei
-// negozi di MOOVY nasce vuoto finche' Lorenzo non lo prezza: con le variabili gia' impostate i negozi
-// nascerebbero in un portale che non spedisce. Il listino d'acquisto si chiede solo a chi ha un padre: la
-// radice non compra da nessuno.
-//
-// Un valore che non torna ferma l'installazione come uno mancante. Una lettura fallita no: e' un guasto
-// passeggero come gli altri di questo file (letturaFallita), e dirlo «configurazione non valida» manderebbe
-// a cercare su Vercel un errore che non c'e'. Qui non si scrive nei log: lo fa chi ferma davvero una
-// creazione (creaContoShopify), non la pagina della scelta che si limita a non offrirla.
-async function configurazioneOnboarding(admin: any): Promise<{ masterId: string; listinoId: string } | Errore> {
-  const masterId = masterDeiNegoziShopify() || ''
-  const listinoId = (process.env.SHOPIFY_ONBOARDING_LISTINO_ID || '').trim()
-  if (!masterId || !listinoId) {
-    const mancano = [!masterId && 'SHOPIFY_ONBOARDING_MASTER_ID', !listinoId && 'SHOPIFY_ONBOARDING_LISTINO_ID'].filter(Boolean).join(' e ')
-    return { error: `variabili d'onboarding mancanti: ${mancano}`, codice: 'onboarding_non_configurato' }
-  }
-  const [{ data: master, error: eM }, { data: listino, error: eL }, { data: fasce, error: eF }] = await Promise.all([
-    admin.from('masters').select('id,demo,attivo,parent_master_id,parent_listino_id').eq('id', masterId).maybeSingle(),
-    admin.from('listini_clienti').select('master_id,attivo').eq('id', listinoId).maybeSingle(),
-    admin.from('listini_clienti_fasce').select('id').eq('listino_id', listinoId).limit(1),
-  ])
-  if (eM || eL || eF) return letturaFallita('configurazione d\'onboarding', eM || eL || eF)
-  const motivo = !master ? 'SHOPIFY_ONBOARDING_MASTER_ID non e\' un master'
-    : master.demo === true ? 'SHOPIFY_ONBOARDING_MASTER_ID e\' un master demo'
-    : master.attivo === false ? 'SHOPIFY_ONBOARDING_MASTER_ID e\' un master spento'
-    : master.parent_master_id && !master.parent_listino_id ? 'SHOPIFY_ONBOARDING_MASTER_ID non ha un listino d\'acquisto (parent_listino_id)'
-    : !listino ? 'SHOPIFY_ONBOARDING_LISTINO_ID non e\' un listino clienti'
-    : listino.master_id !== masterId ? 'SHOPIFY_ONBOARDING_LISTINO_ID e\' il listino di un altro master'
-    : listino.attivo === false ? 'SHOPIFY_ONBOARDING_LISTINO_ID non e\' attivo'
-    : !fasce?.length ? 'SHOPIFY_ONBOARDING_LISTINO_ID non ha nessuna fascia di prezzo'
-    : null
-  if (motivo) return { error: `onboarding non valido: ${motivo}`, codice: 'onboarding_non_configurato' }
-  return { masterId, listinoId }
-}
-
-// Il pulsante «No, crea il mio account» si mostra solo se la creazione puo' riuscire. 'non_so' e' una
-// lettura fallita: la pagina lo dice diverso da «non ancora disponibile», che e' una configurazione.
-export async function creazioneContoDisponibile(admin: any): Promise<'si' | 'no' | 'non_so'> {
-  const c = await configurazioneOnboarding(admin)
-  if (!('error' in c)) return 'si'
-  return c.codice === 'onboarding_non_configurato' ? 'no' : 'non_so'
-}
 
 // Password dell'utente di login del negoziante. Non la usa mai (entra col magic link), ma esiste e
 // apre il modulo /cliente: deve essere un segreto vero. Prima era 'Sh0p!' + due Math.random(), che non
@@ -265,71 +182,4 @@ export async function trovaContoDelNegozio(admin: any, shop: string): Promise<Co
     return { clienteId: gia.id, masterId: gia.master_id, accesso: null }
   }
   return null
-}
-
-// Il paese della sede legale. 'Italia' e' il valore che usa tutto il portale (e la schermata del primo
-// accesso precompila la sede solo se e' italiana): con `country` si scriveva il nome inglese che manda
-// Shopify, e un conto di luglio ha 'Philippines'. Per un paese estero resta il nome, che non si confonde
-// con l'Italia; senza indirizzo, 'Italia' come il valore predefinito della colonna.
-function paeseDaShopify(addr: any): string {
-  const codice = String(addr?.countryCodeV2 || '').trim().toUpperCase()
-  if (codice === 'IT') return 'Italia'
-  return String(addr?.country || '').trim() || codice || 'Italia'
-}
-
-// Crea il conto di un negozio che non ne aveva uno, sotto il master dei negozi, e il suo accesso. Lo
-// chiama solo il ramo «No, crea il mio account» della scelta, dopo aver consumato l'installazione in
-// sospeso (lib/shopifyCollega.ts): due clic non creano due conti.
-export async function creaContoShopify(admin: any, shop: string, token: string): Promise<Esito> {
-  const onboarding = await configurazioneOnboarding(admin)
-  if ('error' in onboarding) {
-    console.error('[SHOPIFY][PROVISION] installazione ferma, nessun conto creato:', onboarding.error)
-    return onboarding
-  }
-  const { masterId, listinoId } = onboarding
-
-  const info = await fetchShopInfo(shop, token)
-  const nome = info?.name || shop.replace('.myshopify.com', '')
-  const addr = info?.billingAddress || {}
-  const email = emailContoShopify(shop)
-
-  // L'indirizzo e' interno (lib/indirizzi-interni.ts): fra le porte che CREANO clienti e' l'unica che
-  // lo puo' dare, e lo dichiara a inserisciClienteConCodice, che lo rifiuta a tutte le altre. Chi lo
-  // scrive su un cliente gia' esistente non passa da li': per questo il conto ritrovato per indirizzo,
-  // in trovaContoDelNegozio, si riaggancia solo coi suoi controlli.
-  const { data: nuovo, error } = await inserisciClienteConCodice(admin, {
-    master_id: masterId,
-    ragione_sociale: nome,
-    email,
-    // SOLO LA SEDE LEGALE, E COME PROPOSTA. Fino al 21/10/2026 l'indirizzo di fatturazione di Shopify
-    // finiva anche nella sede operativa, telefono compreso: e' il mittente di ogni spedizione, e un
-    // negozio che fattura da un indirizzo e spedisce da un magazzino si vedeva ritirare i pacchi nel
-    // posto sbagliato, senza che nessuno glielo chiedesse. Il 9/09 i conti nati cosi' non avevano
-    // spedito niente. Ora sede operativa e telefono li chiede la schermata del primo accesso, che a
-    // questi conti compare finche' non sono completi (decisione D2 di Lorenzo; lib/dati-negozio.ts):
-    // l'indirizzo di fatturazione resta qui sotto, nella sede legale, come proposta da confermare.
-    // Telefono e sede operativa vuoti: la colonna so_paese prende da sola 'Italia'.
-    sl_paese: paeseDaShopify(addr), sl_indirizzo: addr.address1 || null,
-    sl_citta: addr.city || null, sl_provincia: addr.provinceCode || addr.province || null, sl_cap: addr.zip || null,
-    listino_cliente_id: listinoId,
-    // Le impostazioni dei clienti creati dal portale (app/api/clienti/crea: etichetta 10x11, deciso il
-    // 18/9), piu' il segno che fa comparire la schermata del primo accesso anche quando i campi sembrano
-    // pieni: il negoziante deve confermare almeno una volta. Lo toglie la schermata quando salva.
-    impostazioni: { formato_stampa: '10x11', sede_da_completare: true },
-    tipo_contratto: 'credito_scalare',
-    aliquota_iva: '22',
-    attivo: true,
-  }, 'id', { indirizzoInterno: true })
-  if (error?.code === '23505' && String(error.message || '').includes('clienti_email_key')) {
-    // DUE CREAZIONI DELLO STESSO NEGOZIO INSIEME: fra la scelta e questo insert il conto con lo stesso
-    // indirizzo e' nato altrove. Questa si ferma senza toccare niente. Riusare quel conto da qui faceva
-    // salvare il negozio a tutte e due le richieste (revisione del 20/10). Alla riapertura dell'app il
-    // conto si ritrova per indirizzo, coi controlli di trovaContoDelNegozio.
-    return { error: 'conto creato da un\'altra installazione simultanea', codice: 'collegamento_non_salvato' }
-  }
-  if (error || !nuovo) {
-    return { error: `cliente: ${error?.code || ''} ${error?.message || 'insert senza riga'}`.trim(), codice: 'account_non_creato' }
-  }
-  const a = await assicuraAccesso(admin, { id: nuovo.id, master_id: masterId, email, ragione_sociale: nome }, shop)
-  return a.esito === 'pronto' ? { clienteId: nuovo.id, masterId } : a.errore
 }

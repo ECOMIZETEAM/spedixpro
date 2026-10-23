@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { conErrore, conCollegato } from '@/lib/esiti-collegamento'
-import { entraNelPortaleDaShopify } from '@/lib/accesso-cliente'
-import { creaContoShopify, creazioneContoDisponibile } from '@/lib/shopifyProvision'
 import {
   PAGINA_SCELTA, type Sospeso, attendiCollegamento, azzeraSospesoShopify, collegaNegozioShopify, consumaSospeso,
   contaTentativoSbagliato, gettoneModuloShopify, gettoneModuloValido, sessioneNelBrowser, sospesoDelBrowser,
@@ -19,15 +17,16 @@ export const dynamic = 'force-dynamic'
 // «HAI GIÀ UN ACCOUNT MOOVEXPRESS?»: la scelta di un negozio Shopify MAI VISTO, dopo l'autorizzazione.
 //
 // Decisione D1 di Lorenzo del 21/10/2026. Il callback, per un negozio che non e' legato a nessun conto, non
-// crea piu' niente: mette il token da parte (lib/shopifyCollega.ts) e manda qui. Tre strade:
+// crea piu' niente: mette il token da parte (lib/shopifyCollega.ts) e manda qui. Due strade, tutte e due
+// verso un conto che esiste gia':
 // - «Collega al conto …»: nel browser c'e' gia' un cliente; il negozio va a lui, coi suoi prezzi;
-// - «Sì, accedo»: email e password di un conto cliente esistente, sotto il suo master e ai suoi prezzi;
-// - «No, crea il mio account»: il conto nuovo sotto il master dei negozi (MOOVY), con l'accesso automatico.
+// - «Sì, accedo»: email e password di un conto cliente esistente, sotto il suo master e ai suoi prezzi.
+// La terza, «Crea il mio account», l'ha tolta Lorenzo il 23/10/2026: l'app e' solo per chi e' gia' cliente.
 // Prima l'installazione senza sessione creava sempre un conto nuovo, e chi ne aveva gia' uno si ritrovava
 // un secondo conto vuoto sotto un'altra rete. E lo state col cliente dentro non basta piu' ad agganciare:
 // veniva dalla sessione di /enter, che puo' essere di chiunque abbia usato quel browser.
 //
-// GET serve la pagina, POST le sue tre azioni. Ogni POST risponde 303: dopo un 307 il browser ripeterebbe il
+// GET serve la pagina, POST le sue due azioni. Ogni POST risponde 303: dopo un 307 il browser ripeterebbe il
 // POST sulla pagina d'arrivo (e' successo al login master, app/api/auth/login).
 
 export async function GET(req: NextRequest) {
@@ -44,7 +43,7 @@ export async function GET(req: NextRequest) {
     return paginaProblemaTemporaneo()
   }
 
-  const [sessione, creazione] = await Promise.all([sessioneNelBrowser(admin, req), creazioneContoDisponibile(admin)])
+  const sessione = await sessioneNelBrowser(admin, req)
   return paginaSceltaAccount({
     shop: s.shop,
     esito,
@@ -56,7 +55,6 @@ export async function GET(req: NextRequest) {
     altroAccount: q.get('altro') === '1' || esitoDelModuloAccedi(esito),
     nota: sessione.tipo === 'non_collegabile' ? sessione.motivo : null,
     gettoneAccedi: gettoneModuloShopify(s, 'accedi'),
-    creazione: creazione === 'si' ? { stato: 'si', gettone: gettoneModuloShopify(s, 'crea') } : { stato: creazione },
   })
 }
 
@@ -94,7 +92,9 @@ export async function POST(req: NextRequest) {
 
   if (azione === 'conferma') return conferma(req, admin, s, gettone)
   if (azione === 'accedi') return accedi(req, admin, s, gettone, form, altro)
-  if (azione === 'crea') return crea(req, admin, s, gettone, altro)
+  // Una pagina aperta prima del 23/10/2026 puo' ancora mandare «Crea il mio account»: si risponde che da
+  // Shopify non nascono conti, senza toccare l'installazione, che resta buona per accedere.
+  if (azione === 'crea') return allaPagina(req, 'solo_clienti', altro)
   return allaPagina(req, 'richiesta_non_valida')
 }
 
@@ -180,35 +180,4 @@ async function accedi(req: NextRequest, admin: any, s: Sospeso, gettone: string,
   return azzeraSospesoShopify(conSessione(verso(req, esito.ok
     ? conCollegato('/cliente/integrazioni', negozio(s))
     : conErrore('/cliente/integrazioni', esito.codice))))
-}
-
-// «NO, CREA IL MIO ACCOUNT»: il conto nuovo sotto il master dei negozi. L'installazione si consuma PRIMA di
-// creare: un secondo clic non trova piu' niente e non crea un secondo conto. Poi si entra come entra ogni
-// conto nato da Shopify, con l'accesso automatico (regola D5, lib/accesso-cliente.ts), con un 303; se nel
-// browser c'e' la sessione di un'altra persona, prima la pagina di conferma.
-async function crea(req: NextRequest, admin: any, s: Sospeso, gettone: string, altro: boolean): Promise<NextResponse> {
-  if (!gettoneModuloValido(gettone, s, 'crea')) return allaPagina(req, 'modulo_scaduto', altro)
-  const disponibile = await creazioneContoDisponibile(admin)
-  if (disponibile === 'no') return allaPagina(req, 'creazione_non_disponibile', altro)
-  if (disponibile === 'non_so') return allaPagina(req, 'temporaneo', altro)
-
-  const presa = await consumaSospeso(admin, s)
-  if (presa.esito === 'illeggibile') return allaPagina(req, 'temporaneo', altro)
-  if (presa.esito === 'gia_usato') {
-    const collegatoA = await attendiCollegamento(admin, s.shop)
-    return azzeraSospesoShopify(collegatoA
-      ? await entraNelPortaleDaShopify(req, admin, { clienteId: collegatoA, shop: s.shop, status: 303 })
-      : allaPagina(req))
-  }
-
-  // Da qui l'installazione non c'e' piu': un errore manda a riaprire l'app dall'admin del negozio, che rifa'
-  // l'autorizzazione e ritrova il conto, se e' nato (trovaContoDelNegozio, per indirizzo).
-  const conto = await creaContoShopify(admin, s.shop, presa.credenziali.access_token)
-  if ('error' in conto) {
-    console.error('[SHOPIFY][SCELTA] conto non creato', s.shop, conto.codice, conto.error)
-    return azzeraSospesoShopify(verso(req, conErrore('/cliente', conto.codice)))
-  }
-  const esito = await collegaNegozioShopify(admin, { shop: s.shop, clienteId: conto.clienteId, credenziali: presa.credenziali })
-  if (!esito.ok) return azzeraSospesoShopify(verso(req, conErrore('/cliente', esito.codice)))
-  return azzeraSospesoShopify(await entraNelPortaleDaShopify(req, admin, { clienteId: conto.clienteId, shop: s.shop, status: 303 }))
 }

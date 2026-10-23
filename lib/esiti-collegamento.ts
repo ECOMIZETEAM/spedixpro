@@ -34,11 +34,6 @@ const SHOPIFY = {
   collegamento_non_salvato: "Il collegamento del negozio non è stato salvato per un problema temporaneo. Riapri MoovExpress dall'admin del tuo negozio Shopify (menu App) per riprovare; se si ripete, contatta l'assistenza.",
   account_non_creato: "Il negozio ha autorizzato MoovExpress, ma non siamo riusciti a creare il tuo account. Riprova riaprendo MoovExpress dall'admin del tuo negozio Shopify (menu App); se si ripete, contatta l'assistenza.",
   shopify_non_configurato: "Il collegamento con Shopify non è disponibile in questo momento. Riprova più tardi; se si ripete, contatta l'assistenza.",
-  // Un negozio nuovo che installa quando il suo master non e' ancora impostato
-  // (SHOPIFY_ONBOARDING_MASTER_ID o SHOPIFY_ONBOARDING_LISTINO_ID mancanti): l'installazione si ferma
-  // e non nasce nessun conto. Decisione di Lorenzo del 20/10: mai un master o un listino di ripiego
-  // scelti a caso, che appendevano il negozio sotto la rete sbagliata.
-  onboarding_non_configurato: "Installazione non ancora disponibile: stiamo completando la configurazione. Riprova più tardi o scrivi all'assistenza.",
   // Il negozio e' collegato a un conto che esisteva gia' (collegato con «Ho già un account»): aprendo l'app
   // da Shopify non si entra da soli, si mette la password (decisione di Lorenzo del 21/10/2026, vedi
   // lib/conti-shopify.ts). Il codice arriva anche a chi e' gia' dentro con un altro conto: il middleware lo

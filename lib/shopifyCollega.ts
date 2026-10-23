@@ -286,7 +286,7 @@ export function azzeraSospesoShopify(risposta: NextResponse): NextResponse {
 // cambia a ogni installazione), per QUELL'azione e, per «Collega al conto», per QUEL cliente: se nel
 // frattempo nel browser e' entrato un altro conto, il negozio non va a un conto diverso da quello scritto
 // sul pulsante.
-export type AzioneScelta = 'conferma' | 'accedi' | 'crea'
+export type AzioneScelta = 'conferma' | 'accedi'
 
 function firmaModulo(s: Sospeso, azione: AzioneScelta, clienteId: string): string {
   const segreto = process.env.SHOPIFY_API_SECRET || ''

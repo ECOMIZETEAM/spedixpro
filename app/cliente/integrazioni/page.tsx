@@ -479,11 +479,9 @@ export default function IntegrazioniPage() {
                       Entra su Shopify con il tuo account, scegli il negozio da collegare e installa MoovExpress: al termine confermi il collegamento a questo account. Non serve scrivere il dominio.
                     </p>
                     {/* I nomi fra «» sono quelli della pagina della scelta (lib/shopify-pagina-scelta.ts),
-                        che sta fuori dal portale: se cambiano la', vanno cambiati qui. «Crea il mio account»
-                        darebbe al negozio un conto nuovo sotto il master dei negozi Shopify, non questo
-                        (decisione D1). */}
+                        che sta fuori dal portale: se cambiano la', vanno cambiati qui. */}
                     <p style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.5, margin: '10px 0 0' }}>
-                      Al ritorno da Shopify premi «Collega il negozio». Se invece ti chiediamo «Hai già un account MoovExpress?», usa «Accedi e collega» con email e password di questo account: «Crea il mio account» ne aprirebbe uno nuovo.
+                      Al ritorno da Shopify premi «Collega il negozio». Se invece ti chiediamo «Hai già un account MoovExpress?», usa «Accedi e collega» con email e password di questo account.
                     </p>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
                       <button

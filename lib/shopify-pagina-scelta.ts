@@ -24,6 +24,9 @@ import { PAGINA_SCELTA } from '@/lib/shopifyCollega'
 
 type Testo = { it: string; en: string }
 
+// Chi non ha un conto scrive qui (Lorenzo, 23/10/2026).
+const CONTATTO_ACCOUNT = 'info@moovexpress.com'
+
 export const ESITI_SCELTA = {
   credenziali: { it: 'Email o password non corretti.', en: 'Incorrect email or password.' },
   troppi_tentativi: {
@@ -45,9 +48,10 @@ export const ESITI_SCELTA = {
     it: 'Non siamo riusciti a completare l\'operazione per un problema temporaneo. Riprova tra qualche istante.',
     en: 'We could not complete the operation because of a temporary problem. Please try again in a moment.',
   },
-  creazione_non_disponibile: {
-    it: 'La creazione di un account nuovo da Shopify non è ancora disponibile. Se hai già un account MoovExpress, accedi qui sopra; altrimenti riprova più tardi o scrivi all\'assistenza.',
-    en: 'Creating a new account from Shopify is not available yet. If you already have a MoovExpress account, sign in above; otherwise please try again later or contact support.',
+  // La risposta a un modulo «Crea il mio account» rimasto aperto in una pagina di prima del 23/10/2026.
+  solo_clienti: {
+    it: `MoovExpress è riservata ai clienti dei nostri partner: da Shopify non si aprono conti nuovi. Se hai già un account accedi qui sotto; se non ce l'hai scrivi a ${CONTATTO_ACCOUNT}.`,
+    en: `MoovExpress is available to customers of our shipping partners only: new accounts cannot be opened from Shopify. If you already have an account, sign in below; if not, write to ${CONTATTO_ACCOUNT}.`,
   },
   richiesta_non_valida: { it: 'Richiesta non valida: usa i pulsanti di questa pagina.', en: 'Invalid request: please use the buttons on this page.' },
 } as const satisfies Record<string, Testo>
@@ -128,6 +132,8 @@ button[disabled]{opacity:.6;cursor:default}
 .oppure{display:flex;align-items:center;gap:12px;margin:26px 0 0;color:#9ca3af;font-size:12.5px;text-transform:uppercase;letter-spacing:.5px}
 .oppure:before,.oppure:after{content:"";flex:1;border-top:1px solid #ececef}
 a.alt{display:block;text-align:center;margin-top:16px;font-size:14px;font-weight:600;color:#6b7280;text-decoration:none}
+.testo a{color:#ea580c;font-weight:600;text-decoration:none}
+.testo a:hover{text-decoration:underline}
 a.alt:hover{color:#111827;text-decoration:underline}
 .nota-centro{font-size:13px;line-height:1.5;color:#6b7280;text-align:center;margin:12px 0 0}
 .piede{margin:18px 4px 0;text-align:center;font-size:12.5px;line-height:1.5;color:#9ca3af}`
@@ -215,7 +221,6 @@ export type OpzioniScelta = {
   altroAccount: boolean
   nota: keyof typeof NOTE_SESSIONE | null
   gettoneAccedi: string
-  creazione: { stato: 'si'; gettone: string } | { stato: 'no' } | { stato: 'non_so' }
 }
 
 export function paginaSceltaAccount(o: OpzioniScelta): NextResponse {
@@ -245,18 +250,6 @@ export function paginaSceltaAccount(o: OpzioniScelta): NextResponse {
   // aperto (ESITI_DEL_MODULO_ACCEDI).
   const altro = !!o.conto && o.altroAccount
 
-  const creazione = o.creazione.stato === 'si'
-    ? due({
-      it: 'Creiamo un account MoovExpress per questo negozio: ci entrerai aprendo MoovExpress dall\'admin di Shopify, senza password. Al primo accesso ti chiederemo l\'indirizzo di ritiro e i dati per la fattura.',
-      en: 'We will create a MoovExpress account for this store: you will enter it by opening MoovExpress from your Shopify admin, with no password. On first access we will ask for your pickup address and billing details.',
-    }) + modulo('crea', o.creazione.gettone, pulsante('Crea il mio account', 'Create my account', 'sec'), altro)
-    : o.creazione.stato === 'no'
-      ? avviso(ESITI_SCELTA.creazione_non_disponibile, 'nota')
-      : avviso({
-        it: 'Non riusciamo a verificare ora la creazione di un account nuovo: ricarica la pagina tra qualche istante.',
-        en: 'We cannot check right now whether a new account can be created: please reload this page in a moment.',
-      }, 'nota')
-
   return pagina(testa
     + `<div class="riepilogo">${rigaNegozio(o.shop)}</div>`
     + (o.esito ? avviso(ESITI_SCELTA[o.esito], 'err') : '')
@@ -270,9 +263,18 @@ export function paginaSceltaAccount(o: OpzioniScelta): NextResponse {
       `<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required maxlength="200">`
       + `<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">`
       + pulsante('Accedi e collega', 'Sign in and connect'), altro)
+    // SOLO CHI E' GIA' CLIENTE (Lorenzo, 23/10/2026: «dobbiamo renderla accessibile solo per i già clienti
+    // MoovExpress, perché ricaricano il credito al master tramite SEPA; così riduciamo i rischi»). Fino ad allora
+    // qui c'era «Crea il mio account», che apriva un conto nuovo sotto MOOVY a chiunque installasse l'app. La
+    // guida di Shopify ammette le app che servono solo chi ha un contratto (Integrating with the Shopify admin,
+    // eccezione B2B): la prima cosa che si vede deve essere il collegamento al conto esistente, ed e' questa.
     + `<div class="oppure">${t({ it: 'oppure', en: 'or' })}</div>`
     + due({ it: 'Non hai un account?', en: 'No account yet?' }, 'h2')
-    + creazione
+    // Il testo passa da t(), che protegge l'HTML; il link si aggiunge fuori.
+    + `<p class="testo">${t({
+      it: 'MoovExpress è riservata ai clienti dei nostri partner di spedizione. Per avere un account scrivi a',
+      en: 'MoovExpress is available to customers of our shipping partners. To get an account, write to',
+    })} <a href="mailto:${CONTATTO_ACCOUNT}">${CONTATTO_ACCOUNT}</a>.</p>`
     + (o.conto ? `<a class="alt" href="${PAGINA_SCELTA}">${t({ it: 'Torna al conto con cui sei entrato', en: 'Back to the account you are signed in with' })}</a>` : ''),
   'Collega il negozio', 200, PIEDE_COLLEGAMENTO)
 }
