@@ -83,7 +83,7 @@ export default function DatiBonifico({ variante }: { variante: 'pagina' | 'riqua
           {coordinate}
         </div>
         <div style={{ ...testoAvviso, fontSize: 12, marginTop: 8 }}>
-          <strong>Metti la causale esatta</strong>: contiene il tuo codice cliente ed è quello che fa riconoscere il versamento.
+          <strong>Metti la causale esatta</strong>: contiene il tuo nome ed è quello che fa riconoscere il versamento.
           {d.contatto ? <> Per qualsiasi cosa: <strong>{d.contatto}</strong>.</> : null}
         </div>
       </div>
@@ -112,7 +112,7 @@ export default function DatiBonifico({ variante }: { variante: 'pagina' | 'riqua
       <div style={{ ...avviso, marginTop: 12 }}>
         {coordinate ? (
           <div style={{ ...testoAvviso, color: '#7c2d12' }}>
-            <strong>Metti la causale esatta</strong>: contiene il tuo codice cliente ed è quello che
+            <strong>Metti la causale esatta</strong>: contiene il tuo nome ed è quello che
             fa riconoscere il versamento. Senza, l’accredito richiede più tempo.
             {d.contatto ? <> Per qualsiasi cosa: <strong>{d.contatto}</strong>.</> : null}
           </div>

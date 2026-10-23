@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 // Le ricariche self-service con carta sono sospese, e la pagina diceva soltanto "contatta il tuo
 // referente": un vicolo cieco. Il cliente non puo' spedire finche' non ha credito, quindi deve
 // almeno sapere DOVE versarlo. Chi incassa non e' MoovExpress ma il MASTER del cliente: i dati
-// bancari sono i suoi (masters.iban/intestatario/banca), e la causale porta il codice cliente cosi'
+// bancari sono i suoi (masters.iban/intestatario/banca), e la causale porta il NOME del cliente cosi'
 // l'accredito si riconosce senza rincorrere nessuno.
 //
 // La legge un componente solo, app/cliente/DatiBonifico: lo mostrano la pagina Ricarica credito e il
@@ -52,6 +52,14 @@ export async function GET() {
   // sbagliato presentato come quello del conto. Al 21/10/2026 i 4 master con l'IBAN (su 51) hanno
   // tutti intestatario e banca: per i loro 388 clienti attivi a credito scalare non cambia niente.
   const intestatario = String(mr.intestatario || '').trim()
+  // LA CAUSALE PORTA IL NOME, NON IL CODICE (Lorenzo, 23/10/2026: «non si deve vedere CLI-0001 ma il nome»).
+  // Il codice cliente si conta per master: CLI-0001 c'e' sotto ogni master, e a chi riceve il bonifico non
+  // dice chi ha pagato senza aprire il gestionale. Il nome si scrive coi soli caratteri del bonifico SEPA
+  // (lettere senza accenti, cifre, / - ? : ( ) . , ' + e spazio, al massimo 140): una «&» o una «è» la banca
+  // di chi paga la rifiuta o la cambia da sola. Senza nome resta il codice.
+  const nomeSepa = String(cli.ragione_sociale || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9/\-?:().,'+ ]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const causale = `Ricarica credito ${nomeSepa || cli.codice_cliente || ''}`.trim().slice(0, 140)
   return NextResponse.json({
     codice_cliente: cli.codice_cliente || null,
     ragione_sociale: cli.ragione_sociale || null,
@@ -62,7 +70,7 @@ export async function GET() {
     iban: pronto ? iban : null,
     intestatario: pronto ? (intestatario || null) : null,
     banca: pronto ? (mr.banca || null) : null,
-    causale: `Ricarica credito ${cli.codice_cliente || cli.ragione_sociale || ''}`.trim(),
+    causale,
     contatto: mr.email_supporto || mr.email || null,
     master: mr.nome || null,
   })

@@ -180,7 +180,7 @@ function RicaricaCarta() {
 // Con la carta sospesa questa pagina diceva soltanto "contatta il tuo referente": un vicolo cieco. Chi
 // si e' appena iscritto non puo' spedire finche' non ha credito, e non trovava scritto da nessuna parte
 // DOVE versarlo — nemmeno la voce di menu, che era nascosta. Chi incassa e' il MASTER del cliente, non
-// noi: i dati bancari sono i suoi, e la causale porta il codice cliente cosi' l'accredito si riconosce
+// noi: i dati bancari sono i suoi, e la causale porta il nome del cliente cosi' l'accredito si riconosce
 // da solo. Saldo, coordinate e ripiego stanno in DatiBonifico, lo stesso che mostra il riquadro
 // "credito insufficiente": la pagina e il riquadro non possono dire due cose diverse.
 function RicaricaBonifico() {
