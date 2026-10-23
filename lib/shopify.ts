@@ -294,10 +294,21 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
   const righe = await righeDaEvadere(supabase, spedizioneIds, 'shopify')
   for (const { ordine, spedizioneId, nelPacco } of righe) {
     if (ordine.fulfillment_stato === 'ok') continue
+    // UN «OK» SCRITTO NEL FRATTEMPO NON SI SOVRASCRIVE.
+    //
+    // Dopo una spedizione partono due spinte quasi insieme (segna-spedito e il completamento della
+    // creazione quando arriva la LDV vera). Il 23/10/2026, sull'ordine #1036 del negozio di prova, la prima
+    // ha evaso e scritto 'ok'; la seconda aveva letto l'ordine un attimo prima che Shopify lo desse per
+    // evaso (fulfillment order gia' chiuso, ordine ancora UNFULFILLED) e ha scritto 'errore' sopra. Su
+    // Shopify l'ordine era Evaso col tracking giusto, nel portale «Store non aggiornato». Un esito diverso
+    // da 'ok' quindi si scrive solo se la riga non e' diventata 'ok' intanto: le righe gia' 'ok' qui non si
+    // toccano comunque (sopra si saltano).
     const segna = async (stato: string, errore: string | null) => {
-      await supabase.from('ordini_ecommerce')
+      let q = supabase.from('ordini_ecommerce')
         .update({ fulfillment_stato: stato, fulfillment_errore: errore })
         .eq('id', ordine.id)
+      if (stato !== 'ok') q = q.or('fulfillment_stato.is.null,fulfillment_stato.neq.ok')
+      await q
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
     }
     try {
@@ -404,6 +415,12 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
         //
         // Ora la verita' la dice Shopify: si guarda `displayFulfillmentStatus` dell'ORDINE.
         if (stato === 'FULFILLED') { await segna('ok', 'gia evaso su Shopify'); continue }
+        // ...e le sue evasioni: se ce n'e' gia' una attiva col NOSTRO tracking, l'ordine e' evaso da noi
+        // anche se lo stato dell'ordine non si e' ancora aggiornato (la seconda spinta della corsa qui sopra).
+        const conIlNostro = (ord?.fulfillments || []).some((f: any) =>
+          String(f?.status || '').toUpperCase() !== 'CANCELLED'
+          && (f?.trackingInfo || []).some((t: any) => String(t?.number || '').trim() === String(tracking).trim()))
+        if (conIlNostro) { await segna('ok', 'gia evaso su Shopify con questo tracking'); continue }
         if (trattenuti.length) {
           // 'attesa', NON 'errore'. Aspettiamo il negoziante (blocco antifrode, richiesta del
           // compratore, evasione differita): non abbiamo sbagliato niente noi. Con 'errore' il
