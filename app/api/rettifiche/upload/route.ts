@@ -213,6 +213,11 @@ export async function POST(req: NextRequest) {
           // nessuno sotto) e le ANNULLATE (addebito stornato, la spedizione e' di nuovo da rettificare).
           if (x.target_master_id && x.target_master_id === x.master_id) continue
           if (x.propagazione === 'annullata') continue
+          // ALLO STESSO SCALINO: conta solo una rettifica fatta da chi carica o verso di lui. Se Wave ha gia'
+          // rettificato MULTI con OneTracking, LOGIXIA col suo file deve poter addebitare Wave (decisione di
+          // Lorenzo, 24/10/2026): e' un altro scalino. Il doppio a valle (Wave che rigira a MULTI quello che
+          // MULTI ha gia' pagato) lo ferma il database, trg_rettifica_no_doppia_ripesatura (stesso pagante).
+          if (x.master_id !== myMaster && x.target_master_id !== myMaster) continue
           if (x.spedizione_id) giaRettificateSet.add(x.spedizione_id)
         }
       }

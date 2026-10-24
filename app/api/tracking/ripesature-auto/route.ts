@@ -22,12 +22,25 @@ export const maxDuration = 300
 //  * NIENTE RETTIFICA SE IL PREZZO NON CAMBIA. Il collo si riprezza col listino di OGNI livello: se
 //    passa da 1 a 2 kg e quel listino fa lo stesso prezzo fino a 2 kg, la differenza e' zero e non
 //    nasce nulla. Se passa da 7 a 13 kg e cambia scaglione, nasce.
-//  * LA RETTIFICA NASCE SUL DETENTORE DEL CONTRATTO (MULTIEXPRESS) verso il suo figlio DIRETTO, che
-//    poi la gira a valle dal suo pannello. Non scende da sola fino al cliente finale.
+//  * LA RETTIFICA NASCE SU CHI APRE IL CONTRATTO (MULTIEXPRESS per i suoi Poste) verso il suo figlio
+//    DIRETTO, che poi la gira a valle dal suo pannello. Non scende da sola fino al cliente finale.
+//    SDA EXPRESS L e' di LOGIXIA, ma la rettifica OneTracking la apre WAVE verso il suo figlio (quasi
+//    sempre MULTI): decisione di Lorenzo del 24/10/2026. Fino ad allora quel contratto non passava da
+//    nessuna coda (MULTI non ne e' detentore) e su 21.875 pacchi misurati non era nata nessuna rettifica.
 //  * SOLO I CONTRATTI DEL DETENTORE: un master con un Poste suo (Velox Logistick, "Poste STANDARD I")
 //    paga il proprio fornitore, e quel costo non passa da noi. Lo filtra la coda nel database.
 //  * SOLO COLLO SINGOLO: sul multicollo una misura non e' la spedizione (vedi la coda).
 const MASTER_DETENTORE = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'   // MULTIEXPRESS
+const WAVE = 'f9af770b-8382-41df-8035-6b2da819046b'               // Wave ship
+// I GIRI, in quest'ordine, con lo stesso budget di tempo: prima i contratti di MULTI (di norma pochi pacchi
+// nuovi al giro), poi SDA EXPRESS L per Wave. Ogni giro ha la sua coda nel database.
+type Giro = { nome: string; master: string; coda: (admin: any, lim: number) => Promise<{ data: any; error: any }> }
+const GIRI: Giro[] = [
+  { nome: 'MULTIEXPRESS', master: MASTER_DETENTORE,
+    coda: (admin, lim) => admin.rpc('prossime_ripesature_da_calcolare', { p_master: MASTER_DETENTORE, lim }) },
+  { nome: 'Wave ship · SDA EXPRESS L', master: WAVE,
+    coda: (admin, lim) => admin.rpc('prossime_ripesature_contratto', { p_master: WAVE, p_contratto: 'SDA EXPRESS L', lim }) },
+]
 const PER_GIRO = 150
 const BUDGET_MS = 240_000
 
@@ -78,73 +91,83 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, in_pausa: true, messaggio: 'Recupero ripesature in pausa: riprende quando lo decide Lorenzo.' })
   }
 
-  const { data: coda, error: erroreCoda } = await admin.rpc('prossime_ripesature_da_calcolare', {
-    p_master: MASTER_DETENTORE, lim: PER_GIRO,
-  })
-  if (erroreCoda) return NextResponse.json({ error: 'Coda non leggibile' }, { status: 500 })
-
   const inizio = Date.now()
-  let controllate = 0, rettificate = 0, nessunRecupero = 0, gia = 0, nonCalcolabili = 0, errori = 0, recuperoTot = 0
-  for (const r of (coda || []) as any[]) {
-    if (Date.now() - inizio > BUDGET_MS) break
-    controllate++
-    const segna = (esito: string, extra: Record<string, any> = {}) =>
-      admin.from('ripesature_check').upsert({
-        spedizione_id: r.spedizione_id, controllato_il: new Date().toISOString(), esito, ...extra,
-      })
-    try {
-      // Il collo COME L'HA MISURATO IL CORRIERE. Si passano le MISURE, non il solo peso: il
-      // supplemento lo fa il volume, e col solo peso meta' delle righe uscirebbe negativa.
-      const rip = {
-        idOrdine: r.ldv, idVerifiche: [], ldv: r.ldv, addebitoFornitore: 0,
-        colli: [{
-          peso: Number(r.peso) || 0,
-          lunghezza: Number(r.lunghezza), larghezza: Number(r.larghezza), altezza: Number(r.altezza),
-        }],
-        dataChiusura: '', mittente: '', destinatario: '',
-      }
-      const [esito] = await calcolaRipesature(admin, [rip as any])
-      if (!esito?.trovata) { nonCalcolabili++; await segna('no-misure', { dettaglio: esito?.motivo || 'spedizione non ricostruita' }); continue }
+  const esitiGiri: any[] = []
+  for (const giro of GIRI) {
+    if (Date.now() - inizio > BUDGET_MS) { esitiGiri.push({ giro: giro.nome, saltato: 'tempo finito' }); continue }
+    // Una coda che non si legge (per esempio la funzione non ancora installata) ferma QUEL giro, non gli altri.
+    const { data: coda, error: erroreCoda } = await giro.coda(admin, PER_GIRO)
+    if (erroreCoda) { console.error('[RIPESATURE-AUTO] coda non leggibile', giro.nome, erroreCoda.message); esitiGiri.push({ giro: giro.nome, errore: 'coda non leggibile' }); continue }
 
-      // IL COLLO DEVE ESSERE DIVENTATO PIU' GRANDE, altrimenti non si tocca niente.
-      // Il motore confronta "prezzo rifatto oggi col collo vero" contro "quello che risulta
-      // addebitato nei movimenti": se nel frattempo il listino e' cambiato, quella differenza esce
-      // positiva ANCHE su un collo piu' piccolo. Nella prova a vuoto usciva una rettifica di 0,49
-      // EUR su una spedizione passata da 1,0 a 0,9 kg — un addebito che col ripesato non c'entra.
-      // La ripesatura si paga solo se il pacco e' piu' grande di quello per cui si e' pagato.
-      const pesoPrima = Math.max(Number(esito.pesoRealePrima) || 0, Number(esito.pesoVolumePrima) || 0)
-      const pesoDopo = Math.max(Number(esito.pesoDopo) || 0, Number(esito.pesoVolumeDopo) || 0)
-      if (pesoDopo <= pesoPrima + 0.001) {
-        nessunRecupero++
-        await segna('ok', { dettaglio: `collo non piu' grande (${pesoPrima.toFixed(2)} → ${pesoDopo.toFixed(2)} kg)` })
-        continue
-      }
+    let controllate = 0, rettificate = 0, nessunRecupero = 0, gia = 0, nonCalcolabili = 0, errori = 0, recuperoTot = 0
+    for (const r of (coda || []) as any[]) {
+      if (Date.now() - inizio > BUDGET_MS) break
+      controllate++
+      const segna = (esito: string, extra: Record<string, any> = {}) =>
+        admin.from('ripesature_check').upsert({
+          spedizione_id: r.spedizione_id, controllato_il: new Date().toISOString(), esito, ...extra,
+        })
+      try {
+        // Il collo COME L'HA MISURATO IL CORRIERE. Si passano le MISURE, non il solo peso: il
+        // supplemento lo fa il volume, e col solo peso meta' delle righe uscirebbe negativa.
+        const rip = {
+          idOrdine: r.ldv, idVerifiche: [], ldv: r.ldv, addebitoFornitore: 0,
+          colli: [{
+            peso: Number(r.peso) || 0,
+            lunghezza: Number(r.lunghezza), larghezza: Number(r.larghezza), altezza: Number(r.altezza),
+          }],
+          dataChiusura: '', mittente: '', destinatario: '',
+        }
+        const [esito] = await calcolaRipesature(admin, [rip as any])
+        if (!esito?.trovata) { nonCalcolabili++; await segna('no-misure', { dettaglio: esito?.motivo || 'spedizione non ricostruita' }); continue }
 
-      const cr = await creaRettificaDaEsito(admin, MASTER_DETENTORE, esito)
-      if (cr.creata) {
-        rettificate++; recuperoTot += cr.recupero || 0
-        await segna('rettificata', { rettifica_id: cr.rettificaId || null, recupero: cr.recupero || null })
-        continue
+        // IL COLLO DEVE ESSERE DIVENTATO PIU' GRANDE, altrimenti non si tocca niente.
+        // Il motore confronta "prezzo rifatto oggi col collo vero" contro "quello che risulta
+        // addebitato nei movimenti": se nel frattempo il listino e' cambiato, quella differenza esce
+        // positiva ANCHE su un collo piu' piccolo. Nella prova a vuoto usciva una rettifica di 0,49
+        // EUR su una spedizione passata da 1,0 a 0,9 kg — un addebito che col ripesato non c'entra.
+        // La ripesatura si paga solo se il pacco e' piu' grande di quello per cui si e' pagato.
+        const pesoPrima = Math.max(Number(esito.pesoRealePrima) || 0, Number(esito.pesoVolumePrima) || 0)
+        const pesoDopo = Math.max(Number(esito.pesoDopo) || 0, Number(esito.pesoVolumeDopo) || 0)
+        if (pesoDopo <= pesoPrima + 0.001) {
+          nessunRecupero++
+          await segna('ok', { dettaglio: `collo non piu' grande (${pesoPrima.toFixed(2)} → ${pesoDopo.toFixed(2)} kg)` })
+          continue
+        }
+
+        const cr = await creaRettificaDaEsito(admin, giro.master, esito)
+        if (cr.creata) {
+          rettificate++; recuperoTot += cr.recupero || 0
+          await segna('rettificata', { rettifica_id: cr.rettificaId || null, recupero: cr.recupero || null })
+          continue
+        }
+        const motivo = cr.motivo || ''
+        if (motivo.includes('gia')) { gia++; await segna('gia-rettificata', { dettaglio: motivo }) }
+        // "nessun recupero" = il collo vero costa uguale a quello dichiarato con il listino di quel
+        // livello: e' la risposta giusta, non un buco. Si segna come controllata e non si torna piu'.
+        else if (motivo.includes('nessun recupero')) { nessunRecupero++; await segna('ok', { dettaglio: 'stesso prezzo col suo listino' }) }
+        else { nonCalcolabili++; await segna('non-calcolabile', { dettaglio: motivo.slice(0, 150) }) }
+      } catch (e: any) {
+        errori++
+        try { await segna('errore', { dettaglio: String(e?.message || e).slice(0, 150) }) } catch { /* pazienza */ }
       }
-      const motivo = cr.motivo || ''
-      if (motivo.includes('gia')) { gia++; await segna('gia-rettificata', { dettaglio: motivo }) }
-      // "nessun recupero" = il collo vero costa uguale a quello dichiarato con il listino di quel
-      // livello: e' la risposta giusta, non un buco. Si segna come controllata e non si torna piu'.
-      else if (motivo.includes('nessun recupero')) { nessunRecupero++; await segna('ok', { dettaglio: 'stesso prezzo col suo listino' }) }
-      else { nonCalcolabili++; await segna('non-calcolabile', { dettaglio: motivo.slice(0, 150) }) }
-    } catch (e: any) {
-      errori++
-      try { await segna('errore', { dettaglio: String(e?.message || e).slice(0, 150) }) } catch { /* pazienza */ }
     }
-  }
 
-  // Quante ne restano dopo questo giro (per il pannello).
-  const { data: restanti } = await admin.rpc('prossime_ripesature_da_calcolare', { p_master: MASTER_DETENTORE, lim: 500 })
+    // Quante ne restano dopo questo giro (per il pannello).
+    const { data: restanti } = await giro.coda(admin, 500)
+    esitiGiri.push({
+      giro: giro.nome, controllate, rettificate, nessunRecupero, giaRettificate: gia, nonCalcolabili, errori,
+      recuperoTot: Math.round(recuperoTot * 100) / 100, arretrato: (restanti || []).length,
+    })
+  }
+  // Il primo giro resta anche nei campi di sempre, per chi li legge gia'.
+  const primo = esitiGiri[0] || {}
   return NextResponse.json({
     ok: true,
-    controllate, rettificate, nessunRecupero, giaRettificate: gia, nonCalcolabili, errori,
-    recuperoTot: Math.round(recuperoTot * 100) / 100,
-    arretrato: (restanti || []).length,
+    controllate: primo.controllate || 0, rettificate: primo.rettificate || 0, nessunRecupero: primo.nessunRecupero || 0,
+    giaRettificate: primo.giaRettificate || 0, nonCalcolabili: primo.nonCalcolabili || 0, errori: primo.errori || 0,
+    recuperoTot: primo.recuperoTot || 0, arretrato: primo.arretrato || 0,
+    giri: esitiGiri,
     durataSec: Math.round((Date.now() - inizio) / 1000),
   })
 }
