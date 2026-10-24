@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback } from 'react'
 
 // Pagina SMS del CLIENTE — SOLA LETTURA. Il cliente NON compra gli SMS da solo: glieli gira il suo
 // master (filiale). Qui vede quanti ne restano, quelli inviati, e le ricariche ricevute.
+// Ai negozi del master dell'App Store (lib/conti-shopify.ts) niente prezzi ne' inviti a ricaricare:
+// la voce non e' nel loro menu, e chi apre la pagina a mano legge solo che il servizio non c'e'.
 
 const eur = (n: number) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 const dataIt = (s: string) => { const d = new Date(s); return isNaN(d.getTime()) ? s : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
@@ -15,11 +17,23 @@ interface Stato {
 
 export default function ClienteSmsPage() {
   const [d, setD] = useState<Stato | null>(null)
+  // null finche' non si sa: il prezzo e l'invito a farsi ricaricare aspettano la risposta, perche' a un
+  // negozio Shopify non devono comparire nemmeno per un istante.
+  const [acquisto, setAcquisto] = useState<{ disponibile: boolean; motivo?: string } | null>(null)
 
   const carica = useCallback(async () => {
     try { const r = await fetch('/api/cliente/sms/stato'); if (r.ok) setD(await r.json()) } catch {}
   }, [])
   useEffect(() => { carica() }, [carica])
+  // Lo dice la rotta dell'acquisto, la stessa che lo rifiuta (pagaSoloEtichette): pagina e guardia non
+  // possono dire due cose diverse. Senza risposta si resta come prima: il rifiuto vero e' nel server.
+  useEffect(() => {
+    fetch('/api/sms/acquista').then(r => r.ok ? r.json() : null)
+      .then(x => setAcquisto(x?.disponibile === false ? { disponibile: false, motivo: String(x.motivo || '') } : { disponibile: true }))
+      .catch(() => setAcquisto({ disponibile: true }))
+  }, [])
+  const vendibile = acquisto?.disponibile === true
+  const nonVendibile = acquisto?.disponibile === false
 
   const costoSms = d?.costoSms || 0.10
 
@@ -32,42 +46,57 @@ export default function ClienteSmsPage() {
     <div style={{ maxWidth: '960px' }}>
       <div style={{ marginBottom: '18px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>SMS</h1>
-        <span style={{ display: 'block', marginTop: '4px', fontSize: '13px', color: '#666' }}>
-          Avvisa i tuoi destinatari via SMS con il link al tracking. Ogni SMS costa {eur(costoSms)}. Se sei a 0, l'SMS non parte.
-        </span>
+        {vendibile && (
+          <span style={{ display: 'block', marginTop: '4px', fontSize: '13px', color: '#666' }}>
+            Avvisa i tuoi destinatari via SMS con il link al tracking. Ogni SMS costa {eur(costoSms)}. Se sei a 0, l'SMS non parte.
+          </span>
+        )}
       </div>
 
-      {d && !d.gatewayPronto && <div style={{ padding: '9px 12px', borderRadius: '6px', marginBottom: '14px', fontSize: '12.5px', color: '#9a3412', background: '#fff7ed', border: '1px solid #fdba74' }}>Le notifiche SMS sono in fase di attivazione sulla piattaforma.</div>}
+      {/* Al posto del prezzo e del "chiedi al referente": il servizio per loro non c'e'. */}
+      {nonVendibile && (
+        <div style={{ ...card, marginBottom: '16px', maxWidth: '520px', background: '#f8fafc' }}>
+          <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a' }}>{acquisto?.motivo || 'Acquisto SMS non disponibile.'}</div>
+        </div>
+      )}
 
-      {/* Disponibili */}
-      <div style={{ ...card, borderColor: '#fdba74', background: '#fff7ed', marginBottom: '16px', maxWidth: '360px' }}>
-        <span style={lbl}>SMS disponibili</span>
-        <div style={{ fontSize: '30px', fontWeight: 800, color: '#ea580c' }}>{(d?.smsDisponibili || 0).toLocaleString('it-IT')}</div>
-        <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {eur(d?.creditoSms || 0)} di credito · {eur(costoSms)}/SMS</div>
-      </div>
+      {vendibile && d && !d.gatewayPronto && <div style={{ padding: '9px 12px', borderRadius: '6px', marginBottom: '14px', fontSize: '12.5px', color: '#9a3412', background: '#fff7ed', border: '1px solid #fdba74' }}>Le notifiche SMS sono in fase di attivazione sulla piattaforma.</div>}
+
+      {/* Disponibili. A chi non li compra si mostrano solo se qualcuno gliene ha dati, senza prezzo. */}
+      {(!nonVendibile || (d?.smsDisponibili || 0) > 0) && (
+        <div style={{ ...card, borderColor: '#fdba74', background: '#fff7ed', marginBottom: '16px', maxWidth: '360px' }}>
+          <span style={lbl}>SMS disponibili</span>
+          <div style={{ fontSize: '30px', fontWeight: 800, color: '#ea580c' }}>{(d?.smsDisponibili || 0).toLocaleString('it-IT')}</div>
+          {vendibile && <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {eur(d?.creditoSms || 0)} di credito · {eur(costoSms)}/SMS</div>}
+        </div>
+      )}
 
       {/* Come ricaricare (il cliente non compra da solo) */}
-      <div style={{ ...card, marginBottom: '16px', maxWidth: '520px', background: '#f8fafc' }}>
-        <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Ti servono più SMS?</div>
-        <div style={{ fontSize: '12.5px', color: '#6b7280' }}>Chiedi al tuo referente (la tua filiale) di ricaricarti il credito SMS: te lo aggiunge lui.</div>
-      </div>
-
-      {/* SMS inviati */}
-      <div style={{ ...card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
-        <div style={{ padding: '12px 18px', borderBottom: '1px solid #e5e7eb', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>SMS inviati</div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead><tr style={{ background: '#f9fafb' }}>{['Spedizione', 'Inviato il'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {!d?.inviati?.length ? (
-                <tr><td colSpan={2} style={{ padding: '22px 16px', color: '#9ca3af', fontSize: '13px', textAlign: 'center' }}>Nessun SMS inviato ancora</td></tr>
-              ) : d.inviati.slice(0, 100).map((m, i) => (
-                <tr key={i}><td style={{ ...td, fontWeight: 600 }}>{m.numero}</td><td style={{ ...td, color: '#6b7280' }}>{dataIt(m.quando)}</td></tr>
-              ))}
-            </tbody>
-          </table>
+      {vendibile && (
+        <div style={{ ...card, marginBottom: '16px', maxWidth: '520px', background: '#f8fafc' }}>
+          <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Ti servono più SMS?</div>
+          <div style={{ fontSize: '12.5px', color: '#6b7280' }}>Chiedi al tuo referente (la tua filiale) di ricaricarti il credito SMS: te lo aggiunge lui.</div>
         </div>
-      </div>
+      )}
+
+      {/* SMS inviati: lo storico resta visibile a tutti, ma a chi non li compra una tabella vuota non serve. */}
+      {(!nonVendibile || !!d?.inviati?.length) && (
+        <div style={{ ...card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
+          <div style={{ padding: '12px 18px', borderBottom: '1px solid #e5e7eb', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>SMS inviati</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead><tr style={{ background: '#f9fafb' }}>{['Spedizione', 'Inviato il'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {!d?.inviati?.length ? (
+                  <tr><td colSpan={2} style={{ padding: '22px 16px', color: '#9ca3af', fontSize: '13px', textAlign: 'center' }}>Nessun SMS inviato ancora</td></tr>
+                ) : d.inviati.slice(0, 100).map((m, i) => (
+                  <tr key={i}><td style={{ ...td, fontWeight: 600 }}>{m.numero}</td><td style={{ ...td, color: '#6b7280' }}>{dataIt(m.quando)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Ricariche ricevute */}
       {!!d?.acquisti?.length && (

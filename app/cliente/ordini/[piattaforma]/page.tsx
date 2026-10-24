@@ -10,6 +10,7 @@ import { numeriOrdine, numeroOrdineCorrisponde } from '@/lib/numero-ordine-negoz
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo } from '@/app/cliente/anteprima-prezzi'
 import { descriviColli } from '@/lib/colli-ordine'
+import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
@@ -118,6 +119,11 @@ export default function OrdiniPage() {
   // 'incompleto' (mancano CAP o provincia della sede operativa) e 'fallito' (lettura non riuscita)
   // si dicono in due modi diversi: nel secondo caso il profilo puo' essere a posto.
   const [statoMittente, setStatoMittente] = useState<'attesa' | 'ok' | 'incompleto' | 'fallito'>('attesa')
+  // "Scrivi al tuo referente" non porta da nessuna parte per il negozio nato dall'app Shopify: lui ha la
+  // schermata dei dati del negozio, e i messaggi qui sotto gli offrono di riaprirla. Agli altri clienti
+  // restano i messaggi di sempre.
+  const [contoShopify, setContoShopify] = useState(false)
+  const [msgDatiNegozio, setMsgDatiNegozio] = useState('')
 
   // IL NEGOZIO SELEZIONATO DEVE ESSERE DI QUESTA PIATTAFORMA.
   //
@@ -160,6 +166,7 @@ export default function OrdiniPage() {
     fetch('/api/cliente/dati').then(r=>r.json()).then(c=>{
       if (!c || c.error) throw new Error('lettura mittente')
       const cap=c.so_cap||'', provincia=c.so_provincia||''
+      setContoShopify(c.conto_shopify===true)
       setMittente(cap&&provincia?{cap,provincia}:null)
       setStatoMittente(cap&&provincia?'ok':'incompleto')
     }).catch(()=>setStatoMittente('fallito'))
@@ -169,6 +176,16 @@ export default function OrdiniPage() {
     fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchi(Array.isArray(d)?d:[])).catch(()=>{}).finally(()=>setPacchiPronti(true))
     leggiMittente()
   }, [])
+  // Salvati i dati del negozio, l'indirizzo di partenza si rilegge: il messaggio a schermo e i prezzi
+  // mancanti erano quelli di prima del salvataggio.
+  useEffect(()=>{
+    const riletto = () => { setMsgDatiNegozio(''); leggiMittente() }
+    window.addEventListener(EVENTO_DATI_NEGOZIO_SALVATI, riletto)
+    return () => window.removeEventListener(EVENTO_DATI_NEGOZIO_SALVATI, riletto)
+  }, [])
+  // Il pulsante riapre la schermata e intanto rilegge il mittente: se nel frattempo i dati li ha
+  // completati il master, la schermata non si apre e il messaggio non deve restare a schermo.
+  function completaDatiNegozio() { setMsgDatiNegozio(''); apriCompletaDatiNegozio(); leggiMittente() }
 
   // SKU -> peso/misure (catalogo articoli) e SKU -> pacco (scatola).
   //
@@ -210,7 +227,12 @@ export default function OrdiniPage() {
   async function sincronizza() {
     const attiva = integrazioni.find((i:any)=>i.stato==='attivo')
     const id = fStoreValido || attiva?.id
-    if (!id) { setMsg('Nessun negozio '+nome+' collegato'); return }
+    if (!id) {
+      // Un negozio col collegamento morto e' in 'errore', non sparito: si dice il motivo salvato (per Shopify
+      // e' "riapri MoovExpress dall'admin del tuo negozio"), non che il negozio non c'e'.
+      const inErrore = integrazioni.find((i:any)=>i.stato==='errore' && i.errore)
+      setMsg(inErrore ? String(inErrore.errore) : 'Nessun negozio '+nome+' collegato'); return
+    }
     setSincronizzando(true); setMsg('')
     try {
       // IL PERIODO SCELTO IN PAGINA DECIDE COSA SI IMPORTA: se metti "oggi", Sincronizza scarica SOLO
@@ -507,6 +529,7 @@ export default function OrdiniPage() {
 
   async function spedisciSelezionati(){
     if (spedendo) return   // guardia doppio-submit: un secondo click prima del re-render poteva partire due volte
+    setMsgDatiNegozio('')
     const ids = Object.keys(sel).filter(id=>sel[id])
     if (ids.length===0){ setMsg('Seleziona almeno un ordine'); return }
     setSpedendo(true)
@@ -515,7 +538,8 @@ export default function OrdiniPage() {
     try {
       const cli = await fetch('/api/cliente/dati').then(r=>r.json())
       if (!cli || cli.error) { setMsg('Errore: dati cliente non disponibili'); setSpedendo(false); return }
-      const shipFrom = { name:cli.ragione_sociale||'', company:cli.ragione_sociale||'', street1:cli.so_indirizzo||'', street2:'', city:cli.so_citta||'', state:cli.so_provincia||'', postalCode:cli.so_cap||'', country:'IT', phone:cli.telefono||'', email:cli.email||'' }
+      // email_mittente, non email: il conto nato da Shopify ha un indirizzo nostro che non riceve posta.
+      const shipFrom = { name:cli.ragione_sociale||'', company:cli.ragione_sociale||'', street1:cli.so_indirizzo||'', street2:'', city:cli.so_citta||'', state:cli.so_provincia||'', postalCode:cli.so_cap||'', country:'IT', phone:cli.telefono||'', email:(cli.email_mittente??cli.email)||'' }
       // SENZA INDIRIZZO DI PARTENZA NON SI SPEDISCE: si dice qui, una volta, con parole chiare.
       //
       // Il mittente si costruisce dalla sede operativa del cliente. Se manca, la creazione risponde
@@ -523,12 +547,17 @@ export default function OrdiniPage() {
       // provincia ne' dove metterla, e per giunta lo dice una volta per ogni riga del lotto. Chi
       // arriva qui appena registrato (l'app dello store crea l'account da sola) si trova quel muro
       // senza nessuna indicazione.
+      // Il negozio nato dall'app Shopify non ha un referente a cui scrivere: ha la schermata dei dati del
+      // negozio, e il messaggio offre di riaprirla.
+      const contoShop = cli.conto_shopify===true
       if (!shipFrom.street1 || !shipFrom.city || !shipFrom.postalCode || !shipFrom.state) {
-        setMsg('Manca l\'indirizzo di partenza del tuo magazzino (via, città, CAP, provincia): è il mittente di ogni spedizione. Scrivi al tuo referente per farlo completare, poi riprova.')
+        if (contoShop) { setMsg(''); setMsgDatiNegozio('Manca l\'indirizzo di ritiro del tuo negozio (via, città, CAP, provincia): è il mittente di ogni spedizione.') }
+        else setMsg('Manca l\'indirizzo di partenza del tuo magazzino (via, città, CAP, provincia): è il mittente di ogni spedizione. Scrivi al tuo referente per farlo completare, poi riprova.')
         setSpedendo(false); return
       }
       if (String(shipFrom.phone||'').replace(/[^0-9]/g,'').length < 6) {
-        setMsg('Manca il tuo numero di telefono: alcuni corrieri lo richiedono per il ritiro. Scrivi al tuo referente per farlo aggiungere, poi riprova.')
+        if (contoShop) { setMsg(''); setMsgDatiNegozio('Manca il tuo numero di telefono: alcuni corrieri lo richiedono per il ritiro.') }
+        else setMsg('Manca il tuo numero di telefono: alcuni corrieri lo richiedono per il ritiro. Scrivi al tuo referente per farlo aggiungere, poi riprova.')
         setSpedendo(false); return
       }
 
@@ -768,6 +797,12 @@ export default function OrdiniPage() {
       </div>
 
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>{msg}</div>}
+      {msgDatiNegozio && (
+        <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c'}}>
+          <span style={{flex:'1 1 240px'}}>{msgDatiNegozio}</span>
+          <button onClick={completaDatiNegozio} style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'8px',padding:'8px 14px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>Completa i dati del negozio</button>
+        </div>
+      )}
 
       {/* Carrello: credito insufficiente per l'intero lotto → pagamento unico con la carta */}
       {creditoKO && (
@@ -852,9 +887,14 @@ export default function OrdiniPage() {
           </select>
           <div style={{flex:1}}/>
           {/* PERCHE' NON SI VEDONO I PREZZI: va detto in chiaro, non in un suggerimento al passaggio. */}
-          {!loading && ordini.length>0 && statoMittente==='incompleto' && (
+          {!loading && ordini.length>0 && statoMittente==='incompleto' && (contoShopify ? (
+            <span style={{fontSize:'13px',color:'#b45309'}}>
+              Per vedere i prezzi serve l'indirizzo di ritiro del tuo negozio.{' '}
+              <button onClick={completaDatiNegozio} style={{background:'none',border:'none',padding:0,color:'#ea580c',fontWeight:600,fontSize:'13px',cursor:'pointer',textDecoration:'underline'}}>Completa i dati del negozio</button>
+            </span>
+          ) : (
             <span style={{fontSize:'13px',color:'#b45309'}}>Per vedere i prezzi serve l'indirizzo di partenza del tuo magazzino (CAP e provincia): scrivi al tuo referente per farlo completare.</span>
-          )}
+          ))}
           {!loading && ordini.length>0 && statoMittente==='fallito' && (
             <span style={{fontSize:'13px',color:'#b45309'}}>
               Non sono riuscito a leggere il tuo indirizzo di partenza, quindi i prezzi non sono calcolati.{' '}
@@ -946,7 +986,7 @@ export default function OrdiniPage() {
                         ))}
                       </span>
                     )}] : []),
-                    { l:'Pagamento', v:<span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span> },
+                    { l:'Pagamento', v:<span style={{display:'inline-flex',alignItems:'center',gap:'6px',flexWrap:'wrap' as const}}><span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:cp.bg,color:cp.fg}}>{labelPag(o.stato_pagamento)}</span>{o.metodo_pagamento && <span style={{fontSize:'11.5px',color:'#6b7280'}}>{o.metodo_pagamento}</span>}</span> },
                     { l:'Totale', v:<span style={{fontWeight:700,color:'#1a1a1a'}}>{o.totale?Number(o.totale).toFixed(2):'—'} {o.valuta||''}{cod>0 && <span title="Ordine in contrassegno: l'importo verrà applicato alla spedizione" style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fff7ed',color:'#c2410c',border:'1px solid #fed7aa'}}>COD</span>}
                       {/* NON PAGATO E SENZA METODO DI PAGAMENTO: qui si perdono soldi in silenzio.
                           Il contrassegno lo riconosciamo dal metodo che il negozio ci dice (per un
@@ -956,8 +996,13 @@ export default function OrdiniPage() {
                           possiamo sapere se e' in contrassegno, e mettere l'importo a indovinare
                           sarebbe peggio (si chiederebbero soldi al destinatario di un ordine gia'
                           pagato). Prima non si diceva niente e l'ordine partiva come prepagato: chi
-                          spediva scopriva di non aver incassato a consegna avvenuta. */}
-                      {cod===0 && ['pending','unpaid','partially_paid','authorized'].includes(String(o.stato_pagamento||'')) && <span title={"Il negozio non indica il metodo di pagamento di quest'ordine, e risulta non pagato. Se e' in contrassegno l'importo NON viene applicato da solo: apri \u00ab Crea spedizione \u00bb su questa riga e scrivilo a mano, altrimenti il pacco parte come prepagato e non incassi niente alla consegna."} style={{marginLeft:'6px',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fffbeb',color:'#b45309',border:'1px solid #fde68a',cursor:'help'}}>contrassegno? da verificare</span>}</span> },
+                          spediva scopriva di non aver incassato a consegna avvenuta.
+                          SOLO SENZA METODO, E IN GRIGIO (Lorenzo, 22/10/2026). Fino ad allora la scritta
+                          era \u00abcontrassegno? da verificare\u00bb su QUALUNQUE ordine non pagato e non in
+                          contrassegno, anche con un metodo chiaro come un bonifico in attesa (907 ordini
+                          WooCommerce col bonifico in 90 giorni), e per Shopify sempre, perche' la lista
+                          non passava il suo metodo. Con un metodo, e' il metodo a decidere: niente scritta. */}
+                      {cod===0 && !o.metodo_pagamento && ['pending','unpaid','partially_paid','authorized'].includes(String(o.stato_pagamento||'')) && <span title={"Il negozio non indica il metodo di pagamento di quest'ordine (succede con gli ordini creati a mano nel pannello del negozio). Se e' in contrassegno l'importo NON viene applicato da solo: apri \u00ab Crea spedizione \u00bb su questa riga e scrivilo a mano, altrimenti il pacco parte come prepagato e non incassi niente alla consegna."} style={{marginLeft:'6px',fontSize:'10px',fontWeight:600,padding:'2px 6px',borderRadius:'999px',background:'#f3f4f6',color:'#6b7280',border:'1px solid #e5e7eb',cursor:'help'}}>metodo non indicato</span>}</span> },
                     // Quanto costera' spedirlo, PRIMA di spedire. "Totale" qui sopra e' il valore della merce.
                     ...(costoSped != null ? [{ l:'Costo spedizione', v:costoSped }] : []),
                     ...(getTags(o) ? [{ l:'Tags', v:<span style={{color:'#6b7280'}}>{getTags(o)}</span> }] : []),
@@ -995,8 +1040,17 @@ export default function OrdiniPage() {
                             {(o.unito_in || piattaforma==='shopify') ? badgeEvasione(o) : null}
                           </span>
                         : <span style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-end',gap:'3px'}}>
-                            <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>
+                            {/* SPEDITO DA NOI: il tracking al posto di «Crea spedizione», e la possibilita' di
+                                rifarla solo dopo una conferma (Lorenzo, 22/10/2026). Prima c'era solo «✓ Spedito»,
+                                e chi cercava il numero doveva andarlo a pescare in Spedizioni. */}
+                            {o.spedizione?.numero
+                              ? (o.spedizione.token
+                                  ? <a href={'/traccia/'+o.spedizione.token} target="_blank" rel="noopener noreferrer" title="Apri il tracking della spedizione" style={{color:'#166534',fontSize:'12.5px',fontWeight:700,textDecoration:'none',fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace'}}>✓ {o.spedizione.numero} ↗</a>
+                                  : <span style={{color:'#166534',fontSize:'12.5px',fontWeight:700,fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace'}}>✓ {o.spedizione.numero}</span>)
+                              : <span style={{color:'#166534',fontSize:'12px',fontWeight:600}}>✓ Spedito</span>}
+                            {o.spedizione?.stato==='annullamento_pending' && <span style={{fontSize:'10.5px',fontWeight:600,color:'#6b7280'}}>annullo in corso</span>}
                             {badgeEvasione(o)}
+                            <button onClick={async()=>{ if (await dialog.confirm({ title:'Spedirlo di nuovo?', message:'Quest\'ordine è già stato spedito'+(o.spedizione?.numero?' con '+o.spedizione.numero:'')+'. Crei una seconda spedizione, con un nuovo addebito: fallo solo se il primo pacco non è partito o va rifatto.', confirmText:'Crea un\'altra spedizione' })) creaSpedizione(o) }} style={{background:'none',border:'none',padding:0,color:'#9ca3af',fontSize:'11px',textDecoration:'underline',cursor:'pointer'}}>Ricrea spedizione</button>
                           </span>}
                     </td>
                   </tr>

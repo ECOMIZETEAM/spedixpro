@@ -92,6 +92,8 @@ const NAV: NavItem[] = [
     { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova', perm: 'admin.invoice.create' },
   ]},
   { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
+  // Senza perm: solo titolare e admin (isFull). Ci sono gli stipendi, l'operatore non la vede (lib/costi-gestione).
+  { label: 'Costi di gestione', href: '/dashboard/costi-gestione', icon: '⊖' },
   { label: 'Abbonamento', href: '/dashboard/abbonamento', icon: '★' },
   { label: 'Reports', href: '/dashboard/reports', icon: '◈', sub: [
     { label: 'Report Spedizioni', href: '/dashboard/reports/spedizioni', perm: 'admin.reports.shippings' },

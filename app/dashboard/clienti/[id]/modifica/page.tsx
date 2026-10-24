@@ -22,6 +22,11 @@ export default function ModificaClientePage() {
   const [msg, setMsg] = useState('')
   const [resetPassword, setResetPassword] = useState(false)
   const [form, setForm] = useState<any>({})
+  // L'impronta dei dati del negozio che questo modulo ha davanti. La GET la da' solo ai conti nati da
+  // Shopify, che intanto possono completare la schermata del primo accesso: torna al PUT col salvataggio,
+  // e se il negozio ha cambiato i suoi dati dopo l'apertura il PUT rifiuta invece di riscriverli coi
+  // valori vecchi. Per gli altri clienti resta vuota e non viaggia.
+  const [versioneDati, setVersioneDati] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`/api/clienti/${id}`).then(r => r.json()).then(d => {
@@ -30,6 +35,7 @@ export default function ModificaClientePage() {
       if (d?.ledger) { router.replace(`/dashboard/clienti/${id}`); return }
       setCliente(d)
       setForm(d || {})
+      setVersioneDati(typeof d?.versione_dati_negozio === 'string' ? d.versione_dati_negozio : null)
       setLoading(false)
     })
     fetch('/api/listini/lista').then(r => r.json()).then(d => setListini(Array.isArray(d) ? d : []))
@@ -42,11 +48,19 @@ export default function ModificaClientePage() {
     setSaving(true); setMsg('')
     const res = await fetch(`/api/clienti/${id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, resetPassword })
+      // L'impronta va dopo il modulo: quella dentro il modulo e' dell'apertura, questa e' aggiornata
+      // dall'ultimo salvataggio. Vuota (gli altri clienti) non si manda.
+      body: JSON.stringify({ ...form, resetPassword, versione_dati_negozio: versioneDati ?? undefined })
     })
     const data = await res.json()
     setSaving(false)
+    // Il rifiuto per i dati del negozio appena cambiati passa di qui come gli altri errori. La scheda non
+    // si ricarica da sola: il master perderebbe senza accorgersene quello che ha scritto. Il messaggio gli
+    // dice di ricaricarla, cosi' vede i dati nuovi prima di rimettere le sue modifiche.
     if (data.error) { setMsg('Errore: ' + data.error); return }
+    // Il salvataggio puo' aver cambiato l'impronta (per esempio l'email di accesso): un secondo clic
+    // prima di tornare alla scheda deve partire da quella nuova.
+    setVersioneDati(typeof data.versione_dati_negozio === 'string' ? data.versione_dati_negozio : null)
     setMsg(resetPassword && data.emailInviata ? '✓ Salvato — nuova password inviata via email' : '✓ Anagrafica aggiornata!')
     setTimeout(() => router.push(`/dashboard/clienti/${id}`), 1200)
   }

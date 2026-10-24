@@ -15,13 +15,17 @@ const STEPS: { icon: string; titolo: string; testo: string }[] = [
   { icon: '🎙️', titolo: 'Moovy, il tuo assistente', testo: 'In basso a destra c\'è Moovy: chiedigli a voce o per iscritto di tracciare una spedizione, controllare il credito e altro. Buone spedizioni!' },
 ]
 
-export default function TutorialCliente({ brandNome }: { brandNome?: string | null }) {
+// `sospeso`: e' aperta la schermata dei dati del negozio (CompletaDatiNegozio, solo i conti nati da
+// Shopify). Il tutorial non si apre sotto di lei: parte quando lei si chiude, cosi' il negoziante trova
+// una cosa alla volta, prima i dati che servono a spedire e poi la visita guidata.
+export default function TutorialCliente({ brandNome, sospeso = false }: { brandNome?: string | null; sospeso?: boolean }) {
   const [aperto, setAperto] = useState(false)
   const [step, setStep] = useState(0)
   // Benvenuto col marchio del master (white-label), non "MoovExpress" fisso.
   const passi = brandNome ? STEPS.map((s, i) => i === 0 ? { ...s, titolo: `Benvenuto in ${brandNome}` } : s) : STEPS
 
   useEffect(() => {
+    if (sospeso) return
     // Mostra al primo accesso: chiede al server se il tutorial è già stato visto.
     let annulla = false
     const local = typeof window !== 'undefined' && window.localStorage.getItem('moov_tutorial_cliente') === 'done'
@@ -31,14 +35,15 @@ export default function TutorialCliente({ brandNome }: { brandNome?: string | nu
       if (!d?.visto) setAperto(true)
     }).catch(() => { if (!annulla) setAperto(true) })
     return () => { annulla = true }
-  }, [])
+  }, [sospeso])
 
   // Riapertura dalla voce "Introduzione" del menu (ClienteNav dispatcha l'evento).
   useEffect(() => {
+    if (sospeso) { setAperto(false); return }
     const riapri = () => { setStep(0); setAperto(true) }
     window.addEventListener('moovx-apri-tutorial', riapri)
     return () => window.removeEventListener('moovx-apri-tutorial', riapri)
-  }, [])
+  }, [sospeso])
 
   const chiudi = (salvaVisto: boolean) => {
     setAperto(false)

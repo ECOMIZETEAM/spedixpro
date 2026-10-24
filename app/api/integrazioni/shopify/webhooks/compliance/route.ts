@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyShopifyWebhook } from '@/lib/shopifyWebhook'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { cancellaSospesiDelNegozio } from '@/lib/shopifyCollega'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -54,10 +55,15 @@ export async function POST(req: NextRequest) {
         // Shopify su 23 erano gia' irraggiungibili cosi'.
         // Il dominio ora sta SULLA riga dell'ordine: nessuna cancellazione altrove lo porta via.
         await cancella(admin.from('ordini_ecommerce').delete().eq('shop', shop), 'ordini_ecommerce (per negozio)')
+        // L'installazione che aspettava la scelta dell'account (lib/shopifyCollega.ts) tiene il token del
+        // negozio: e' un suo dato come gli altri.
+        await cancella(cancellaSospesiDelNegozio(admin, shop), 'installazione in sospeso')
 
-        const { data: ints } = await admin
+        const { data: ints, error: eInts } = await admin
           .from('integrazioni').select('id')
           .eq('piattaforma', 'shopify').eq('identificativo', shop)
+        // Una lettura fallita non e' «nessuna integrazione»: si risponderebbe 200 con la riga ancora li'.
+        if (eInts) { guasti.push(`lettura integrazioni: ${eInts.message}`); console.error('[SHOPIFY][GDPR] lettura integrazioni fallita', eInts.message) }
         const ids = (ints || []).map((i: any) => i.id)
         if (ids.length) {
           // Rete di sicurezza per le righe vecchie, scritte prima che esistesse la colonna `shop`.
@@ -83,9 +89,10 @@ export async function POST(req: NextRequest) {
         await cancella(admin.from('ordini_ecommerce').delete()
           .eq('shop', shop).in('ordine_esterno_id', ordersToRedact), 'ordini_ecommerce (cliente, per negozio)')
 
-        const { data: ints } = await admin
+        const { data: ints, error: eInts } = await admin
           .from('integrazioni').select('id')
           .eq('piattaforma', 'shopify').eq('identificativo', shop)
+        if (eInts) { guasti.push(`lettura integrazioni: ${eInts.message}`); console.error('[SHOPIFY][GDPR] lettura integrazioni fallita', eInts.message) }
         const ids = (ints || []).map((i: any) => i.id)
         if (ids.length) {
           await cancella(admin.from('ordini_ecommerce').delete()

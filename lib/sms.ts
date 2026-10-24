@@ -138,10 +138,18 @@ async function autoRicaricaSeServe(admin: any, tipo: 'cliente' | 'master', id: s
     const { stripeConfigurato, stripeClient } = await import('@/lib/stripe')
     if (!stripeConfigurato()) return
     const tab = tipo === 'cliente' ? 'clienti' : 'masters'
-    const { data: t } = await admin.from(tab).select('credito_sms,impostazioni,stripe_customer_id').eq('id', id).maybeSingle()
+    const { data: t } = await admin.from(tab).select(tipo === 'cliente' ? 'credito_sms,impostazioni,stripe_customer_id,master_id' : 'credito_sms,impostazioni,stripe_customer_id').eq('id', id).maybeSingle()
     const imp = (t?.impostazioni as any) || {}
     const auto = imp.sms_auto
     if (!auto?.attiva || !t?.stripe_customer_id) return
+    // I NEGOZI SOTTO IL MASTER DELL'APP STORE PAGANO SOLO ETICHETTE (lib/conti-shopify.ts, decisione di
+    // Lorenzo del 21/10/2026): l'auto-ricarica e' un acquisto di SMS con la carta, lo stesso che
+    // /api/sms/acquista per loro chiude. La guardia sta qui perche' sms_auto si puo' scrivere anche da altre
+    // porte (il PATCH di /api/cliente/dati accetta l'oggetto impostazioni intero) e ogni addebito passa di qui.
+    if (tipo === 'cliente') {
+      const { pagaSoloEtichette } = await import('@/lib/conti-shopify')
+      if (pagaSoloEtichette((t as any)?.master_id)) return
+    }
     const soglia = Number(auto.soglia) || 0
     const pacchetto = Number(auto.pacchetto) || 1000
     const rimanenti = Math.floor(Number(t.credito_sms || 0) / COSTO_SMS_EUR)

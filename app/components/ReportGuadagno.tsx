@@ -46,6 +46,17 @@ export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api
         <span>Incassato <b style={{ color: '#1a1a1a' }}>{loading ? '…' : eur(d?.ricavi || 0)}</b></span>
         <span>Costo <b style={{ color: '#f97316' }}>{loading ? '…' : eur(d?.costi || 0)}</b></span>
       </div>
+
+      {/* Solo nel Guadagno Totale e solo per il titolare: la rotta manda costiGestione soltanto a lui. */}
+      {!loading && d?.costiGestione !== undefined && (
+        <div style={{ display: 'flex', gap: '14px', marginTop: '10px', paddingTop: '9px', borderTop: '1px dashed #e8e8e8', fontSize: '11px', color: '#8a8a8a', flexWrap: 'wrap', alignItems: 'baseline' }}>
+          <span>Costi di gestione <b style={{ color: '#dc2626' }}>{eur(d.costiGestione)}</b></span>
+          <span>Utile netto <b style={{ fontSize: '14px', color: Number(d.utileNetto) < 0 ? '#dc2626' : '#16a34a' }}>{eur(d.utileNetto)}</b></span>
+          <a href="/dashboard/costi-gestione" style={{ marginLeft: 'auto', color: '#f97316', fontWeight: 600, textDecoration: 'none' }}>
+            {Number(d.costiGestione) ? 'Costi di gestione →' : 'Aggiungi i costi di gestione →'}
+          </a>
+        </div>
+      )}
     </div>
   )
 }

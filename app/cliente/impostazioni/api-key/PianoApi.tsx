@@ -102,6 +102,37 @@ export default function PianoApi() {
     : ''
   const colore = bloccato ? '#dc2626' : oltre ? '#d97706' : pieno >= 80 ? '#d97706' : '#16a34a'
 
+  // I NEGOZI DEL MASTER DELL'APP STORE NON COMPRANO PACCHETTI (lib/conti-shopify.ts): pagano solo
+  // etichette, la condizione dell'esenzione dal Billing di Shopify. Di norma non arrivano nemmeno qui,
+  // perche' un cliente nasce esente e vede il riquadro qui sopra; ci arrivano solo se il super master
+  // decide che le API le pagano. Allora il consumo si mostra lo stesso, ma senza prezzi ne' tasti per
+  // pagare: una cassa che poi la rotta rifiuta sarebbe solo un vicolo cieco.
+  if (d.soloEtichette) {
+    return (
+      <div style={{ marginTop: '26px' }}>
+        <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Uso delle API</div>
+        <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '16px' }}>
+          <div>
+            <span style={{ fontSize: '26px', fontWeight: 800, color: colore }}>{usate.toLocaleString('it-IT')}</span>
+            <span style={{ fontSize: '14px', color: '#666' }}>{limite > 0 ? ` di ${limite.toLocaleString('it-IT')}` : ''} spedizioni create via API questo mese</span>
+          </div>
+          {bloccato ? (
+            <div style={{ marginTop: '8px', fontSize: '13px', color: '#991b1b', fontWeight: 600 }}>
+              Le API sono ferme. Il portale resta aperto e le spedizioni già create continuano il loro giro.
+            </div>
+          ) : oltre ? (
+            <div style={{ marginTop: '8px', fontSize: '13px', color: '#b45309', fontWeight: 600 }}>
+              Hai superato le spedizioni comprese: le API continuano a funzionare{siFerma ? ` fino al ${siFerma}` : ' ancora per poco'}.
+            </div>
+          ) : null}
+          <div style={{ marginTop: '8px', fontSize: '13px', color: '#666' }}>
+            I pacchetti API a pagamento non sono disponibili per i negozi collegati da Shopify.
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ marginTop: '26px' }}>
       <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Pacchetto API</div>

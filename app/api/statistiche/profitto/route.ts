@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { calderoneCache, conCache } from '@/lib/cache-memoria'
+import { leggiCostiGestione, puoGestireCosti, riepilogoCosti, type RiepilogoCosti } from '@/lib/costi-gestione'
 
 // STATISTICHE — PROFITTO = IL CALDERONE del master, scomposto PER-VOCE, PER-CONTRATTO e PER-CLIENTE.
 // Stessa identica base del "Guadagno Totale" della dashboard (/api/reports/guadagno-totale), ma qui
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: u } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const { data: u } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   const M = u?.master_id
   if (!M || ['cliente', 'agente'].includes((u?.ruolo || '').toLowerCase())) {
     return NextResponse.json({ error: 'Non disponibile' }, { status: 403 })
@@ -87,8 +88,19 @@ export async function GET(req: NextRequest) {
     guadagno: r2(n(c.guadagno)), margine: marg(n(c.ricavi), n(c.costi)),
   }))
 
+  // COSTI DI GESTIONE e UTILE NETTO (lib/costi-gestione), solo al titolare e ai suoi admin: stessa
+  // cifra della card Guadagno Totale della dashboard, sullo stesso periodo. Il totale qui sopra non cambia.
+  let costiGestione: RiepilogoCosti | undefined
+  if (puoGestireCosti(u as any)) {
+    try {
+      const dal = dalISO.slice(0, 10), al = alISO.slice(0, 10)
+      costiGestione = riepilogoCosti(await leggiCostiGestione(admin, M, dal, al), dal, al)
+    } catch { /* la pagina resta quella di sempre */ }
+  }
+
   return NextResponse.json({
     totale: { ricavi: ric, costi: cos, guadagno: gua, margine: marg(ric, cos) },
+    ...(costiGestione ? { costiGestione, utileNetto: r2(gua - costiGestione.totale) } : {}),
     spedizioni: nSped,
     guadagnoMedio: nSped > 0 ? r2(gua / nSped) : 0,
     perVoce, perContratto, perCliente,

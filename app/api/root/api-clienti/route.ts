@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { stripeClient, stripeConfigurato } from '@/lib/stripe'
+import { pagaSoloEtichette } from '@/lib/conti-shopify'
 
 // CHI PAGA LE API, DECISO A MANO.
 //
@@ -62,8 +63,15 @@ export async function POST(req: NextRequest) {
   if (!clienteId) return NextResponse.json({ error: 'Cliente mancante' }, { status: 400 })
 
   const { data: cli } = await s.admin.from('clienti')
-    .select('id,ragione_sociale,api_esente,api_piano,api_stripe_subscription_id').eq('id', clienteId).maybeSingle()
+    .select('id,ragione_sociale,api_esente,api_piano,api_stripe_subscription_id,master_id').eq('id', clienteId).maybeSingle()
   if (!cli) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
+  // UN NEGOZIO SOTTO IL MASTER DELL'APP STORE NON SI METTE A PAGAMENTO. Paga solo etichette: e' la
+  // condizione dell'esenzione dal Billing di Shopify (lib/conti-shopify.ts, decisione di Lorenzo del
+  // 21/10/2026), e per lui i pacchetti API con carta non esistono: /api/cliente/api-piano glieli rifiuta,
+  // quindi messo a pagamento resterebbe con le API ferme e nessun modo di riattivarle.
+  if (paga && pagaSoloEtichette((cli as any).master_id)) {
+    return NextResponse.json({ error: 'I negozi collegati da Shopify non pagano le API: pagano solo le etichette.' }, { status: 400 })
+  }
 
   // METTERLO GRATIS DEVE ANCHE SMETTERE DI ADDEBITARGLI.
   //

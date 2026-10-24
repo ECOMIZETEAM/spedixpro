@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { stripeConfigurato, stripeClient, prezzoStripeApi, aliquotaIva } from '@/lib/stripe'
+import { pagaSoloEtichette } from '@/lib/conti-shopify'
 
 // IL PACCHETTO API, DAL LATO DEL CLIENTE.
 //
@@ -11,19 +12,35 @@ import { stripeConfigurato, stripeClient, prezzoStripeApi, aliquotaIva } from '@
 // Fino a 50 spedizioni al mese non si paga niente: il piano Free non ha una cassa, e chiedere una
 // carta a chi non deve pagare sarebbe solo un modo per perderlo.
 
+// I NEGOZI DEL MASTER DELL'APP STORE NON COMPRANO PACCHETTI API.
+//
+// Pagano solo etichette (pagaSoloEtichette, lib/conti-shopify.ts), che e' la condizione dell'esenzione
+// dal Billing di Shopify: un pacchetto API pagato qui con la carta sarebbe un incasso dell'app fuori dal
+// sistema di Shopify (decisione di Lorenzo del 21/10/2026). Si rifiuta nel POST, da cui passano sia la
+// prima cassa sia il cambio di un abbonamento gia' attivo, e non solo nella pagina, che si aggira con una
+// chiamata diretta. Le chiavi API restano gratuite come per tutti.
+const NON_PER_I_NEGOZI_SHOPIFY = 'Pacchetti API a pagamento non disponibili per i negozi collegati da Shopify.'
+const CONTO_ILLEGGIBILE = 'Non riesco a leggere il tuo conto in questo momento. Riprova.'
+
 async function contesto() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   const { data: u } = await supabase.from('utenti').select('cliente_id,ruolo').eq('id', user.id).maybeSingle()
   if (!u?.cliente_id || (u.ruolo || '').toLowerCase() !== 'cliente') return null
-  return { user, clienteId: u.cliente_id as string, admin: createAdminSupabase() }
+  const admin = createAdminSupabase()
+  // Il master scritto sulla riga del CLIENTE, quello che decide il suo listino e il suo conto. Una lettura
+  // fallita non diventa "non e' un negozio Shopify": soloEtichette resta null e chi chiama si ferma.
+  const { data: cli, error } = await admin.from('clienti').select('master_id').eq('id', u.cliente_id).maybeSingle()
+  const soloEtichette: boolean | null = error ? null : pagaSoloEtichette(cli?.master_id)
+  return { user, clienteId: u.cliente_id as string, admin, soloEtichette }
 }
 
 export async function GET() {
   const ctx = await contesto()
   if (!ctx) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
-  const { clienteId, admin } = ctx
+  if (ctx.soloEtichette === null) return NextResponse.json({ error: CONTO_ILLEGGIBILE }, { status: 503 })
+  const { clienteId, admin, soloEtichette } = ctx
 
   const [{ data: stato }, { data: piani }, { data: cli }, { data: chiavi }] = await Promise.all([
     admin.rpc('fn_stato_api_cliente', { p_cliente: clienteId }),
@@ -38,12 +55,14 @@ export async function GET() {
 
   return NextResponse.json({
     stato: stato || null,
-    piani: piani || [],
+    // A chi non puo' comprarli i prezzi non arrivano nemmeno: la pagina mostra una frase al loro posto.
+    piani: soloEtichette ? [] : (piani || []),
     programmato: cli?.api_piano_programmato ? { piano: cli.api_piano_programmato, dal: cli.api_programmato_dal } : null,
     usaApi: (chiavi || []).some((k: any) => k.last_used_at),
     haChiavi: (chiavi || []).length > 0,
     storico: storico || [],
-    pagamentoAttivo: stripeConfigurato(),
+    pagamentoAttivo: stripeConfigurato() && !soloEtichette,
+    soloEtichette,
   })
 }
 
@@ -51,6 +70,10 @@ export async function POST(req: NextRequest) {
   const ctx = await contesto()
   if (!ctx) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const { clienteId, admin } = ctx
+  // Prima di ogni altro controllo: a un negozio Shopify la risposta e' sempre questa, qualunque
+  // pacchetto abbia chiesto e comunque sia configurato il pagamento.
+  if (ctx.soloEtichette === null) return NextResponse.json({ error: CONTO_ILLEGGIBILE }, { status: 503 })
+  if (ctx.soloEtichette) return NextResponse.json({ error: NON_PER_I_NEGOZI_SHOPIFY }, { status: 403 })
   if (!stripeConfigurato()) return NextResponse.json({ error: 'Pagamento con carta non disponibile' }, { status: 400 })
 
   const body = await req.json().catch(() => ({} as any))

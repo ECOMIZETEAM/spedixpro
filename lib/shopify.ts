@@ -1,4 +1,4 @@
-import { createServerSupabase } from '@/lib/supabase'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import { ESITI_EVASIONE, MAX_TENTATIVI_NEGOZIO, STATI_SPEDIZIONE_IN_ANNULLO, righeDaEvadere, spedizioneDelPacco } from '@/lib/evasione-ordini'
 import { assorbitiDi } from '@/lib/ordini-uniti'
 
@@ -7,7 +7,7 @@ const API_VERSION = '2026-04'
 // SCOPE OAUTH — FONTE UNICA.
 //
 // La stessa stringa serve in due posti: shopify.app.toml (quella che Shopify pubblica, approva e
-// mostra al negoziante) e il parametro `scope` dell'authorize URL costruito da install/route.ts.
+// mostra al negoziante) e il parametro `scope` dell'authorize URL costruito da lib/shopifyOAuth.ts.
 // Finche' erano due copie battute a mano combaciavano per fortuna, non per costruzione: chi
 // correggeva l'una e non l'altra collegava male i negozi senza che nessuno se ne accorgesse.
 //
@@ -48,9 +48,72 @@ export function tokenValidoSenzaRinnovo(integrazione: any): string | null {
   return token && expiresAt && expiresAt - Date.now() > 5 * 60 * 1000 ? String(token) : null
 }
 
+// IL NEGOZIO SI RICOLLEGA DA SHOPIFY, NON DALLE INTEGRAZIONI.
+//
+// Dal 21/10/2026 nelle Integrazioni non c'e' piu' il campo del dominio (Shopify lo vieta, requisito 2.3.1):
+// un collegamento da rifare si rifa' riaprendo l'app dall'admin del negozio, dove /enter trova la riga in
+// 'errore' e riparte dall'autorizzazione. Questi testi li legge il negoziante (Integrazioni, ordini,
+// sincronizzazione): fino a quel giorno gli dicevano «ricollega il negozio dalle Integrazioni».
+const RIAPRI_DA_SHOPIFY = "Riapri MoovExpress dall'admin del tuo negozio Shopify (menu App)."
+const SESSIONE_SCADUTA = `Sessione Shopify scaduta. ${RIAPRI_DA_SHOPIFY}`
+const RINNOVO_RIFIUTATO = `Shopify non rinnova più l'accesso al negozio. ${RIAPRI_DA_SHOPIFY}`
+const TOKEN_NON_VALIDO = `Il collegamento con Shopify non è più valido (sessione scaduta o app disinstallata dal negozio). ${RIAPRI_DA_SHOPIFY}`
+
+// IL TOKEN E' MORTO: LO DICE LA RIGA, NON SOLO IL MESSAGGIO.
+//
+// Fino al 21/10/2026 un rinnovo rifiutato o un 401 scrivevano il motivo e lasciavano la riga 'attivo': /enter
+// faceva entrare come se niente fosse, il cron ci riprovava a ogni giro e gli ordini non arrivavano piu'. Ora
+// la riga va in 'errore': il cron (solo 'attivo') la salta, la pagina Integrazioni mostra il motivo e /enter,
+// alla prossima apertura dall'admin del negozio, rifa' l'autorizzazione.
+// SOLO SE LE CREDENZIALI SONO ANCORA QUELLE RIFIUTATE: il filtro sul token rende il segno atomico. Se intanto
+// un'altra porta ha rinnovato, o il callback ha salvato un collegamento nuovo, la riga ha un token diverso e
+// non si tocca: un collegamento appena rifatto non torna in 'errore' per una richiesta partita prima. E solo
+// da 'attivo': una riga 'disconnesso' (app disinstallata) tiene il suo motivo.
+// Col client di servizio, chiunque chiami: e' un fatto del negozio, e un segno perso lascerebbe aperto
+// l'ingresso in un collegamento morto.
+async function segnaCollegamentoMorto(
+  riga: { id?: string | null; shop?: string | null },
+  credenziale: { campo: 'access_token' | 'refresh_token'; valore: string | null },
+  motivo: string,
+): Promise<void> {
+  const chi = riga.id || riga.shop || '?'
+  try {
+    let q: any = createAdminSupabase().from('integrazioni').update({ stato: 'errore', errore: motivo })
+      .eq('piattaforma', 'shopify').eq('stato', 'attivo')
+    if (riga.id) q = q.eq('id', riga.id)
+    else if (riga.shop) q = q.eq('identificativo', riga.shop)
+    else return
+    const colonna = `credenziali->>${credenziale.campo}`
+    q = credenziale.valore ? q.eq(colonna, credenziale.valore) : q.is(colonna, null)
+    const { data, error } = await q.select('id')
+    if (error) console.error('[SHOPIFY][TOKEN MORTO] stato non scritto', chi, error.message)
+    else if ((data || []).length) console.warn('[SHOPIFY][TOKEN MORTO] collegamento in errore, alla prossima apertura da Shopify si rifa\' l\'autorizzazione', chi)
+  } catch (e: any) {
+    console.error('[SHOPIFY][TOKEN MORTO] stato non scritto', chi, e?.message || e)
+  }
+}
+
+// Il refresh token appena rifiutato e' gia' stato sostituito sulla riga da un rinnovo concorrente? Allora il
+// token di quel rinnovo e' buono, e lo si usa. Si guarda subito e, se la riga ha ancora il token rifiutato,
+// una seconda volta dopo un secondo: il rifiuto puo' arrivare mentre chi ha vinto sta ancora salvando. Se no
+// null, e il collegamento si segna morto (lo stesso refresh token fa da condizione anche li').
+async function tokenRinnovatoDaAltri(id: string | null | undefined, rifiutato: string): Promise<string | null> {
+  if (!id) return null
+  for (let giro = 0; giro < 2; giro++) {
+    if (giro) await attendi(1000)
+    const { data, error } = await (createAdminSupabase().from('integrazioni') as any)
+      .select('credenziali').eq('id', id).maybeSingle()
+    if (error || !data) return null
+    if (String(data.credenziali?.refresh_token || '') === rifiutato) continue
+    return tokenValidoSenzaRinnovo(data)
+  }
+  return null
+}
+
 // Restituisce un access token Shopify valido per l'integrazione data.
 // Se il token e' scaduto (o sta per scadere), lo rifresca col refresh token
 // e aggiorna le credenziali salvate. Ritorna { token } oppure { error }.
+// `db` non serve piu': le credenziali le scrive il client di servizio (vedi sotto). Resta per chi lo passa.
 export async function getValidShopifyToken(integrazione: any, db?: any): Promise<{ token?: string; error?: string }> {
   const cred = (integrazione?.credenziali || {}) as any
   const shop = cred.shop || integrazione?.identificativo
@@ -63,11 +126,13 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
 
   // Token scaduto (o vecchio non-scadente ormai rifiutato): si rinnova col refresh token
   // (grant_type=refresh_token, expiring=1 — vedi sotto). Se il refresh token non c'e' (tipico dei
-  // collegamenti fatti PRIMA del passaggio ai token scadenti), non c'è nulla da rinnovare: si chiede
-  // di ricollegare il negozio. NB: i nuovi collegamenti chiedono `expiring=1` nello scambio token
+  // collegamenti fatti PRIMA del passaggio ai token scadenti), non c'è nulla da rinnovare: solo una nuova
+  // autorizzazione ne da' uno, quindi la riga va in 'errore' e il negozio si ricollega riaprendo l'app da
+  // Shopify. NB: i nuovi collegamenti chiedono `expiring=1` nello scambio token
   // (callback), come da doc Shopify — NON `grant_options[]=expiring` nell'authorize (non esiste).
   if (!refreshToken) {
-    return { error: 'Sessione Shopify scaduta. Ricollega il negozio dalle Integrazioni.' }
+    await segnaCollegamentoMorto({ id: integrazione?.id }, { campo: 'access_token', valore: cred.access_token ? String(cred.access_token) : null }, SESSIONE_SCADUTA)
+    return { error: SESSIONE_SCADUTA }
   }
   const apiKey = process.env.SHOPIFY_API_KEY
   const apiSecret = process.env.SHOPIFY_API_SECRET
@@ -86,8 +151,33 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
     const raw = await r.text()
     let d: any = null
     try { d = JSON.parse(raw) } catch {}
+    // QUALE RIFIUTO VUOL DIRE «RIFARE L'AUTORIZZAZIONE». Il 401: e' la risposta che l'esempio della guida
+    // Shopify (authorization code grant) tratta come definitiva — refresh token scaduto, ritirato da una nuova
+    // autorizzazione, o app disinstallata. E il 400 con invalid_grant, che e' lo stesso caso detto alla maniera
+    // dello standard OAuth (RFC 6749). Gli altri no: 429 e 5xx passano da soli, e un 400 qualunque, un 403 o
+    // un 401 con invalid_client (richiesta malformata, l'app che non si fa riconoscere) sono un guasto nostro,
+    // che riaprire l'app non ripara — e che metterebbe in 'errore' tutti i negozi insieme. Prima ogni rifiuto
+    // diceva «sessione scaduta, ricollega», anche un Shopify fuori servizio.
+    // Il corpo si scrive nel log solo per le risposte d'errore: una risposta buona porta i token.
+    const codiceOAuth = typeof d?.error === 'string' ? d.error : ''
+    if ((r.status === 401 && codiceOAuth !== 'invalid_client') || (r.status === 400 && codiceOAuth === 'invalid_grant')) {
+      // DUE RINNOVI INSIEME NON SONO UN TOKEN MORTO. Alle :20 partono insieme sincronizzazione, evasioni e
+      // annulli (vercel.json), e le evasioni partono anche dalla creazione delle spedizioni: due porte possono
+      // leggere la riga negli ultimi cinque minuti del token e rinnovare con lo stesso refresh token. Shopify ne
+      // accetta uno; chi perde riceve questo rifiuto mentre chi ha vinto sta salvando. Prima di dire «morto» si
+      // guarda se la riga ha gia' il token di chi ha vinto, e si usa quello.
+      const altrui = await tokenRinnovatoDaAltri(integrazione?.id, String(refreshToken))
+      if (altrui) {
+        console.warn('[SHOPIFY][REFRESH] rinnovo rifiutato, ma un altro rinnovo era appena riuscito: usato il suo token', shop, 'HTTP', r.status)
+        return { token: altrui }
+      }
+      console.error('[SHOPIFY][REFRESH] rinnovo rifiutato', shop, 'HTTP', r.status, raw.slice(0, 200))
+      await segnaCollegamentoMorto({ id: integrazione?.id }, { campo: 'refresh_token', valore: String(refreshToken) }, RINNOVO_RIFIUTATO)
+      return { error: RINNOVO_RIFIUTATO }
+    }
     if (!r.ok || !d?.access_token) {
-      return { error: 'Sessione Shopify scaduta. Ricollega il negozio dalle Integrazioni.' }
+      console.error('[SHOPIFY][REFRESH] rinnovo non riuscito', shop, 'HTTP', r.status, r.ok ? '(risposta senza access_token)' : raw.slice(0, 200))
+      return { error: `Rinnovo dell'accesso a Shopify non riuscito (HTTP ${r.status}): si riprova da solo al prossimo giro. Se si ripete, contatta l'assistenza.` }
     }
 
     const n = Date.now()
@@ -98,8 +188,39 @@ export async function getValidShopifyToken(integrazione: any, db?: any): Promise
       expires_at: d.expires_in ? n + Number(d.expires_in) * 1000 : null,
       refresh_expires_at: d.refresh_token_expires_in ? n + Number(d.refresh_token_expires_in) * 1000 : cred.refresh_expires_at,
     }
-    const supabase = db || await createServerSupabase()
-    await supabase.from('integrazioni').update({ credenziali: newCred }).eq('id', integrazione.id)
+    // IL TOKEN NUOVO LO SALVA IL CLIENT DI SERVIZIO, CHIUNQUE CHIAMI. Fino al 21/10/2026 lo salvava il client
+    // ricevuto: dalla sincronizzazione del portale e' quello della sessione del cliente, che `credenziali` non
+    // la puo' nemmeno leggere (app/api/integrazioni/shopify/sync), e l'esito non lo guardava nessuno: se il
+    // salvataggio non riusciva, il refresh token nuovo si perdeva in silenzio.
+    // ...E SOLO SE LA RIGA HA ANCORA IL REFRESH TOKEN APPENA USATO. Se intanto il callback ha salvato un
+    // collegamento nuovo, si tiene quello: per la guida Shopify "acquiring a token and refreshing one each
+    // retire the other's result", quindi questo rinnovo e' gia' ritirato, e scritto sopra lascerebbe la riga
+    // con un refresh token morto. Il token appena avuto vale comunque fino alla sua scadenza: serve a questa
+    // chiamata.
+    // ...E UN RINNOVO RIUSCITO RIMETTE 'attivo' UNA RIGA SEGNATA 'errore'. Riuscire col refresh token che la
+    // riga ha ancora prova che il collegamento e' vivo. Senza questo, due rinnovi insieme lasciavano in 'errore'
+    // un negozio sano: il segno di chi perde (condizionato a quel refresh token) poteva arrivare prima del
+    // salvataggio di chi vince, che toccava solo le credenziali. Il cron salta le righe in 'errore', «Ordini
+    // Shopify» spariva dal menu, e gli ordini non arrivavano finche' il negoziante non riapriva l'app. Due
+    // scritture condizionate allo stato, cosi' l'ordine col segno non conta piu': da 'attivo' si salvano le sole
+    // credenziali e l'avviso dell'ultima sincronizzazione resta; da 'errore' si toglie anche il motivo. Una riga
+    // 'disconnesso' (app disinstallata) non torna in vita: le sue credenziali sono vuote e non passa nessuna
+    // delle due.
+    const salva = async (dallo: 'attivo' | 'errore') => {
+      const campi = dallo === 'attivo' ? { credenziali: newCred } : { credenziali: newCred, stato: 'attivo', errore: null }
+      const { data, error } = await (createAdminSupabase().from('integrazioni') as any)
+        .update(campi).eq('id', integrazione.id).eq('stato', dallo)
+        .eq('credenziali->>refresh_token', String(refreshToken)).select('id')
+      return { salvata: !error && (data || []).length > 0, error }
+    }
+    const daAttivo = await salva('attivo')
+    if (daAttivo.error) console.error('[SHOPIFY][REFRESH] token rinnovato ma NON salvato', shop, daAttivo.error.message)
+    else if (!daAttivo.salvata) {
+      const daErrore = await salva('errore')
+      if (daErrore.error) console.error('[SHOPIFY][REFRESH] token rinnovato ma NON salvato', shop, daErrore.error.message)
+      else if (daErrore.salvata) console.warn('[SHOPIFY][REFRESH] rinnovo riuscito su un collegamento segnato in errore: di nuovo attivo', shop)
+      else console.warn('[SHOPIFY][REFRESH] token rinnovato, ma la riga e\' cambiata nel frattempo (collegamento rifatto o app disinstallata): lasciata com\'e\'', shop)
+    }
     return { token: d.access_token }
   } catch (e: any) {
     return { error: 'Errore refresh token: ' + (e?.message || e) }
@@ -123,7 +244,12 @@ export async function shopifyGraphQL(shop: string, token: string, query: string,
   // quindi non si capiva mai quale dei due fosse. Ora si registra il corpo dell'errore.
   if (r.status === 401) {
     console.error('[SHOPIFY][401]', shop, raw.slice(0, 300))
-    throw new Error('Il collegamento con Shopify non è più valido (sessione scaduta o app disinstallata dal negozio). Ricollega il negozio dalle Integrazioni.')
+    // Il token e' stato revocato (app disinstallata, segreto dell'app revocato): la riga va in 'errore', e
+    // all'apertura da Shopify si rifa' l'autorizzazione. Il segno vale per QUESTO token (segnaCollegamentoMorto):
+    // una richiesta partita con un token gia' sostituito non rimette in 'errore' il collegamento nuovo. Vale
+    // anche dalla simulazione dell'annullo: il 401 e' un fatto del negozio, non un effetto della prova.
+    await segnaCollegamentoMorto({ shop }, { campo: 'access_token', valore: token }, TOKEN_NON_VALIDO)
+    throw new Error(TOKEN_NON_VALIDO)
   }
   if (r.status === 403) {
     console.error('[SHOPIFY][403]', shop, raw.slice(0, 300))
@@ -168,10 +294,21 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
   const righe = await righeDaEvadere(supabase, spedizioneIds, 'shopify')
   for (const { ordine, spedizioneId, nelPacco } of righe) {
     if (ordine.fulfillment_stato === 'ok') continue
+    // UN «OK» SCRITTO NEL FRATTEMPO NON SI SOVRASCRIVE.
+    //
+    // Dopo una spedizione partono due spinte quasi insieme (segna-spedito e il completamento della
+    // creazione quando arriva la LDV vera). Il 23/10/2026, sull'ordine #1036 del negozio di prova, la prima
+    // ha evaso e scritto 'ok'; la seconda aveva letto l'ordine un attimo prima che Shopify lo desse per
+    // evaso (fulfillment order gia' chiuso, ordine ancora UNFULFILLED) e ha scritto 'errore' sopra. Su
+    // Shopify l'ordine era Evaso col tracking giusto, nel portale «Store non aggiornato». Un esito diverso
+    // da 'ok' quindi si scrive solo se la riga non e' diventata 'ok' intanto: le righe gia' 'ok' qui non si
+    // toccano comunque (sopra si saltano).
     const segna = async (stato: string, errore: string | null) => {
-      await supabase.from('ordini_ecommerce')
+      let q = supabase.from('ordini_ecommerce')
         .update({ fulfillment_stato: stato, fulfillment_errore: errore })
         .eq('id', ordine.id)
+      if (stato !== 'ok') q = q.or('fulfillment_stato.is.null,fulfillment_stato.neq.ok')
+      await q
       esiti.push({ ordine: ordine.numero_ordine, stato, errore })
     }
     try {
@@ -190,10 +327,11 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
       const integr = await integrazioneDellaRiga(supabase, ordine)
       const shop = (integr?.credenziali as any)?.shop
       if (!integr || !shop) { await segna('errore', 'integrazione non trovata'); continue }
-      // Si passa il client GIA' pronto (nel cron e' l'admin/service_role): senza, getValidShopifyToken
-      // ripiega su createServerSupabase (user-scoped) e nel cron — che non ha sessione — la RLS blocca
-      // il salvataggio del token rinnovato. Shopify invalida il vecchio refresh_token appena lo usi:
-      // se il nuovo non si salva, al giro dopo il refresh fallisce e il negozio "si scollega" da solo.
+      // Il token rinnovato lo salva getValidShopifyToken col client di servizio, dal 21/10/2026 qualunque
+      // client gli si passi. Prima lo salvava con questo: senza, ripiegava su createServerSupabase
+      // (user-scoped) e nel cron — che non ha sessione — la RLS bloccava il salvataggio del token
+      // rinnovato. E un refresh_token nuovo non salvato vuol dire che il vecchio prima o poi smette di
+      // valere, e il negozio "si scollega" da solo.
       const tk = await getValidShopifyToken(integr, supabase)
       if (tk.error || !tk.token) { await segna('errore', tk.error || 'token non disponibile'); continue }
       const token = tk.token
@@ -277,6 +415,12 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
         //
         // Ora la verita' la dice Shopify: si guarda `displayFulfillmentStatus` dell'ORDINE.
         if (stato === 'FULFILLED') { await segna('ok', 'gia evaso su Shopify'); continue }
+        // ...e le sue evasioni: se ce n'e' gia' una attiva col NOSTRO tracking, l'ordine e' evaso da noi
+        // anche se lo stato dell'ordine non si e' ancora aggiornato (la seconda spinta della corsa qui sopra).
+        const conIlNostro = (ord?.fulfillments || []).some((f: any) =>
+          String(f?.status || '').toUpperCase() !== 'CANCELLED'
+          && (f?.trackingInfo || []).some((t: any) => String(t?.number || '').trim() === String(tracking).trim()))
+        if (conIlNostro) { await segna('ok', 'gia evaso su Shopify con questo tracking'); continue }
         if (trattenuti.length) {
           // 'attesa', NON 'errore'. Aspettiamo il negoziante (blocco antifrode, richiesta del
           // compratore, evasione differita): non abbiamo sbagliato niente noi. Con 'errore' il

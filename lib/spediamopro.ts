@@ -4,6 +4,7 @@
  * Units: weight in grams, dimensions in mm, prices in euro cents
  */
 import { testoIndicaReso } from './spedisci'
+import { telefonoValido } from './dati-negozio'
 
 const BASE_URL = 'https://core.spediamopro.com/api/v2'
 
@@ -146,7 +147,9 @@ export function sanitizzaIndirizzoSp(a: SpediamoproAddress, opts?: { emailObblig
 
 // Telefono valido per SpediamoPro? (solo cifre, 6–15). Usato per validare a monte il destinatario,
 // che SpediamoPro esige, e dare un errore CHIARO invece del 422 tecnico.
-export function telValidoSp(v: any): boolean { const d = String(v ?? '').replace(/[^0-9]/g, ''); return d.length >= 6 && d.length <= 15 }
+// La soglia vive in lib/dati-negozio (telefonoValido), un modulo che non nomina fornitori: la stessa
+// regola la usa la schermata del primo accesso, e due copie dello stesso numero finirebbero per divergere.
+export function telValidoSp(v: any): boolean { return telefonoValido(v) }
 
 // Email valida per SpediamoPro? Stesso criterio di pulisciEmail, cioe' di quella che arriva davvero al
 // corriere. Serve sulle consegne a un PUNTO, dove il codice di ritiro viaggia per email.

@@ -236,14 +236,63 @@ export function eventiDaFullTracking(tracking: any[]): EventoTracking[] {
 // ═══════════════════════════════════════════════════════════════════════════════════════
 const TERMINALI_LETTURA = new Set(['consegnata', 'annullata', 'annullamento_manuale'])
 
-export function statoDaLetturaPoste(eventi: { stato: string | null }[], statoAttuale: string | null): string | null {
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// IL RITORNO ALLA PARTENZA. Alcuni pacchi rientrati non dicono mai "reso": il corriere chiude il
+// viaggio di ritorno con un semplice "Consegnata (firma: ...)" nella filiale da cui il pacco era
+// partito. Il disegno pero' e' inconfondibile: mancata consegna (o giacenza) in una filiale, poi
+// consegna nella filiale di PARTENZA. Es. Edit Shop 2UW07WF015883: partito da Porto d'Ascoli,
+// "consegna non riuscita" a Venezia Mestre, poi "Consegnata (firma: Edite.shop)" a Porto d'Ascoli —
+// firmato dal mittente stesso. Regola voluta da Lorenzo (24/10/2026) per Poste e SpediamoPro. Prova
+// sulle 12.425 cronologie con una mancata consegna o una giacenza (24/10/2026): 254 riconosciute, 248
+// gia' resi al mittente per altre vie, 6 resi veri rimasti "in consegna", nessuna consegna vera al
+// destinatario presa per reso. La stessa prova sulla citta' del mittente (invece della filiale) dava
+// falsi, perche' la filiale del capoluogo serve anche i paesi intorno. Lo stato dell'evento, se manca,
+// si legge dalla frase col dizionario Poste.
+// ═══════════════════════════════════════════════════════════════════════════════════════
+export function ritornoAllaPartenza(
+  eventi: { stato?: string | null; descrizione?: string | null; luogo?: string | null; data_evento?: string | null }[],
+): boolean {
+  const norm = (v: any) => String(v || '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/[^a-z0-9à-ù' ]/g, ' ').replace(/\s+/g, ' ').trim()
+  // La stessa filiale arriva scritta in modi diversi ("Bari" e "BARI (BA)"): uguali se una contiene
+  // l'altra. Senza questo, AESSE GROUP 1UW1R00039324 (Grumo Appula -> Bari, consegnato al destinatario)
+  // risultava tornato alla partenza.
+  const stessa = (a: string, b: string) => !!a && !!b && (a === b || a.includes(b) || b.includes(a))
+  // Solo i luoghi scritti come filiali Poste ("Terni", "CD SARONNO", "Hub Nord"). Le cronologie Spedisci
+  // mescolano anche il comune con la provincia ("VILLABATE (PA)", "dalla sede operativa di MADDALONI
+  // (CE)"): la stessa filiale con due nomi fa sembrare un viaggio di ritorno una consegna normale (4
+  // consegne vere al destinatario prese per resi, nella prova sui dati del 24/10/2026).
+  const nomeComune = (v: any) => /\(\s*[a-z]{2}\s*\)\s*$/i.test(String(v || '').trim()) || /^dalla sede operativa/i.test(String(v || '').trim())
+  const conLuogo = (Array.isArray(eventi) ? eventi : [])
+    .filter((e) => e && e.data_evento && norm(e.luogo) && !nomeComune(e.luogo))
+    .map((e) => ({ luogo: norm(e.luogo), quando: String(e.data_evento), stato: e.stato || mappaStatoPoste(String(e.descrizione || '')) }))
+    .sort((a, b) => (a.quando < b.quando ? -1 : a.quando > b.quando ? 1 : 0))
+  const partenza = conLuogo.find((e) => e.stato === 'spedita' || e.stato === 'in_transito')
+  if (!partenza) return false
+  // La filiale di DESTINAZIONE e' quella del primo giro in consegna. Se coincide con la partenza la
+  // spedizione e' locale, e "consegnata alla partenza" e' la consegna normale al destinatario (prima
+  // di questa condizione Giugliano -> Giugliano o Roma -> Roma risultavano tornate indietro).
+  const iDest = conLuogo.findIndex((e) => e.stato === 'in_consegna')
+  if (iDest < 0 || stessa(conLuogo[iDest].luogo, partenza.luogo)) return false
+  const destinazione = conLuogo[iDest].luogo
+  let fallimento = -1
+  conLuogo.forEach((e, i) => { if (i >= iDest && (e.stato === 'non_consegnato' || e.stato === 'in_giacenza')) fallimento = i })
+  if (fallimento < 0 || stessa(conLuogo[fallimento].luogo, partenza.luogo)) return false
+  const consegna = conLuogo.slice(fallimento + 1).filter((e) => e.stato === 'consegnata').pop()
+  return !!consegna && stessa(consegna.luogo, partenza.luogo) && !stessa(consegna.luogo, destinazione)
+}
+
+export function statoDaLetturaPoste(
+  eventi: { stato: string | null; descrizione?: string | null; luogo?: string | null; data_evento?: string | null }[],
+  statoAttuale: string | null,
+): string | null {
   // IL RESO VINCE SULLA CONSEGNA, ANCHE SE ARRIVA PRIMA.
   // Un pacco rifiutato torna indietro e il viaggio di ritorno finisce con "Consegnata (firma: ...)":
   // quella e' la consegna AL MITTENTE. Prendendo lo stato piu' avanzato, consegnata (7) batteva
   // reso (6) e il pacco risultava consegnato: 221 spedizioni al 17/09/2026, con il costo del reso
   // mai addebitato alla rete. Se nella cronologia c'e' un reso, lo stato e' reso — e qui si
   // DECLASSA anche da 'consegnata', perche' e' l'unico modo di correggere quelle gia' sbagliate.
-  if (eventi.some((e) => e.stato === 'reso_mittente')) {
+  // Anche il pacco che torna alla filiale di partenza senza mai dire "reso" (ritornoAllaPartenza).
+  if (eventi.some((e) => e.stato === 'reso_mittente') || ritornoAllaPartenza(eventi)) {
     return (statoAttuale === 'reso_mittente' || statoAttuale === 'annullata' || statoAttuale === 'annullamento_manuale')
       ? null : 'reso_mittente'
   }

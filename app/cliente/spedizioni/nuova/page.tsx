@@ -243,7 +243,9 @@ export default function NuovaSpedizioneCliente() {
     fetch('/api/cliente/dati').then(r=>r.json()).then(c => {
       if (!c || c.error) return
       setClienteData(c)
-      setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
+      // email_mittente, non email: per il conto nato da Shopify l'email del conto e' un indirizzo nostro
+      // che non riceve posta, e finiva nel mittente di ogni spedizione (la regola e' nella rotta).
+      setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:(c.email_mittente??c.email)||'',telefono:c.telefono||''})
     })
   }, [])
 
@@ -342,7 +344,7 @@ export default function NuovaSpedizioneCliente() {
   // Il mittente torna ai dati del cliente (il cliente spedisce sempre da sé). Il banner successo resta.
   function resetForm() {
     const c = clienteData
-    if (c) setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:c.email||'',telefono:c.telefono||''})
+    if (c) setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:(c.email_mittente??c.email)||'',telefono:c.telefono||''})
     setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
     setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
     setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setHscode(''); setRifOrdine('')

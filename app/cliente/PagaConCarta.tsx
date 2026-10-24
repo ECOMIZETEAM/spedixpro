@@ -1,13 +1,44 @@
 'use client'
 import { useState } from 'react'
+import { RICARICHE_CARTA_SOSPESE } from '@/lib/ricarica-carta'
+import DatiBonifico from './DatiBonifico'
 
-// Riquadro "credito insufficiente" con la scorciatoia di pagamento: addebita la carta salvata per
-// l'esatto mancante e, appena il credito sale, RIPROVA la spedizione da solo — nessun redirect,
-// nessuna cassa. Se non c'è carta salvata o la banca chiede il 3DS, manda alla Ricarica (che la
-// cassa Stripe sa gestire, e la prima volta la carta la salva).
-export default function PagaConCarta({ mancante, costo, credito, onPagato }: {
-  mancante: number; costo: number; credito: number; onPagato: () => void
-}) {
+type Props = { mancante: number; costo: number; credito: number; onPagato: () => void }
+
+// Riquadro "credito insufficiente" di Nuova spedizione, Ordini e Import: compare quando il credito a
+// scalare non copre la spedizione o il lotto.
+//
+// Con la carta sospesa (lib/ricarica-carta) non c'e' nessun pulsante di pagamento. Fino al 21/10/2026 il
+// riquadro non guardava l'interruttore: mostrava a tutti "Paga con la carta e spedisci" e la rotta
+// rispondeva sempre "sospeso", quindi l'unica azione offerta non funzionava mai. Ora dice quanto manca
+// e mostra gia' qui i dati per il bonifico del master del cliente, gli stessi della pagina Ricarica
+// (DatiBonifico). onPagato resta nella firma, cosi' i tre chiamanti non cambiano, ma serve solo alla
+// carta: col bonifico il credito lo carica il master quando il versamento arriva, e la spedizione la
+// rilancia il cliente.
+export default function PagaConCarta(props: Props) {
+  if (RICARICHE_CARTA_SOSPESE) {
+    return <RiquadroBonifico mancante={props.mancante} costo={props.costo} credito={props.credito} />
+  }
+  return <RiquadroCarta {...props} />
+}
+
+function RiquadroBonifico({ mancante, costo, credito }: Omit<Props, 'onPagato'>) {
+  return (
+    <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+      <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 14 }}>Credito insufficiente</div>
+      <div style={{ color: '#9a3412', fontSize: 13, marginTop: 3 }}>
+        Spedizione € {costo.toFixed(2)} · credito € {credito.toFixed(2)} — mancano <b>€ {mancante.toFixed(2)}</b>.
+      </div>
+      <DatiBonifico variante="riquadro" />
+    </div>
+  )
+}
+
+// La scorciatoia della carta: addebita la carta salvata per l'esatto mancante e, appena il credito
+// sale, RIPROVA la spedizione da solo — nessun redirect, nessuna cassa. Se non c'è carta salvata o la
+// banca chiede il 3DS, manda alla Ricarica (che la cassa Stripe sa gestire, e la prima volta la carta
+// la salva).
+function RiquadroCarta({ mancante, costo, credito, onPagato }: Props) {
   const [invio, setInvio] = useState(false)
   const [msg, setMsg] = useState('')
 

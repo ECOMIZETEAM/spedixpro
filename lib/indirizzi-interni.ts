@@ -36,6 +36,12 @@ export function emailContoLedger(condivisioneId: string): string {
   return `ledger-${condivisioneId}@${DOMINIO_LEDGER}`
 }
 
+// Vero solo per l'indirizzo dei conti nati dall'installazione dell'app Shopify (emailContoShopify). Il
+// dominio vecchio non conta: i 3 conti Shopify di luglio sono stati spostati qui il 20/10.
+export function eIndirizzoContoShopify(email: string | null | undefined): boolean {
+  return dominioDi(email) === DOMINIO_SHOPIFY
+}
+
 // Vero per gli indirizzi inventati da noi: i due sottodomini ESATTI e tutto moovexpress.app. Falso per
 // le caselle vere di moovexpress.com (info@, noreply@, demo-...@) e per i domini che solo somigliano.
 export function eIndirizzoInterno(email: string | null | undefined): boolean {

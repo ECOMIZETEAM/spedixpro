@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { righeFileCod } from '@/lib/cod-file-righe'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
@@ -186,7 +187,7 @@ export default function DistinteContrassegniPage() {
         } else {
           if (!xlsxRead) { const x = await import('xlsx'); xlsxUtils = x.utils; xlsxRead = x.read }
           const wb = xlsxRead(await file.arrayBuffer())
-          righe = xlsxUtils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
+          righe = righeFileCod(xlsxUtils, wb)
         }
       } catch { righe = [] }
       letti.push({ name: file.name, righe })

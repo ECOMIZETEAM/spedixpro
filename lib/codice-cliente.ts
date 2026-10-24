@@ -65,8 +65,9 @@ export async function prossimoNumeroCliente(db: any, masterId: string): Promise<
 // portale del master, la registrazione dal sito o la riconferma di un preventivo accettassero
 // quell'indirizzo, chi conosce il nome di un negozio (e' pubblico) potrebbe preparargli il conto prima
 // che installi, e poi vederne ordini e compratori. Le porte che CREANO clienti passano tutte da qui,
-// quindi la regola della creazione sta qui: solo l'installazione dichiara di usare un indirizzo
-// interno. I conti-ledger nascono altrove (condivisioni/accetta) e da qui non passano.
+// quindi la regola della creazione sta qui, e dal 23/10/2026 senza eccezioni: l'installazione Shopify,
+// l'unica che dichiarava di usare un indirizzo interno, non crea piu' conti (l'app e' solo per chi e'
+// gia' cliente). I conti-ledger nascono altrove (condivisioni/accetta) e da qui non passano.
 //
 // Copre la creazione, non il cambio: l'indirizzo si scrive ancora su un cliente che esiste gia', dal
 // cambio email della scheda (app/api/clienti/[id]/route.ts) o con una PATCH diretta del cliente sulla
@@ -86,9 +87,8 @@ export function indirizzoInternoRifiutato(error: any): boolean {
 // alla cieca: prima si ripartiva da CLI-0001.
 export async function inserisciClienteConCodice(
   db: any, campi: Record<string, any> & { master_id: string }, colonne = 'id',
-  opzioni: { indirizzoInterno?: boolean } = {},
 ): Promise<{ data: any; error: any; codice: string }> {
-  if (eIndirizzoInterno(campi.email) && !opzioni.indirizzoInterno) {
+  if (eIndirizzoInterno(campi.email)) {
     console.warn('[CODICE CLIENTE] creazione rifiutata: indirizzo email interno', campi.master_id)
     return { data: null, error: { code: INDIRIZZO_INTERNO, message: 'indirizzo email interno della piattaforma' }, codice: '' }
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { wooGet } from '@/lib/woo'
+import { COME_SI_COLLEGA_SHOPIFY } from '@/lib/shopify-scheda-app'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -29,7 +30,8 @@ export async function POST(req: NextRequest) {
     // al cliente — qui riconosciamo la piattaforma vera e lo spieghiamo. (Caso reale: ilpapiroshop.com
     // è Storeden, non WooCommerce — l'errore mostrava l'HTML di una pagina "storeden-404.html".)
     if (/storeden/i.test(msg)) return NextResponse.json({ error: 'Questo sito è realizzato con Storeden, non con WooCommerce: non ha le API WooCommerce da collegare. Le integrazioni supportano WooCommerce, Shopify e PrestaShop.' }, { status: 400 })
-    if (/cdn\.shopify|myshopify|x-shopify/i.test(msg)) return NextResponse.json({ error: 'Questo sito sembra Shopify, non WooCommerce: collegalo dalla sezione Shopify, non da WooCommerce.' }, { status: 400 })
+    // Shopify non si collega scrivendo il sito (requisito 2.3.1): la frase sta con la scheda dell'app.
+    if (/cdn\.shopify|myshopify|x-shopify/i.test(msg)) return NextResponse.json({ error: 'Questo sito sembra Shopify, non WooCommerce: ' + COME_SI_COLLEGA_SHOPIFY }, { status: 400 })
     if (/prestashop/i.test(msg)) return NextResponse.json({ error: 'Questo sito sembra PrestaShop, non WooCommerce: collegalo dalla sezione PrestaShop.' }, { status: 400 })
     if (/<!doctype|<html[\s>]/i.test(msg)) return NextResponse.json({ error: 'Questo indirizzo non espone l\'API WooCommerce (risponde con una pagina web, non con i dati). Controlla che sia davvero un sito WooCommerce e che l\'API REST sia attiva su /wp-json/wc/v3.' }, { status: 400 })
     return NextResponse.json({ error: 'Impossibile raggiungere WooCommerce. Verifica URL e che le API REST siano attive. ' + msg.slice(0, 120) }, { status: 400 })
