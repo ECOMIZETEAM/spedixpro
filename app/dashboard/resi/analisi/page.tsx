@@ -6,8 +6,9 @@ import { COLORI_RESI, RESI_PERIODI, type PeriodoResi } from '@/lib/resi-percentu
 // ANALISI RESI (richiesta di Lorenzo, 17/10/2026): la percentuale di resi di ogni cliente della rete, per
 // accorgersi per tempo di chi truffa o sta per fallire. Clienti diretti e sotto-master, che si aprono sui
 // propri clienti e sotto-master; un sotto-master porta il totale della sua rete e quanti clienti colorati
-// ha dentro. Periodo a scelta: le spedizioni create negli ultimi 30, 90 o 180 giorni (i resi rientrano
-// anche dopo un mese: a 30 giorni la percentuale e' piu' bassa del vero).
+// ha dentro. Periodo a scelta, 30, 90 o 180 giorni: le spedizioni partite nel periodo e i resi RIENTRATI nel
+// periodo, anche di pacchi partiti prima (Lorenzo, 24/10/2026: "se quel reso rientra oggi, deve rientrare su
+// oggi").
 
 type Nodo = {
   tipo: 'cliente' | 'master'; id: string; nome: string; partite: number; resi: number; pct: number
@@ -99,7 +100,7 @@ export default function AnalisiResiPage() {
       <div style={{ marginBottom: '14px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Analisi resi</h1>
         <p style={{ color: '#4b5563', fontSize: '13px', margin: '4px 0 0' }}>
-          La percentuale di resi di ogni cliente della tua rete, sulle spedizioni create nel periodo. Un cliente con troppi resi va guardato da vicino: può essere un problema di merce, di destinatari o di affidabilità.
+          La percentuale di resi di ogni cliente della tua rete: i pacchi rientrati nel periodo, anche se partiti prima, sulle spedizioni partite nel periodo. Un cliente con troppi resi va guardato da vicino: può essere un problema di merce, di destinatari o di affidabilità.
         </p>
       </div>
 
@@ -115,7 +116,6 @@ export default function AnalisiResiPage() {
           </div>
           <LegendaResi />
         </div>
-        {giorni === 30 && <div style={{ fontSize: '11.5px', color: '#92400e', marginTop: '8px' }}>A 30 giorni molti resi non sono ancora rientrati: la percentuale è più bassa del vero.</div>}
         {dati && !caricamento && (
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '14px' }}>
             <div style={{ flex: '1 1 160px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '10px 12px' }}>

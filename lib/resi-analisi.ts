@@ -4,7 +4,9 @@ import { livelloResi, GRAVITA, type LivelloResi } from '@/lib/resi-percentuale'
 // clienti e i propri sotto-master, a qualunque profondita'. Ogni nodo porta spedizioni partite, resi e
 // colore (lib/resi-percentuale); un sotto-master porta il totale della sua rete e quanti clienti colorati
 // ci sono dentro, cosi' un problema in fondo alla rete si vede gia' dalla prima riga.
-// I numeri li conta il database (resi_per_cliente_v2); qui si mettono solo in fila.
+// I numeri li conta il database (resi_per_cliente_v2); qui si mettono solo in fila. Un reso conta nel giorno
+// in cui rientra (24/10/2026): un cliente che nel periodo non ha spedito ma ha avuto rientri resta, con 0
+// partite — e' proprio il caso da vedere, un cliente che smette di spedire mentre i pacchi gli tornano indietro.
 
 export type NodoResi = {
   tipo: 'cliente' | 'master'
@@ -41,7 +43,7 @@ export async function analisiResiRete(
   const { data: righe, error } = await admin.rpc('resi_per_cliente_v2', { p_master: masterId, p_dal: dal })
   if (error) throw new Error('Analisi resi non riuscita: ' + error.message)
   let rr: { master_id: string; cliente_id: string; partite: number; resi: number }[] =
-    (Array.isArray(righe) ? righe : []).map((r: any) => ({ ...r, partite: Number(r.partite) || 0, resi: Number(r.resi) || 0 })).filter((r: any) => r.partite > 0)
+    (Array.isArray(righe) ? righe : []).map((r: any) => ({ ...r, partite: Number(r.partite) || 0, resi: Number(r.resi) || 0 })).filter((r: any) => r.partite > 0 || r.resi > 0)
   if (opz.soloClienti) { const ok = new Set(opz.soloClienti); rr = rr.filter(r => ok.has(r.cliente_id)) }
 
   const { data: ms } = await admin.from('masters').select('id,nome,parent_master_id')
@@ -80,7 +82,7 @@ export async function analisiResiRete(
     for (const sub of (figliMaster.get(id) || [])) {
       if (visti.has(sub)) continue
       const n = nodoMaster(sub, visti)
-      if (n.partite > 0) figli.push(n)
+      if (n.partite > 0 || n.resi > 0) figli.push(n)
     }
     figli.sort(ordina)
     const partite = figli.reduce((s, f) => s + f.partite, 0)
