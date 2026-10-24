@@ -146,6 +146,24 @@ export async function GET(req: NextRequest) {
         // reso_mittente — e il trigger DB (trg_reso_da_addebitare) mette in coda l'addebito del reso.
         // Vince su tutto il resto (anche su una eventuale eccezione/giacenza dello stesso giro).
         if (spediamoproEventiIndicanoReso(tr.events)) nuovo = 'reso_mittente'
+        // IL RITORNO ALLA PARTENZA (lib/tracking-poste): non consegnato in una filiale, poi consegnato in
+        // quella da cui era partito = tornato al mittente, anche se nessun evento dice "reso" (4 casi nello
+        // storico al 24/10/2026, es. IUZZOLINI 1UW07WF351807: mancata consegna ad Albignasego, consegnato a
+        // Cosenza col nome del mittente). Si guarda solo quando SpediamoPro dichiara la consegna: gli
+        // eventi di questo giro e quelli gia' salvati, perche' le filiali le porta la cronologia Poste
+        // letta da OneTracking, non sempre questa. Se la lettura non riesce resta la consegna.
+        if (nuovo === 'consegnata' && s.stato !== 'consegnata') {
+          try {
+            const { normalizzaEventi } = await import('@/lib/tracking-eventi')
+            const { ritornoAllaPartenza } = await import('@/lib/tracking-poste')
+            const { eventi: diQuestoGiro } = normalizzaEventi(tr.events, {
+              data: ['at', 'date', 'datetime', 'data'], descrizione: ['description', 'title'], luogo: ['location', 'place', 'luogo'],
+            })
+            const { data: salvati } = await admin.from('tracking_events')
+              .select('stato,descrizione,luogo,data_evento').eq('spedizione_id', s.id).limit(500)
+            if (ritornoAllaPartenza([...(salvati || []), ...diQuestoGiro])) nuovo = 'reso_mittente'
+          } catch { /* resta la consegna */ }
+        }
         if (tr.trackingCode) nuovoTracking = tr.trackingCode
 
         // CRONOLOGIA. Gli eventi erano gia' qui — `tr.events`, usati sopra per riconoscere il reso —
