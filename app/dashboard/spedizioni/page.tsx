@@ -742,7 +742,7 @@ async function apriTracking(s: any) {
                             <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
                               style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
                           )}
-                          <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} />
+                          <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} clienteDiretto={!s.master_rete_id && s.clienti?.ragione_sociale ? nomeClientePulito(s.clienti.ragione_sociale) : undefined} />
                         </div>
                       </td>
                     </tr>

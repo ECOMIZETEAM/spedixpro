@@ -16,6 +16,10 @@ function Badge({ stato }: { stato: string }) {
   const s = STATI[stato] || STATI.aperto
   return <span style={{ background: s.bg, color: s.color, padding: '3px 10px', borderRadius: '5px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>{s.label}</span>
 }
+// 'master_per_cliente' = aperto dal master sulla spedizione di un suo cliente (api/assistenza/apri):
+// il ticket e' del cliente, che lo vede, ma la prima riga l'ha scritta l'assistenza.
+const etichettaApertura = (tipo: string) =>
+  tipo === 'master' ? 'Sotto-master' : tipo === 'master_per_cliente' ? 'Cliente · aperto dall\'assistenza' : 'Cliente'
 
 export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket' | 'pod' }) {
   const isPod = categoria === 'pod'
@@ -173,6 +177,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     setSalvando(false)
     if (j.error) { setMsg(j.error); return }
     setApri(false); setNuovo({ oggetto: '', messaggio: '' }); carica()
+    // LDV di un cliente diretto: il ticket e' nato del cliente e resta qui, non e' salito. Lo si
+    // apre subito, cosi' si vede di chi e' e c'e' gia' sotto mano «Inoltra» se va girato sopra.
+    if (j.per_cliente && j.id) apriDettaglio({ id: j.id })
   }
 
   // Ricerca: per LDV (oggetto), numero pratica (codice) O cliente (aperto_da). Va applicata a TUTTE
@@ -272,7 +279,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')} {new Date(t.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</td>
                   <td style={td}>
                     <div style={{ fontWeight: 600 }}>{t.aperto_da || '—'}</div>
-                    <div style={{ fontSize: '11px', color: '#888' }}>{t.tipo_apertura === 'master' ? 'Sotto-master' : 'Cliente'}</div>
+                    <div style={{ fontSize: '11px', color: '#888' }}>{etichettaApertura(t.tipo_apertura)}</div>
                   </td>
                   <td style={td}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
@@ -392,7 +399,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
             </div>
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '12px', color: '#666' }}>
-                <span><b style={{ color: '#1a1a1a' }}>{sel.aperto_da}</b> ({sel.tipo_apertura === 'master' ? 'Sotto-master' : 'Cliente'})</span>
+                <span><b style={{ color: '#1a1a1a' }}>{sel.aperto_da}</b> ({etichettaApertura(sel.tipo_apertura)})</span>
                 <Badge stato={sel.stato} />
               </div>
 
