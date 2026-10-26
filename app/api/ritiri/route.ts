@@ -2,6 +2,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { etichettaRitiriSenzaCodice } from '@/lib/ritiro-codice'
 
 
 // STATO RITIRI SPEDIAMOPRO: rinfresca best-effort dai pickup live (GET /pickups/{id}).
@@ -72,6 +73,7 @@ export async function GET(req: NextRequest) {
     const lista = await fetchAll(build)
     const { createAdminSupabase: _admR } = await import('@/lib/supabase-admin')
     await rinfrescaStatiPickup(_admR(), lista)
+    await etichettaRitiriSenzaCodice(_admR(), lista)
     return NextResponse.json(lista)
   }
 
@@ -91,7 +93,10 @@ export async function GET(req: NextRequest) {
       if (al) q = q.lte('created_at', al + 'T23:59:59')
       return q
     }
-    return NextResponse.json(await fetchAll(buildAg))
+    const listaAg = await fetchAll(buildAg)
+    const { createAdminSupabase: _admAg } = await import('@/lib/supabase-admin')
+    await etichettaRitiriSenzaCodice(_admAg(), listaAg)
+    return NextResponse.json(listaAg)
   }
 
   // Master/admin: rete = sé + discendenza. Risale la catena ANCHE con "Tutti i clienti".
@@ -136,6 +141,7 @@ export async function GET(req: NextRequest) {
   }
   const data = await fetchAll(build)
   await rinfrescaStatiPickup(admin, data)
+  await etichettaRitiriSenzaCodice(admin, data)
 
   // Etichetta col nome del sotto-master per i ritiri della rete (null per i miei).
   let out = data || []

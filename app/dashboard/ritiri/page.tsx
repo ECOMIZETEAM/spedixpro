@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import CodiceRitiroMancante from '@/app/components/CodiceRitiroMancante'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -163,7 +164,7 @@ export default function RitiriPage() {
                     <td style={{padding:'9px 12px'}}>
                       <a href={'/dashboard/ritiri/'+r.id}
                         style={{color:'#f97316',fontWeight:'600',fontSize:'12px',textDecoration:'none'}}>
-                        {r.cod_ritiro||'—'}
+                        {r.cod_ritiro||<CodiceRitiroMancante stato={r.codice_stato}/>}
                       </a>
                     </td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{r.pagamento||'Porto franco'}</td>

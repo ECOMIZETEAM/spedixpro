@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const esito = await rincorriCodiciRitiro(admin, { budgetMs: 40000 })
   if (esito.trovati || esito.errori) {
-    console.log('[RITIRO-CODICE] trovati', esito.trovati, '| errori', esito.errori, '| chieste', esito.chieste, 'su', esito.candidate, '| senza codice:', JSON.stringify(esito.testi))
+    console.log('[RITIRO-CODICE] trovati', esito.trovati, 'dopo minuti', JSON.stringify(esito.minutiTrovati), '| errori', esito.errori, '| chieste', esito.chieste, 'su', esito.candidate, '| senza codice:', JSON.stringify(esito.testi))
   }
   return NextResponse.json({ ok: true, ...esito })
 }

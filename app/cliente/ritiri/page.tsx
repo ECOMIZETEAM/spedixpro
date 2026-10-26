@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import CodiceRitiroMancante from '@/app/components/CodiceRitiroMancante'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -163,7 +164,7 @@ export default function RitiriPage() {
                       {/* Testo, non link: puntava a /cliente/ritiri/<id>, una pagina che non e' mai esistita,
                           e chi cliccava il codice trovava una 404 (per Shopify motivo di rifiuto, 2.1.1). */}
                       <span style={{color:'#1a1a1a',fontWeight:'600',fontSize:'12px'}}>
-                        {r.cod_ritiro||'—'}
+                        {r.cod_ritiro||<CodiceRitiroMancante stato={r.codice_stato}/>}
                       </span>
                     </td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{r.pagamento||'Porto franco'}</td>

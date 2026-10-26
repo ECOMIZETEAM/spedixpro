@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import CodiceRitiroMancante from '@/app/components/CodiceRitiroMancante'
 
 const sel = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
 const inp = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}
@@ -196,7 +197,7 @@ export default function ElencoRitiriPage() {
                   return (
                     <Fragment key={r.id}>
                     <tr style={{ background: '#fff' }}>
-                      <td style={{ padding: '9px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || '-'}</td>
+                      <td style={{ padding: '9px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || <CodiceRitiroMancante stato={r.codice_stato} />}</td>
                       <td style={{ padding: '9px 14px', color: '#1a1a1a' }}>
                         {r.clienti?.ragione_sociale || '-'}
                         {r.master_rete && <div style={{ fontSize: '11px', color: '#4f46e5', fontWeight: 600 }}>▸ {r.master_rete}</div>}

@@ -12,18 +12,71 @@
 // l'API, il riepilogo della creazione e /api/ritiri/crea) e sulla riga dell'elenco Ritiri. Chiunque lo
 // trovi passa da qui, cosi' i due posti non si separano.
 export async function salvaCodiceRitiro(admin: any, spedizioneId: string, codice: string): Promise<void> {
-  // raw_response si rilegge adesso e si aggiunge una chiave sola: lo scrivono anche la creazione in
-  // background e il tracking, e una copia letta prima ne cancellerebbe i cambiamenti.
-  const { data: s } = await admin.from('spedizioni').select('raw_response,ritiro_id').eq('id', spedizioneId).maybeSingle()
-  if (!s) return
-  await admin.from('spedizioni')
-    .update({ raw_response: { ...((s.raw_response as any) || {}), _codiceRitiro: codice } })
-    .eq('id', spedizioneId)
+  const s = await aggiungiARaw(admin, spedizioneId, { _codiceRitiro: codice })
   // Solo se la riga e' ancora vuota: una riga Ritiri puo' raccogliere piu' spedizioni, e il codice
   // che l'utente ha gia' visto non cambia sotto i suoi occhi.
-  if (s.ritiro_id) {
+  if (s?.ritiro_id) {
     await admin.from('ritiri').update({ cod_ritiro: codice, tracking_ritiro: codice })
       .eq('id', s.ritiro_id).is('cod_ritiro', null)
+  }
+}
+
+// raw_response si rilegge adesso e si aggiungono solo le chiavi date: lo scrivono anche la creazione
+// in background e il tracking, e una copia letta prima ne cancellerebbe i cambiamenti.
+async function aggiungiARaw(admin: any, spedizioneId: string, chiavi: Record<string, any>): Promise<{ ritiro_id: string | null } | null> {
+  const { data: s } = await admin.from('spedizioni').select('raw_response,ritiro_id').eq('id', spedizioneId).maybeSingle()
+  if (!s) return null
+  await admin.from('spedizioni')
+    .update({ raw_response: { ...((s.raw_response as any) || {}), ...chiavi } })
+    .eq('id', spedizioneId)
+  return s
+}
+
+// COSA SI MOSTRA AL POSTO DEL CODICE, finche' manca. Il trattino non diceva niente: ne' a chi aspetta un
+// codice in arrivo, ne' a chi ha il pacco ancora in negozio perche' il ritiro non e' mai stato
+// confermato (Poste Business Express V dal Sud, dal 20/10/2026: "Not available" per giorni).
+//   - "In attesa": il corriere scrive di aver inoltrato la richiesta (BRT, codice in arrivo in qualche
+//     ora) e la rincorsa lo sta ancora cercando, oppure la richiesta ha meno di 2 ore, quando di norma
+//     il codice arriva.
+//   - "Non confermato": tutto il resto. E' alla lettera cio' che sappiamo: nessuna conferma.
+// `testo` e' la frase del corriere salvata dalla rincorsa (raw_response._ritiroTesto); sulle
+// spedizioni nate prima che la si salvasse manca, e decide l'eta'.
+export type StatoCodiceRitiro = 'in_attesa' | 'non_confermato'
+const ATTESA_NORMALE_MS = 2 * 3600 * 1000
+// Oltre questa eta' la rincorsa smette di chiedere: se il codice non c'e', non arriva piu'.
+const FINESTRA_RINCORSA_MS = 3 * 24 * 3600 * 1000
+export function statoCodiceRitiro(creatoIl: string, testo: string | null, ora = Date.now()): StatoCodiceRitiro {
+  const eta = ora - new Date(creatoIl).getTime()
+  if (/RICHIESTA\s+INOLTRATA/i.test(String(testo || '')) && eta < FINESTRA_RINCORSA_MS) return 'in_attesa'
+  return eta < ATTESA_NORMALE_MS ? 'in_attesa' : 'non_confermato'
+}
+
+// Per l'elenco Ritiri: aggiunge `codice_stato` alle righe dei contratti DVA ancora senza codice. Si legge
+// col client di servizio solo il minimo (eta' e frase della prima spedizione della riga): l'utente
+// riceve una delle due parole, mai la frase del corriere.
+export async function etichettaRitiriSenzaCodice(admin: any, righe: any[]): Promise<void> {
+  const vuote = (righe || []).filter((r: any) => !r.cod_ritiro && r.corriere_id)
+  if (!vuote.length) return
+  const corrIds = Array.from(new Set(vuote.map((r: any) => r.corriere_id)))
+  const { data: corrs } = await admin.from('corrieri').select('id,tipo').in('id', corrIds)
+  const dva = new Set((corrs || []).filter((c: any) => c.tipo === 'easyparcel').map((c: any) => c.id))
+  const daGuardare = vuote.filter((r: any) => dva.has(r.corriere_id))
+  if (!daGuardare.length) return
+  // A blocchi: un .in() con centinaia di id fa un indirizzo troppo lungo, e la lettura fallisce
+  // senza errore visibile (e' successo alla pulizia dei dati Amazon).
+  const perRitiro = new Map<string, { created_at: string; testo: string | null }>()
+  const ids = daGuardare.map((r: any) => r.id)
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data: sped } = await admin.from('spedizioni')
+      .select('ritiro_id,created_at,testo:raw_response->>_ritiroTesto')
+      .in('ritiro_id', ids.slice(i, i + 150))
+      .order('created_at', { ascending: true })
+    for (const s of sped || []) if (!perRitiro.has(s.ritiro_id)) perRitiro.set(s.ritiro_id, { created_at: s.created_at, testo: s.testo })
+  }
+  const ora = Date.now()
+  for (const r of daGuardare) {
+    const s = perRitiro.get(r.id)
+    r.codice_stato = statoCodiceRitiro(s?.created_at || r.created_at, s?.testo || null, ora)
   }
 }
 
@@ -31,6 +84,7 @@ export type EsitoRincorsa = {
   candidate: number             // spedizioni col ritiro senza codice, ultimi 3 giorni
   chieste: number               // quelle a cui toccava in questo giro
   trovati: number               // codice arrivato e salvato
+  minutiTrovati: number[]       // dopo quanto e' arrivato ciascun codice: misura le 2 ore di statoCodiceRitiro
   errori: number
   testi: Record<string, number> // cosa scrive il fornitore al posto del codice (per i log)
 }
@@ -59,10 +113,10 @@ function tocca(id: string, periodo: number, giro: number): boolean {
 }
 
 export async function rincorriCodiciRitiro(admin: any, opts: { budgetMs?: number } = {}): Promise<EsitoRincorsa> {
-  const esito: EsitoRincorsa = { candidate: 0, chieste: 0, trovati: 0, errori: 0, testi: {} }
+  const esito: EsitoRincorsa = { candidate: 0, chieste: 0, trovati: 0, minutiTrovati: [], errori: 0, testi: {} }
   const avvio = Date.now()
   const { data: candidate, error } = await admin.from('spedizioni')
-    .select('id,created_at,ep_ordine:raw_response->>_idOrdine,corrieri!inner(tipo,credenziali)')
+    .select('id,created_at,ep_ordine:raw_response->>_idOrdine,ep_testo:raw_response->>_ritiroTesto,corrieri!inner(tipo,credenziali)')
     .eq('corrieri.tipo', 'easyparcel')
     .eq('richiedi_ritiro', true)
     .is('raw_response->>_codiceRitiro', null)
@@ -71,8 +125,7 @@ export async function rincorriCodiciRitiro(admin: any, opts: { budgetMs?: number
     .not('numero', 'like', 'TMP-%')
     .not('numero', 'like', 'DVA-%')
     .not('stato', 'in', '(annullata,storno_richiesto)')
-    // Tre giorni: se dopo tre giorni il codice non c'e', non arriva piu'.
-    .gte('created_at', new Date(avvio - 3 * 24 * 3600 * 1000).toISOString())
+    .gte('created_at', new Date(avvio - FINESTRA_RINCORSA_MS).toISOString())
     // Le piu' recenti per prime: se il giro finisce il tempo, resta indietro chi aspetta da piu' tempo
     // e ha meno probabilita' di ricevere il codice.
     .order('created_at', { ascending: false })
@@ -100,7 +153,12 @@ export async function rincorriCodiciRitiro(admin: any, opts: { budgetMs?: number
         if (r.codiceRitiro) {
           await salvaCodiceRitiro(admin, s.id, r.codiceRitiro)
           esito.trovati++
+          esito.minutiTrovati.push(Math.round((Date.now() - new Date(s.created_at).getTime()) / 60000))
         } else {
+          // La frase si tiene sulla spedizione, e si riscrive solo quando cambia: decide cosa vede
+          // l'elenco Ritiri al posto del codice (statoCodiceRitiro).
+          const testo = r.testo.slice(0, 80)
+          if (testo && testo !== s.ep_testo) await aggiungiARaw(admin, s.id, { _ritiroTesto: testo })
           // Le date e i numeri fuori, cosi' le frasi uguali si contano insieme. Una frase nuova nei
           // log e' il segnale che il fornitore ha cambiato qualcosa, come il 25/10 su BRT.
           const k = (r.testo.replace(/\d[\d\-/.:]*/g, '#') || '(vuoto)').slice(0, 40)
