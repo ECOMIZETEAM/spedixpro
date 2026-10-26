@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
+import { spedizioniConColliLeggeri } from '@/lib/colli-senza-etichette'
 import { vedeLaRete } from '@/lib/perimetro'
 
 // Guadagno del master = quanto incassa dai clienti diretti e dai sotto-master diretti
@@ -61,10 +62,17 @@ export async function GET(req: NextRequest) {
       })
     }
     const calcAg = await creaCalcolatoreListinoCliente(admin, listinoAg)
+    // SENZA colli_dettaglio: li' dentro ci sono anche le etichette dei colli in base64 (fino a qualche MB
+    // per spedizione), e un agente con 3.800 spedizioni nel mese scaricava ~360 MB per disegnare la sua
+    // card. Il 25/10/2026 la stessa lettura dal Report Agenti ha fermato il database (vedi
+    // lib/guadagno-agente). Al listino servono solo peso e lati dei colli: arrivano senza etichette.
     const sped = await fetchAll(() => admin.from('spedizioni')
-      .select('id,costo_totale,created_at,stato,corriere_id,peso_reale,peso_fatturato,colli,dest_cap,dest_provincia,dest_citta,dest_paese,colli_dettaglio,contrassegno,assicurazione,servizi_accessori')
+      .select('id,costo_totale,created_at,stato,corriere_id,peso_reale,peso_fatturato,colli,dest_cap,dest_provincia,dest_citta,dest_paese,contrassegno,assicurazione,servizi_accessori')
       .in('cliente_id', idsCli).gte('created_at', dal).lte('created_at', alEnd)
       .order('created_at', { ascending: false }).order('id', { ascending: false }))
+    const colliLeggeri = await spedizioniConColliLeggeri(admin,
+      (sped || []).filter((x: any) => x.stato !== 'annullata').map((x: any) => x.id), '')
+    for (const sp of (sped || [])) (sp as any).colli_dettaglio = colliLeggeri.get((sp as any).id)?.colli_dettaglio ?? []
     // Quello che il cliente ha pagato DAVVERO (movimenti), non il campo sulla spedizione: cosi'
     // resi e giacenze entrano nel conto come nell'elenco. Le rettifiche no (vedi TIPI): il costo
     // dell'agente e' il listino sulla spedizione originale, e contare la ripesatura pagata dal

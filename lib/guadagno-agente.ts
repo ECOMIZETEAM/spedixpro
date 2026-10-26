@@ -1,6 +1,7 @@
 import { clientiAgente } from '@/lib/agente'
 import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
+import { spedizioniConColliLeggeri } from '@/lib/colli-senza-etichette'
 
 // GUADAGNO DI UN AGENTE nel periodo, secondo il metodo di compenso che il master gli ha assegnato.
 // Quattro strade esclusive:
@@ -51,11 +52,20 @@ export async function calcolaGuadagnoAgente(
   if (!clienti.length) return vuoto
 
   // Spedizioni dei suoi clienti nel periodo (le annullate non contano).
+  // SENZA colli_dettaglio. Li' dentro ci sono anche le ETICHETTE dei colli in base64 (fino a qualche MB
+  // per spedizione SDA EXPRESS L), e qui si leggevano per tutto il periodo a blocchi da 1.000, 4 alla
+  // volta: domenica 25/10/2026 alle 17:46 il Report Agenti ha esaurito la memoria del database, che si e'
+  // fermato ed e' ripartito da solo alle 17:50 (5 minuti di portale fermo per tutti). Gli agenti di
+  // spedizioni 2000 da soli erano ~2,2 GB a testa nel mese — e senza listino agente quel campo non serve
+  // a niente. I colli servono solo al costo dal listino agente, qui sotto: li' si leggono peso e lati,
+  // senza le etichette (lib/colli-senza-etichette).
+  // Ordine con l'id come spareggio: senza, fetchAll a blocchi poteva ripetere o saltare spedizioni con
+  // lo stesso created_at al confine dei 1.000 (vedi lib/fetch-all).
   const sped = await fetchAll(() => admin.from('spedizioni')
-    .select('id,cliente_id,costo_totale,costo_spedizione,stato,corriere_id,peso_reale,peso_fatturato,colli,dest_cap,dest_provincia,dest_citta,dest_paese,colli_dettaglio,contrassegno,assicurazione,servizi_accessori,created_at')
+    .select('id,cliente_id,costo_totale,costo_spedizione,stato,corriere_id,peso_reale,peso_fatturato,colli,dest_cap,dest_provincia,dest_citta,dest_paese,contrassegno,assicurazione,servizi_accessori,created_at')
     .in('cliente_id', clienti).gte('created_at', dal).lte('created_at', alEnd)
     .not('stato', 'in', '(annullata)')
-    .order('created_at', { ascending: false }))
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
   const numSpedizioni = (sped || []).length
   if (!numSpedizioni) return vuoto
   const spedIds = (sped || []).map((s: any) => s.id)
@@ -89,6 +99,10 @@ export async function calcolaGuadagnoAgente(
   let costoAgTot: number | null = null
   if (listinoAg) {
     const calcCosto = await creaCalcolatoreListinoCliente(admin, listinoAg)
+    // Il listino prezza collo per collo (peso e lati di ognuno): si attaccano alle righe i colli SENZA
+    // etichette, gli stessi oggetti di prima per tutto cio' che il calcolo legge.
+    const colli = await spedizioniConColliLeggeri(admin, spedIds, '')
+    for (const s of (sped || [])) (s as any).colli_dettaglio = colli.get((s as any).id)?.colli_dettaglio ?? []
     let t = 0
     for (const s of (sped || [])) {
       const cAg = calcCosto(s)?.totale

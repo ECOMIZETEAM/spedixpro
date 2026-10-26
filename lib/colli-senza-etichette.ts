@@ -11,13 +11,13 @@
 const CAMPI_COLLO = ['peso', 'lunghezza', 'larghezza', 'altezza']
 
 // `colonne` = le colonne normali da leggere insieme (senza colli_dettaglio). Torna id → riga, con
-// `colli_dettaglio` ricomposto (array, eventualmente vuoto).
+// `colli_dettaglio` ricomposto (array, eventualmente vuoto). `colonne` vuota = servono solo i colli.
 export async function spedizioniConColliLeggeri(admin: any, ids: string[], colonne: string): Promise<Map<string, any>> {
   const out = new Map<string, any>()
   const unici = Array.from(new Set(ids.filter(Boolean)))
   for (let i = 0; i < unici.length; i += 150) {
     const blocco = unici.slice(i, i + 150)
-    const { data: righe } = await admin.from('spedizioni').select(`id,colli,${colonne}`).in('id', blocco)
+    const { data: righe } = await admin.from('spedizioni').select(colonne ? `id,colli,${colonne}` : 'id,colli').in('id', blocco)
     for (const r of (righe || []) as any[]) out.set(r.id, { ...r, colli_dettaglio: [] })
     // QUANTI COLLI LEGGERE: ogni campo estratto costringe il database ad aprire l'intero dettaglio (etichette
     // comprese), quindi se ne chiedono il meno possibile. Il dettaglio non ha mai piu' elementi dei colli
