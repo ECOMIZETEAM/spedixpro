@@ -404,7 +404,15 @@ export default function RettificaCostiPage() {
   const totaleCtrl  = Math.round(rettCtrl.reduce((s: number, r: any) => s + (Number(r.manca) || 0), 0) * 100) / 100
 
   // Un gruppo (intestazione + righe) → array di <tr>. Stessa resa per entrambe le sezioni.
-  const renderGruppo = ([chiave, g]: any) => [(
+  const renderGruppo = ([chiave, g]: any) => {
+    // QUANTO STAI PER ADDEBITARE A QUESTO CLIENTE: chi seleziona alcune righe di un gruppo vede subito, sulla
+    // riga del gruppo, quante sono e la somma (chiesto da Lorenzo il 26/10/2026: "3 selezionate · € 32,30").
+    // E' lo stesso addebito della colonna Differenza (ripesatura + supplementi); sul "tuo costo" e' il costo.
+    const sel = g.righe.filter((r: any) => selectedIds.includes(r.id))
+    const totSel = Math.round(sel.reduce((t: number, r: any) => t + (g.tipo === 'proprio'
+      ? (r.costo_gia_pagato ? 0 : Number(r.costo_fornitore || 0))
+      : -(Number(r.differenza || 0) - Number(r.fuori_sagoma || 0))), 0) * 100) / 100
+    return [(
     <tr key={'g-'+chiave} onClick={()=>setAperti(p=>({...p,[chiave]:!p[chiave]}))}
       style={{background:'#f3f4f6',cursor:'pointer'}}>
       <td style={{padding:'9px 10px',borderBottom:'1px solid #d1d5db'}} onClick={e=>e.stopPropagation()}>
@@ -421,6 +429,11 @@ export default function RettificaCostiPage() {
         <span style={{fontWeight:400,color:'#6b7280',marginLeft:'8px'}}>
           {g.tipo==='master'?'sotto-master':g.tipo==='proprio'?'il tuo costo':'cliente diretto'} · {g.righe.length} {g.righe.length===1?'rettifica':'rettifiche'}
         </span>
+        {sel.length > 0 && (
+          <span style={{marginLeft:'10px',fontWeight:700,color:'#ea580c',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'999px',padding:'2px 10px'}}>
+            {sel.length} {sel.length===1?'selezionata':'selezionate'} · € {totSel.toFixed(2)}
+          </span>
+        )}
         <span style={{float:'right',fontWeight:700,color:g.totale<0?'#dc2626':'#15803d'}}>
           {g.tipo==='proprio' ? <span style={{color:'#475569'}}>tuo costo € {g.costo.toFixed(2)}</span> : <>€ {Math.abs(g.totale).toFixed(2)}{g.costo > 0.005 && <span style={{fontWeight:500,color:'#475569',marginLeft:'8px'}}>· tuo costo € {g.costo.toFixed(2)}</span>}</>}
         </span>
@@ -506,6 +519,7 @@ export default function RettificaCostiPage() {
       </tr>
     )
   })]
+  }
 
   // RETTIFICHE ELIMINATE: filtro "cerca" (LDV, da chi, motivo), totali sul filtrato, pagine.
   const elimQ = elimCerca.trim().toLowerCase()
