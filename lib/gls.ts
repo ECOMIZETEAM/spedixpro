@@ -240,15 +240,21 @@ export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): str
       tag('Provincia', (p.provincia || '').substring(0, 2).toUpperCase()),
       tag('Colli', '1'),
       tag('PesoReale', pesoIt(peso)),
-      // Contrassegno / assicurazione / note / riferimento SOLO sul primo collo (dati di spedizione,
-      // non di collo: ripeterli su ogni Parcel rischia di moltiplicarli).
+      // Il riferimento (Bda) va su OGNI collo: GLS mette nella stessa spedizione i colli con lo stesso
+      // destinatario E la stessa Bda. Quando stava solo sul primo, un multicollo con riferimento si
+      // spezzava in due spedizioni: il collo 1 con il numero che salvavamo, gli altri in una seconda
+      // che non vedevamo — etichetta con un collo solo, e la seconda restava aperta su GLS. Rifatta poi
+      // senza riferimento, ci si agganciava sopra: Hard2Buff → Salerno, 2 pacchi, su GLS 665264142 a
+      // 3 colli più la 665264141 (19/10/2026; 9 casi di Quick dal 01/10).
+      p.bda ? tag('Bda', String(p.bda).substring(0, 20)) : '',
+      // Contrassegno / assicurazione / note SOLO sul primo collo (dati di spedizione, non di collo:
+      // ripeterli su ogni Parcel rischia di moltiplicarli).
       primo && p.importoContrassegno && p.importoContrassegno > 0 ? tag('Importocontrassegno', euroIt(p.importoContrassegno)) : '',
       primo && p.importoContrassegno && p.importoContrassegno > 0 && p.modalitaIncasso ? tag('ModalitaIncasso', p.modalitaIncasso) : '',
       primo && p.assicurazione && p.assicurazione > 0 ? tag('Assicurazione', euroIt(p.assicurazione)) : '',
       // Servizi accessori (Sabato/Exchange/Preavviso…): codici 2-cifre, max 6, separati da virgola. Solo primo collo.
       primo && p.serviziAccessori && p.serviziAccessori.length ? tag('ServiziAccessori', Array.from(new Set(p.serviziAccessori)).slice(0, 6).join(',')) : '',
       primo && p.note ? tag('Notespedizione', p.note.substring(0, 100)) : '',
-      primo && p.bda ? tag('Bda', String(p.bda).substring(0, 20)) : '',
       // Contatti destinatario per il FlexDeliveryService — solo primo collo (dati di spedizione).
       // Email: GLS la vuole <=70. Cellulare1: solo cifre, ULTIME 10 (toglie prefisso +39/0039 e spazi);
       // se ne restano meno di 9 non si manda (evita un valore monco che GLS potrebbe rifiutare).
