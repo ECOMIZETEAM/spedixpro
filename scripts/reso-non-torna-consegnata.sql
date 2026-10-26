@@ -15,7 +15,10 @@ language plpgsql
 set search_path = public
 as $$
 begin
-  if OLD.stato = 'reso_mittente' and NEW.stato = 'consegnata' then
+  -- Dal 26/10/2026 anche verso gli stati di viaggio: sei resi corretti il 24/10 erano tornati 'in_consegna'
+  -- per /api/v1/tracking, che non aveva il "solo in avanti". Correzione a mano: passare da 'in_lavorazione'.
+  if OLD.stato = 'reso_mittente'
+     and NEW.stato in ('consegnata', 'spedita', 'in_transito', 'in_consegna', 'in_giacenza', 'non_consegnato') then
     NEW.stato := OLD.stato;
   end if;
   return NEW;

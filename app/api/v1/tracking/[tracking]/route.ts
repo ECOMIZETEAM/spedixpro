@@ -81,6 +81,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     // Reso appiccicoso: dopo un reso la 'consegnata' del corriere e' la consegna del RITORNO al
     // mittente, non una consegna al destinatario -> lo stato resta reso (come nelle altre due porte).
     if (sped.stato === 'reso_mittente' && nuovo === 'consegnata') return
+    // SOLO IN AVANTI, come il giro automatico e il tracking a richiesta: il fornitore puo' essere indietro
+    // rispetto a noi. Qui mancava: un partner che interroga questa API ogni mezz'ora ha riportato "in
+    // consegna" sei resi corretti il 24/10/2026 (Edit Shop 2UW07WF016363 e altri), e a ogni richiesta gli
+    // partiva anche l'avviso "tracking.updated" con uno stato vecchio. Il reso resta l'eccezione: vale
+    // anche se il corriere e' "piu' avanti" (la consegna del ritorno).
+    if (nuovo !== 'annullata' && nuovo !== 'reso_mittente' && prioritaStato(nuovo) <= prioritaStato(sped.stato)) return
     try { await admin.from('spedizioni').update({ stato: nuovo }).eq('id', sped.id) } catch {}
     notifica(nuovo === 'consegnata' ? 'tracking.delivered' : 'tracking.updated', nuovo, eventi)
   }
