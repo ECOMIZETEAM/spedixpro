@@ -1747,22 +1747,15 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
             const upd: any = {}
             if (w.numero) { upd.numero = w.numero; upd.tracking_number = w.numero }
             // Il codice di prenotazione del ritiro viaggia con la lettera di vettura: se non era
-            // pronta al momento della creazione, questo e' l'unico momento in cui lo si puo'
-            // ancora prendere. Senza salvarlo qui il ritiro resterebbe per sempre senza numero.
+            // pronta al momento della creazione, lo si prende qui. Nel frattempo la schermata ha
+            // chiamato /api/ritiri/crea, che ha agganciato la spedizione alla riga Ritiri nata senza
+            // codice: salvaCodiceRitiro completa anche quella. Se arriva ancora piu' tardi, lo
+            // rincorre /api/ritiri/codici-lampo.
             if (w.codiceRitiro) {
-              const codice = w.codiceRitiro
-              // Si rilegge la riga adesso: nel frattempo la schermata ha chiamato /api/ritiri/crea,
-              // che ha agganciato la spedizione alla riga Ritiri (ritiro_id). Quella riga e' nata
-              // senza codice — qui la si completa.
-              const { data: att } = await adminCrea.from('spedizioni')
-                .select('raw_response,ritiro_id').eq('id', spedIdBg).maybeSingle()
-              upd.raw_response = { ...((att?.raw_response as any) || {}), _codiceRitiro: w.codiceRitiro }
-              if (att?.ritiro_id) {
-                try {
-                  await adminCrea.from('ritiri').update({ cod_ritiro: codice, tracking_ritiro: codice })
-                    .eq('id', att.ritiro_id).is('cod_ritiro', null)
-                } catch { }
-              }
+              try {
+                const { salvaCodiceRitiro } = await import('@/lib/ritiro-codice')
+                await salvaCodiceRitiro(adminCrea, spedIdBg, w.codiceRitiro)
+              } catch (e: any) { console.error('[CREA][EASYPARCEL] codice ritiro:', e?.message) }
             }
             const b64 = (await unisci(w.singole.map(s => s.pdfBase64))) || w.pdfBase64
             if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`

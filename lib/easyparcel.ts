@@ -667,6 +667,18 @@ export async function easyparcelWaybillGrezza(
   }
 }
 
+// SOLO IL CODICE DEL RITIRO, SENZA LE ETICHETTE.
+// La rincorsa del codice (lib/ritiro-codice) richiede le stesse spedizioni piu' volte al giorno: con
+// i PDF in base64 ogni domanda pesava ~150 KB per un campo di dieci caratteri, senza ~400 byte
+// (misurato il 26/10/2026, stesso campo nella risposta).
+// `testo` e' cio' che il corriere ha scritto davvero: "Not available", "RICHIESTA INOLTRATA IL
+// 26-10-2026" o il codice. codiceRitiroValido scarta le frasi, ma sono proprio le frasi a dire se il
+// codice e' in arrivo o non arrivera'.
+export async function easyparcelCodiceRitiro(apikey: string, idOrdine: string): Promise<{ codiceRitiro: string | null; testo: string }> {
+  const d = await chiamaWaybill(apikey, idOrdine, false, false)
+  return { codiceRitiro: codiceRitiroValido(d.pickup_code), testo: String(d.pickup_code ?? '').trim() }
+}
+
 // COME SI CHIEDE IL RITIRO A QUESTO FORNITORE.
 //
 // Il blocco si costruiva a mano dentro la creazione dal portale, e quando e' nata la porta dell'API

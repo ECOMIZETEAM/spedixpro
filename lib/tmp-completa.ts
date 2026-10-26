@@ -109,6 +109,13 @@ export async function completaTmp(
     const { error } = await admin.from('spedizioni').update(patch).eq('id', s.id)
     if (error) { console.error('[TMP] aggiornamento fallito', s.numero, error.message); continue }
 
+    // IL CODICE DEL RITIRO viaggia in questa stessa risposta e qui veniva buttato. La rincorsa del
+    // codice (lib/ritiro-codice) salta le spedizioni provvisorie: se c'e' gia', si salva adesso.
+    if (w?.codiceRitiro) {
+      const { salvaCodiceRitiro } = await import('@/lib/ritiro-codice')
+      await salvaCodiceRitiro(admin, s.id, w.codiceRitiro)
+    }
+
     if (patch.numero) {
       esito.completate++
       console.log('[TMP] completata', s.numero, '->', patch.numero)

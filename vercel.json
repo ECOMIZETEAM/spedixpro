@@ -60,6 +60,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/ritiri/codici-lampo",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/spedizioni/tmp-recupero",
       "schedule": "*/15 * * * *"
     },

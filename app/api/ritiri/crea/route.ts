@@ -132,9 +132,13 @@ export async function POST(req: NextRequest) {
           const w = await easyparcelWaybill(apikey, String((prima.raw_response as any)._idOrdine), 5, 2000, true, 18000)
           if (w.codiceRitiro) {
             _cr = w.codiceRitiro
-            const agg: any = { raw_response: { ...(prima.raw_response as any), _codiceRitiro: _cr } }
-            if (w.numero && /^(TMP|DVA)-/.test(String(prima.numero || ''))) { agg.numero = w.numero; agg.tracking_number = w.numero }
-            await admin.from('spedizioni').update(agg).eq('id', prima.id)
+            // Non dalla copia letta all'inizio della richiesta: nel frattempo la creazione in
+            // background puo' aver scritto la sua parte, e quella copia la cancellerebbe.
+            const { salvaCodiceRitiro } = await import('@/lib/ritiro-codice')
+            await salvaCodiceRitiro(admin, prima.id, _cr)
+            if (w.numero && /^(TMP|DVA)-/.test(String(prima.numero || ''))) {
+              await admin.from('spedizioni').update({ numero: w.numero, tracking_number: w.numero }).eq('id', prima.id)
+            }
           }
         }
       } catch (e: any) { console.error('[RITIRI][EASYPARCEL] codice ritiro non ancora disponibile:', e?.message) }
