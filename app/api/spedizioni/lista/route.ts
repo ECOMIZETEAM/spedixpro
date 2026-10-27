@@ -672,6 +672,13 @@ export async function GET(req: NextRequest) {
   }
   segna('tipo-corriere')
   const OLTRE_15GG = Date.now() - 15 * 24 * 60 * 60 * 1000
+  // APPENA NATA: la riga della spedizione si salva PRIMA che la catena addebiti i master (27/10, spedizioni
+  // 2000, 050063293084645: riga salvata alle 09:30:41.7, lista letta alle 42.197, movimento del master alle
+  // 42.676). In quel mezzo secondo costoMine manca e la riga cadeva sul ripiego calcMioCorr, che prezza col
+  // listino del master sul peso fatturato (3,13 kg → 5,56) mentre la cascata applica la regola del fornitore
+  // (peso reale 2 kg → 4,79): il master ha visto margine −0,21 rosso su una spedizione che gli rende +0,56.
+  // Nei primi 2 minuti, se il mio movimento non c'è ancora, costo e margine restano «in calcolo».
+  const APPENA_NATA = Date.now() - 2 * 60 * 1000
 
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
@@ -734,7 +741,12 @@ export async function GET(req: NextRequest) {
     if (prezzo_corriere == null && (costoIngrossoAcq.get(s.id) || 0) > 0) {
       prezzo_corriere = costoIngrossoAcq.get(s.id)!
     }
-    if (prezzo_corriere == null && calcMioCorr) {
+    // Solo dopo i rami esatti qui sopra (contratto proprio, ponte, ingrosso): quelli hanno già il costo vero
+    // alla nascita. Restano fuori il ripiego sul listino e il pareggio col prezzo cliente, che su una
+    // spedizione di pochi secondi danno un numero inventato. Vale anche per il padre che guarda la sua rete.
+    const costoInCalcolo = vedeCostoMaster && prezzo_corriere == null && !costoMine.has(s.id)
+      && !!s.created_at && new Date(s.created_at).getTime() > APPENA_NATA
+    if (prezzo_corriere == null && calcMioCorr && !costoInCalcolo) {
       const nome = (s.corrieri as any)?.nome_contratto
       const mioCorr = (s.master_id === mineId) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
@@ -750,8 +762,8 @@ export async function GET(req: NextRequest) {
     // comparire "0,00 €" su ogni riga, indistinguibile da un margine realmente nullo: da qui
     // la segnalazione che i margini del portale agente erano sbagliati. Meglio un trattino.
     const agenteSenzaCosto = ruolo === 'agente' && prezzo_corriere == null
-    if (prezzo_corriere == null && !agenteSenzaCosto) prezzo_corriere = prezzo_cliente
-    const margine = agenteSenzaCosto ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
+    if (prezzo_corriere == null && !agenteSenzaCosto && !costoInCalcolo) prezzo_corriere = prezzo_cliente
+    const margine = (agenteSenzaCosto || costoInCalcolo) ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
     // Rettifica della riga, dal punto di vista di chi guarda: quanto l'ha addebitata al SUO diretto
     // (cliente, o figlio di prima linea per le spedizioni di rete) e quanto l'ha pagata lui. Solo
     // movimenti, come il riquadro Rettifiche: se non ha pagato niente, il costo e' 0.
@@ -769,7 +781,7 @@ export async function GET(req: NextRequest) {
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
     const distinta_reso = distintaReso.get(s.id) || null
     const no_annullo_15gg = corrTipo.get(s.corriere_id) === 'spediamopro' && !!s.created_at && new Date(s.created_at).getTime() < OLTRE_15GG
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, rettifica, id_ordine, distinta_reso, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, costo_in_calcolo: costoInCalcolo, rettifica, id_ordine, distinta_reso, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
   })
   // ── CONTRASSEGNO PER-LIVELLO: il badge è verde solo se IO ho incassato. ──
   // Per un MASTER: verde se la rimessa indirizzata a ME (target_master_id) è pagata; arancio se

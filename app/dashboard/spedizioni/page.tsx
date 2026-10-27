@@ -681,8 +681,10 @@ async function apriTracking(s: any) {
                     ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span title={s.cod_parziale?`COD parziale: il corriere ha incassato € ${Number(s.cod_incassato).toFixed(2)} sui € ${Number(s.contrassegno).toFixed(2)} dichiarati. Al cliente scende solo l'incassato.`:undefined} style={{...codBadgeStyle(s.stato_contrassegno,s.cod_parziale),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}{s.cod_parziale&&<span style={{marginLeft:'3px',fontSize:'9px',fontWeight:'700'}}>PARZIALE</span>}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
                     { l: 'Cliente', v: <span><b style={{color:'#1a1a1a'}}>€ {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
-                    { l: 'Costo', v: s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—' },
-                    { l: 'Margine', v: <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</b> },
+                    // In calcolo: spedizione di pochi secondi, l'addebito della catena non è ancora arrivato (la
+                    // rotta non inventa il costo: vedi APPENA_NATA in /api/spedizioni/lista).
+                    { l: 'Costo', v: s.costo_in_calcolo ? <span style={{color:'#9ca3af'}} title="L'addebito arriva fra pochi secondi: aggiorna la lista">in calcolo</span> : s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—' },
+                    { l: 'Margine', v: s.costo_in_calcolo ? <b style={{color:'#9ca3af',fontWeight:500}} title="L'addebito arriva fra pochi secondi: aggiorna la lista">in calcolo</b> : <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</b> },
                     // Rettifica A PARTE: prezzo, costo e margine qui sopra sono solo della spedizione.
                     ...(s.rettifica ? [{ l: 'Rettifica', v: (
                       <span title={`Addebitata al cliente € ${Number(s.rettifica.cliente).toFixed(2)} · pagata € ${Number(s.rettifica.costo).toFixed(2)}`}>
