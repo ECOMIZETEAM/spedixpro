@@ -148,7 +148,7 @@ async function autoRicaricaSeServe(admin: any, tipo: 'cliente' | 'master', id: s
     // porte (il PATCH di /api/cliente/dati accetta l'oggetto impostazioni intero) e ogni addebito passa di qui.
     if (tipo === 'cliente') {
       const { pagaSoloEtichette } = await import('@/lib/conti-shopify')
-      if (pagaSoloEtichette((t as any)?.master_id)) return
+      if ((await pagaSoloEtichette(admin, id)) !== false) return
     }
     const soglia = Number(auto.soglia) || 0
     const pacchetto = Number(auto.pacchetto) || 1000

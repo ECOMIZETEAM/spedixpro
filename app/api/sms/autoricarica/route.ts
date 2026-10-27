@@ -34,9 +34,9 @@ export async function POST(req: NextRequest) {
   // carta, che per loro e' chiuso (lib/conti-shopify.ts; stesso testo di /api/sms/acquista). Spegnerla
   // resta sempre possibile. La guardia vera, per ogni porta, e' in autoRicaricaSeServe (lib/sms.ts).
   if (attiva && tabella === 'clienti') {
-    const { data: cli, error: eCli } = await admin.from('clienti').select('master_id').eq('id', id).maybeSingle()
-    if (eCli) return NextResponse.json({ error: 'Non riesco a leggere il tuo conto in questo momento. Riprova.' }, { status: 503 })
-    if (pagaSoloEtichette(cli?.master_id)) return NextResponse.json({ error: 'Acquisto SMS non disponibile per i negozi collegati da Shopify.' }, { status: 403 })
+    const solo = await pagaSoloEtichette(admin, id)
+    if (solo === null) return NextResponse.json({ error: 'Non riesco a leggere il tuo conto in questo momento. Riprova.' }, { status: 503 })
+    if (solo) return NextResponse.json({ error: 'Acquisto SMS non disponibile per i negozi collegati da Shopify.' }, { status: 403 })
   }
 
   const { data: riga } = await admin.from(tabella).select('impostazioni').eq('id', id).maybeSingle()

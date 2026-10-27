@@ -3,6 +3,7 @@ import { randomInt } from 'crypto'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { inviaCredenzialiCliente } from '@/lib/email'
 import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
+import { MASTER_VETRINA, LISTINO_VETRINA } from '@/lib/vetrina'
 
 /* REGISTRAZIONE dal SITO PUBBLICO (www.moovexpress.com): un visitatore diventa cliente vero.
  *
@@ -11,7 +12,7 @@ import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } 
  * portale non gli darebbe. Il modello e' quello della rotta preventivo, non quello di
  * app/api/clienti/crea (che presuppone un master gia' loggato):
  *
- * 1. IL PERIMETRO E' FISSO A CODICE. Master (MULTIEXPRESS), listino (Standard Web),
+ * 1. IL PERIMETRO E' FISSO A CODICE. Master e listino della vetrina (lib/vetrina.ts),
  *    tipo di contratto (credito scalare) e credito (zero) sono scritti qui sotto, MAI letti dal
  *    corpo. Chi si registra sceglie solo chi e' e come lo si contatta, niente altro.
  *
@@ -28,9 +29,6 @@ import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } 
  *    Il danno che un robot puo' fare e' limitato — clienti a credito zero che non spediscono — ma
  *    ogni registrazione manda una email, e senza freno un robot ci fa sospendere il dominio Resend.
  */
-
-const MULTIEXPRESS = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'
-const LISTINO_WEB = '4e6658e9-e975-4057-8c78-b258fbc98a64'
 
 const ORIGINI = ['https://www.moovexpress.com', 'https://moovexpress-web.vercel.app']
 
@@ -123,7 +121,7 @@ export async function POST(req: NextRequest) {
   // lib/codice-cliente.ts. Qui prima c'era la formula alfabetica, che su MULTIEXPRESS reggeva solo
   // perche' il suo ultimo codice in alfabeto era anche il piu' alto.
   const { data: inserito, error } = await inserisciClienteConCodice(admin, {
-    master_id: MULTIEXPRESS,
+    master_id: MASTER_VETRINA,
     ragione_sociale: ragioneSociale,
     email,
     telefono: telefono || null,
@@ -131,7 +129,7 @@ export async function POST(req: NextRequest) {
     cf: tipo === 'privato' ? cf : null,
     rappresentante_legale: tipo === 'azienda' ? rappresentante : null,
     // PERIMETRO FISSO — mai dal corpo:
-    listino_cliente_id: LISTINO_WEB,
+    listino_cliente_id: LISTINO_VETRINA,
     tipo_contratto: 'credito_scalare',   // nasce a credito scalare: senza credito non spedisce
     attivo: true,
     // credito NON impostato: default 0. api_* NON impostati: default esente/free.
@@ -170,7 +168,7 @@ export async function POST(req: NextRequest) {
   // Riga utenti (client ADMIN: la riga e' di un altro utente, l'RLS bloccherebbe il client di
   // sessione). I campi di sistema li scrive solo la piattaforma — vedi il trigger su `utenti`.
   const { error: uErr } = await admin.from('utenti').insert({
-    id: authUser.user.id, ruolo: 'cliente', master_id: MULTIEXPRESS,
+    id: authUser.user.id, ruolo: 'cliente', master_id: MASTER_VETRINA,
     cliente_id: nuovoCliente.id, nome: ragioneSociale, attivo: true,
   })
   if (uErr) {

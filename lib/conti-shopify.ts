@@ -14,7 +14,7 @@ import { eIndirizzoContoShopify } from '@/lib/indirizzi-interni'
 //      Presa alla lettera, "chi non ha sede o telefono" l'avrebbe mostrata a 136 clienti di oggi, 49 dei
 //      quali spediscono tutti i giorni scrivendo il mittente a mano (conteggio del 21/10).
 //
-// 2) Il cliente sta sotto il master dei negozi dell'App Store (MOOVY, variabile
+// 2) Il cliente e' un negozio dell'app sotto il master dell'App Store (MOOVY, variabile
 //    SHOPIFY_ONBOARDING_MASTER_ID)? Quei negozi pagano SOLO etichette e i loro seguiti (rettifiche, resi,
 //    giacenze): e' la condizione per l'esenzione dal Billing di Shopify (requisito 1.2, "shipping
 //    labels"). Quindi niente SMS a pagamento e niente piani API con carta: sarebbero incassi dell'app
@@ -36,7 +36,29 @@ export function masterDeiNegoziShopify(): string | null {
   return id || null
 }
 
-export function pagaSoloEtichette(masterIdDelCliente: string | null | undefined): boolean {
+// Il cliente paga SOLO etichette (punto 2)? Si', se sta sotto MOOVY e USA L'APP: il conto e' nato
+// dall'installazione, oppure ha un negozio Shopify collegato.
+//
+// Fino al 27/10/2026 bastava il master, perche' sotto MOOVY c'erano solo i negozi dell'app. Da quel giorno
+// MOOVY e' anche il master di chi si registra dal sito (lib/vetrina.ts), e quei clienti non sono negozi
+// dell'app: Lorenzo ha deciso che restano come tutti gli altri, SMS e piani API compresi. Guardando solo
+// il master li avremmo chiusi in silenzio.
+// Non basta nemmeno l'indirizzo del conto: TEST SHOPIFY, il conto con cui entra il revisore di Shopify,
+// ha un'email nostra normale e un negozio collegato, e deve vedere la schermata a sole etichette — e'
+// quella che il revisore controlla. Un cliente del sito che collega poi un negozio passa a sole etichette:
+// da li' usa l'app sotto il master dell'app, che e' il caso che l'esenzione copre.
+//
+// null = lettura non riuscita: chi chiama NON apre la cassa. Meglio un acquisto rifiutato una volta che
+// un incasso fuori da Shopify.
+export async function pagaSoloEtichette(db: any, clienteId: string | null | undefined): Promise<boolean | null> {
   const m = masterDeiNegoziShopify()
-  return !!m && !!masterIdDelCliente && masterIdDelCliente === m
+  if (!m || !clienteId) return false
+  const { data: cli, error } = await db.from('clienti').select('master_id,email').eq('id', clienteId).maybeSingle()
+  if (error) return null
+  if (!cli || cli.master_id !== m) return false
+  if (contoNatoDaShopify(cli)) return true
+  const { data: negozi, error: eNeg } = await db.from('integrazioni').select('id')
+    .eq('cliente_id', clienteId).eq('piattaforma', 'shopify').limit(1)
+  if (eNeg) return null
+  return (negozi || []).length > 0
 }

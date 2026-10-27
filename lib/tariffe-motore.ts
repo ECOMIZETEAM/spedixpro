@@ -8,7 +8,7 @@
  * Riscrivere il calcolo li' avrebbe creato due verita' sui prezzi, e il giorno che se ne
  * cambia una l'altra resta indietro in silenzio. Qui la regola e' una sola e la chiamano
  * in due: la rotta del portale (con la sessione) e quella pubblica (che forza il Listino
- * Standard Web di MULTIEXPRESS).
+ * Standard Web del master della vetrina, lib/vetrina.ts).
  *
  * Chi lo modifica tocca ENTRAMBE le porte. */
 

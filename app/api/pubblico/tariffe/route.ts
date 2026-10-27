@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { calcolaTariffeCliente } from '@/lib/tariffe-motore'
 import { marchioCorriere, logoCorriere } from '@/lib/corriere-logo'
+import { MASTER_VETRINA, LISTINO_VETRINA } from '@/lib/vetrina'
 
 /* Il preventivo per il SITO PUBBLICO: chiunque, senza account.
  *
@@ -11,8 +12,8 @@ import { marchioCorriere, logoCorriere } from '@/lib/corriere-logo'
  *
  * Quello che questa rotta fa in piu' e' tenere il perimetro:
  *
- * 1. IL CLIENTE E' FISSO. Non si legge dal corpo della richiesta: e' MULTIEXPRESS con il
- *    Listino Standard Web, scritti qui sotto a codice. Un identificativo che arrivasse da
+ * 1. IL CLIENTE E' FISSO. Non si legge dal corpo della richiesta: e' il master della vetrina con
+ *    il suo Listino Standard Web, scritti a codice in lib/vetrina.ts. Un identificativo che arrivasse da
  *    fuori permetterebbe a chiunque di farsi prezzare il listino di un altro.
  *
  * 2. USA IL CLIENT AMMINISTRATIVO, quindi salta le regole di isolamento del database. E'
@@ -25,8 +26,6 @@ import { marchioCorriere, logoCorriere } from '@/lib/corriere-logo'
  *    identificativi interni. Il costo non c'era gia' prima e non deve tornare.
  */
 
-const MULTIEXPRESS = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'
-const LISTINO_WEB = '4e6658e9-e975-4057-8c78-b258fbc98a64'
 const IVA = 0.22
 
 const ORIGINI = ['https://www.moovexpress.com', 'https://moovexpress-web.vercel.app']
@@ -101,7 +100,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminSupabase()
   const esito = await calcolaTariffeCliente(
     admin,
-    { cliente: { master_id: MULTIEXPRESS, listino_cliente_id: LISTINO_WEB }, clienteId: null, subMatch: null },
+    { cliente: { master_id: MASTER_VETRINA, listino_cliente_id: LISTINO_VETRINA }, clienteId: null, subMatch: null },
     richiesta,
   )
   // I messaggi del motore parlano a chi CONFIGURA il portale ("configura la tariffa sul

@@ -55,11 +55,12 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   //   all'utente con ruolo cliente: e' l'unico a cui la rotta che salva risponde.
   // - versioneDati: l'impronta dei dati che la schermata mostra. Torna indietro col salvataggio, e la
   //   rotta non scrive se nel frattempo qualcuno (il master dalla scheda) li ha cambiati.
-  // - soloEtichette: il cliente sta sotto il master dei negozi dell'App Store (lib/conti-shopify).
+  // - soloEtichette: il cliente e' un negozio dell'app sotto il master dell'App Store (lib/conti-shopify).
+  //   Se non si riesce a leggerlo vale "si'": la voce SMS non si mostra, la cassa resta chiusa.
   const completaDati = (utente.ruolo || '').toLowerCase() === 'cliente' && servonoDatiNegozio(cliente)
     ? datiPerLaSchermata(cliente) : null
   const versioneDati = completaDati ? versioneDatiNegozio(cliente) : null
-  const soloEtichette = pagaSoloEtichette(cliente?.master_id)
+  const soloEtichette = (await pagaSoloEtichette(createAdminSupabase(), utente.cliente_id)) !== false
 
   // A CHI CHIEDERE AIUTO DALLA SCHERMATA. La schermata non si chiude, e il pulsante Supporto della
   // testata le sta sotto: chi ha un dato che i controlli non accettano (un CAP nuovo che l'archivio non

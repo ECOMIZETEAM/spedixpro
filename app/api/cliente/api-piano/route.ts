@@ -29,10 +29,8 @@ async function contesto() {
   const { data: u } = await supabase.from('utenti').select('cliente_id,ruolo').eq('id', user.id).maybeSingle()
   if (!u?.cliente_id || (u.ruolo || '').toLowerCase() !== 'cliente') return null
   const admin = createAdminSupabase()
-  // Il master scritto sulla riga del CLIENTE, quello che decide il suo listino e il suo conto. Una lettura
-  // fallita non diventa "non e' un negozio Shopify": soloEtichette resta null e chi chiama si ferma.
-  const { data: cli, error } = await admin.from('clienti').select('master_id').eq('id', u.cliente_id).maybeSingle()
-  const soloEtichette: boolean | null = error ? null : pagaSoloEtichette(cli?.master_id)
+  // Una lettura fallita non diventa "non e' un negozio Shopify": soloEtichette resta null e chi chiama si ferma.
+  const soloEtichette: boolean | null = await pagaSoloEtichette(admin, u.cliente_id)
   return { user, clienteId: u.cliente_id as string, admin, soloEtichette }
 }
 

@@ -69,7 +69,9 @@ export async function POST(req: NextRequest) {
   // condizione dell'esenzione dal Billing di Shopify (lib/conti-shopify.ts, decisione di Lorenzo del
   // 21/10/2026), e per lui i pacchetti API con carta non esistono: /api/cliente/api-piano glieli rifiuta,
   // quindi messo a pagamento resterebbe con le API ferme e nessun modo di riattivarle.
-  if (paga && pagaSoloEtichette((cli as any).master_id)) {
+  const soloEtichette = paga ? await pagaSoloEtichette(s.admin, clienteId) : false
+  if (soloEtichette === null) return NextResponse.json({ error: 'Non riesco a leggere il conto del cliente in questo momento. Riprova.' }, { status: 503 })
+  if (soloEtichette) {
     return NextResponse.json({ error: 'I negozi collegati da Shopify non pagano le API: pagano solo le etichette.' }, { status: 400 })
   }
 
