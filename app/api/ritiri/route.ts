@@ -64,7 +64,8 @@ export async function GET(req: NextRequest) {
     const build = () => {
       let q = supabase.from('ritiri').select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
         .eq('master_id', utente.master_id).eq('cliente_id', utente.cliente_id)
-        .order('created_at', { ascending: false })
+        // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
       if (codRitiro) q = q.ilike('cod_ritiro', '%' + codRitiro + '%')
       if (dal) q = q.gte('created_at', dal)
       if (al) q = q.lte('created_at', al + 'T23:59:59')
@@ -86,7 +87,8 @@ export async function GET(req: NextRequest) {
     const buildAg = () => {
       let q = supabase.from('ritiri').select('*, clienti(ragione_sociale), corrieri(nome_contratto)')
         .eq('master_id', utente!.master_id).in('cliente_id', idsMiei)
-        .order('created_at', { ascending: false })
+        // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
       if (clienteId) q = q.eq('cliente_id', clienteId)
       if (codRitiro) q = q.ilike('cod_ritiro', '%' + codRitiro + '%')
       if (dal) q = q.gte('created_at', dal)

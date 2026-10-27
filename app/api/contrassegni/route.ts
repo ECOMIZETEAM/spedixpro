@@ -59,7 +59,8 @@ export async function GET(req: NextRequest) {
     let q = db.from('spedizioni')
       .select(`${SPED_COLS}, clienti(ragione_sociale), ${embCorr}`)
       .gt('contrassegno', 0)
-      .order('created_at', { ascending: false })
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (subtreeSel) q = q.in('master_id', subtreeSel)
     else q = q.eq('master_id', utente?.master_id)
     if (ledgerNascosti.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)

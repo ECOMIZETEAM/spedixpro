@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
   let query = admin.from('rubrica_destinatari')
     .select('id,nome,indirizzo,citta,provincia,cap,paese,telefono,email,note', { count: 'exact' })
     .eq('cliente_id', u!.cliente_id)
-    .order('nome', { ascending: true })
+    // + id: due destinatari con lo stesso nome si scambiavano di pagina (uno doppio, l'altro mai visto).
+    .order('nome', { ascending: true }).order('id', { ascending: true })
     .range(offset, offset + limit - 1)
   if (q) query = query.or(`nome.ilike.%${q}%,citta.ilike.%${q}%,cap.ilike.%${q}%,indirizzo.ilike.%${q}%`)
   const { data, count, error } = await query

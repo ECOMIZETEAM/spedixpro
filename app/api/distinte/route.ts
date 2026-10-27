@@ -146,7 +146,8 @@ export async function GET(req: NextRequest) {
       let q = db.from('distinte')
         .select('*, clienti(ragione_sociale), corrieri(nome_contratto,tipo)')
         .in('master_id', masterIdsDistinte.length ? masterIdsDistinte : noMaster)
-        .order('created_at', { ascending: false })
+        // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+        .order('created_at', { ascending: false }).order('id', { ascending: false })
       if (filtroAgente) q = q.in('cliente_id', filtroAgente)
       // Il cliente: le SUE distinte, scritto qui e non lasciato alla sola RLS (che in sola lettura non si
       // verifica). Il portale cliente ha /api/cliente/distinte; se arriva qui, non vede altro.

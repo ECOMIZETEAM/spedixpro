@@ -51,7 +51,8 @@ export async function GET(req: NextRequest) {
       .select(`id,numero,mitt_nome,dest_nome,dest_citta,dest_cap,dest_provincia,peso_reale,peso_fatturato,colli,created_at,cliente_id,corriere_id,clienti(ragione_sociale)${filtroContratti ? ',corrieri!inner(nome_contratto)' : ''}`)
       .in('master_id', masterFilter)
       .is('distinta_id', null)
-      .order('created_at', { ascending: false })
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (filtroContratti) q = q.in('corrieri.nome_contratto', ownedContractNames as string[])
     if (filtroAgente) q = q.in('cliente_id', filtroAgente)
     if (clienteId) q = q.eq('cliente_id', clienteId)

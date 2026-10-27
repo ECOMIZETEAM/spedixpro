@@ -13,7 +13,8 @@ export async function GET() {
     .from('distinte')
     .select('id,numero,data,stato,totale_colli,totale_peso,corriere_id,created_at,corrieri(nome_contratto)')
     .eq('cliente_id', clienteId)
-    .order('created_at', { ascending: false }))
+    // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
 
   // Il contratto puo' appartenere a un master PIU' IN ALTO della catena: in quel caso l'RLS sui
   // corrieri (master_id IN mia_rete_master()) impedisce al cliente di leggerlo e le colonne
@@ -47,7 +48,10 @@ export async function GET() {
     const speds = await fetchAll(() => supabase
       .from('spedizioni')
       .select('distinta_id,costo_totale,contrassegno,colli,peso_fatturato,peso_reale')
-      .in('distinta_id', idsDistinte))
+      .in('distinta_id', idsDistinte)
+      // Ordine fisso per le pagine (oltre 1000 si accavallavano). distinta_id PRIMA dell'id: resta
+      // sull'indice delle distinte; ordinando per solo id il database scorreva spedizioni per intero.
+      .order('distinta_id', { ascending: true }).order('id', { ascending: true }))
     for (const s of speds || []) {
       const k = (s as any).distinta_id
       if (!k) continue

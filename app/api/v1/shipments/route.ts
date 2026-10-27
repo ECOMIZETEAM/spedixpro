@@ -44,7 +44,10 @@ export async function GET(req: NextRequest) {
     // stato ma non avevano modo di riagganciare la spedizione all'ordine del proprio gestionale, che
     // e' il primo motivo per cui si legge questa lista.
     .select('id,numero,tracking_number,rif_ordine,stato,dest_nome,dest_citta,dest_provincia,dest_cap,dest_paese,colli,peso_reale,contrassegno,costo_totale,created_at', { count: 'exact' })
-    .eq('cliente_id', ctx.clienteId).order('created_at', { ascending: false }).range(offset, offset + limit - 1)
+    .eq('cliente_id', ctx.clienteId)
+    // + id: con la sola data, le spedizioni importate in blocco (stesso created_at) cambiavano pagina fra
+    // una richiesta e l'altra, e chi integra ne vedeva due volte alcune e mai altre.
+    .order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + limit - 1)
   if (stato) q = q.eq('stato', stato)
   const { data, count } = await q
   return NextResponse.json({ shipments: data || [], count: count || 0, limit, offset })

@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
     const capi = await fetchAll(() => supabase
       .from('ordini_importati')
       .select('id, spedizioni(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings))')
-      .in('id', capoIds))
+      .in('id', capoIds).order('id', { ascending: true }))
     for (const c of (capi || [])) if ((c as any).spedizioni) spedDiCapo.set((c as any).id, (c as any).spedizioni)
   }
   const unitiConSped = (uniti || [])

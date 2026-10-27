@@ -146,7 +146,10 @@ export async function GET(req: NextRequest) {
     // LOGIXIA, vedeva 123 giacenze e 57 resi (283 €) di LOGIXIA verso se stessa (1-14/10/2026).
     const righe = await senzaStornate(await fetchAll(() => perPeriodo(admin.from('movimenti')
       .select('id,tipo,descrizione,importo,saldo_dopo,created_at,spedizione_id').eq('master_target_id', targetMasterId)
-      .or('conto.is.null,conto.neq.proprio'))))
+      .or('conto.is.null,conto.neq.proprio')
+      // Ordine fisso per le pagine (oltre 1000 si accavallavano): la data sta sull'indice del conto,
+      // l'id rompe la parità. Il solo id farebbe ordinare tutti i movimenti del master a ogni pagina.
+      .order('created_at', { ascending: false }).order('id', { ascending: false }))))
     return NextResponse.json(righe.map((m: any) => riga(m, sub.nome)))
   }
 
@@ -158,6 +161,8 @@ export async function GET(req: NextRequest) {
   const righe = await senzaStornate(await fetchAll(() => {
     let q = admin.from('movimenti').select('id,tipo,descrizione,importo,saldo_dopo,created_at,cliente_id,spedizione_id')
       .eq('master_id', utente.master_id).not('cliente_id', 'is', null)
+      // Ordine fisso per le pagine, come sopra: data (sull'indice del master) + id a parità di data.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (clienteId) q = q.eq('cliente_id', clienteId)
     return perPeriodo(q)
   }))

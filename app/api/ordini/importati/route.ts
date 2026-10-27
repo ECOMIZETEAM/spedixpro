@@ -21,7 +21,8 @@ export async function GET(_req: NextRequest) {
     .from('ordini_importati')
     .select('id,destinatario,indirizzo,cap,localita,provincia,country,telefono,email_destinatario,peso,colli,contrassegno,contenuto,articoli,sku,note,rif_mittente,rif_destinatario,order_id,totale_ordine,fonte,stato,errore,spedizione_id,created_at')
     .eq('cliente_id', utente.cliente_id)
-    .order('created_at', { ascending: false }))
+    // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
   // Registro degli accessi ai dati personali (la lista porta i destinatari). Dopo la risposta.
   const quanti = (ordini as any[]).length
   after(() => registraAudit({ utenteId: user.id, ruolo: utente.ruolo, azione: 'ordini_importati_lista', dettaglio: String(quanti) }))

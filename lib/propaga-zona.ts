@@ -20,7 +20,10 @@ export async function sincronizzaZonaAiDiscendenti(admin: any, ownerZonaId: stri
   // CAP correnti del proprietario (paginati: possono superare i 1000)
   const capsOwner: any[] = []
   for (let from = 0; ; from += 1000) {
-    const { data } = await admin.from('zone_cap').select('paese,provincia,cap,citta').eq('zona_id', ownerZonaId).range(from, from + 999)
+    // ORDINE FISSO, o le pagine si accavallano: questo elenco SOSTITUISCE i CAP della zona in ogni
+    // sotto-master (delete + insert qui sotto), quindi un CAP perso qui sparirebbe da tutta la rete e
+    // quella destinazione verrebbe prezzata con un'altra zona. Verificato il 27/10: copie ancora intatte.
+    const { data } = await admin.from('zone_cap').select('paese,provincia,cap,citta').eq('zona_id', ownerZonaId).order('id', { ascending: true }).range(from, from + 999)
     if (!data?.length) break
     capsOwner.push(...data)
     if (data.length < 1000) break

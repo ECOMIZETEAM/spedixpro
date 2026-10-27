@@ -36,7 +36,8 @@ async function capDellaZona(admin: any, zonaId: string | null): Promise<Set<stri
   if (!zonaId) return null
   const out = new Set<string>()
   for (let da = 0; ; da += 1000) {
-    const { data } = await admin.from('zone_cap').select('cap').eq('zona_id', zonaId).range(da, da + 999)
+    // Ordine fisso: senza, oltre 1000 CAP le pagine si accavallavano e l'autista perdeva delle consegne.
+    const { data } = await admin.from('zone_cap').select('cap').eq('zona_id', zonaId).order('id', { ascending: true }).range(da, da + 999)
     for (const r of (data || [])) if (r.cap) out.add(String(r.cap).trim())
     if (!data || data.length < 1000) break
   }

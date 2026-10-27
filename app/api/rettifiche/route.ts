@@ -27,7 +27,8 @@ export async function GET(req: NextRequest) {
       .select('*, clienti(ragione_sociale), masters:target_master_id(nome)')
       .eq('master_id', utente?.master_id)
       .eq('confermata', false)
-      .order('created_at', { ascending: false })
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (filtroAgente) q = q.in('cliente_id', filtroAgente)
     if (fileId) q = q.eq('file_id', fileId)
     return q

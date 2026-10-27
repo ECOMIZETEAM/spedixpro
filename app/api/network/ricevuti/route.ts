@@ -63,7 +63,7 @@ export async function GET(_req: NextRequest) {
         const { data, error } = await adminDb.from('rettifiche')
           .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
           .eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).is('propagazione', null)
-          .order('created_at', { ascending: false }).range(da, da + 999)
+          .order('created_at', { ascending: false }).order('id', { ascending: false }).range(da, da + 999)
         if (error) { console.error('[NETWORK] rettifiche da decidere:', error.message); break }
         daDecidere.push(...(data || []))
         if (!data || data.length < 1000) break

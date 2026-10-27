@@ -23,7 +23,8 @@ export async function GET(_req: NextRequest) {
     const { data } = await admin.from('spedizioni')
       .select('id,numero,tracking_number,giacenza_stato,giacenza_data,giacenza_verifica_esito,giacenza_verifica_at,giacenza_motivo,corrieri(tipo,nome_contratto),clienti(ragione_sociale),masters:master_id(nome)')
       .eq('giacenza_stato', 'svincolata')
-      .order('giacenza_verifica_at', { ascending: false, nullsFirst: false })
+      // + id: le non ancora verificate hanno tutte la data vuota, e senza secondo ordine cambiavano pagina.
+      .order('giacenza_verifica_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false })
       .range(off, off + 999)
     if (!data || !data.length) break
     rows.push(...data)

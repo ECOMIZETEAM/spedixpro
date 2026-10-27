@@ -51,7 +51,8 @@ export async function ordiniSpeditiPerRiferimento(supabase: any, clienteId: stri
     .not('rif_ordine', 'is', null)
     .is('cancellata_il', null)
     .gte('created_at', DA)
-    .order('created_at', { ascending: false }))
+    // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
   const ANN = ['annullata', 'annullamento_pending', 'annullamento_manuale']
   const spedDiRif = new Map<string, any>()
   for (const s of (speds || [])) {
@@ -110,7 +111,7 @@ export async function GET() {
   const spedDiCapo = new Map<string, any>()
   if (capoIds.length) {
     const capi = await fetchAll(() => supabase.from('ordini_importati')
-      .select('id, spedizioni(created_at, stato, cancellata_il)').in('id', capoIds))
+      .select('id, spedizioni(created_at, stato, cancellata_il)').in('id', capoIds).order('id', { ascending: true }))
     for (const c of (capi || [])) if ((c as any).spedizioni) spedDiCapo.set((c as any).id, (c as any).spedizioni)
   }
   const unitiConSped = (uniti || []).map((u: any) => ({ ...u, spedizioni: spedDiCapo.get(u.unito_in) })).filter((u: any) => u.spedizioni)

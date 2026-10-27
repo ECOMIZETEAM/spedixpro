@@ -41,7 +41,8 @@ export async function GET(req: NextRequest) {
     .eq('cliente_id', utente.cliente_id)
     .eq('piattaforma', piattaforma)
     .in('integrazione_id', integrIds)
-    .order('created_at', { ascending: false }))
+    // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
   // DATA SPEDIZIONE = quando la spedizione l'abbiamo creata NOI. E' il secondo filtro della pagina
   // ("quando e' stato spedito"): uguale per tutti i canali e senza chiedere niente ai negozi. Lettura a
   // parte perche' spedizione_id non ha una FK (niente embed); la sessione del cliente, per RLS, vede

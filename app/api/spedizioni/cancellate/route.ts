@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
       .select('*, clienti(ragione_sociale)')
       .eq('master_id', utente?.master_id)
       .eq('stato', 'annullata')
-      .order('updated_at', { ascending: false })
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      .order('updated_at', { ascending: false }).order('id', { ascending: false })
     if (agIds) q = q.in('cliente_id', agIds)
     if (clienteId) q = q.eq('cliente_id', clienteId)
     if (numero) q = q.ilike('numero', '%' + numero + '%')

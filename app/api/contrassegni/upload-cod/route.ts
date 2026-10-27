@@ -64,7 +64,8 @@ export async function POST(req: NextRequest) {
   // contratto (es. E&A per SpediamoPro) — dal caricare la MIA tratta e rimborsarlo. L'anti-doppio è
   // PER-MASTER: le distinte sono personali del livello. Backstop DB: uniq_righe_cod_sped_per_master.
   const giaInMieDistinteSet = new Set<string>()
-  for (const r of await fetchAll(() => adminDb.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_master_id', masterId))) {
+  // Ordine fisso: oltre 1000 righe le pagine si accavallavano e una LDV gia' in distinta poteva mancare.
+  for (const r of await fetchAll(() => adminDb.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_master_id', masterId).order('id', { ascending: true }))) {
     if ((r as any).spedizione_id) giaInMieDistinteSet.add((r as any).spedizione_id)
   }
 

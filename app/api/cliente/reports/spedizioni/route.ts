@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
       // costo_spedizione, e non si joina niente che riveli il provider (nome_contratto e' il brand).
       .select(`${SPED_COLS_CLIENTE}, clienti(ragione_sociale), corrieri(nome_contratto)`)
       .eq('cliente_id', clienteId)
-      .order('created_at', { ascending: false })
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (stato) q = q.eq('stato', stato)
     if (dal) q = q.gte('created_at', dal)
     if (al) q = q.lte('created_at', al)

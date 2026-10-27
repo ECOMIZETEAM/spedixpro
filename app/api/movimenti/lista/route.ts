@@ -52,13 +52,14 @@ export async function GET(req: NextRequest) {
   // Carica secondo la modalità: paginata (page>0) o storica completa.
   const carica = async (db: any, col: string, val: string) => {
     if (!page) {
-      const movimenti = await fetchAll(() => buildQ(db, col, val).order('created_at', { ascending: false }))
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      const movimenti = await fetchAll(() => buildQ(db, col, val).order('created_at', { ascending: false }).order('id', { ascending: false }))
       return { movimenti: movimenti || [], total: (movimenti || []).length, somma: null as number | null }
     }
     const from = (page - 1) * perPage
     // SOLO le righe della pagina: niente count:'exact', che rifaceva lo scan del filtro a ogni pagina.
     const { data } = await buildQ(db, col, val, '*', false)
-      .order('created_at', { ascending: false }).range(from, from + perPage - 1)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, from + perPage - 1)
     // TOTALE (serve alla paginazione) + SOMMA in UNA query aggregata sull'indice: prima la somma era
     // un fetchAll di TUTTI gli importi del filtro (per E&A ~64k righe, ~65 viaggi HTTP) ripetuto a
     // OGNI click/keystroke — era la lentezza della lista. La RPC applica gli stessi filtri di buildQ
