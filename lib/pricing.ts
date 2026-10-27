@@ -1004,10 +1004,10 @@ async function creaCalcolatoreCorriereBase(
     // fetchAll: le fasce possono superare le 1000 righe (limite PostgREST) — prima venivano TRONCATE
     // e il fallback prezzava con fasce incomplete (margine sbagliato oltre le prime 1000).
     listinoIds.length
-      ? fetchAll(() => supabase.from('listini_corrieri_fasce').select('listino_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds))
+      ? fetchAll(() => supabase.from('listini_corrieri_fasce').select('listino_id,corriere_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds).order('id', { ascending: true }))
       : Promise.resolve([] as any[]),
     listinoIds.length
-      ? supabase.from('listini_corrieri_supplementi').select('listino_id,tipo,valore,tipo_calcolo,descrizione').in('listino_id', listinoIds)
+      ? supabase.from('listini_corrieri_supplementi').select('listino_id,corriere_id,tipo,valore,tipo_calcolo,descrizione').in('listino_id', listinoIds)
       : Promise.resolve({ data: [] as any[] }),
   ])
   const aggFv = (aggFvRes as any).data
@@ -1020,22 +1020,33 @@ async function creaCalcolatoreCorriereBase(
     listinoPerCorriere.set(l.corriere_id, { id: l.id, fattore })
   }
 
-  const fascePerListino = new Map<string, any[]>()
+  // FASCE E SUPPLEMENTI SI PRENDONO PER CONTRATTO, NON PER LISTINO — come fa l'addebito
+  // (calcolaPrezzoCorriereDettaglio: tutti i listini del master, filtro corriere_id).
+  // Raggruppati per listino, una riga salvata nel listino di un ALTRO contratto finiva nel conto
+  // sbagliato: CF GROUP aveva 28 fasce GLS CASERTA e 36 POSTE DELIVERY EXPRESS D dentro il listino
+  // di Poste Delivery Business S (vecchio editor a listino unico, 3/8/2026). Qui una spedizione
+  // Business S poteva mostrare il costo di una fascia GLS, e GLS/Express D non avevano costo,
+  // mentre l'addebito li prezzava giusti. Elenco e report dicevano una cifra, i movimenti un'altra.
+  const fascePerCorriere = new Map<string, any[]>()
   for (const f of fasce || []) {
-    if (!fascePerListino.has(f.listino_id)) fascePerListino.set(f.listino_id, [])
-    fascePerListino.get(f.listino_id)!.push(f)
+    if (!fascePerCorriere.has(f.corriere_id)) fascePerCorriere.set(f.corriere_id, [])
+    fascePerCorriere.get(f.corriere_id)!.push(f)
   }
 
-  const supplPerListino = new Map<string, any[]>()
+  const supplPerCorriere = new Map<string, any[]>()
   for (const s of suppl || []) {
-    if (!supplPerListino.has(s.listino_id)) supplPerListino.set(s.listino_id, [])
-    supplPerListino.get(s.listino_id)!.push(s)
+    if (!supplPerCorriere.has(s.corriere_id)) supplPerCorriere.set(s.corriere_id, [])
+    supplPerCorriere.get(s.corriere_id)!.push(s)
   }
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
+  // ORDINE FISSO, o le pagine si accavallano. A blocchi da 1000 senza ordine il database non
+  // garantisce che pagina 2 riprenda dove finisce pagina 1: su SEMPLICE SPEDIRE (21.158 CAP di zona)
+  // tre letture di fila davano 16.737, 16.737 e 17.737 righe diverse — il resto doppioni. I CAP
+  // persi cambiavano a ogni apertura dell'elenco, e con loro la zona: costo vuoto o di un'altra zona.
   const zc: any[] = zonaIds.length
     ? await fetchAll(() => zoneCapMirate(
-        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare))
+        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare).order('id', { ascending: true }))
     : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
@@ -1059,7 +1070,7 @@ async function creaCalcolatoreCorriereBase(
   return function prezzoCorriereRow(s: any): DettaglioPrezzo | null {
     const lc = listinoPerCorriere.get(s.corriere_id)
     if (!lc) return null
-    const fasceList = fascePerListino.get(lc.id) || []
+    const fasceList = fascePerCorriere.get(s.corriere_id) || []
     if (!fasceList.length) return null
 
     const L = Number(s.lunghezza) || 0, W = Number(s.larghezza) || 0, H = Number(s.altezza) || 0
@@ -1100,7 +1111,7 @@ async function creaCalcolatoreCorriereBase(
     if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
     const nolo = prezzo
-    const supplList = supplPerListino.get(lc.id) || []
+    const supplList = supplPerCorriere.get(s.corriere_id) || []
     const cod = Number(s.contrassegno) || 0, ass = Number(s.assicurazione) || 0
     // Sponda: la soglia è solo il trigger, poi prezzo/kg sul TOTALE dei kg (peso fatturato).
     const noloBase = prezzo
@@ -1137,7 +1148,7 @@ async function creaCalcolatoreListinoClienteBase(
     // fetchAll: oltre 1000 fasce venivano TRONCATE (limite PostgREST) → prezzi fallback incompleti.
     fetchAll(() => supabase
       .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome)')
-      .eq('listino_id', listinoId)),
+      .eq('listino_id', listinoId).order('id', { ascending: true })),
   ])
   const listino = (listinoRes as any).data
   const aggCorr = (aggCorrRes as any).data
@@ -1171,9 +1182,10 @@ async function creaCalcolatoreListinoClienteBase(
   for (const c of (corrSettL || [])) settPerCorrL.set(c.id, (c as any).settings || {})
 
   const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
+  // Ordine fisso per le pagine: stesso guasto del calcolatore del costo, qui sopra.
   const zc: any[] = zonaIds.length
     ? await fetchAll(() => zoneCapMirate(
-        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare))
+        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare).order('id', { ascending: true }))
     : []
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
