@@ -48,7 +48,6 @@ create trigger trg_corrieri_nome_ai_listini
 -- 3) Fasce e supplementi stanno nel listino del LORO contratto, presso lo stesso master.
 --    Se chi scrive indica il listino di un altro contratto, la riga va in quello giusto: il prezzo e'
 --    lo stesso (l'addebito legge per contratto), ma l'elenco e chi cancella "il listino X" no.
---    Se il contratto non ha un listino suo presso quel master, la riga non ha un posto giusto: rifiuto.
 create or replace function public.fn_riga_listino_corrieri_al_suo_contratto()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_master uuid; v_corr uuid; v_giusto uuid;
@@ -58,10 +57,11 @@ begin
   if v_corr is not distinct from new.corriere_id then return new; end if;
   select id into v_giusto from public.listini_corrieri
    where master_id = v_master and corriere_id = new.corriere_id;
-  if v_giusto is null then
-    raise exception 'Questa riga di prezzo appartiene a un contratto che non ha un listino suo presso questo master.'
-      using errcode = '23514';
-  end if;
+  -- Contratto senza un listino suo presso quel master: la riga resta dove l'hanno messa, NON si rifiuta.
+  -- L'editor (app/api/listini/corrieri) e la copia ai sotto-master CANCELLANO le fasce del contratto
+  -- prima di reinserirle: un rifiuto qui le lascerebbe a zero, un contratto senza prezzi. Tutte le
+  -- porte creano prima il listino del contratto (27/10: 0 casi), e l'addebito legge per contratto.
+  if v_giusto is null then return new; end if;
   new.listino_id := v_giusto;
   return new;
 end $$;
