@@ -130,13 +130,17 @@ export async function POST(req: NextRequest) {
   const linkStato = `https://www.moovexpress.com/stato-richiesta/${token}`
   try { await inviaRichiestaPartner({ to: email, nome: ragioneSociale, piano: piano.nome, link: linkStato }) } catch {}
 
-  // Avvisa la piattaforma: la richiesta va rivista e approvata (la vede MOOVY e chi gli sta sopra).
+  // Avvisa chi deve approvare. La campanella (app/api/notifiche/mie) mostra solo le notifiche del PROPRIO
+  // master, non risale la catena come il pannello da approvare: quindi una riga al master della vetrina
+  // (MOOVY) e una al suo padre (MULTIEXPRESS), che le riceveva fino al 27/10 e approva come prima.
   try {
-    await admin.from('notifiche').insert({
-      master_id: MASTER_VETRINA, cliente_id: null, gruppi: ['Amministratore'],
-      oggetto: 'Nuova richiesta rivenditore', link: '/dashboard/clienti/master',
-      messaggio: `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : contrattiPreferenza === 'misto' ? 'MISTI (nostri+suoi)' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`,
-    })
+    const { data: vetrina } = await admin.from('masters').select('parent_master_id').eq('id', MASTER_VETRINA).maybeSingle()
+    const destinatari = [MASTER_VETRINA, vetrina?.parent_master_id].filter(Boolean) as string[]
+    const messaggio = `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : contrattiPreferenza === 'misto' ? 'MISTI (nostri+suoi)' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`
+    await admin.from('notifiche').insert(destinatari.map(m => ({
+      master_id: m, cliente_id: null, gruppi: ['Amministratore'],
+      oggetto: 'Nuova richiesta rivenditore', link: '/dashboard/clienti/master', messaggio,
+    })))
   } catch {}
 
   return NextResponse.json({

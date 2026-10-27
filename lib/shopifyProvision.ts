@@ -109,6 +109,10 @@ async function assicuraAccesso(admin: any, cli: Conto, shop: string): Promise<St
 // scrittura e il motivo nei log. Che il conto non abbia un accesso su un altro indirizzo lo controlla
 // assicuraAccesso. Se il master d'onboarding un giorno cambia, i conti nati sotto quello di prima non si
 // riagganciano piu' da soli: il log lo dice, e il master va aggiunto qui.
+// Dal 27/10/2026 sotto il master d'onboarding (MOOVY) ci sono anche i clienti che si registrano dal sito
+// (lib/vetrina.ts), quindi "sta sotto MOOVY" non vuol piu' dire "e' nato dall'installazione". La difesa
+// regge lo stesso: un conto del sito ha un accesso sul suo indirizzo vero (assicuraAccesso lo scarta) e
+// l'indirizzo del negozio non si puo' dare a un cliente nuovo (lib/codice-cliente.ts lo rifiuta).
 async function masterDellInstallazione(admin: any, cli: Conto, shop: string): Promise<Errore | null> {
   if (cli.master_id === masterDeiNegoziShopify()) return null
   const { data: m, error } = await admin.from('masters').select('is_super_master').eq('id', cli.master_id).maybeSingle()

@@ -6,7 +6,7 @@ import AvvisoApi from './AvvisoApi'
 import EsitoCollegamento from './EsitoCollegamento'
 import { DialogProvider } from '../components/DialogProvider'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pagaSoloEtichette } from '@/lib/conti-shopify'
+import { pagaSoloEtichette, masterDeiNegoziShopify } from '@/lib/conti-shopify'
 import { recapitoEmail } from '@/lib/indirizzi-interni'
 import { COLONNE_DATI_NEGOZIO, datiPerLaSchermata, servonoDatiNegozio, versioneDatiNegozio } from '@/lib/dati-negozio'
 
@@ -60,7 +60,10 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   const completaDati = (utente.ruolo || '').toLowerCase() === 'cliente' && servonoDatiNegozio(cliente)
     ? datiPerLaSchermata(cliente) : null
   const versioneDati = completaDati ? versioneDatiNegozio(cliente) : null
-  const soloEtichette = (await pagaSoloEtichette(createAdminSupabase(), utente.cliente_id)) !== false
+  // La lettura in piu' si fa solo per i clienti del master dell'App Store: questo layout gira a ogni pagina
+  // del portale cliente, e per tutti gli altri la risposta e' gia' "no" dal master letto qui sopra.
+  const soloEtichette = !!cliente?.master_id && cliente.master_id === masterDeiNegoziShopify()
+    && (await pagaSoloEtichette(createAdminSupabase(), utente.cliente_id)) !== false
 
   // A CHI CHIEDERE AIUTO DALLA SCHERMATA. La schermata non si chiude, e il pulsante Supporto della
   // testata le sta sotto: chi ha un dato che i controlli non accettano (un CAP nuovo che l'archivio non
