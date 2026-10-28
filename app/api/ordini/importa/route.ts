@@ -486,18 +486,21 @@ export async function POST(req: NextRequest) {
     const { rifOrdineAffidabile } = await import('@/lib/rif-ordine')
     const ids = [...new Set(records.map(r => r.order_id).filter((x: any) => fileEcwid ? !!String(x || '').trim() : rifOrdineAffidabile(x)))]
     if (ids.length) {
-      const esistenti = new Set<string>()
-      for (let i = 0; i < ids.length; i += 300) {
-        const { data: ex } = await supabase.from('ordini_importati')
-          .select('order_id').eq('cliente_id', clienteId).in('order_id', ids.slice(i, i + 300))
-        for (const e of (ex || [])) if ((e as any).order_id) esistenti.add((e as any).order_id)
+      // Per ogni ordine gia' presente, anche DOVE e' adesso (spedito con quale numero, o da spedire):
+      // vedi lib/ordini-gia-importati.ts.
+      const { ordiniGiaImportati } = await import('@/lib/ordini-gia-importati')
+      let esistenti: Map<string, string>
+      try { esistenti = await ordiniGiaImportati(supabase, clienteId, ids as string[]) }
+      catch (e: any) {
+        console.error('[IMPORTA] controllo doppioni non riuscito', clienteId, e?.message || e)
+        return NextResponse.json({ error: 'Non sono riuscito a controllare gli ordini già importati: riprova tra poco.' }, { status: 503 })
       }
       if (esistenti.size) {
         for (let k = records.length - 1; k >= 0; k--) {
           if (records[k].order_id && esistenti.has(records[k].order_id)) {
             const oid = String(records[k].order_id)
             // Anche questo e' un ordine NON importato: nell'elenco col suo perche', non solo contato.
-            errori.push({ riga: rigaPerOrdine.get(oid) ?? null, ordine: oid, motivo: 'Già importato in precedenza' })
+            errori.push({ riga: rigaPerOrdine.get(oid) ?? null, ordine: oid, motivo: esistenti.get(oid) || 'Già importato in precedenza' })
             records.splice(k, 1); giaPresenti++
           }
         }
