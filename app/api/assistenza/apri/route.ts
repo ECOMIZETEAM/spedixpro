@@ -172,11 +172,13 @@ export async function POST(req: NextRequest) {
   //    PER-SPEDIZIONE: su un'ALTRA spedizione può aprire liberamente. Vale sia per i ticket sia per le
   //    POD. Se il ticket non è collegato a una spedizione (LDV non riconosciuta) non si blocca nulla:
   //    non c'è un perimetro su cui deduplicare. ──
+  //    Anche 'rimborso' (in attesa del rimborso del corriere) conta come aperta: chi chiede novita'
+  //    scrive in quella, non ne apre una seconda (decisione del committente, 28/10/2026).
   if (record.spedizione_id) {
     let q = admin.from('tickets').select('codice,cliente_id')
       .eq('categoria', categoria)
       .eq('spedizione_id', record.spedizione_id)
-      .in('stato', ['aperto', 'in_lavorazione'])
+      .in('stato', ['aperto', 'in_lavorazione', 'rimborso'])
     // Per il ticket aperto PER il cliente conta anche quello che il cliente ha gia' aperto da se'
     // (o che il master gli ha gia' aperto): la spedizione ha UNA conversazione col cliente, e il
     // master la porta avanti — e se serve la inoltra — da quella. Conta anche un vecchio ticket del

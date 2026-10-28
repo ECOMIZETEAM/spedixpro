@@ -9,6 +9,9 @@ import { AllegatoChat } from '@/app/components/AllegatoChat'
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
   in_lavorazione: { label: 'In lavorazione', bg: '#eff6ff', color: '#2563eb' },
+  // risolto nei fatti, ma si aspetta il rimborso del corriere: prima finiva confuso tra "In
+  // lavorazione" e "Risolto" (777 ticket parlano di rimborso). Solo ticket, non POD.
+  rimborso: { label: 'In attesa di rimborso', bg: '#f5f3ff', color: '#7c3aed' },
   risolto: { label: 'Risolto', bg: '#f0fdf4', color: '#16a34a' },
   chiuso: { label: 'Chiuso', bg: '#f3f4f6', color: '#6b7280' },
 }
@@ -197,6 +200,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     nuovi: cercati.filter((t: any) => t.non_letto_owner).length,
     aperto: cercati.filter((t: any) => t.stato === 'aperto').length,
     in_lavorazione: cercati.filter((t: any) => t.stato === 'in_lavorazione').length,
+    rimborso: cercati.filter((t: any) => t.stato === 'rimborso').length,
     risolto: cercati.filter((t: any) => t.stato === 'risolto').length,
     chiuso: cercati.filter((t: any) => t.stato === 'chiuso').length,
   }
@@ -250,7 +254,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
           </div>
           {/* Tab di stato con contatori: filtro rapido + colpo d'occhio su quanti ce ne sono. */}
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {[{ k: 'tutti', label: 'Tutti' }, { k: 'nuovi', label: 'Nuovi' }, { k: 'aperto', label: 'Aperti' }, { k: 'in_lavorazione', label: 'In lavorazione' }, { k: 'risolto', label: 'Risolti' }, { k: 'chiuso', label: 'Chiusi' }].map(tab => {
+            {[{ k: 'tutti', label: 'Tutti' }, { k: 'nuovi', label: 'Nuovi' }, { k: 'aperto', label: 'Aperti' }, { k: 'in_lavorazione', label: 'In lavorazione' }, ...(isPod ? [] : [{ k: 'rimborso', label: 'Rimborso' }]), { k: 'risolto', label: 'Risolti' }, { k: 'chiuso', label: 'Chiusi' }].map(tab => {
               const attivo = filtroStato === tab.k
               const n = conta[tab.k] || 0
               const evidNuovi = tab.k === 'nuovi' && n > 0 && !attivo
@@ -300,6 +304,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                       <button onClick={() => apriDettaglio(t)} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>💬 Apri chat</button>
                       {!isPod && t.stato !== 'in_lavorazione' && t.stato !== 'risolto' && (
                         <button onClick={() => aggiorna(t.id, { stato: 'in_lavorazione' })} style={{ padding: '5px 10px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>In lavorazione</button>
+                      )}
+                      {!isPod && !['rimborso', 'risolto', 'chiuso'].includes(t.stato) && (
+                        <button onClick={() => aggiorna(t.id, { stato: 'rimborso' })} style={{ padding: '5px 10px', border: 'none', background: '#7c3aed', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Attesa rimborso</button>
                       )}
                       {t.stato !== 'risolto' && (
                         <button onClick={() => aggiorna(t.id, { stato: 'risolto' })} style={{ padding: '5px 10px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Segna risolto</button>
@@ -590,6 +597,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
               {(ruoloChat === 'master' || ruoloChat === 'rete') && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f1f5f9', paddingTop: '12px', alignItems: 'center' }}>
                   {!isPod && !['chiuso', 'in_lavorazione', 'risolto'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione' })) setSel((s: any) => ({ ...s, stato: 'in_lavorazione' })) }} style={{ padding: '8px 14px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>}
+                  {!isPod && !['rimborso', 'risolto', 'chiuso'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'rimborso' })) setSel((s: any) => ({ ...s, stato: 'rimborso' })) }} style={{ padding: '8px 14px', border: 'none', background: '#7c3aed', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>💶 In attesa di rimborso</button>}
                   {!['risolto', 'chiuso'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto' })) setSel((s: any) => ({ ...s, stato: 'risolto' })) }} style={{ padding: '8px 14px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>}
                   {sel.stato !== 'chiuso' && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'chiuso' })) setSel(null) }} style={{ padding: '8px 14px', border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>🔒 Chiudi e archivia</button>}
                   {ruoloChat === 'rete' && sel.stato !== 'chiuso' && <span style={{ fontSize: '11px', color: '#888' }}>Puoi chiuderlo anche per conto del master a cui è stato inoltrato.</span>}
