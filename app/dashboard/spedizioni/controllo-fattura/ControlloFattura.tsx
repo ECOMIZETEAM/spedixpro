@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useDialog } from '@/app/components/DialogProvider'
-import { leggiFatturaBrt, descriviVoce, type RigaFatturaBrt } from '@/lib/fattura-brt'
+import { leggiFatturaBrt, descriviVoce } from '@/lib/fattura-brt'
+import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 
 /* CONTROLLO FATTURA CORRIERE. Il detentore carica la fattura di BRT (il file TIVAF) e vede spedizione per
  * spedizione quanto ha fatturato BRT, quanto Moove gli ha registrato come costo, e il perché di ogni
@@ -12,15 +13,14 @@ import { leggiFatturaBrt, descriviVoce, type RigaFatturaBrt } from '@/lib/fattur
  * L'addebito ai clienti NON si fa qui: le differenze di peso si mandano alla Rettifica Costi come un file
  * "solo pesi", e lì si confermano come ogni altra rettifica. Una porta sola per i soldi dei pesi. */
 
-type Motivo = { tipo: 'peso' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile'; importo: number; testo: string }
-export type EsitoControllo = {
-  riga: RigaFatturaBrt
-  spedizione: { id: string; numero: string; stato: string; data: string; colli: number; peso: number; contrassegno: number; citta: string; chi: string } | null
-  abbinataPer: 'riferimento' | 'segnacollo' | null
-  brt: number; moove: number | null; listino: number | null; zona: string | null; differenza: number | null
-  motivi: Motivo[]; voci: Record<string, number>
-}
+export type EsitoControllo = EsitoPagina
 type Contratto = { id: string; nome: string; attivo: boolean }
+type FatturaStorico = {
+  id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; data_fattura: string | null; nome_file: string | null
+  righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
+  da_girare: number; euro_da_girare: number; rettifiche_file_id: string | null; created_at: string
+  girate: { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number } | null; aTuoCarico: number
+}
 type Filtro = 'perdita' | 'tutte' | 'peso' | 'voce' | 'tariffa' | 'annullata' | 'non_trovata' | 'rientri'
 
 // Pacchetti da 200: il listino si rifà con la funzione dell'addebito (~0,1 s a destinazione), così ogni
@@ -86,7 +86,7 @@ const MOTIVI: Record<string, { nome: string; icona: string }> = {
   non_calcolabile: { nome: 'Destinazione senza prezzo nel listino', icona: 'avviso' },
 }
 
-export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string } }) {
+export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string; storico?: FatturaStorico[] } }) {
   const dialog = useDialog()
   const [contratti, setContratti] = useState<Contratto[] | null>(iniziale?.contratti ?? null)
   const [contrattoId, setContrattoId] = useState(iniziale?.contratti?.[0]?.id ?? '')
@@ -99,69 +99,78 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const [pagina, setPagina] = useState(1)
   const [inviando, setInviando] = useState(false)
   const [trascina, setTrascina] = useState(false)
+  const [fatturaId, setFatturaId] = useState<string | null>(null)
+  const [rettificheInviate, setRettificheInviate] = useState(false)
+  const [storico, setStorico] = useState<FatturaStorico[] | null>(iniziale?.storico ?? null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const caricaStorico = () => fetch('/api/fatture-corriere/storico').then(r => r.json()).then(d => setStorico(d.fatture || [])).catch(() => setStorico([]))
   useEffect(() => {
     if (iniziale) return
     fetch('/api/fatture-corriere/analizza').then(r => r.json()).then(d => {
       const c = d.contratti || []
       setContratti(c); if (c.length === 1) setContrattoId(c[0].id)
     }).catch(() => setContratti([]))
+    caricaStorico()
   }, [iniziale])
+
+  async function apriFattura(id: string) {
+    const d = await fetch('/api/fatture-corriere/storico?fattura=' + id).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
+    if (d.error) { await dialog.alert({ title: 'Fattura non aperta', message: d.error }); return }
+    setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setRettificheInviate(!!d.fattura.rettifiche_file_id)
+    if (d.fattura.corriere_id) setContrattoId(d.fattura.corriere_id)
+    setEsiti(d.esiti || []); setAvvisi([]); setPagina(1); setFiltro('perdita'); setCerca('')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false) }
 
   async function caricaFile(file: File) {
     if (!contrattoId) { await dialog.alert({ title: 'Scegli il contratto', message: 'Prima scegli il contratto BRT a cui si riferisce la fattura.' }); return }
+    if (fileRef.current) fileRef.current.value = ''
     // BRT scrive il file in ISO-8859-1: letto come UTF-8, le accentate dei destinatari diventerebbero rombi.
     const testo = new TextDecoder('iso-8859-1').decode(await file.arrayBuffer())
     const { righe, errori } = leggiFatturaBrt(testo)
     if (!righe.length) { await dialog.alert({ title: 'File non letto', message: errori.join(' ') || 'Nessuna riga nel file.' }); return }
-    setNomeFile(file.name); setEsiti([]); setAvvisi(errori); setPagina(1); setFiltro('perdita')
+    chiudiFattura()
+    setNomeFile(file.name); setAvvisi(errori); setPagina(1); setFiltro('perdita'); setCerca('')
     const tutti: EsitoControllo[] = []
     const inizio = Date.now()
+    let id: string | null = null
     setAvanz({ fatti: 0, totale: righe.length, da: inizio, etichetta: 'Confronto la fattura con le tue spedizioni' })
     for (let i = 0; i < righe.length; i += PACCHETTO) {
-      const res = await fetch('/api/fatture-corriere/analizza', {
+      const res: Response = await fetch('/api/fatture-corriere/analizza', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contrattoId, righe: righe.slice(i, i + PACCHETTO) }),
+        body: JSON.stringify(id
+          ? { fatturaId: id, righe: righe.slice(i, i + PACCHETTO) }
+          : { contrattoId, righe: righe.slice(i, i + PACCHETTO), testata: { numeroFattura: righe[0].numeroFattura, dataFattura: righe[0].dataFattura, nomeFile: file.name } }),
       })
-      const d = await res.json().catch(() => ({ error: 'Risposta non valida' }))
+      const d: any = await res.json().catch(() => ({ error: 'Risposta non valida' }))
+      // La stessa fattura già controllata non si rifà: si riapre quella salvata.
+      if (d.giaCaricata) {
+        setAvanz(null)
+        await dialog.alert({ title: 'Fattura già caricata', message: `La fattura n. ${righe[0].numeroFattura} l'hai già controllata il ${new Date(d.giaCaricata.il).toLocaleDateString('it-IT')}: la riapro.` })
+        await apriFattura(d.giaCaricata.id); return
+      }
       // A metà: si ferma e lo dice. Un controllo parziale presentato come completo farebbe credere che
-      // le spedizioni mancanti non ci siano.
+      // le spedizioni mancanti non ci siano. Nello storico resta "in corso" e ricaricando riparte da capo.
       if (!res.ok || d.error) {
         setAvanz(null)
-        await dialog.alert({ title: 'Controllo interrotto', message: `${d.error || 'Errore'} — controllate ${tutti.length} righe su ${righe.length}. Riprova a caricare il file.` })
+        await dialog.alert({ title: 'Controllo interrotto', message: `${d.error || 'Errore'} — controllate ${tutti.length} righe su ${righe.length}. Ricarica il file: riparte da capo.` })
         setEsiti(tutti); return
       }
+      id = d.fatturaId
       tutti.push(...d.esiti)
       setAvanz({ fatti: Math.min(i + PACCHETTO, righe.length), totale: righe.length, da: inizio, etichetta: 'Confronto la fattura con le tue spedizioni' })
     }
-    setAvanz(null); setEsiti(tutti)
-    if (fileRef.current) fileRef.current.value = ''
+    // I totali dello storico li rifà il server dalle righe salvate.
+    await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId: id, chiudi: true }) }).catch(() => null)
+    setFatturaId(id); setAvanz(null); setEsiti(tutti)
+    caricaStorico()
   }
 
   const trovate = useMemo(() => esiti.filter(e => e.spedizione), [esiti])
-  const daRettificare = useMemo(() => trovate.filter(e => e.riga.andata && e.spedizione?.stato !== 'annullata'
-    && e.motivi.some(m => m.tipo === 'peso' && m.importo > 0.005)), [trovate])
-
-  const totali = useMemo(() => {
-    const t = { brt: 0, brtTrovate: 0, moove: 0, nonTrovate: 0, nNonTrovate: 0, rientri: 0, nRientri: 0, andate: 0 }
-    const perMotivo: Record<string, { n: number; euro: number }> = {}
-    const perVoce: Record<string, { n: number; euro: number }> = {}
-    for (const e of esiti) {
-      t.brt += e.brt
-      if (e.riga.andata) t.andate++; else { t.rientri += e.brt; t.nRientri++ }
-      if (!e.spedizione) { t.nonTrovate += e.brt; t.nNonTrovate++; continue }
-      t.brtTrovate += e.brt; t.moove += e.moove || 0
-      for (const m of e.motivi) {
-        const v = perMotivo[m.tipo] || { n: 0, euro: 0 }; v.n++; v.euro += m.importo; perMotivo[m.tipo] = v
-        if (m.tipo === 'voce') {
-          const s = m.testo.match(/sigla BRT "([^"]+)"/)?.[1] || '?'
-          const w = perVoce[s] || { n: 0, euro: 0 }; w.n++; w.euro += m.importo; perVoce[s] = w
-        }
-      }
-    }
-    return { ...t, perMotivo, perVoce }
-  }, [esiti])
+  const daRettificare = useMemo(() => esiti.filter(daGirare), [esiti])
+  const totali = useMemo(() => riepilogaFattura(esiti), [esiti])
 
   // COSA ALLINEARE NEL LISTINO: a parità di peso, di quanto il listino si scosta da BRT, per zona e fascia.
   // Solo dove le spedizioni sono almeno tre: un caso isolato non è una regola da correggere.
@@ -235,6 +244,12 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       if (d.finito) break
     }
     setAvanz(null); setInviando(false)
+    // Nello storico la fattura ricorda in quale file di rettifiche sono finite le sue differenze: da lì si
+    // legge, mese per mese, quanto è stato davvero girato ai clienti.
+    if (fileId && fatturaId) {
+      await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, rettificheFileId: fileId }) }).catch(() => null)
+      setRettificheInviate(true); caricaStorico()
+    }
     await dialog.alert({
       title: errore ? 'Invio interrotto' : 'Rettifiche create',
       message: (errore ? errore + ' — ' : '') + `Create ${creati} rettifiche su ${righe.length} spedizioni.`
@@ -261,7 +276,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
 
   const scegliFile = () => { if (!avanz) fileRef.current?.click() }
   const contrattoNome = contratti?.find(c => c.id === contrattoId)?.nome
-  const diff = r2(totali.brtTrovate - totali.moove)
+  const diff = totali.differenza
   const conRisultati = esiti.length > 0 && !avanz
   const maxMotivo = Math.max(0.01, ...Object.values(totali.perMotivo).map(v => Math.abs(v.euro)))
 
@@ -346,7 +361,59 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           </>)}
         </div>
 
-        {!avanz && (
+        {!avanz && !!storico?.length && (
+          <div style={{ ...carta, marginTop: 16, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', borderBottom: `1px solid ${C.filo}` }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>Fatture controllate</div>
+                <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2 }}>Mese per mese: quanto ha fatturato il corriere, quanto hai girato ai clienti e quanto è rimasto a te</div>
+              </div>
+              <div style={{ fontSize: 12.5, color: C.attenuato, ...cifre }}>
+                Totale a tuo carico: <b style={{ color: coloreImporto(storico.reduce((t, f) => t + f.aTuoCarico, 0)), fontSize: 14 }}>{conSegno(r2(storico.reduce((t, f) => t + f.aTuoCarico, 0)))}</b>
+              </div>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead><tr style={{ background: C.fondoTenue }}>
+                  {[['Mese', 'left'], ['Fattura', 'left'], ['Fatturato', 'right'], ['Costo in Moove', 'right'], ['Differenza', 'right'], ['Girato ai clienti', 'right'], ['A tuo carico', 'right'], ['', 'right']].map(([h, a], i) => (
+                    <th key={i} style={{ padding: '9px 14px', fontSize: 11.5, fontWeight: 600, color: C.attenuato, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', textAlign: a as any, borderBottom: `1px solid ${C.filo}` }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>{storico.map((f, i) => (
+                  <tr key={f.id} style={{ borderTop: i ? `1px solid ${C.filo}` : 'none' }}>
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>{f.data_fattura ? new Date(f.data_fattura).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : '—'}</div>
+                      <div style={{ fontSize: 12, color: C.attenuato, marginTop: 2 }}>{f.nome_contratto}</div>
+                    </td>
+                    <td style={{ padding: '11px 14px' }}>
+                      <div style={{ fontWeight: 600 }}>n. {f.numero_fattura}</div>
+                      <div style={{ fontSize: 12, color: C.attenuato, marginTop: 2 }}>{f.righe.toLocaleString('it-IT')} righe{f.non_trovate ? ` · ${f.non_trovate} fuori Moove` : ''}</div>
+                    </td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 600, ...cifre }}>{euro(Number(f.totale_corriere))}</td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', ...cifre }}>{euro(Number(f.costo_moove))}</td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 600, color: coloreImporto(Number(f.differenza)), ...cifre }}>{conSegno(Number(f.differenza))}</td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', ...cifre }}>
+                      {f.girate ? (<>
+                        <div style={{ fontWeight: 600 }}>{euro(f.girate.euroConfermati)}</div>
+                        {f.girate.euroInAttesa > 0.005 && <div style={{ fontSize: 12, color: C.ambra, marginTop: 2 }}>{euro(f.girate.euroInAttesa)} da confermare</div>}
+                      </>) : f.da_girare ? <span style={{ fontSize: 12, color: C.ambra }}>{f.da_girare} da mandare</span> : <span style={{ color: '#98a2b3' }}>—</span>}
+                    </td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', ...cifre }}>
+                      <span style={{ display: 'inline-block', padding: '3px 9px', borderRadius: 8, fontWeight: 700, color: coloreImporto(f.aTuoCarico), background: f.aTuoCarico > 0.005 ? C.rossoTenue : f.aTuoCarico < -0.005 ? C.verdeTenue : C.fondoTenue }}>{conSegno(f.aTuoCarico)}</span>
+                    </td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                      <button onClick={() => apriFattura(f.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 12.5, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
+                        Apri <Icona nome="freccia" size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {!avanz && !storico?.length && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12, marginTop: 16 }}>
             {[
               ['bilancia', 'Peso rimisurato', 'BRT ha pesato o misurato il pacco più del dichiarato: la differenza si gira al cliente con la Rettifica.'],
@@ -378,9 +445,12 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
               Fattura BRT n. {esiti[0].riga.numeroFattura}{esiti[0].riga.dataFattura ? ` del ${new Date(esiti[0].riga.dataFattura).toLocaleDateString('it-IT')}` : ''}
             </div>
             <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2 }}>
-              {nomeFile} · {esiti.length.toLocaleString('it-IT')} righe: {totali.andate.toLocaleString('it-IT')} spedizioni e {totali.nRientri} rientri · contratto {contrattoNome}
+              {nomeFile} · {esiti.length.toLocaleString('it-IT')} righe: {totali.andate.toLocaleString('it-IT')} spedizioni e {totali.rientri} rientri · contratto {contrattoNome}
             </div>
           </div>
+          <button onClick={chiudiFattura} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
+            <Icona nome="fattura" size={16} /> Tutte le fatture
+          </button>
           <button onClick={scegliFile} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
             <Icona nome="carica" size={16} /> Carica un'altra fattura
           </button>
@@ -389,11 +459,11 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         {/* ── I NUMERI ── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 }}>
           {[
-            { ic: 'fattura', t: 'Fatturato da BRT', v: euro(r2(totali.brt)), n: `${esiti.length.toLocaleString('it-IT')} righe in fattura`, c: C.testo },
-            { ic: 'euro', t: 'Costo registrato in Moove', v: euro(r2(totali.moove)), n: `sulle ${trovate.length.toLocaleString('it-IT')} spedizioni trovate`, c: C.testo },
+            { ic: 'fattura', t: 'Fatturato da BRT', v: euro(totali.totaleCorriere), n: `${esiti.length.toLocaleString('it-IT')} righe in fattura`, c: C.testo },
+            { ic: 'euro', t: 'Costo registrato in Moove', v: euro(totali.costoMoove), n: `sulle ${trovate.length.toLocaleString('it-IT')} spedizioni trovate`, c: C.testo },
             { ic: 'sale', t: 'Differenza', v: conSegno(diff), n: diff > 0.005 ? 'BRT ti costa più di quanto vedi' : diff < -0.005 ? 'vedi un costo più alto del vero' : 'torna al centesimo', c: coloreImporto(diff), evid: true },
             { ic: 'bilancia', t: 'Da girare ai clienti', v: String(daRettificare.length), n: 'spedizioni col peso BRT più alto', c: daRettificare.length ? C.arancioScuro : C.testo },
-            { ic: 'pacco', t: 'Non trovate in Moove', v: String(totali.nNonTrovate), n: totali.nNonTrovate ? `${euro(r2(totali.nonTrovate))} spedite fuori dal portale` : 'tutte abbinate', c: totali.nNonTrovate ? C.ambra : C.testo },
+            { ic: 'pacco', t: 'Non trovate in Moove', v: String(totali.nonTrovate), n: totali.nonTrovate ? `${euro(totali.totaleNonTrovate)} spedite fuori dal portale` : 'tutte abbinate', c: totali.nonTrovate ? C.ambra : C.testo },
           ].map(k => (
             <div key={k.t} style={{ ...carta, padding: 16, ...(k.evid ? { borderColor: diff > 0.005 ? C.rossoOrlo : C.verdeOrlo, background: diff > 0.005 ? C.rossoTenue : C.verdeTenue } : {}) }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: C.attenuato }}><Icona nome={k.ic} size={15} /> {k.t}</div>
@@ -428,9 +498,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
               </div>
             ))}
             {!Object.keys(totali.perMotivo).length && <div style={{ fontSize: 13, color: C.verde, display: 'flex', gap: 6, alignItems: 'center' }}><Icona nome="spunta" size={16} /> Nessuna differenza: la fattura torna con Moove.</div>}
-            {totali.nRientri > 0 && (
+            {totali.rientri > 0 && (
               <div style={{ display: 'flex', gap: 8, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 9, padding: '9px 11px', marginTop: 10 }}>
-                <Icona nome="rientro" size={16} /> {totali.nRientri} rientri per {euro(r2(totali.rientri))}: non si confrontano col nolo dell'andata, il reso si addebita col suo flusso.
+                <Icona nome="rientro" size={16} /> {totali.rientri} rientri per {euro(totali.totaleRientri)}: non si confrontano col nolo dell'andata, il reso si addebita col suo flusso.
               </div>
             )}
           </div>
@@ -474,13 +544,22 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                 <span style={{ color: C.arancioScuro, marginLeft: 8, ...cifre }}>{conSegno(r2(daRettificare.reduce((s, e) => s + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0)))}</span>
               </div>
               <div style={{ fontSize: 12.5, color: '#475467', marginTop: 3, lineHeight: 1.45 }}>
-                BRT le ha tassate più del peso registrato in Moove. Diventano rettifiche da confermare in Rettifica Costi, ognuno paga col proprio listino: finché non le confermi non si muove nulla.
+                {rettificheInviate
+                  ? 'Le hai già mandate alla Rettifica: le trovi in Rettifica Costi, da confermare. Rimandarle non le raddoppia, quelle già create vengono saltate.'
+                  : 'BRT le ha tassate più del peso registrato in Moove. Diventano rettifiche da confermare in Rettifica Costi, ognuno paga col proprio listino: finché non le confermi non si muove nulla.'}
               </div>
             </div>
-            <button onClick={mandaAllaRettifica} disabled={inviando}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: 'none', fontSize: 13.5, fontWeight: 700, background: C.arancio, color: '#fff', cursor: inviando ? 'default' : 'pointer', boxShadow: '0 1px 2px rgba(16,24,40,.1)' }}>
-              Manda alla Rettifica <Icona nome="freccia" size={16} />
-            </button>
+            {rettificheInviate ? (
+              <a href="/dashboard/spedizioni/rettifica"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: `1px solid ${C.arancioOrlo}`, fontSize: 13.5, fontWeight: 700, background: '#fff', color: C.arancioScuro, textDecoration: 'none' }}>
+                Apri Rettifica Costi <Icona nome="freccia" size={16} />
+              </a>
+            ) : (
+              <button onClick={mandaAllaRettifica} disabled={inviando}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: 'none', fontSize: 13.5, fontWeight: 700, background: C.arancio, color: '#fff', cursor: inviando ? 'default' : 'pointer', boxShadow: '0 1px 2px rgba(16,24,40,.1)' }}>
+                Manda alla Rettifica <Icona nome="freccia" size={16} />
+              </button>
+            )}
           </div>
         )}
 
