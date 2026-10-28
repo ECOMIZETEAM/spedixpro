@@ -102,17 +102,27 @@ export async function leggiEtichetta(
 ): Promise<EtichettaLetta | null> {
   if (sped?.etichetta_path) {
     const da = await scaricaEtichetta(admin, sped.etichetta_path)
-    if (da) return da
+    if (da) return inPdfSeImmagine(da)
     // Il percorso c'e' ma il file no: non ci si ferma qui, si prova comunque il base64.
     console.error('[ETICHETTE] percorso presente ma file mancante', sped.etichetta_path)
   }
   const dal = scomponiDataUrl(sped?.etichetta_url)
-  if (dal) return { ...dal, ext: estensioneDa(dal.mime) }
+  if (dal) return inPdfSeImmagine({ ...dal, ext: estensioneDa(dal.mime) })
   const legacy = sped?.raw_response?.labelData
   if (legacy) {
     try { return { buffer: Buffer.from(legacy, 'base64'), mime: 'application/pdf', ext: 'pdf' } } catch { }
   }
   return null
+}
+
+// UPS da' una GIF (o uno ZIP di GIF nel multicollo): la si serve come PDF verticale 10x15, vedi
+// lib/etichetta-immagine. Si guardano i BYTE, non il tipo dichiarato: fino al 21/10 la catena della
+// condivisione salvava le GIF come application/pdf.
+async function inPdfSeImmagine(et: EtichettaLetta): Promise<EtichettaLetta> {
+  const { eGif, eZip, etichettaImmagineInPdf } = await import('@/lib/etichetta-immagine')
+  if (!eGif(et.buffer) && !eZip(et.buffer)) return et
+  const pdf = await etichettaImmagineInPdf(et.buffer)
+  return pdf ? { buffer: pdf, mime: 'application/pdf', ext: 'pdf' } : et
 }
 
 // COME leggiEtichetta, MA MULTICOLLO. Se la spedizione ha più colli e ognuno ha la SUA etichetta,
@@ -160,6 +170,23 @@ export async function nomeMasterEtichetta(admin: any, masterId?: string | null):
 // di un altro collo. La stampa SINGOLA non aveva il problema (passa da leggiEtichettaCompleta, che
 // il percorso lo legge): le due strade dicevano cose diverse sulla stessa spedizione.
 export async function sorgentiEtichettePerStampa(
+  admin: any,
+  sped: { etichetta_url?: string | null; etichetta_path?: string | null; colli_dettaglio?: any; raw_response?: any }
+): Promise<Array<{ url?: string; bytes?: Uint8Array }>> {
+  // Chi stampa in blocco apre ogni sorgente come PDF: una GIF UPS gli dava "ETICHETTA NON
+  // DISPONIBILE". Le immagini arrivano gia' convertite, come nella stampa singola.
+  const sorgenti = await sorgentiGrezze(admin, sped)
+  return Promise.all(sorgenti.map(async s => {
+    // Un data URL si decodifica solo se comincia come una GIF (R0lGOD) o uno ZIP (UEsDB): gli altri
+    // sono PDF, e la stampa in blocco ne passa centinaia.
+    const byte = s.bytes || (s.url && /^data:[^,]*;base64,(R0lGOD|UEsDB)/.test(s.url) ? scomponiDataUrl(s.url)?.buffer : null)
+    if (!byte?.length) return s
+    const et = await inPdfSeImmagine({ buffer: Buffer.from(byte), mime: '', ext: '' })
+    return et.mime === 'application/pdf' ? { bytes: new Uint8Array(et.buffer) } : s
+  }))
+}
+
+async function sorgentiGrezze(
   admin: any,
   sped: { etichetta_url?: string | null; etichetta_path?: string | null; colli_dettaglio?: any; raw_response?: any }
 ): Promise<Array<{ url?: string; bytes?: Uint8Array }>> {

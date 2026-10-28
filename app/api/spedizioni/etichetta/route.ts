@@ -174,10 +174,13 @@ export async function GET(req: NextRequest) {
           const { spediamoproGetLabel, normalizzaEtichetta } = await import('@/lib/spediamopro')
           const raw = await spediamoproGetLabel(authcode, Number(shipId))
           // ZIP multicollo → PDF unico; PDF/GIF/PNG mono-collo invariati.
-          const { buffer: buf, mime, ext } = await normalizzaEtichetta(raw)
+          const { buffer: buf, mime } = await normalizzaEtichetta(raw)
           try { const { createAdminSupabase } = await import('@/lib/supabase-admin'); await createAdminSupabase().from('spedizioni').update({ etichetta_url: `data:${mime};base64,${buf.toString('base64')}` }).eq('id', id) } catch {}
-          const outBuf = mime === 'application/pdf' ? await conRiepilogo(buf) : buf
-          return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
+          // Si salva l'originale; si serve come le altre letture: la GIF UPS in PDF verticale.
+          const { leggiEtichetta } = await import('@/lib/etichette')
+          const et = (await leggiEtichetta(null, { etichetta_url: `data:${mime};base64,${buf.toString('base64')}` }))!
+          const outBuf = et.mime === 'application/pdf' ? await conRiepilogo(et.buffer) : et.buffer
+          return new NextResponse(new Uint8Array(outBuf), { status: 200, headers: { 'Content-Type': et.mime, 'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${et.ext}"`, 'Cache-Control': 'private, max-age=0, no-store' } })
         } catch (e: any) {
           // Etichetta non ancora generata dal corriere (tipico del multicollo appena creato).
           const m = String(e?.message || '')
