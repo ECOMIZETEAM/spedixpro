@@ -21,6 +21,8 @@ const NAV: NavItem[] = [
     { label: 'Elenco Spedizioni', href: '/dashboard/spedizioni', perm: 'admin.shippings.index' },
     { label: 'Giacenze', href: '/dashboard/spedizioni/giacenze', perm: 'admin.stocks.index' },
     { label: 'Rettifica Costi', href: '/dashboard/spedizioni/rettifica', perm: 'admin.shippings.weight_corrections.index' },
+    // La pagina la vede chi può caricare rettifiche; la rotta poi lascia passare solo il detentore di un BRT.
+    { label: 'Controllo Fattura Corriere', href: '/dashboard/spedizioni/controllo-fattura', perm: 'admin.shippings.weight_corrections.index' },
     { label: 'Spedizioni Cancellate', href: '/dashboard/spedizioni/cancellate', perm: 'admin.shippings.cancelled.index' },
   ]},
   { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '¤', sub: [
