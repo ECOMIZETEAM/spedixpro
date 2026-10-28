@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
         id: e.spedizione.id, numero: e.spedizione.numero, stato: e.spedizione.stato,
         data: e.spedizione.created_at, colli: e.spedizione.colli,
         peso: Number(e.spedizione.peso_fatturato || e.spedizione.peso_reale || 0),
-        contrassegno: Number(e.spedizione.contrassegno || 0),
+        contrassegno: Number(e.spedizione.contrassegno || 0), citta: e.spedizione.dest_citta || '',
         // Il sotto-master per nome, il cliente diretto per ragione sociale: chi riceverà la rettifica.
         chi: e.spedizione.master_id !== u.masterId ? (nomi[e.spedizione.master_id] || 'Sotto-master') : (nomi[e.spedizione.cliente_id || ''] || 'Cliente'),
       },
