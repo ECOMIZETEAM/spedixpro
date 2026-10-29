@@ -402,7 +402,40 @@ export async function POST(req: NextRequest) {
   }
   const spedizioniDaAggiornare: any[] = []
 
-  for (const r of rettifiche as any[]) {
+  // ── UN PO' PIU' VELOCE, CON GLI STESSI CONTROLLI (28/10/2026) ──
+  // Wave confermava le 6.141 rettifiche OneTracking di SDA EXPRESS L a ~175 al minuto: ogni riga rileggeva la
+  // sua spedizione e ricostruiva da capo la catena del contratto condiviso (sempre la stessa) per sapere su quale
+  // conto "(ingrosso)" addebitare. Ora: (1) le spedizioni del blocco si leggono in una volta sola; (2) la
+  // catena si ricostruisce UNA volta per ogni domanda identica (stessa gamba d'origine, cliente, contratto) e
+  // le letture di configurazione passano dal client con memoria — stessi ingressi, stessa risposta; (3) TRE
+  // righe alla volta invece di una. Ogni riga resta presa da sola (UPDATE condizionato), il doppio addebito
+  // lo fermano come prima la chiave RIP-/RIPFORN- (indice unico) e trg_rettifica_no_doppia_ripesatura, e il
+  // credito si muove con le stesse funzioni atomiche (una riga di saldo per volta, nel database).
+  const spedPerId = new Map<string, any>()
+  {
+    const idsSped = [...new Set((rettifiche as any[]).map((r: any) => r.spedizione_id).filter(Boolean))]
+    for (let i = 0; i < idsSped.length; i += 200) {
+      const { data: ss } = await adminDb.from('spedizioni').select('id,master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').in('id', idsSped.slice(i, i + 200))
+      for (const s of (ss || [])) spedPerId.set((s as any).id, s)
+    }
+  }
+  const { createAdminSupabaseConMemoria } = await import('@/lib/supabase-admin')
+  const adminMem = createAdminSupabaseConMemoria()
+  const catenaRisolta = new Map<string, Promise<any>>()
+  const destinoCondivisione = (sp: any): Promise<any> => {
+    const c: any = Array.isArray(sp?.corrieri) ? sp.corrieri[0] : sp?.corrieri
+    const arg = { master_id: sp.master_id, cliente_id: sp.cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: sp.corriere_id }
+    const k = [arg.master_id, arg.cliente_id, arg.corriereTipo, arg.nomeContratto, arg.corriereId].join('|')
+    let p = catenaRisolta.get(k)
+    if (!p) {
+      p = scendiCodDaSpedizione(adminMem, arg, utente!.master_id!)
+      catenaRisolta.set(k, p)
+      p.catch(() => catenaRisolta.delete(k))   // un errore non si ricorda: la riga dopo riprova
+    }
+    return p
+  }
+
+  const confermaUna = async (r: any): Promise<void> => {
     // PRESA ATOMICA, UNA RIGA ALLA VOLTA.
     // Serve contro il doppio addebito: due schede, o un secondo invio dopo che il primo e' andato
     // in timeout mentre ancora girava, rileggevano le stesse righe ancora aperte e addebitavano una
@@ -416,7 +449,7 @@ export async function POST(req: NextRequest) {
       .update({ confermata: true, stato: 'confermata' })
       .eq('id', r.id).eq('master_id', utente!.master_id).eq('confermata', false)
       .select('id')
-    if (!presa?.length) { saltate.push({ id: r.id, perche: 'gia\' confermata da un altro invio' }); continue }
+    if (!presa?.length) { saltate.push({ id: r.id, perche: 'gia\' confermata da un altro invio' }); return }
 
     // ── PRIMA PAGA CHI CONFERMA (regola di Lorenzo, 22/10/2026) ──
     // Chi ha caricato il file del suo fornitore ha gia' pagato il fornitore: il suo costo (costo_fornitore
@@ -426,7 +459,7 @@ export async function POST(req: NextRequest) {
     const costoMio = Math.round(Number(r.costo_fornitore || 0) * 100) / 100
     const soloMio = !!r.target_master_id && r.target_master_id === utente!.master_id
     if (costoMio > 0.005 && r.rif_fornitore && r.spedizione_id) {
-      if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
+      if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); return }
       const rifCosto = await chiaveLibera(`RIPFORN-${r.rif_fornitore}`)
       if (rifCosto) {
         try {
@@ -440,13 +473,13 @@ export async function POST(req: NextRequest) {
           // gia' registrato da un invio parallelo: il costo c'e', si prosegue col livello sotto
           if (!/23505|duplicate key|unique/i.test(String(e?.message || ''))) {
             console.error('[RETTIFICHE] costo di chi conferma non registrato', r.numero_spedizione, e?.message)
-            await riapriRiga(r, 'il tuo costo non e\' stato registrato'); continue
+            await riapriRiga(r, 'il tuo costo non e\' stato registrato'); return
           }
         }
       }
     }
     // SOLO A TUO CARICO: niente da addebitare a nessuno sotto, la riga e' chiusa col suo costo.
-    if (soloMio) { mosse++; continue }
+    if (soloMio) { mosse++; return }
 
     // SEGNO: differenza = costo_iniziale - costo_finale, quindi negativa = addebito e positiva =
     // accredito. Il ramo dei master lo rispettava, quello dei clienti prendeva il valore assoluto e
@@ -465,8 +498,8 @@ export async function POST(req: NextRequest) {
     // passa. Il gate guarda l'importo TOTALE (differenza + fuori sagoma): una riga di solo fuori
     // sagoma ha differenza 0 ma importo -16,39, e NON deve essere scartata. Importo zero O positivo:
     // niente da muovere, ma la riga resta CHIUSA (riaprirla la rimetterebbe in elenco per sempre).
-    if (importoAddebito >= -0.005) continue
-    if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
+    if (importoAddebito >= -0.005) return
+    if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); return }
 
     // UN PACCO NON SI RETTIFICA DUE VOLTE ALLO STESSO DESTINATARIO. Questa e' la PORTA UNICA dove il
     // credito si muove: qui converge OGNI pipeline (file ripesature, file pesi, cascata di rete,
@@ -478,7 +511,7 @@ export async function POST(req: NextRequest) {
     // e' l'indice unico su movimenti(riferimento) per 'RIP-%'; questo pre-controllo evita solo il throw.
     // Con gli STORNI: se l'addebito di prima e' stato stornato, la chiave successiva (vedi chiaveLibera).
     const rifRett = r.spedizione_id ? await chiaveLibera(`RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}`) : null
-    if (r.spedizione_id && !rifRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); continue }
+    if (r.spedizione_id && !rifRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); return }
 
     try {
       if (r.target_master_id) {
@@ -488,9 +521,8 @@ export async function POST(req: NextRequest) {
         let ledgerClienteId: string | null = null
         if (r.spedizione_id) {
           try {
-            const { data: sp } = await adminDb.from('spedizioni').select('master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').eq('id', r.spedizione_id).maybeSingle()
-            const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
-            const dCon = sp ? await scendiCodDaSpedizione(adminDb, { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: (sp as any).corriere_id }, utente!.master_id!) : null
+            const sp = spedPerId.get(r.spedizione_id)
+            const dCon = sp ? await destinoCondivisione(sp) : null
             if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === r.target_master_id && dCon.cliente_id) ledgerClienteId = dCon.cliente_id
           } catch (e) { console.error('[RETTIFICHE] ledger condivisione:', e) }
         }
@@ -500,7 +532,7 @@ export async function POST(req: NextRequest) {
         // salto a codice — Wave non sta sotto LOGIXIA, MULTI è il padre di Wave, spedizioni 2000 e GTS sono
         // fratelli — quindi la rettifica tornava aperta con "non è un master della tua rete" e il venditore
         // restava col costo del fornitore. Senza ledger risolto un compratore fuori dall'albero non passa.
-        if (!discendenti.has(r.target_master_id) && !ledgerClienteId) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
+        if (!discendenti.has(r.target_master_id) && !ledgerClienteId) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); return }
         if (ledgerClienteId) {
           await registraMovimento(adminDb, {
             masterId: utente!.master_id, clienteId: ledgerClienteId,
@@ -515,7 +547,7 @@ export async function POST(req: NextRequest) {
           })
         }
       } else if (r.cliente_id) {
-        if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); continue }
+        if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); return }
         await registraMovimento(adminDb, {
           masterId: utente!.master_id, clienteId: r.cliente_id,
           tipo: 'rettifica', descrizione: descrizione(r), importo: importoAddebito,
@@ -525,7 +557,7 @@ export async function POST(req: NextRequest) {
         // ripesatura (diff<0): un fuori sagoma puro (diff=0) non cambia il nolo, e riscrivere
         // peso_fatturato col peso ripesato lo abbasserebbe sotto il fatturato reale.
         if (r.spedizione_id && diff < -0.005) spedizioniDaAggiornare.push(r)
-      } else { await riapriRiga(r, 'nessun destinatario'); continue }
+      } else { await riapriRiga(r, 'nessun destinatario'); return }
       mosse++
     } catch (e: any) {
       const m = String(e?.message || '')
@@ -539,7 +571,21 @@ export async function POST(req: NextRequest) {
         await riapriRiga(r, 'addebito non riuscito')
       }
     }
-  }
+    }
+
+  // TRE ALLA VOLTA. Un errore inatteso su una riga non ferma le altre: quella riga torna aperta e si
+  // riprova (se il suo addebito fosse gia' passato, al nuovo invio la chiave RIP- lo riconosce e non lo ripete).
+  let prossima = 0
+  await Promise.all(Array.from({ length: Math.min(3, rettifiche.length) }, async () => {
+    while (prossima < rettifiche.length) {
+      const r = (rettifiche as any[])[prossima++]
+      try { await confermaUna(r) }
+      catch (e: any) {
+        console.error('[RETTIFICHE] conferma interrotta', r?.numero_spedizione, e?.message)
+        try { await riapriRiga(r, 'errore inatteso: riprova') } catch { /* resta in saltate */ }
+      }
+    }
+  }))
 
   // Il costo della spedizione si aggiorna SOLO se l'addebito e' andato a buon fine: prima si
   // riscriveva comunque, e restava a sistema una spedizione riprezzata che nessuno aveva pagato.

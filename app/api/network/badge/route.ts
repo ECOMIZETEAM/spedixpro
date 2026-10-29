@@ -34,11 +34,14 @@ export async function GET(_req: NextRequest) {
   // decidere", darebbero "già propagata" — è la stessa esclusione del self-heal di ricevuti.
   // SI PAGINA: senza .range il database ne torna mille e basta, e il numero sul badge diventa una
   // bugia — il 29/09/2026 un sotto-master ne aveva 2.215 e ne vedeva 1.000.
+  // FUORI LE RIGHE "SOLO A TUO CARICO" (master_id = target_master_id): sono il costo del detentore
+  // quando sotto non c'e' niente da recuperare, non vengono da sopra e la pagina non le mostra. Il
+  // 28/10/2026 il file Poste di MULTI ne ha lasciate 1.786: il pallino diceva 1.787, la pagina 1.
   const rettPend: any[] = []
   for (let da = 0; ; da += 1000) {
     const { data, error } = await adminDb.from('rettifiche')
       .select('id,differenza,fuori_sagoma')
-      .eq('target_master_id', mio).eq('confermata', true).is('propagazione', null)
+      .eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).is('propagazione', null)
       .order('id').range(da, da + 999)
     if (error) { console.error('[BADGE] rettifiche da accettare:', error.message); break }
     rettPend.push(...(data || []))
