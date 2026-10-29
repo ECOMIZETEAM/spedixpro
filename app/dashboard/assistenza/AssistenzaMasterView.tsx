@@ -21,8 +21,11 @@ function Badge({ stato }: { stato: string }) {
 }
 // 'master_per_cliente' = aperto dal master sulla spedizione di un suo cliente (api/assistenza/apri):
 // il ticket e' del cliente, che lo vede, ma la prima riga l'ha scritta l'assistenza.
+// 'master_riservato' = aperto allo stesso modo ma senza farlo vedere al cliente: il nome e' quello
+// del cliente della spedizione, il cliente non ne sa niente.
 const etichettaApertura = (tipo: string) =>
-  tipo === 'master' ? 'Sotto-master' : tipo === 'master_per_cliente' ? 'Cliente · aperto dall\'assistenza' : 'Cliente'
+  tipo === 'master' ? 'Sotto-master' : tipo === 'master_per_cliente' ? 'Cliente · aperto dall\'assistenza'
+    : tipo === 'master_riservato' ? 'Riservato · il cliente non lo vede' : 'Cliente'
 
 export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket' | 'pod' }) {
   const isPod = categoria === 'pod'
@@ -33,7 +36,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [risposta, setRisposta] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [apri, setApri] = useState(false)            // modale nuovo ticket
-  const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '' })
+  const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '', visibile_cliente: false })
   const [msg, setMsg] = useState('')
   const [cerca, setCerca] = useState('')             // ricerca per LDV
   const [filtroStato, setFiltroStato] = useState('tutti')   // lo storico resta sempre: 'tutti' include i chiusi
@@ -179,10 +182,10 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     const j = await r.json()
     setSalvando(false)
     if (j.error) { setMsg(j.error); return }
-    setApri(false); setNuovo({ oggetto: '', messaggio: '' }); carica()
-    // LDV di un cliente diretto: il ticket e' nato del cliente e resta qui, non e' salito. Lo si
+    setApri(false); setNuovo({ oggetto: '', messaggio: '', visibile_cliente: false }); carica()
+    // LDV di un cliente diretto: il ticket (del cliente o riservato) resta qui, non e' salito. Lo si
     // apre subito, cosi' si vede di chi e' e c'e' gia' sotto mano «Inoltra» se va girato sopra.
-    if (j.per_cliente && j.id) apriDettaglio({ id: j.id })
+    if ((j.per_cliente || j.riservato) && j.id) apriDettaglio({ id: j.id })
   }
 
   // Ricerca: per LDV (oggetto), numero pratica (codice) O cliente (aperto_da). Va applicata a TUTTE
@@ -548,7 +551,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   {ruoloChat === 'rete' && (
                     <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#1a1a1a', color: '#fff', fontSize: '12px', fontWeight: 600 }}>🔒 Risposta interna alla rete: la vede solo la catena dei master — il cliente finale NON la vede.</div>
                   )}
-                  {ruoloChat === 'master' && Array.isArray(sel.rete_master_ids) && sel.rete_master_ids.length > 0 && (
+                  {/* Sul riservato il cliente non c'e': "interno" non cambierebbe niente, e la spunta
+                      farebbe credere che il resto il cliente lo legga. */}
+                  {ruoloChat === 'master' && sel.tipo_apertura !== 'master_riservato' && Array.isArray(sel.rete_master_ids) && sel.rete_master_ids.length > 0 && (
                     <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 600, color: internoMsg ? '#1a1a1a' : '#666', cursor: 'pointer' }}>
                       <input type="checkbox" checked={internoMsg} onChange={e => setInternoMsg(e.target.checked)} style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
                       🔒 Messaggio interno alla rete (il cliente non lo vede)
@@ -569,7 +574,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <label title="Allega foto, video o file (max 25 MB)" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: caricandoFile ? 'default' : 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1, opacity: caricandoFile ? 0.6 : 1 }}>{caricandoFile ? '⏳' : '📎'}
                       <input type="file" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip" multiple disabled={caricandoFile} onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
                     </label>
-                    <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
+                    <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : sel.tipo_apertura === 'master_riservato' ? (sel.rete_master_ids?.length ? 'Scrivi al master superiore (il cliente non lo vede)…' : 'Scrivi una nota (il cliente non la vede)…') : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
                     <button disabled={inviando || caricandoFile || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 'default' : 'pointer', opacity: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
                   </div>
                 </div>
@@ -626,6 +631,15 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }} /></div>
               <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>Messaggio</label>
                 <textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} /></div>
+              {/* Qui la LDV si scrive a mano e di chi sia la spedizione lo scopre il server: la
+                  domanda vale solo se e' di un cliente diretto, e di partenza e' no (api/assistenza/apri). */}
+              <div style={{ padding: '9px 12px', background: nuovo.visibile_cliente ? '#fff7ed' : '#f8fafc', border: `1px solid ${nuovo.visibile_cliente ? '#fed7aa' : '#e2e8f0'}`, borderRadius: '6px', fontSize: '12px', color: nuovo.visibile_cliente ? '#9a3412' : '#475569', lineHeight: 1.45 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 700, color: '#1a1a1a', cursor: 'pointer', marginBottom: '4px' }}>
+                  <input type="checkbox" checked={nuovo.visibile_cliente} onChange={e => setNuovo(n => ({ ...n, visibile_cliente: e.target.checked }))} style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
+                  Se la LDV è di un tuo cliente, fagli vedere il ticket
+                </label>
+                {nuovo.visibile_cliente ? '👁 Il cliente lo vedrà in Assistenza e leggerà quello che scrivi qui.' : '🔒 Il cliente non lo vedrà.'} Dopo l'invio non si può cambiare.
+              </div>
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button onClick={() => setApri(false)} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Annulla</button>

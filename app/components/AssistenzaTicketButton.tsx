@@ -10,12 +10,14 @@ function fileToObj(file: File): Promise<any> {
 }
 
 // clienteDiretto: nel portale master, il nome del cliente quando la spedizione e' di un cliente
-// diretto. Il ticket aperto da qui e' suo (api/assistenza/apri): lo vede e legge la descrizione.
+// diretto. Il ticket aperto da qui resta al master, e il cliente lo vede solo se il master spunta la
+// casella (api/assistenza/apri): di partenza e' spenta, e dopo non si cambia.
 export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiretto }: { ldv: string; spedizioneId?: string; clienteDiretto?: string }) {
   const [open, setOpen] = useState(false)
   const [modo, setModo] = useState<'' | 'ticket' | 'pod'>('')   // '' = scelta iniziale
   const [desc, setDesc] = useState('')
   const [files, setFiles] = useState<any[]>([])
+  const [visibileCliente, setVisibileCliente] = useState(false)
   const [drag, setDrag] = useState(false)
   const [inviando, setInviando] = useState(false)
   const [msg, setMsg] = useState<{ t: 'ok' | 'err'; x: string } | null>(null)
@@ -23,7 +25,7 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
   const [podVer, setPodVer] = useState(0)   // ricarica la cifra se il server risponde che e' cambiata
   const inviandoRef = useRef(false)          // un doppio clic non apre (e non fa pagare) due richieste
 
-  function chiudi() { setOpen(false); setModo(''); setDesc(''); setFiles([]); setMsg(null) }
+  function chiudi() { setOpen(false); setModo(''); setDesc(''); setFiles([]); setVisibileCliente(false); setMsg(null) }
 
   async function aggiungiFile(list: FileList | File[]) {
     const arr = Array.from(list).slice(0, 10)
@@ -40,7 +42,7 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
     const consenso = modo === 'pod' && podStato.prezzo != null ? { accetto_addebito: true, prezzo_accettato: podStato.prezzo } : {}
     const r = await fetch('/api/assistenza/apri', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oggetto: ldv, messaggio: desc, categoria: modo, allegati: modo === 'ticket' ? files : [], spedizione_id: spedizioneId || null, ...consenso }),
+      body: JSON.stringify({ oggetto: ldv, messaggio: desc, categoria: modo, allegati: modo === 'ticket' ? files : [], spedizione_id: spedizioneId || null, visibile_cliente: modo === 'ticket' && !!clienteDiretto && visibileCliente, ...consenso }),
     }).catch(() => null)
     const j = r ? await r.json().catch(() => ({ error: 'Risposta non valida dal server' })) : { error: 'Errore di rete: riprova' }
     inviandoRef.current = false
@@ -48,8 +50,9 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
     if (j.error) { if (r?.status === 409) setPodVer(v => v + 1); setMsg({ t: 'err', x: j.error }); return }
     const pagata = modo === 'pod' && Number(j.pod_addebitato) > 0 ? ` Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(j.pod_addebitato))}.` : ''
     // Il ticket aperto per il cliente resta al master: va detto, o lo si crede gia' arrivato sopra.
-    if (j.per_cliente) {
-      setMsg({ t: 'ok', x: `Ticket ${j.codice || ''} aperto per ${j.per_cliente}: lo vede in Assistenza. Per girarlo al tuo master superiore aprilo da Assistenza e premi «Inoltra».` })
+    if (j.per_cliente || j.riservato) {
+      const chi = j.per_cliente ? `aperto per ${j.per_cliente}: lo vede in Assistenza` : `aperto: ${j.riservato} non lo vede`
+      setMsg({ t: 'ok', x: `Ticket ${j.codice || ''} ${chi}. Per girarlo al tuo master superiore aprilo da Assistenza e premi «Inoltra».` })
       setTimeout(() => chiudi(), 4000)
       return
     }
@@ -83,8 +86,15 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
               <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>LDV</label>
                   <input value={ldv} disabled style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', background: '#f5f5f5', boxSizing: 'border-box' }} /></div>
-                {modo === 'ticket' && clienteDiretto && <div style={{ padding: '9px 12px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '6px', fontSize: '12px', color: '#9a3412', lineHeight: 1.45 }}>
-                  👁 <b>{clienteDiretto}</b> vedrà questo ticket in Assistenza e leggerà quello che scrivi qui. Resta a te: se serve, lo inoltri al tuo master superiore da Assistenza.</div>}
+                {modo === 'ticket' && clienteDiretto && <div style={{ padding: '9px 12px', background: visibileCliente ? '#fff7ed' : '#f8fafc', border: `1px solid ${visibileCliente ? '#fed7aa' : '#e2e8f0'}`, borderRadius: '6px', fontSize: '12px', color: visibileCliente ? '#9a3412' : '#475569', lineHeight: 1.45 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 700, color: '#1a1a1a', cursor: 'pointer', marginBottom: '4px' }}>
+                    <input type="checkbox" checked={visibileCliente} onChange={e => setVisibileCliente(e.target.checked)} style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
+                    Fai vedere questo ticket a {clienteDiretto}
+                  </label>
+                  {visibileCliente
+                    ? <>👁 <b>{clienteDiretto}</b> vedrà questo ticket in Assistenza e leggerà quello che scrivi qui.</>
+                    : <>🔒 <b>{clienteDiretto}</b> non vedrà questo ticket.</>}
+                  {' '}Resta a te: se serve, lo inoltri al tuo master superiore da Assistenza. Dopo l'invio non si può cambiare.</div>}
                 {modo === 'ticket' && <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>Descrizione del problema <span style={{ color: '#dc2626', fontWeight: 700 }}>fornire imballo e contenuto obbligatorio</span></label>
                   <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} autoFocus placeholder="Descrivi il problema su questa spedizione…" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} /></div>}
                 {modo === 'ticket' && <div>
