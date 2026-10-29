@@ -6,17 +6,20 @@
  *   Moove   = il costo registrato al detentore su quella spedizione (movimenti: addebito, rettifiche, rimborsi)
  *   Listino = il listino del detentore rifatto sul PESO TASSATO DA BRT, con la stessa funzione dell'addebito
  * e la differenza BRT − Moove si divide in parti che sommano esatte:
- *   peso    = Listino − Moove   → BRT ha pesato o misurato di più: è la parte che si ribalta sui clienti
- *   voci    = voci extra che nel listino non esistono (ingombro, servizi…)
- *   tariffa = il resto: nolo, carburante, isole e contrassegno del listino non allineati a quelli di BRT
+ *   peso        = Listino − Moove   → BRT ha pesato o misurato di più: è la parte che si ribalta sui clienti
+ *   supplemento = voci extra che il listino PREVEDE (fuori misura… nei supplementi del corriere, sezione
+ *                 Giacenze): in creazione non si sapevano, il prezzo è quello del listino
+ *   voci        = voci extra che nel listino non esistono, o la parte che il listino non copre
+ *   tariffa     = il resto: nolo, carburante, isole e contrassegno del listino non allineati a quelli di BRT
  *
  * Solo lettura: qui non si scrive niente. L'addebito ai clienti passa dalla Rettifica, che è la porta unica
  * del credito per i pesi (vedi REGOLE.md). */
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { calcolaPrezzoCorriereDettaglio, type DettaglioCorriere } from '@/lib/pricing'
 import { descriviVoce, type RigaFatturaBrt, type CategoriaVoce } from '@/lib/fattura-brt'
+import { prezziSupplementoDa, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
 
-export type TipoMotivo = 'peso' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile'
+export type TipoMotivo = 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile'
 export type Motivo = { tipo: TipoMotivo; importo: number; testo: string }
 
 export type SpedizioneAbbinata = {
@@ -131,6 +134,17 @@ export async function analizzaFatturaBrt(
     }
   }
 
+  // I supplementi del corriere nel listino del detentore (fuori misura…): il prezzo con cui una voce BRT
+  // risulta prevista. Prima riga per id, come legge le giacenze l'addebito.
+  const { data: listiniDet } = await admin.from('listini_corrieri').select('id').eq('master_id', masterId)
+  const idsDet = (listiniDet || []).map((l: any) => l.id)
+  const { data: supplDet, error: errSuppl } = idsDet.length
+    ? await admin.from('listini_corrieri_supplementi').select('tipo,nome,valore').in('listino_id', idsDet)
+        .eq('corriere_id', contrattoId).eq('tipo', TIPO_SUPPLEMENTO_CORRIERE).order('id', { ascending: true })
+    : { data: [], error: null }
+  if (errSuppl) throw new Error('lettura supplementi del listino non riuscita: ' + errSuppl.message)
+  const prezziSupplemento = prezziSupplementoDa(supplDet || [])
+
   // Il listino del detentore sul peso tassato da BRT. Stesse righe = stesso calcolo: si fa una volta.
   const memo = new Map<string, Promise<DettaglioCorriere | null>>()
   const listinoDi = (r: RigaFatturaBrt, s: any) => {
@@ -193,7 +207,17 @@ export async function analizzaFatturaBrt(
       const conCarburante = r2(v.importo * (1 + quotaCarburante))
       fuori += conCarburante
       const sopra = r2(conCarburante - v.importo)
-      motivi.push({ tipo: 'voce', importo: conCarburante, testo: `${d.nome} (sigla BRT "${v.sigla}"): ${euro(v.importo)}${sopra >= 0.01 ? ` + ${euro(sopra)} di carburante` : ''}, nel tuo listino non c'è.` })
+      const brtVoce = `${euro(v.importo)}${sopra >= 0.01 ? ` + ${euro(sopra)} di carburante` : ''}`
+      const prevista = d.voceListino ? prezziSupplemento.get(d.voceListino.toLowerCase()) : undefined
+      if (!prevista) {
+        motivi.push({ tipo: 'voce', importo: conCarburante, testo: `${d.nome} (sigla BRT "${v.sigla}"): ${brtVoce}, nel tuo listino non c'è${d.voceListino ? ` ("${d.voceListino}" vuoto nei supplementi del corriere, sezione Giacenze)` : ''}.` })
+        continue
+      }
+      // Prevista dal listino: in creazione non si sapeva, quindi Moove non l'ha addebitata. Quel che il
+      // listino non copre (di solito il carburante che BRT ci calcola sopra) resta una voce a parte.
+      motivi.push({ tipo: 'supplemento', importo: prevista, testo: `${d.voceListino} (sigla BRT "${v.sigla}"): ${euro(prevista)} dal tuo listino. In creazione non si sapeva: BRT lo mette dopo, va girato a chi ha spedito.` })
+      const resto = r2(conCarburante - prevista)
+      if (Math.abs(resto) >= 0.01) motivi.push({ tipo: 'voce', importo: resto, testo: `${d.voceListino} (sigla BRT "${v.sigla}"): BRT chiede ${brtVoce}, il tuo listino ${euro(prevista)}: listino ${resto > 0 ? 'più basso' : 'più alto'} di ${euro(Math.abs(resto))}.` })
     }
 
     const tariffa = r2(differenza - peso - fuori)

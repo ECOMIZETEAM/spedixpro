@@ -6,6 +6,8 @@ import { useDialog } from '@/app/components/DialogProvider'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
 import CodiceContratto from '@/app/components/CodiceContratto'
 import { peggioreSuNolo, type Nolo } from '@/lib/sotto-costo-formule'
+import { vociSupplementoDa, type VoceSupplemento } from '@/lib/supplementi-corriere'
+import TabellaSupplementiCorriere from '@/app/components/TabellaSupplementiCorriere'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -54,6 +56,8 @@ interface Props {
   // Il mio NOLO per fascia (col fuel), chiave "tipo|peso|zona_id": giacenze e accessori si pagano
   // fisso + % del nolo, quindi il confronto si fa su questa base, fascia per fascia.
   costiNoloMaster?: Record<string, number>
+  // Il contratto ha i supplementi del corriere (fuori misura…) accesi: lib/supplementi-corriere.
+  conSupplementi?: boolean
 }
 
 const fattori = [
@@ -152,7 +156,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
@@ -387,6 +391,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     {nome:'Consegna parziale e rendi',prezzo:0,perc:0},
     {nome:'Consegna parziale e distruggi',prezzo:0,perc:0},
   ]))
+  const [supplementiCorriere, setSupplementiCorriere] = useState<VoceSupplemento[]>(() => bozza?.supplementiCorriere ?? vociSupplementoDa(supplementiEsistenti||[]))
   const [aperturaGiacenza, setAperturaGiacenza] = useState(() => {
     if (bozza?.aperturaGiacenza != null) return bozza.aperturaGiacenza
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'giacenza_apertura')
@@ -423,10 +428,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     primoGiro.current = false
     if (cambiata && !modificata) setModificata(true)
     try {
-      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg }))
+      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg }))
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg])
+  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg])
 
   function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
   function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
@@ -453,6 +458,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             giacenze: { servizi: giacenzeServizi, apertura: aperturaGiacenza },
             ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
             sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
+            ...(conSupplementi ? { supplementiCorriere } : {}),
           }
         })
       })
@@ -513,7 +519,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     : null
   // Pallino rosso sui tab: quel tab ha almeno una riga sotto costo?
   const qualcheFasciaSotto = fasce.some(f => zone.some(z => { const costo = costiMaster?.[`${(f as any).tipo}|${(f as any).peso}|${z.id}`]; const p = parseFloat((f as any).prezzi[z.id] ?? ''); return !zonaBloccata(z.id) && costo != null && p > 0 && p < costo }))
-  const qualcheGiacenzaSotto = aperturaSotto || giacenzeServizi.some((s: any) => servizioSotto('giacenza', s).sotto)
+  const supplementoSotto = conSupplementi && supplementiCorriere.some(v => { const c = costiSupplMaster?.[`supplemento_corriere|${v.nome.toLowerCase()}`]?.valore || 0; return c > 0 && (Number(v.prezzo) || 0) < c - 0.005 })
+  const qualcheGiacenzaSotto = aperturaSotto || supplementoSotto || giacenzeServizi.some((s: any) => servizioSotto('giacenza', s).sotto)
   const qualcheAccessorioSotto = serviziAccessori.some((s: any) => servizioSotto('accessorio', s).sotto)
   const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto }
 
@@ -795,6 +802,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             {aperturaSotto && costoApertura && <span style={{fontSize:'11px',color:'#dc2626'}}>costo {eurE(costoApertura.valore)} €</span>}
           </div>
           <div style={{fontSize:'11px',color:'#f97316',marginTop:'4px'}}>* Il costo sarà addebitato solo nella fase di svincolo da parte del cliente</div>
+          {conSupplementi && <TabellaSupplementiCorriere voci={supplementiCorriere} onChange={setSupplementiCorriere} chi="cliente" costi={costiSupplMaster} />}
         </div>
       )}
 

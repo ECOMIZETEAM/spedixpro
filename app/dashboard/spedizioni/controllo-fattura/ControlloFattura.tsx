@@ -21,7 +21,7 @@ type FatturaStorico = {
   da_girare: number; euro_da_girare: number; rettifiche_file_id: string | null; created_at: string
   girate: { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number } | null; aTuoCarico: number
 }
-type Filtro = 'perdita' | 'tutte' | 'peso' | 'voce' | 'tariffa' | 'annullata' | 'non_trovata' | 'rientri'
+type Filtro = 'perdita' | 'tutte' | 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_trovata' | 'rientri'
 
 // Pacchetti da 200: il listino si rifà con la funzione dell'addebito (~0,1 s a destinazione), così ogni
 // richiesta resta lontana dal tempo massimo anche sulle fatture dei detentori grandi.
@@ -80,6 +80,7 @@ function Pillola({ children, colore, fondo, orlo }: { children: ReactNode; color
 
 const MOTIVI: Record<string, { nome: string; icona: string }> = {
   peso: { nome: 'Peso o volume rimisurato da BRT', icona: 'bilancia' },
+  supplemento: { nome: 'Supplementi previsti dal tuo listino', icona: 'pacco' },
   voce: { nome: 'Voci BRT che il listino non ha', icona: 'etichetta' },
   tariffa: { nome: 'Listino non allineato a BRT', icona: 'cursori' },
   annullata: { nome: 'Annullate in Moove, fatturate da BRT', icona: 'annullata' },
@@ -194,7 +195,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   }
   const conteggi = useMemo(() => {
     const out = {} as Record<Filtro, number>
-    for (const f of ['perdita', 'tutte', 'peso', 'voce', 'tariffa', 'annullata', 'non_trovata', 'rientri'] as Filtro[]) out[f] = esiti.filter(e => passa(e, f)).length
+    for (const f of ['perdita', 'tutte', 'peso', 'supplemento', 'voce', 'tariffa', 'annullata', 'non_trovata', 'rientri'] as Filtro[]) out[f] = esiti.filter(e => passa(e, f)).length
     return out
   }, [esiti])
   const filtrate = useMemo(() => {
@@ -417,7 +418,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12, marginTop: 16 }}>
             {[
               ['bilancia', 'Peso rimisurato', 'BRT ha pesato o misurato il pacco più del dichiarato: la differenza si gira al cliente con la Rettifica.'],
-              ['etichetta', 'Voci fuori listino', 'Ingombro, isole minori e le altre voci di BRT che nel tuo listino non hanno un prezzo.'],
+              ['pacco', 'Supplementi', 'Fuori misura e gli altri supplementi che BRT mette dopo: se nel tuo listino hanno un prezzo, sono previsti.'],
+              ['etichetta', 'Voci fuori listino', 'Le voci di BRT che nel tuo listino non hanno un prezzo, o la parte che il prezzo non copre.'],
               ['cursori', 'Listino da allineare', 'A parità di peso, dove il tuo listino è più basso (o più alto) di quanto chiede BRT.'],
               ['annullata', 'Annullate ma fatturate', 'Spedizioni annullate e rimborsate in Moove che BRT ti ha fatturato lo stesso.'],
             ].map(([ic, t, d]) => (
@@ -567,7 +569,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         <div style={{ ...carta, overflow: 'hidden' }}>
           <div style={{ padding: '14px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderBottom: `1px solid ${C.filo}` }}>
             <div style={{ display: 'inline-flex', background: C.fondoTenue, border: `1px solid ${C.filo}`, borderRadius: 10, padding: 3, flexWrap: 'wrap' }}>
-              {([['perdita', 'Con perdita'], ['tutte', 'Tutte'], ['peso', 'Peso'], ['voce', 'Voci'], ['tariffa', 'Listino'], ['annullata', 'Annullate'], ['non_trovata', 'Non trovate'], ['rientri', 'Rientri']] as [Filtro, string][])
+              {([['perdita', 'Con perdita'], ['tutte', 'Tutte'], ['peso', 'Peso'], ['supplemento', 'Supplementi'], ['voce', 'Voci'], ['tariffa', 'Listino'], ['annullata', 'Annullate'], ['non_trovata', 'Non trovate'], ['rientri', 'Rientri']] as [Filtro, string][])
                 .filter(([k]) => k === 'perdita' || k === 'tutte' || conteggi[k] > 0)
                 .map(([k, l]) => (
                   <button key={k} onClick={() => { setFiltro(k); setPagina(1) }}

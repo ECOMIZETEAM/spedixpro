@@ -3,6 +3,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
 import CodiceContratto from '@/app/components/CodiceContratto'
+import { vociSupplementoDa, type VoceSupplemento } from '@/lib/supplementi-corriere'
+import TabellaSupplementiCorriere from '@/app/components/TabellaSupplementiCorriere'
 
 const inp = {padding:'6px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const inpFull = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',textAlign:'right' as const,boxSizing:'border-box' as const}
@@ -136,6 +138,9 @@ export default function ListinoCorrierePage() {
     {nome:'Consegna parziale e distruggi',prezzo:0,perc:0},
   ])
   const [aperturaGiacenza, setAperturaGiacenza] = useState(0)
+  // Supplementi del corriere (fuori misura…): solo sui contratti dove sono accesi (lib/supplementi-corriere).
+  const [conSupplementi, setConSupplementi] = useState(false)
+  const [supplementiCorriere, setSupplementiCorriere] = useState<VoceSupplemento[]>([])
   const [ritiroPrezzo, setRitiroPrezzo] = useState(0)
   const [ritiroPercNolo, setRitiroPercNolo] = useState(0)
   const [spondaSoglia, setSpondaSoglia] = useState(150)
@@ -208,6 +213,8 @@ export default function ListinoCorrierePage() {
     setGiacenzeServizi(prev => buildServiziDa(data.supplementi||[], 'giacenza', prev))
     const aperturaRiga = (data.supplementi||[]).find((s:any) => s.tipo === 'giacenza_apertura')
     setAperturaGiacenza(aperturaRiga ? Number(aperturaRiga.valore)||0 : 0)
+    setConSupplementi(!!data.supplementiCorriere)
+    setSupplementiCorriere(vociSupplementoDa(data.supplementi||[]))
     const ritiroRiga = (data.supplementi||[]).find((s:any) => s.tipo === 'ritiro')
     setRitiroPrezzo(ritiroRiga ? Number(ritiroRiga.valore)||0 : 0)
     const ritiroDescr = ritiroRiga ? parseDescr(ritiroRiga.descrizione) : null
@@ -281,6 +288,7 @@ export default function ListinoCorrierePage() {
       giacenze: { servizi: giacenzeServizi, apertura: aperturaGiacenza },
       ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
       sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
+      ...(conSupplementi ? { supplementiCorriere } : {}),
     }
 
     const res = await fetch('/api/listini/corrieri', {
@@ -529,6 +537,7 @@ export default function ListinoCorrierePage() {
             <input type="number" step="0.01" value={aperturaGiacenza||''} onChange={e=>setAperturaGiacenza(parseFloat(e.target.value)||0)} style={{...inp,width:'80px',textAlign:'right' as const}} placeholder="0"/>
           </div>
           <div style={{fontSize:'11px',color:'#f97316',marginTop:'4px'}}>* Il costo sarà addebitato solo nella fase di svincolo da parte del cliente</div>
+          {conSupplementi && <TabellaSupplementiCorriere voci={supplementiCorriere} onChange={setSupplementiCorriere} sola={soloLetturaCorriere} chi="corriere" />}
         </div>
       )}
 

@@ -146,7 +146,10 @@ export function leggiFatturaBrt(testo: string): LetturaFatturaBrt {
  * delle sigle incerte resta modificabile e segnato "da confermare" finché non arriva quella ufficiale.
  * Le minuscole e le maiuscole sono sigle DIVERSE (g ≠ G, i ≠ I). */
 export type CategoriaVoce = 'carburante' | 'contrassegno' | 'isole' | 'ingombro' | 'servizio' | 'rientro' | 'altro'
-export const SIGLE_BRT: Record<string, { nome: string; categoria: CategoriaVoce; certa: boolean }> = {
+// `voceListino`: la voce dei supplementi del corriere (lib/supplementi-corriere) che la rappresenta nel
+// listino del detentore. Se lì c'è un prezzo, la voce è prevista e va girata al cliente; se no, manca.
+export type SiglaBrt = { nome: string; categoria: CategoriaVoce; certa: boolean; voceListino?: string }
+export const SIGLE_BRT: Record<string, SiglaBrt> = {
   // Sempre l'8% esatto del nolo (più le voci "i" e "g"), anche sui pacchi da 1 kg: è il carburante.
   f: { nome: 'Carburante', categoria: 'carburante', certa: true },
   // 1,29 € fisso + una parte che cresce con l'importo: la commissione contrassegno.
@@ -157,7 +160,7 @@ export const SIGLE_BRT: Record<string, { nome: string; categoria: CategoriaVoce;
   J: { nome: 'Isole minori e località disagiate', categoria: 'isole', certa: true },
   // 6,90 / 1,50 € solo su andate di due mittenti di materassi e arredo, ci si calcola sopra il carburante:
   // un supplemento di ingombro, non una giacenza.
-  i: { nome: 'Supplemento ingombro (da confermare)', categoria: 'ingombro', certa: false },
+  i: { nome: 'Supplemento ingombro (da confermare)', categoria: 'ingombro', certa: false, voceListino: 'Fuori misura' },
   Q: { nome: 'Servizio di consegna (da confermare)', categoria: 'servizio', certa: false },
   I: { nome: 'Voce sui rientri (da confermare)', categoria: 'rientro', certa: false },
   F: { nome: 'Voce da 40 € (da confermare)', categoria: 'altro', certa: false },
@@ -166,6 +169,6 @@ export const SIGLE_BRT: Record<string, { nome: string; categoria: CategoriaVoce;
   '*': { nome: 'Spese varie', categoria: 'altro', certa: false },
 }
 
-export function descriviVoce(sigla: string): { nome: string; categoria: CategoriaVoce; certa: boolean } {
+export function descriviVoce(sigla: string): SiglaBrt {
   return SIGLE_BRT[sigla] || { nome: `Voce "${sigla}" sconosciuta`, categoria: 'altro', certa: false }
 }

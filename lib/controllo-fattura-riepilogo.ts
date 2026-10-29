@@ -3,7 +3,7 @@
  * Niente database qui: gira nel browser e sul server. */
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
 
-export type MotivoPagina = { tipo: 'peso' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile'; importo: number; testo: string }
+export type MotivoPagina = { tipo: 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile'; importo: number; testo: string }
 export type EsitoPagina = {
   riga: RigaFatturaBrt
   spedizione: { id: string; numero: string; stato: string; data: string; colli: number; peso: number; contrassegno: number; citta: string; chi: string } | null

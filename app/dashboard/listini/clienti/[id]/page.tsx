@@ -1,6 +1,8 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import { fattoreVolumeCorriere } from '@/lib/pricing'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { corriereConSupplementi } from '@/lib/supplementi-corriere'
 import ListinoEditor from './ListinoEditor'
 
 export default async function ModificaListinoPage({
@@ -125,6 +127,7 @@ export default async function ModificaListinoPage({
   const fattoreCostoMaster = (corriereSelezionato?.id && utente?.master_id)
     ? await fattoreVolumeCorriere(supabase, utente.master_id, corriereSelezionato.id)
     : 5000
+  const conSupplementi = await corriereConSupplementi(createAdminSupabase(), corriereSelezionato?.id)
 
   return (
     <>
@@ -148,6 +151,7 @@ export default async function ModificaListinoPage({
       costiMaster={costiMaster}
       costiSupplMaster={costiSupplMaster}
       costiNoloMaster={costiNoloMaster}
+      conSupplementi={conSupplementi}
       tipoListino="cliente"
     />
     </>

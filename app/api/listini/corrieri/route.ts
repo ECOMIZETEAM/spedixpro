@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -141,11 +142,14 @@ export async function GET(req: NextRequest) {
     if (effettivo > 0) listinoOut = { ...listino, fattore_volume: effettivo }
   }
 
+  // I supplementi del corriere (fuori misura…) si mostrano solo sui contratti dove sono accesi.
+  const supplementiCorriere = await corriereConSupplementi(_admin, corriereSelezionato?.id)
+
   return NextResponse.json({
     listino: listinoOut, corrieri, corrieriDisponibili,
     corriereSelezionatoId: corriereSelezionato?.id || '',
     corriereEreditato: !!corriereSelezionato?.ereditato,
-    fasce, supplementi,
+    fasce, supplementi, supplementiCorriere,
   })
 }
 
@@ -199,6 +203,11 @@ export async function POST(req: NextRequest) {
   // (potevano essere sparse sotto listino_id diversi): evita duplicati/orfani e le riconsolida.
   const { data: listiniMaster } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente?.master_id)
   const masterListinoIds = [...new Set([...(listiniMaster || []).map((l: any) => l.id), listinoId].filter(Boolean))]
+  // I supplementi del corriere si riscrivono solo se la pagina li manda: una pagina aperta prima che
+  // esistessero salverebbe senza, e la cancellazione qui sotto li perderebbe.
+  const { data: supplCorrierePrima } = await supabase.from('listini_corrieri_supplementi')
+    .select('tipo,nome,valore,tipo_calcolo,descrizione').in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
+    .eq('tipo', TIPO_SUPPLEMENTO_CORRIERE).order('id', { ascending: true })
   await supabase.from('listini_corrieri_fasce').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
   await supabase.from('listini_corrieri_supplementi').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
 
@@ -261,6 +270,12 @@ export async function POST(req: NextRequest) {
         righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'sponda', nome: 'Sponda', valore: prezzo_kg, tipo_calcolo: 'per_kg', descrizione: JSON.stringify({ soglia_kg }) })
       }
     }
+  }
+  const { createAdminSupabase: _adminSuppl } = await import('@/lib/supabase-admin')
+  if (Array.isArray(supplementi?.supplementiCorriere) && await corriereConSupplementi(_adminSuppl(), corriereId)) {
+    righeSupplementi.push(...righeSupplementoCorriere(supplementi.supplementiCorriere, { listino_id: listinoId, corriere_id: corriereId }))
+  } else {
+    righeSupplementi.push(...(supplCorrierePrima || []).map((r: any) => ({ ...r, listino_id: listinoId, corriere_id: corriereId })))
   }
   if (righeSupplementi.length) {
     const { error } = await supabase.from('listini_corrieri_supplementi').insert(righeSupplementi)

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
 
 // La propagazione a cascata tocca decine di sotto-master: col default (15s) la funzione veniva
 // TRONCATA a meta' -> propagazione parziale e prezzi disallineati a valle, in silenzio.
@@ -181,6 +183,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
           }
         }
       } catch (e) { console.error('Sponda di default dal listino corriere:', e) }
+    }
+
+    // Supplementi del corriere (fuori misura…): dalla pagina se li manda, altrimenti restano quelli di
+    // prima — una pagina aperta prima che esistessero salverebbe senza, e la cancellazione li perderebbe.
+    if (Array.isArray(supplementi.supplementiCorriere) && await corriereConSupplementi(createAdminSupabase(), corriere_id)) {
+      righeSupplementi.push(...righeSupplementoCorriere(supplementi.supplementiCorriere, { listino_id: id, corriere_id }))
+    } else {
+      for (const r of (_supplOld || []).filter((r: any) => r.tipo === TIPO_SUPPLEMENTO_CORRIERE)) {
+        righeSupplementi.push({ listino_id: id, corriere_id, tipo: r.tipo, nome: r.nome, valore: r.valore, tipo_calcolo: r.tipo_calcolo, descrizione: r.descrizione })
+      }
     }
 
     if (righeSupplementi.length) {
