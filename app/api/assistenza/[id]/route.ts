@@ -132,6 +132,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   // Notifiche: chi scrive non si auto-notifica; il cliente viene toccato SOLO dai messaggi pubblici.
+  // Un messaggio riapre un 'risolto', NON un 'rimborso': il cliente che chiede "novita' sul
+  // rimborso?" non deve far uscire la pratica dalla scheda Rimborso (decisione del committente,
+  // 28/10/2026). Il pallino "Nuovo" all'assistenza arriva lo stesso.
   const nuovoStato = t.stato === 'risolto' ? 'aperto' : t.stato
   const upd: any = { updated_at: new Date().toISOString(), stato: nuovoStato }
   const senzaMe = (ids: string[]) => Array.from(new Set(ids.filter(x => x && x !== utente?.master_id)))
@@ -183,8 +186,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json()
   const admin = createAdminSupabase()
 
-  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti,assegnazioni').eq('id', id).maybeSingle()
+  const { data: t } = await admin.from('tickets').select('owner_master_id,rete_master_ids,rete_non_letti,assegnazioni,categoria').eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
+  // 'rimborso' = risolto ma in attesa del rimborso del corriere: ha senso solo sui ticket, una
+  // richiesta POD non ha nulla da rimborsare.
+  if (body?.stato === 'rimborso' && t.categoria === 'pod') {
+    return NextResponse.json({ error: 'Lo stato "In attesa di rimborso" vale solo per i ticket, non per le richieste POD.' }, { status: 400 })
+  }
   const inCatena = Array.isArray(t.rete_master_ids) && t.rete_master_ids.includes(masterId)
   const sonoOwner = t.owner_master_id === masterId
   if (!sonoOwner && !inCatena) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
@@ -227,7 +235,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   // 'chiuso' = archiviato (termina la chat, sola lettura). Lo cambia l'owner O un master della catena
   // (chi ha in mano il ticket inoltrato può chiuderlo/segnarlo per conto dell'assistenza diretta).
-  if ((sonoOwner || inCatena) && body?.stato && ['aperto', 'in_lavorazione', 'risolto', 'chiuso'].includes(body.stato)) upd.stato = body.stato
+  if ((sonoOwner || inCatena) && body?.stato && ['aperto', 'in_lavorazione', 'rimborso', 'risolto', 'chiuso'].includes(body.stato)) upd.stato = body.stato
 
   // Caricamento POD (base64) -> storage -> pod_url. Caricare la POD chiude la richiesta.
   // PDF **o IMMAGINE** (jpg/png/webp): BRT manda FOTO, non PDF. Si conserva il tipo REALE del file
@@ -253,9 +261,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
-  // Agire su un ticket non ancora preso (in lavorazione, risolto o POD caricata) vale come prenderlo
-  // in carico per il PROPRIO livello, se nessuno del proprio master l'ha già preso.
-  if (sonoOwner && (upd.stato === 'in_lavorazione' || upd.stato === 'risolto' || upd.pod_url) && !((t.assegnazioni as any)?.[masterId])) {
+  // Agire su un ticket non ancora preso (in lavorazione, rimborso, risolto o POD caricata) vale come
+  // prenderlo in carico per il PROPRIO livello, se nessuno del proprio master l'ha già preso.
+  if (sonoOwner && (upd.stato === 'in_lavorazione' || upd.stato === 'rimborso' || upd.stato === 'risolto' || upd.pod_url) && !((t.assegnazioni as any)?.[masterId])) {
     upd.assegnazioni = { ...((t.assegnazioni as any) || {}), [masterId]: { id: user.id, nome: nomeUtente } }
   }
 
