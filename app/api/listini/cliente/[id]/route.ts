@@ -216,9 +216,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
       const { risincronizzaCondivisione } = await import('@/lib/condivisione-engine')
       const admin = createAdminSupabase()
       const { data: ledgers } = await admin.from('clienti').select('id').eq('ledger', true).eq('listino_cliente_id', id)
+      // Tutti i collegamenti attivi del ledger, anche quello del vecchio tipo (un contratto solo, con
+      // corriere_id valorizzato: LOGIXIA → Wave). Il filtro `corriere_id is null` lo escludeva, e dal 3/10
+      // al 29/10 nessun salvataggio di LOGIXIA è arrivato a Wave: il secondo scaglione del contrassegno
+      // restava a 2.000 € mentre l'ingrosso diceva 5.000. risincronizzaCondivisione a quel tipo riallinea
+      // solo il costo, senza creargli contratti nuovi.
       for (const l of (ledgers || [])) {
-        const { data: link } = await admin.from('corrieri_condivisi').select('id').eq('cliente_ledger_id', (l as any).id).eq('stato', 'attiva').is('corriere_id', null).maybeSingle()
-        if (link?.id) await risincronizzaCondivisione(admin, link.id)
+        const { data: links } = await admin.from('corrieri_condivisi').select('id').eq('cliente_ledger_id', (l as any).id).eq('stato', 'attiva')
+        for (const link of (links || [])) await risincronizzaCondivisione(admin, (link as any).id)
       }
     } catch (e) { console.error('Re-sync condivisione dopo salvataggio listino:', e) }
   })
