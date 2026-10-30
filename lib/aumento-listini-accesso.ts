@@ -32,3 +32,11 @@ export async function listiniDaPropagare(admin: any, masterId: string, listini: 
   for (const c of (ledger || []) as any[]) if (scelti.has(c.listino_cliente_id)) out.add(c.listino_cliente_id)
   return [...out]
 }
+
+/** Riallinea sotto-master e collegati di questi listini, uno alla volta. Torna quanti listini ha riallineato. */
+export async function riallinea(admin: any, masterId: string, listini: string[]): Promise<number> {
+  const daPropagare = await listiniDaPropagare(admin, masterId, listini)
+  const { propagaListinoModificato } = await import('@/lib/listino-modificato')
+  for (const id of daPropagare) await propagaListinoModificato(admin, id)
+  return daPropagare.length
+}

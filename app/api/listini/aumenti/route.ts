@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { leggiPercentuale } from '@/lib/aumento-listini'
-import { accessoAumenti, eUuid, listiniDaPropagare } from '@/lib/aumento-listini-accesso'
+import { accessoAumenti, eUuid, riallinea } from '@/lib/aumento-listini-accesso'
 
 // AUMENTA PREZZI — un contratto, piu' listini cliente, una percentuale (richiesta di Lorenzo, 30/10/2026).
 // Esempio: Ecomize LL alza SDA EXPRESS L del 5% su tutti i listini dei suoi clienti.
@@ -83,14 +83,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: stato === 500 ? 'Aumento non riuscito: nessun prezzo è stato cambiato.' : error.message }, { status: stato })
   }
 
-  // Sotto-master e master collegati che comprano da questi listini: le loro copie si riallineano dopo
-  // la risposta (su reti profonde ci vuole del tempo), come al salvataggio dall'editor.
-  const daPropagare = await listiniDaPropagare(admin, acc.masterId, listini)
-  if (daPropagare.length) {
-    after(async () => {
-      const { propagaListinoModificato } = await import('@/lib/listino-modificato')
-      for (const id of daPropagare) await propagaListinoModificato(createAdminSupabase(), id)
-    })
-  }
-  return NextResponse.json({ ok: true, ...(data as any), propagazione: daPropagare.length })
+  // Sotto-master e master collegati che comprano da questi listini: le loro copie si riallineano PRIMA di
+  // rispondere, non dopo. La copia al sotto-master cancella e reinserisce in piu' passi: con un "Annulla"
+  // premuto subito (un +50 al posto di +5) due riallineamenti dello stesso sotto-master si accavallavano e
+  // il suo Listino Corrieri poteva restare coi prezzi alzati, o con le fasce doppie. Di solito sono uno o
+  // due listini; l'addebito legge comunque il listino vero, questo e' quello che il sotto-master VEDE.
+  const propagazione = await riallinea(admin, acc.masterId, listini)
+  return NextResponse.json({ ok: true, ...(data as any), propagazione })
 }

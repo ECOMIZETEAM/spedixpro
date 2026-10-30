@@ -30,6 +30,11 @@
 
 begin;
 
+-- Aggiungere la colonna chiede `corrieri` tutta per se' fino al commit. Se una lettura lunga la sta usando,
+-- invece di restare in coda (e far mettere in coda dietro di se' ogni richiesta che tocca i contratti,
+-- creazione spedizioni compresa) lo script si ferma dopo 5 secondi senza aver cambiato niente: si riprova.
+set local lock_timeout = '5s';
+
 -- ── 1. CODICE CONTRATTO ─────────────────────────────────────────────────────────────────────────────────
 create or replace function public.genera_codice_contratto()
 returns text
@@ -54,6 +59,9 @@ end
 $f$;
 
 alter table public.corrieri add column if not exists codice text;
+-- L'indice prima del riempimento: ogni codice nuovo si controlla sull'indice, non scorrendo la tabella
+-- (i NULL non collidono fra loro).
+create unique index if not exists uniq_corrieri_codice on public.corrieri (codice);
 
 -- Le righe di oggi: si riempiono senza toccare updated_at (nessun contratto e' stato modificato davvero).
 alter table public.corrieri disable trigger trg_corrieri_updated;
@@ -61,7 +69,6 @@ update public.corrieri set codice = public.genera_codice_contratto() where codic
 alter table public.corrieri enable trigger trg_corrieri_updated;
 
 alter table public.corrieri alter column codice set not null;
-create unique index if not exists uniq_corrieri_codice on public.corrieri (codice);
 
 -- DEFINER: deve leggere i codici esistenti, e `authenticated` (che inserisce contratti dal portale) quella
 -- colonna non la legge. Un trigger scatta anche senza il permesso EXECUTE di chi scrive (come fn_audit).
@@ -172,8 +179,14 @@ begin
     raise exception '% listini non sono di questo master', v_estranei using errcode = '42501';
   end if;
 
-  insert into aumenti_listino (master_id, corriere_id, nome_contratto, codice_contratto, percentuale, richiesta_id, creato_da)
-  values (p_master, p_corriere, v_nome, v_codice, v_perc, p_richiesta, p_utente)
+  -- Aumenti e annulli dello stesso contratto dello stesso master, uno alla volta. E l'ora si prende DOPO
+  -- essere entrati: e' quella che decide chi e' "l'ultimo" all'annullo, e deve seguire l'ordine in cui si
+  -- scrive davvero (con now(), l'ora d'inizio, due aumenti contemporanei potevano risultare invertiti e un
+  -- +X% restare nei listini per sempre).
+  perform pg_advisory_xact_lock(hashtextextended('aumento_listino:' || p_master || ':' || p_corriere, 0));
+
+  insert into aumenti_listino (master_id, corriere_id, nome_contratto, codice_contratto, percentuale, richiesta_id, creato_da, creato_il)
+  values (p_master, p_corriere, v_nome, v_codice, v_perc, p_richiesta, p_utente, clock_timestamp())
   returning id into v_id;
 
   -- round() su numeric arrotonda il mezzo centesimo per eccesso: 7,10 x 1,05 = 7,455 -> 7,46.
@@ -222,11 +235,14 @@ declare
   v_rip integer;
   v_tot integer;
 begin
-  select annullato_il, creato_il, corriere_id into v_annullato, v_creato, v_corriere
-    from aumenti_listino where id = p_aumento and master_id = p_master for update;
+  select corriere_id into v_corriere from aumenti_listino where id = p_aumento and master_id = p_master;
   if not found then
     raise exception 'Aumento non trovato' using errcode = '42501';
   end if;
+  -- In fila con gli aumenti dello stesso contratto (vedi applica_aumento_listino).
+  perform pg_advisory_xact_lock(hashtextextended('aumento_listino:' || p_master || ':' || v_corriere, 0));
+  select annullato_il, creato_il into v_annullato, v_creato
+    from aumenti_listino where id = p_aumento and master_id = p_master for update;
   if v_annullato is not null then
     raise exception 'Questo aumento e'' gia'' stato annullato' using errcode = '22023';
   end if;

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -63,6 +63,19 @@ const fattori = [
   {label:'125 kg/m³ (8000)',value:8000},{label:'100 kg/m³ (10000)',value:10000},
   {label:'Peso reale (no volumetrico)',value:0},
 ]
+
+// Impronta dei dati del listino come arrivano dal server: cambia se qualcuno li ha toccati da fuori
+// dall'editor (aumento in percentuale, Adegua, duplicazioni, un altro salvataggio).
+function improntaListino(listino: any, fasce: any[], supplementi: any[] | undefined, fattore: number | undefined): string {
+  const righe = [
+    `l|${listino?.nome ?? ''}|${listino?.fattore_volume ?? ''}|${listino?.solo_peso_reale ? 1 : 0}|${fattore ?? ''}`,
+    ...(fasce || []).map((f: any) => `f|${f.zona_id}|${f.tipo}|${Number(f.peso_min) || 0}|${Number(f.peso_max)}|${Number(f.prezzo)}|${Number(f.fuel) || 0}`).sort(),
+    ...(supplementi || []).map((x: any) => `s|${x.tipo}|${x.nome ?? ''}|${x.valore ?? ''}|${x.tipo_calcolo ?? ''}|${x.descrizione ?? ''}`).sort(),
+  ].join('\n')
+  let h = 5381
+  for (let i = 0; i < righe.length; i++) h = ((h * 33) ^ righe.charCodeAt(i)) >>> 0
+  return `${righe.length}:${h.toString(36)}`
+}
 
 function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
   if (!fasceEsistenti?.length) return [2,5,10,20,30,50].map(p => ({ tipo:'fino_a', peso:p, prezzi:{}, fuel:'' }))
@@ -173,16 +186,33 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const zonaBloccata = (zid: string) => guardiaCosti && !zoneMasterPossiede.has(zid)
   // BOZZA in corso: se vai a vedere un altro listino e poi torni la ritrovi (navigazione);
   // se invece RICARICHI la pagina (reload) riparte pulita dai dati salvati.
+  // La bozza vale SOLO se il listino sul server e' ancora quello di quando l'hai lasciata. La bozza si
+  // scrive appena si apre l'editor, anche solo per guardare: aperto "mate shop" a 7,10, aumentato del 5%
+  // da "Aumenta prezzi" (7,46 nel database), tornando con un clic l'editor rimostrava 7,10 e un Salva
+  // qualsiasi lo riscriveva, cancellando l'aumento in silenzio. Lo stesso con Adegua e con le duplicazioni.
+  // L'impronta e' quella dei dati arrivati dal server: se e' cambiata, la bozza non si riprende.
   const bozzaKey = `bozza_listino:${listino.id}:${corriereId}`
+  const impronta = useMemo(() => improntaListino(listino, fasceEsistenti, supplementiEsistenti, fattoreCorriere), [listino, fasceEsistenti, supplementiEsistenti, fattoreCorriere])
+  const [bozzaScartata, setBozzaScartata] = useState(false)
   const [bozza] = useState<any>(() => {
     if (typeof window === 'undefined') return null
     try {
       const nav = (performance.getEntriesByType('navigation')[0] as any)?.type
       if (nav === 'reload') { sessionStorage.removeItem(bozzaKey); return null }
       const raw = sessionStorage.getItem(bozzaKey)
-      return raw ? JSON.parse(raw) : null
+      if (!raw) return null
+      const b = JSON.parse(raw)
+      if (b?.impronta !== improntaListino(listino, fasceEsistenti, supplementiEsistenti, fattoreCorriere)) {
+        sessionStorage.removeItem(bozzaKey)
+        // Avvisa solo se nella bozza c'era davvero qualcosa di diverso da quello che si era aperto.
+        if (b?.modificata) setTimeout(() => setBozzaScartata(true), 0)
+        return null
+      }
+      return b
     } catch { return null }
   })
+  // La bozza e' "modificata" quando qualcosa cambia dopo l'apertura: aprire e guardare non conta.
+  const [modificata, setModificata] = useState<boolean>(!!bozza?.modificata)
   const [nome, setNome] = useState<string>(bozza?.nome ?? (listino.nome ?? ''))
   const [fattore, setFattore] = useState<number>(bozza?.fattore ?? (Number(fattoreCorriere ?? listino.fattore_volume) || 5000))
   const [soloPesoReale, setSoloPesoReale] = useState<boolean>(bozza?.soloPesoReale ?? !!(listino as any).solo_peso_reale)
@@ -385,12 +415,18 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     return r ? Number(r.valore) || 0 : 0
   })
 
-  // Salva la bozza in sessionStorage ad ogni modifica (persiste tra le navigazioni).
+  // Salva la bozza in sessionStorage ad ogni modifica (persiste tra le navigazioni), con l'impronta del
+  // listino del server da cui e' partita.
+  const primoGiro = useRef(true)
   useEffect(() => {
+    const cambiata = modificata || !primoGiro.current
+    primoGiro.current = false
+    if (cambiata && !modificata) setModificata(true)
     try {
-      sessionStorage.setItem(bozzaKey, JSON.stringify({ nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg }))
+      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg }))
     } catch {}
-  }, [bozzaKey, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg])
 
   function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
   function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
@@ -847,6 +883,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
         )}
       </div>
 
+      {bozzaScartata && <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#92400e'}}>Nel frattempo questo listino è stato cambiato (per esempio da un aumento o da Adegua): ti mostro i prezzi salvati adesso. Le modifiche che non avevi salvato non ci sono più.</div>}
       {msg && <div style={{background:msg.startsWith('✓')?'#f0fdf4':'#fef2f2',border:`1px solid ${msg.startsWith('✓')?'#bbf7d0':'#fecaca'}`,borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:msg.startsWith('✓')?'#15803d':'#dc2626'}}>{msg}</div>}
 
       {/* Nome listino */}

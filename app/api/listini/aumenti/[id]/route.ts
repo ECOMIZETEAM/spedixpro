@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse, after } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
-import { accessoAumenti, eUuid, listiniDaPropagare } from '@/lib/aumento-listini-accesso'
+import { accessoAumenti, eUuid, riallinea } from '@/lib/aumento-listini-accesso'
 
 // Un aumento dello storico. GET: in quali listini e con quanti prezzi. POST: annulla.
 // L'annullo lo fa il database (`annulla_aumento_listino`): rimette il prezzo esatto di prima solo dove c'e'
@@ -29,8 +29,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     x.fasce++; x.prima += Number(r.prezzo_prima); x.dopo += Number(r.prezzo_dopo)
     perListino.set(r.listino_id, x)
   }
-  const { data: nomi } = await admin.from('listini_clienti').select('id,nome').eq('master_id', acc.masterId)
-  const nomeDi = new Map((nomi || []).map((l: any) => [l.id, (l.nome || '').trim()]))
+  // Solo i listini di questo aumento, a gruppi (un master puo' avere piu' di mille listini, contando quelli
+  // nati dai preventivi: letti tutti in una volta, oltre il millesimo risultavano "eliminati").
+  const ids = [...perListino.keys()]
+  const nomeDi = new Map<string, string>()
+  for (let i = 0; i < ids.length; i += 40) {
+    const { data: nomi } = await admin.from('listini_clienti').select('id,nome').eq('master_id', acc.masterId).in('id', ids.slice(i, i + 40))
+    for (const l of (nomi || []) as any[]) nomeDi.set(l.id, (l.nome || '').trim())
+  }
   return NextResponse.json({
     listini: [...perListino.entries()]
       .map(([lid, x]) => ({ id: lid, nome: nomeDi.get(lid) || 'Listino eliminato', fasce: x.fasce }))
@@ -53,13 +59,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: stato === 500 ? 'Annullo non riuscito: nessun prezzo è stato cambiato.' : error.message }, { status: stato })
   }
 
+  // Riallineamento prima di rispondere, come all'aumento (vedi app/api/listini/aumenti/route.ts).
   const listini = [...new Set((await righeDellAumento(admin, id)).map((r: any) => r.listino_id as string))]
-  const daPropagare = await listiniDaPropagare(admin, acc.masterId, listini)
-  if (daPropagare.length) {
-    after(async () => {
-      const { propagaListinoModificato } = await import('@/lib/listino-modificato')
-      for (const lid of daPropagare) await propagaListinoModificato(createAdminSupabase(), lid)
-    })
-  }
-  return NextResponse.json({ ok: true, ...(data as any) })
+  const propagazione = await riallinea(admin, acc.masterId, listini)
+  return NextResponse.json({ ok: true, ...(data as any), listini, propagazione })
 }

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import CodiceContratto from '@/app/components/CodiceContratto'
 import { logoCorriere } from '@/lib/corriere-logo'
@@ -102,14 +102,26 @@ export default function AumentaPrezzi() {
   }
   useEffect(() => { caricaTutto() }, [])
 
+  // Il contratto di cui la pagina sta mostrando i listini. Una risposta che arriva tardi per un contratto
+  // lasciato (si sceglie A, lento, poi B) si butta: altrimenti si vedrebbero i listini di A sotto il nome di
+  // B, e l'aumento andrebbe su B coi listini e i numeri di A.
+  const contrattoCorrente = useRef<string | null>(null)
   const caricaListini = (c: Contratto, tieniScelta = false) => {
+    contrattoCorrente.current = c.id
     setCaricoListini(true)
-    if (!tieniScelta) { setScelti(new Set()); setAperto(null) }
+    if (!tieniScelta) { setScelti(new Set()); setAperto(null); setListini([]) }
     return fetch(`/api/listini/aumenti/listini?corriere=${c.id}`).then(r => r.json()).then(j => {
+      if (contrattoCorrente.current !== c.id) return
       setListini(Array.isArray(j?.listini) ? j.listini : []); setZone(j?.zone || {})
-    }).catch(() => setListini([])).finally(() => setCaricoListini(false))
+    }).catch(() => { if (contrattoCorrente.current === c.id) setListini([]) })
+      .finally(() => { if (contrattoCorrente.current === c.id) setCaricoListini(false) })
   }
   const scegliContratto = (c: Contratto) => { setContratto(c); setEsito(null); setRichiestaId(nuovoId()); caricaListini(c) }
+  // Dopo un aumento o un annullo, le bozze dell'editor di quei listini sono vecchie: via (l'editor comunque
+  // non le riprende se il listino e' cambiato, vedi ListinoEditor).
+  const scartaBozze = (corriereId: string, ids: string[]) => {
+    try { for (const id of ids) sessionStorage.removeItem(`bozza_listino:${id}:${corriereId}`) } catch {}
+  }
 
   const contrattiVisti = useMemo(() => {
     const q = cercaContratto.trim().toLowerCase()
@@ -177,6 +189,7 @@ export default function AumentaPrezzi() {
     setSalvando(false)
     if (!res) { await dialog.alert({ title: 'Connessione interrotta', message: 'Non so se l’aumento è arrivato. Ricarica lo storico qui sotto prima di riprovare: se c’è, è già fatto.' }); caricaTutto(); return }
     if (!res.ok) { await dialog.alert({ title: 'Aumento non applicato', message: res.j?.error || 'Nessun prezzo è stato cambiato.' }); caricaTutto(); return }
+    scartaBozze(contratto.id, [...scelti])
     setEsito({ id: res.j.id, listini: res.j.listini, fasce: res.j.fasce, percentuale: res.j.percentuale, contratto: contratto.nome })
     setRichiestaId(nuovoId()); setScelti(new Set()); setPercScritta('')
     caricaTutto(); caricaListini(contratto, true)
@@ -197,6 +210,7 @@ export default function AumentaPrezzi() {
     const res = await fetch(`/api/listini/aumenti/${a.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'annulla' }) })
       .then(async r => ({ ok: r.ok, j: await r.json().catch(() => ({})) })).catch(() => null)
     if (!res || !res.ok) { await dialog.alert({ title: 'Annullo non fatto', message: res?.j?.error || 'Nessun prezzo è stato cambiato.' }); return }
+    scartaBozze(a.corriere_id, Array.isArray(res.j.listini) ? res.j.listini : [])
     await dialog.alert({
       title: 'Aumento annullato',
       message: `${plurale(res.j.ripristinate, 'prezzo è tornato', 'prezzi sono tornati')} com’erano.${res.j.lasciate ? ` ${plurale(res.j.lasciate, 'prezzo era', 'prezzi erano')} stati cambiati dopo l’aumento e ${res.j.lasciate === 1 ? 'è rimasto' : 'sono rimasti'} come li avevi lasciati.` : ''}`,
@@ -244,7 +258,7 @@ export default function AumentaPrezzi() {
 
       {/* 1 · CONTRATTO */}
       <Passo n={1} titolo="Contratto" attivo sotto={contratto ? undefined : 'Quale contratto vuoi aumentare. Il codice accanto al nome distingue due contratti che si chiamano uguale.'}
-        destra={contratto ? <button onClick={() => { setContratto(null); setListini([]); setScelti(new Set()); setEsito(null) }} style={{ background: 'none', border: 0, color: ARANCIO, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cambia</button> : undefined}>
+        destra={contratto ? <button onClick={() => { contrattoCorrente.current = null; setContratto(null); setListini([]); setScelti(new Set()); setEsito(null) }} style={{ background: 'none', border: 0, color: ARANCIO, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Cambia</button> : undefined}>
         {contratto ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <LogoContratto nome={contratto.nome} />
@@ -399,7 +413,7 @@ export default function AumentaPrezzi() {
               )}
               <button onClick={applica} disabled={!perc || salvando}
                 style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 8, background: perc ? ARANCIO : '#e5e5e5', color: perc ? '#fff' : '#999', border: 0, borderRadius: 10, padding: '10px 18px', fontSize: 14, fontWeight: 800, cursor: perc && !salvando ? 'pointer' : 'not-allowed', boxShadow: perc ? '0 2px 8px rgba(249,115,22,.25)' : 'none' }}>
-                {salvando ? 'Applico…' : perc ? `Aumenta del ${percTesto(perc)}` : 'Scrivi la percentuale'}
+                {salvando ? (riepilogo.sub.length || riepilogo.coll.length ? 'Applico e aggiorno la tua rete…' : 'Applico…') : perc ? `Aumenta del ${percTesto(perc)}` : 'Scrivi la percentuale'}
               </button>
             </div>
           </div>
