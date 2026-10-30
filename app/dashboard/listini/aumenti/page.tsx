@@ -364,7 +364,7 @@ export default function AumentaPrezzi() {
             <div style={{ flex: '0 0 auto' }}>
               <div style={{ display: 'flex', alignItems: 'center', border: `1.5px solid ${perc ? ARANCIO : '#e2e2e2'}`, borderRadius: 12, overflow: 'hidden', width: 170, background: '#fff' }}>
                 <span style={{ padding: '0 0 0 14px', fontSize: 22, fontWeight: 800, color: '#a3a3a3' }}>+</span>
-                <input value={percScritta} onChange={e => setPercScritta(e.target.value.replace(/[^\d.,]/g, ''))} inputMode="decimal" placeholder="0" autoFocus
+                <input value={percScritta} onChange={e => setPercScritta(e.target.value.replace(/[^\d.,]/g, ''))} inputMode="decimal" placeholder="0"
                   style={{ width: '100%', border: 0, outline: 'none', fontSize: 26, fontWeight: 800, padding: '10px 6px', textAlign: 'right', color: '#1a1a1a', background: 'transparent' }} />
                 <span style={{ padding: '0 14px 0 2px', fontSize: 22, fontWeight: 800, color: '#a3a3a3' }}>%</span>
               </div>

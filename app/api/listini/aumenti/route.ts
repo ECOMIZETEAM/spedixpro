@@ -19,8 +19,8 @@ export async function GET() {
   const { masterId } = acc
 
   const { data: contratti } = await admin.from('corrieri').select('id,nome_contratto,codice,attivo').eq('master_id', masterId)
-  const { data: listini } = await admin.from('listini_clienti').select('id').eq('master_id', masterId)
-  const mieiListini = new Set((listini || []).map((l: any) => l.id))
+  const listini = await fetchAll<any>(() => admin.from('listini_clienti').select('id').eq('master_id', masterId).order('id'))
+  const mieiListini = new Set(listini.map((l: any) => l.id))
   const ids = (contratti || []).map((c: any) => c.id)
   // Ogni contratto con prezzi in un listino ha la sua riga di aggancio (verificato il 30/10: 8.514 su 8.514):
   // da li' si conta in quanti listini sta, senza leggere tutte le fasce.
