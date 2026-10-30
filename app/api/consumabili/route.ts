@@ -14,7 +14,9 @@ const TIPI_SPESA = ['consumabile', 'rettifica', 'giacenza', 'reso']
 // tipi, per MULTI "Tutti" 1-14/10/2026 uscivano 695 righe per 1.311,22 €: 640 rettifiche, 22 giacenze,
 // 33 resi e NESSUN consumabile; piu' le correzioni manuali del credito registrate come 'rettifica' senza
 // spedizione (1.133 movimenti, −150.731 €, un cliente −6,5 milioni il 20/08). La Storia resta com'e'.
-const TIPI_REPORT = ['consumabile']
+// Dentro anche la 'logistica' (scaffale, preparazione pacchi): e' un servizio comprato come il materiale,
+// e il report del cliente la mostra gia'; senza, master e cliente leggevano due totali diversi.
+const TIPI_REPORT = ['consumabile', 'logistica']
 
 // Rotta dell'area MASTER: legge e scrive col client admin (RLS bypassata) filtrando per
 // master_id, quindi DEVE essere chiusa a chi non è staff del master. Gli utenti del portale

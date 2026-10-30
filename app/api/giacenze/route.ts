@@ -6,6 +6,7 @@ import { gestisceLaRete, senzaCostoMaster } from '@/lib/ruoli'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 import { fetchAllStretto } from '@/lib/fetch-all'
+import { spedizioniInCatena } from '@/lib/catena-report'
 import { confineGiornoRoma } from '@/lib/date-roma'
 import { vettoreFisico } from '@/lib/vettore'
 
@@ -198,18 +199,16 @@ async function importiAlDiretto(adminDb: any, righe: any[], mio: string, primaLi
       movPerSped.get(m.spedizione_id)!.push(m)
     }
   }
-  // Le gambe su cui io sto nella catena (un mio costo 'spedizione'): servono per i movimenti che il
+  // I pacchi su cui io sto nella catena (lib/catena-report): servono per i movimenti che il
   // sotto-master scrive su SE STESSO, che sono addebiti verso di me solo in quel caso. Stessa regola
   // del Report Rettifiche e delle Fatture: senza, la piattaforma (sopra MULTIEXPRESS, nessun contratto)
   // contava "addebitate a MULTIEXPRESS" 718 giacenze (1.347 €, 1-14/10/2026) che sono del suo fornitore.
-  const conMovSelf = tutteLeGambe.filter((sid) => (movPerSped.get(sid) || []).some((m: any) => !m.cliente_id && m.master_id === m.master_target_id))
-  const inCatena = new Set<string>()
-  for (let i = 0; i < conMovSelf.length; i += 200) {
-    const mie = await fetchAllStretto(() => adminDb.from('movimenti').select('id,spedizione_id')
-      .eq('tipo', 'spedizione').eq('master_target_id', mio).in('spedizione_id', conMovSelf.slice(i, i + 200)).order('spedizione_id', { ascending: true }).order('id', { ascending: true }))
-    for (const m of mie) inCatena.add(m.spedizione_id)
-  }
+  // La prova si fa su TUTTE le gambe del pacco (lib/catena-report): sui contratti condivisi il mio costo
+  // d'acquisto sta sul mio conto "(ingrosso)", spesso su un'altra gamba dello stesso tracking.
+  const conSelf = righe.filter((r: any) => [...gambe(r)].some((sid) => (movPerSped.get(sid) || []).some((m: any) => !m.cliente_id && m.master_id === m.master_target_id)))
+  const gambeInCatena = await spedizioniInCatena(adminDb, mio, conSelf.flatMap((r: any) => [...gambe(r)]))
   for (const r of righe) {
+    const paccoInCatena = [...gambe(r)].some((sid) => gambeInCatena.has(sid))
     const fl = r.master_id === mio ? null : (primaLinea.get(r.master_id) || null)
     // Spedizione propria del master senza cliente: non c'e' un diretto a cui addebitare.
     if ((r.master_id === mio && !r.cliente_id) || (r.master_id !== mio && !fl)) { r.importo_giacenza = null; continue }
@@ -221,7 +220,7 @@ async function importiAlDiretto(adminDb: any, righe: any[], mio: string, primaLi
       const alDiretto = r.master_id === mio
         ? (!!m.cliente_id && m.cliente_id === r.cliente_id)
         : (!m.cliente_id && m.master_target_id === fl && m.conto !== 'proprio'
-          && (m.master_id === mio || (m.master_id === fl && inCatena.has(sid))))
+          && (m.master_id === mio || (m.master_id === fl && paccoInCatena)))
       if (alDiretto) somma += Number(m.importo || 0)
     }
     // Importi con segno: l'addebito e' negativo, lo storno positivo. Addebitato = -(somma).

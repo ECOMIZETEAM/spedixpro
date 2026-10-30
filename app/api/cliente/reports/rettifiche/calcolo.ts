@@ -79,8 +79,9 @@ export async function righeRettificheCliente(
     .select('id,numero,corrieri(nome_contratto)').in('id', b).order('id', { ascending: true }))
   const spedDi = new Map(speds.map((s: any) => [s.id, s]))
 
-  // `rettifiche` non ha una regola di lettura per il cliente: chiave di servizio, ma RISTRETTA alle
-  // righe di QUESTO cliente sulle spedizioni dei SUOI movimenti, e senza costo_fornitore.
+  // Chiave di servizio, RISTRETTA alle righe di QUESTO cliente sulle spedizioni dei SUOI movimenti, e
+  // senza costo_fornitore: le colonne si scelgono qui. La regola di lettura del database (al 30/10/2026)
+  // lascerebbe al cliente le sue righe con TUTTE le colonne, costo del fornitore compreso.
   const rett = await leggiPerBlocchi<any>(ids, (b) => adminDb.from('rettifiche')
     .select('id,spedizione_id,numero_spedizione,costo_iniziale,costo_finale,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,created_at')
     .eq('cliente_id', clienteId).eq('confermata', true).in('spedizione_id', b)

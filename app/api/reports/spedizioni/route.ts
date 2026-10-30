@@ -8,6 +8,7 @@ import { confineGiornoRoma } from '@/lib/date-roma'
 import { vettoreFisico } from '@/lib/vettore'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
+import { spedizioniInCatena } from '@/lib/catena-report'
 
 // Il report di un master grande legge decine di migliaia di spedizioni con i loro movimenti ed
 // eventi di tracking (MULTIEXPRESS, 1-14/10/2026: ~60.000 spedizioni). Non sta nella finestra breve.
@@ -159,16 +160,14 @@ async function report(req: NextRequest) {
       .order('created_at', { ascending: true }).order('id', { ascending: true })
     const addebitoMioAlFiglio = (m: any) => (m.master_id === mine || m.master_id === m.master_target_id) && m.conto !== 'proprio'
     // Il movimento che il sotto-master scrive su SE STESSO e' un addebito verso di me solo se io sto nella
-    // catena di quella spedizione (ho un mio costo 'spedizione' sul pacco): stessa regola del Report
-    // Rettifiche e dei report di margine. Senza, la piattaforma (sopra MULTIEXPRESS, nessun contratto)
-    // si trovava "da fatturare a MULTIEXPRESS" 2.037 rettifiche per 8.124 € (1-14/10/2026) che sono
-    // del fornitore di MULTIEXPRESS e con lei non c'entrano.
+    // catena di quella spedizione (lib/catena-report): stessa regola del Report Rettifiche e dei report
+    // di margine. Senza, la piattaforma (sopra MULTIEXPRESS, nessun contratto) si trovava "da fatturare
+    // a MULTIEXPRESS" 2.037 rettifiche per 8.124 € (1-14/10/2026) che sono del fornitore di MULTIEXPRESS
+    // e con lei non c'entrano.
     const soloInCatena = async (righe: any[]) => {
-      const self = Array.from(new Set(righe.filter((m: any) => m.master_id === m.master_target_id).map((m: any) => m.spedizione_id as string)))
+      const self = righe.filter((m: any) => m.master_id === m.master_target_id).map((m: any) => m.spedizione_id as string)
       if (!self.length) return righe
-      const mie = await perBlocchi(self, b => leggiTutto(() => adminDb.from('movimenti').select('id,spedizione_id')
-        .eq('tipo', 'spedizione').eq('master_target_id', mine).in('spedizione_id', b).order('spedizione_id', { ascending: true }).order('id', { ascending: true })))
-      const inCatena = new Set(mie.map((m: any) => m.spedizione_id))
+      const inCatena = await spedizioniInCatena(adminDb, mine as string, self)
       return righe.filter((m: any) => m.master_id !== m.master_target_id || inCatena.has(m.spedizione_id))
     }
     let mvs: any[] = []

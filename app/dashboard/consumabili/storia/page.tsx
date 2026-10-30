@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { giornoRoma } from '@/lib/date-roma'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'auto'}
@@ -11,8 +12,11 @@ export default function StoriaPage() {
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [clienteId, setClienteId] = useState('')
-  const [dal, setDal] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0])
-  const [al, setAl] = useState(() => new Date().toISOString().split('T')[0])
+  // Dal 1° del mese di Roma a oggi. La mezzanotte del 1° in ora locale, passata da toISOString, diventava
+  // il giorno prima (31/10 22:00 UTC): il filtro partiva dall'ultimo giorno del mese precedente.
+  const [dal, setDal] = useState(() => giornoRoma().slice(0, 8) + '01')
+  const [al, setAl] = useState(() => giornoRoma())
+  const [errore, setErrore] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
 
@@ -29,7 +33,8 @@ export default function StoriaPage() {
     if (dal) params.set('dal', dal)
     if (al) params.set('al', al)
     const res = await fetch(`/api/consumabili?${params}`)
-    const data = await res.json()
+    const data = await res.json().catch(() => null)
+    setErrore(Array.isArray(data) ? '' : (data?.error || 'Lettura dei movimenti non riuscita'))
     setMovimenti(Array.isArray(data) ? data : [])
     setLoading(false)
   }
@@ -82,6 +87,8 @@ export default function StoriaPage() {
         </div>
         {loading ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
+        ) : errore ? (
+          <div style={{padding:'40px',textAlign:'center' as const,color:'#b91c1c'}}>{errore}</div>
         ) : !movimenti.length ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>
             <div style={{fontSize:'32px',marginBottom:'8px'}}>📋</div>

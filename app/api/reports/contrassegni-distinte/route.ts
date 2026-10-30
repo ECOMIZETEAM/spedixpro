@@ -6,7 +6,9 @@ import { vedeLaRete } from '@/lib/perimetro'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { statiCodPerLivello } from '@/lib/contrassegni-stato-livello'
 
-export const maxDuration = 60
+// Arriva con tutti i contrassegni del report (MULTIEXPRESS, un mese: migliaia di id, letti a blocchi
+// di 200 in fila): nella finestra di un minuto il report restava senza la colonna della distinta.
+export const maxDuration = 300
 
 // LA DISTINTA DI OGNI CONTRASSEGNO, VISTA DA CHI GENERA IL REPORT.
 //

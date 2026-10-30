@@ -7,6 +7,7 @@ import { fetchAllStretto } from '@/lib/fetch-all'
 import { confineGiornoRoma } from '@/lib/date-roma'
 import { contrattiPossedutiNomi } from '@/lib/rete-masters'
 import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { spedizioniInCatena } from '@/lib/catena-report'
 
 export const maxDuration = 300
 
@@ -134,19 +135,28 @@ export async function GET(req: NextRequest) {
     for (let i = 0; i < idsGambe.length; i += 200) {
       const blocco = idsGambe.slice(i, i + 200)
       const mov = await fetchAllStretto(() => admin.from('movimenti')
-        .select('id,spedizione_id,master_id,cliente_id,master_target_id,importo,created_at')
-        .eq('tipo', 'reso').in('spedizione_id', blocco).order('spedizione_id', { ascending: true }).order('id', { ascending: true }))
+        .select('id,tipo,descrizione,spedizione_id,master_id,cliente_id,master_target_id,conto,importo,created_at')
+        .in('tipo', ['reso', 'rimborso']).in('spedizione_id', blocco).order('spedizione_id', { ascending: true }).order('id', { ascending: true }))
       for (const m of mov) {
+        // Del rimborso conta solo lo STORNO DI UN RESO ("Storno nolo-reso ... reso mai avvenuto"): il reso
+        // stornato non e' piu' dovuto (2UW07WF018081, GENIUS, 5,60 € addebitati il 2/10 e stornati il 5/10).
+        // Gli altri rimborsi (annullo, riprezzo) col reso non c'entrano.
+        if (m.tipo === 'rimborso' && !/reso/i.test(String(m.descrizione || ''))) continue
         if (!movPerSped.has(m.spedizione_id)) movPerSped.set(m.spedizione_id, [])
         movPerSped.get(m.spedizione_id)!.push(m)
       }
     }
+    // Il reso che il sotto-master scrive su SE STESSO e' un addebito verso di me solo se sto nella catena
+    // di quel pacco: stessa regola di Rettifiche, Giacenze e Fatture (lib/catena-report).
+    const conMovSelf = idsGambe.filter((sid) => (movPerSped.get(sid) || []).some((m: any) => !m.cliente_id && m.master_id === m.master_target_id))
+    const inCatena = await spedizioniInCatena(admin, mio, conMovSelf)
 
     const tDal = Date.parse(dal), tAl = Date.parse(al)
     const out: any[] = []
     for (const s of visibili) {
       const movs = gambe(s).flatMap(id => movPerSped.get(id) || [])
-      const miei = movs.filter((m: any) => mieiMasterSet.has(m.master_id))
+      // La data del reso e' quella del primo ADDEBITO di reso dei miei master (non dello storno).
+      const miei = movs.filter((m: any) => m.tipo === 'reso' && mieiMasterSet.has(m.master_id))
       if (!miei.length) continue
       const primo = miei.reduce((a: string, m: any) => (Date.parse(m.created_at) < Date.parse(a) ? m.created_at : a), miei[0].created_at)
       const tPrimo = Date.parse(primo)
@@ -166,6 +176,8 @@ export async function GET(req: NextRequest) {
         }
         // Importi con segno: l'addebito e' negativo, lo storno positivo.
         importo = Math.round(-somma * 100) / 100
+        // Reso stornato per intero: non e' mai avvenuto, e in un report di resi non ci sta.
+        if (importo === 0 && movs.some((m: any) => m.tipo === 'rimborso')) continue
       }
       out.push({
         id: s.id, numero: s.numero, stato: s.stato, created_at: s.created_at,
