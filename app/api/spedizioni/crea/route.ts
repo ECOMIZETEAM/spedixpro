@@ -2052,14 +2052,12 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       const _modalitaIncassoGls = (_im === 'AB' || _im === 'A') ? 'AB' : _im === 'AC' ? 'AC' : 'CONT'
       for (const sv of (serviziAccessori || [])) { const cod = codiceServizioGls(String((sv as any)?.nome || '')); if (cod) codiciGls.push(cod) }
 
-      // FLEX DELIVERY SERVICE (FDS): GLS manda al DESTINATARIO email/SMS con il link per gestirsi la
-      // consegna (riprogramma, dirotta a punto GLS, deposito sicuro, vicino, rifiuta). GLS lo attiva da
-      // solo quando riceve Email/Cellulare1 e il servizio è abilitato sul contratto (lato GLS). Siccome
-      // è l'OPPOSTO della regola "email schermo corriere" (di norma al corriere diamo l'email di
-      // servizio così i suoi link non arrivano al cliente), lo accendiamo di proposito PER CONTRATTO:
-      // settings.flex_delivery = true (oggi i GLS diretti di Quick). Spento = non mandiamo i contatti e
-      // GLS consegna standard. Verificato sull'API GLS vera di Quick (AddParcel di prova + annullo).
-      const fdsAttivo = (corriereRecord as any)?.settings?.flex_delivery === true
+      // CONTATTI DEL DESTINATARIO: su GLS DIRETTO vanno sempre quelli veri (email e cellulare).
+      // La schermatura con l'email di servizio vale per i provider, non per i contratti diretti
+      // (Lorenzo, 30/10/2026): prima partivano solo dove era acceso settings.flex_delivery (i GLS di
+      // Quick), e su tutti gli altri GLS l'autista e GLS non avevano un numero. Con email e cellulare
+      // GLS avvisa il destinatario e, dove il contratto ha il FlexDeliveryService, gli manda il link per
+      // gestirsi la consegna. Sono gli stessi campi che GLS accetta sui contratti di Quick dall'11/9.
       const ris = await creaSpedizioneGls(credGls, {
         ragioneSociale: body.shipTo.name,
         indirizzo: body.shipTo.street1,
@@ -2074,10 +2072,8 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         bda,
-        // Contatti VERI del destinatario solo se FDS è acceso su questo contratto (qui shipTo NON è
-        // mascherato: il mascheramento con l'email di servizio è solo nel ramo SpediamoPro).
-        email: fdsAttivo ? (body.shipTo.email || undefined) : undefined,
-        cellulare: fdsAttivo ? (body.shipTo.phone || undefined) : undefined,
+        email: body.shipTo.email || undefined,
+        cellulare: body.shipTo.phone || undefined,
         ...(parcelGls ? {
           tipoSpedizione: 'P' as const, paese: body.shipTo.country,
           personaRiferimento: body.shipTo.name, telefono: body.shipTo.phone,

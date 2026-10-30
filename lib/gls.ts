@@ -134,12 +134,9 @@ export type ParcelGls = {
   modalitaIncasso?: string       // codice metodo incasso (dipende dal contratto)
   assicurazione?: number         // EUR (solo sul primo collo)
   note?: string                  // Notespedizione
-  serviziAccessori?: string[]    // codici GLS 2-cifre (max 6): Sabato 23, Exchange 24, Preavviso 14, ...
-  // Contatti del DESTINATARIO per il FlexDeliveryService (FDS): GLS manda al destinatario il link
-  // via email/SMS per gestirsi la consegna (riprogramma, dirotta, deposito sicuro, vicino, rifiuta).
-  // Attivo se FDS è abilitato sul contratto GLS: senza questi campi GLS non ha come avvisare nessuno
-  // e il servizio non parte. Vanno passati SOLO quando si vuole davvero far scrivere GLS al cliente
-  // (è l'opposto della regola "email schermo corriere"): lo decide il ramo crea, non questa libreria.
+  serviziAccessori?: string[]    // codici GLS 2-cifre (max 6): oggi solo Exchange 24, vedi codiceServizioGls
+  // Contatti VERI del DESTINATARIO: GLS li usa per gli avvisi (email/SMS) e, dove il contratto ha il
+  // FlexDeliveryService, per il link con cui il destinatario si gestisce la consegna.
   email?: string                 // <Email> destinatario (max 70)
   cellulare?: string             // <Cellulare1> destinatario (GLS vuole le ultime 10 cifre)
   // PARCEL (estero, contratto con settings.tipo_spedizione = 'P'). Manuale MU162 rev.22: per il
@@ -252,10 +249,10 @@ export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): str
       primo && p.importoContrassegno && p.importoContrassegno > 0 ? tag('Importocontrassegno', euroIt(p.importoContrassegno)) : '',
       primo && p.importoContrassegno && p.importoContrassegno > 0 && p.modalitaIncasso ? tag('ModalitaIncasso', p.modalitaIncasso) : '',
       primo && p.assicurazione && p.assicurazione > 0 ? tag('Assicurazione', euroIt(p.assicurazione)) : '',
-      // Servizi accessori (Sabato/Exchange/Preavviso…): codici 2-cifre, max 6, separati da virgola. Solo primo collo.
+      // Servizi accessori (oggi solo Exchange): codici 2-cifre, max 6, separati da virgola. Solo primo collo.
       primo && p.serviziAccessori && p.serviziAccessori.length ? tag('ServiziAccessori', Array.from(new Set(p.serviziAccessori)).slice(0, 6).join(',')) : '',
       primo && p.note ? tag('Notespedizione', p.note.substring(0, 100)) : '',
-      // Contatti destinatario per il FlexDeliveryService — solo primo collo (dati di spedizione).
+      // Email e cellulare del destinatario per gli avvisi GLS — solo primo collo (dati di spedizione).
       // Email: GLS la vuole <=70. Cellulare1: solo cifre, ULTIME 10 (toglie prefisso +39/0039 e spazi);
       // se ne restano meno di 9 non si manda (evita un valore monco che GLS potrebbe rifiutare).
       primo && p.email && p.email.includes('@') ? tag('Email', p.email.trim().substring(0, 70)) : '',

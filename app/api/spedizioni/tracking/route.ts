@@ -177,32 +177,41 @@ export async function GET(req: NextRequest) {
 
     // GLS / BRT DIRETTI: non c'è webhook e nessuno riempie tracking_events → senza questo ramo il popup
     // cadrebbe sulla lettura (vuota) qui sotto e mostrerebbe "nessun evento" per SEMPRE, pur avendo il
-    // badge di stato giusto. Si chiede il tracking LIVE al corriere (come DVA/SpediamoPro). Gli eventi sono
-    // i testi di transito del T&T (senza data: il T&T che interroghiamo espone solo la descrizione dello
-    // stato; la data richiederebbe i campi grezzi del corriere, da mappare su un pacco tracciato reale).
+    // badge di stato giusto. Si chiede il tracking LIVE al corriere (come DVA/SpediamoPro), con data, ora
+    // e luogo di ogni evento.
     if (corriere.tipo === 'gls' || corriere.tipo === 'brt') {
       const raw: any = spedizione.raw_response || {}
       let stati: string[] = []
-      let eventiBrt: { data: string; descrizione: string; luogo: string }[] | null = null
+      let eventiCorriere: { data: string; descrizione: string; luogo: string }[] | null = null
       if (corriere.tipo === 'gls' && raw.numero && cred?.sigla_sede) {
         const { trackingGls, mapStatoGls } = await import('@/lib/gls')
         const r = await trackingGls(cred as any, String(raw.numero)); stati = r.stati
+        // Il popup GLS mostrava solo le descrizioni, senza data né ora (Lorenzo, 30/10/2026): era
+        // scritto quando lib/gls leggeva solo gli stati. Ora gli eventi arrivano con data/ora/luogo.
+        // GLS li manda dal piu' recente; sul Parcel quelli del tratto estero vengono dopo l'Italia,
+        // quindi si riordina per data (gli eventi senza ora, come "creata dal mittente", valgono
+        // inizio giornata e a parità di istante resta l'ordine di GLS).
+        if (r.eventi.length) {
+          const istante = (d: string) => {
+            const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(d || '')
+            return m ? Number(`${m[3]}${m[2].padStart(2, '0')}${m[1].padStart(2, '0')}${(m[4] || '0').padStart(2, '0')}${m[5] || '00'}`) : 0
+          }
+          eventiCorriere = [...r.eventi].sort((a, b) => istante(b.data) - istante(a.data))
+        }
         let av: string | null = null
         for (const s of stati) { const m = mapStatoGls(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
         await persistiStato(av)
       } else if (corriere.tipo === 'brt' && raw.parcelID && cred?.user && cred?.password) {
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati; eventiBrt = r.eventi
+        const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati; eventiCorriere = r.eventi
         let av: string | null = null
         for (const s of stati) { const m = mapStatoBrt(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
         if (r.consegnata && prioritaStato('consegnata') > prioritaStato(av)) av = 'consegnata'
         await persistiStato(av)
       }
-      // BRT: eventi reali con DATA/ORA/filiale, gia' dal piu' recente (niente doppione "consegnata").
-      // Altri (GLS): solo descrizioni, dedup, invertiti per mostrare il piu' recente in alto.
-      const eventi = eventiBrt
-        ? eventiBrt.map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
-        : stati.filter((s, i) => s && stati.indexOf(s) === i).map(s => ({ date: '', description: s, location: '' })).reverse()
+      // Eventi reali con DATA/ORA/luogo, dal piu' recente (gli stati escono dallo stesso giro di lettura:
+      // senza eventi non ci sono nemmeno stati da mostrare).
+      const eventi = (eventiCorriere || []).map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 
