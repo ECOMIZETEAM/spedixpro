@@ -51,15 +51,11 @@ const SERVIZI_ACCESSORI_MARCA: Record<string, { nome: string; prezzo: number; pe
     { nome: 'Reverse Ufficio Postale', prezzo: 0, perc: 0 },
     { nome: 'Consegna su appuntamento', prezzo: 0, perc: 0 },
   ],
-  // GLS: solo i servizi con un CODICE ServiziAccessori vero, così sono TRASMISSIBILI. Mappa nome→codice in
-  // lib/gls. (Via 'Express12'/'Document Return': nessun codice. Via anche Preavviso e Consegna al piano dal
-  // 30/10/2026: i loro codici 14 e 22 attivavano su GLS "ENTRO ORE 13…" ed "EXPRESS12", vedi lib/gls.)
+  // GLS: solo i servizi che si trasmettono col codice GIUSTO (mappa nome→codice in lib/gls). Dal 30/10/2026
+  // resta solo l'Exchange: Sabato, Preavviso, Appuntamento, Consegna al piano, Ident e Return partivano con
+  // codici che su GLS attivavano un altro servizio (es. il Sabato mandava il 23 = document return).
   GLS: [
     { nome: 'Exchange', prezzo: 0, perc: 0 },                 // 24
-    { nome: 'Saturday Service', prezzo: 0, perc: 0 },         // 23
-    { nome: 'Consegna su appuntamento', prezzo: 0, perc: 0 }, // 16
-    { nome: 'Ident Delivery', prezzo: 0, perc: 0 },           // 25
-    { nome: 'Return Service', prezzo: 0, perc: 0 },           // 27
   ],
   SDA: [
     { nome: 'Time Definite ore 10', prezzo: 0, perc: 0 },

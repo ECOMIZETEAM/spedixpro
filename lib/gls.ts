@@ -156,21 +156,19 @@ export type ParcelGls = {
 // NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori. I codici sono 2
 // cifre; il tag ne accetta max 6 separati da virgola. Torna null se il nome non è un servizio GLS
 // trasmissibile.
-// La tabella che GLS ci aveva dato il 2/9 è SBAGLIATA su diversi codici. Provati uno per uno il 30/10/2026
-// sul conto di Wave (spedizione creata, etichetta letta, annullata): 01 "ENTRO ORE 12", 02 "ORA FISSA",
-// 03 "ANTICIPATO", 07 "SERVIZIO AL SABATO", 14 "ENTRO ORE 13 VENEZIA LAGUNA", 21 "SERVIZIO AL SABATO
-// VENEZIA", 22 "EXPRESS12" sono servizi di consegna a orario; gli altri (00 05 06 08 15 16 23 24 25 27)
-// GLS li stampa solo come numero. Per questo Preavviso (era 14), Consegna al piano (era 22) e Flex (era 21)
-// non si mandano più: attivavano un'altra consegna, potenzialmente a pagamento.
+// La tabella che GLS ci aveva dato il 2/9 era SBAGLIATA quasi ovunque: dal 2/9 al 30/10/2026 il codice
+// mandato attivava un altro servizio. Codici veri (guida GLS Italy di ShippyPro, combaciata su tutti i 12
+// punti verificabili: 18 prove sul conto di Wave il 30/10 con etichetta letta e annullo, il pannello
+// fornitore, il manuale MU162): 01 entro le 12, 02 ora fissa, 03 anticipato, 05 consegna al piano,
+// 06 mezzo idoneo, 07 sabato, 08 verifica contenuto, 14/15/16/21 servizi della laguna di Venezia,
+// 22 Express12, 23 document return, 24 Exchange, 25 preavviso telefonico, 27 timbro, 28 Erod,
+// 29 sabato pomeriggio, 30 GDO, 31 Flex, 32 Ident PIN, 34 GDO entro il, 35 food.
+// Si trasmette solo l'Exchange, l'unico che era già giusto. Gli altri servizi del catalogo non hanno un
+// equivalente (appuntamento, return) o vanno riattivati sul codice giusto con una decisione apposita.
 export function codiceServizioGls(nome: string): string | null {
   const n = (nome || '').toLowerCase()
   if (/exchange|cambio/.test(n)) return '24'
-  if (/sabato|saturday/.test(n)) return '23'
-  if (/infoservice|info service|sms/.test(n)) return '15'
-  if (/appuntamento/.test(n)) return '16'
-  if (/ident/.test(n)) return '25'
-  if (/return|reso/.test(n)) return '27'
-  return null   // es. "Express12"/"Document Return"/Preavviso/Consegna al piano: non trasmessi
+  return null   // gli altri nomi non si trasmettono: vedi sopra
 }
 
 export type RisultatoGls = {
