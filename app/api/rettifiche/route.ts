@@ -307,20 +307,25 @@ export async function POST(req: NextRequest) {
     const spedInfo = new Map<string, any>()
     // Senza le etichette dentro colli_dettaglio: servono solo peso e lati (vedi colli-senza-etichette).
     const { spedizioniConColliLeggeri } = await import('@/lib/colli-senza-etichette')
-    for (const [k, x] of await spedizioniConColliLeggeri(adminDb, idS, 'peso_reale,peso_volume,lunghezza,larghezza,altezza,corriere_id,master_id,corrieri(settings)')) spedInfo.set(k, x)
+    for (const [k, x] of await spedizioniConColliLeggeri(adminDb, idS, 'peso_reale,peso_volume,lunghezza,larghezza,altezza,corriere_id,master_id,created_at,corrieri(settings)')) spedInfo.set(k, x)
     // SENZA IL DETTAGLIO DEI COLLI le misure della spedizione sono quelle di UN collo solo: ripeterle per
     // tutti i colli inventa un volume che non c'e'. 050026152906222 (2 colli, 59x56x41 e 35x79x40, cioe'
-    // 27,09 + 22,12 = 49,21 kg) diceva «da 54,19 kg»: il primo collo contato due volte. Sulle multicollo
-    // del fornitore che non salvano il dettaglio i colli veri stanno nei `parcels` della sua risposta
-    // (colliDaRaw, come nel dettaglio spedizione): si leggono SOLO quelli, e solo per queste spedizioni.
-    // Verificato il 30/10/2026 sulle 136 multicollo senza dettaglio con rettifiche in 30 giorni: 133 hanno
-    // i parcels, uno per collo; il «da» veniva sbagliato su 32 (19 in piu', fino a 129 kg su 050275152901425;
-    // 13 in meno, fino a 75,6 kg su 050038152893060).
+    // 27,09 + 22,12 = 49,21 kg) diceva «da 54,19 kg»: il primo collo contato due volte.
+    // IL «DA» E' IL PESO SU CUI SI E' PAGATO ALLA PARTENZA, e su queste multicollo dipende da QUANDO sono
+    // partite: fino al 28/09/2026 (dc000a54) il prezzo si faceva sui TOTALI, max(somma dei pesi, somma dei
+    // volumi); da li' collo per collo, coi colli che stanno nei `parcels` della risposta del fornitore
+    // (colliDaRaw, come nel dettaglio spedizione). Scrivere il collo per collo su una partita prima diceva
+    // «da 31,13 kg a 30,6 kg» con 5,45 di addebito (050020152895413, pagata sulla fascia dei 30 kg).
+    // Verificato il 30/10/2026 sulle 136 multicollo senza dettaglio con rettifiche in 30 giorni (11/08-02/10;
+    // dopo, il dettaglio si salva): delle 87 col peso fatturato ancora quello della partenza, 79 su 80 prima
+    // del 28/09 sono sui totali e 7 su 7 dopo sono collo per collo.
+    const PREZZO_COLLO_PER_COLLO_DAL = Date.parse('2026-09-28T13:51:34Z')
     const { colliDaRaw } = await import('@/lib/colli-dettaglio')
     const colliDalFornitore = new Map<string, any[]>()
     {
       const senzaDett = [...spedInfo.values()]
         .filter((x: any) => (Number(x.colli) || 1) > 1 && !(Array.isArray(x.colli_dettaglio) && x.colli_dettaglio.length))
+        .filter((x: any) => Date.parse(x.created_at) >= PREZZO_COLLO_PER_COLLO_DAL)
         .map((x: any) => x.id)
       for (let i = 0; i < senzaDett.length; i += 150) {
         const { data } = await adminDb.from('spedizioni').select('id,parcels:raw_response->raw->data->parcels').in('id', senzaDett.slice(i, i + 150))
@@ -350,9 +355,9 @@ export async function POST(req: NextRequest) {
       const primaColli = dett.length ? dett : Array.from({ length: n }, () => ({
         peso: (Number(sp.peso_reale) || 0) / n, lunghezza: sp.lunghezza, larghezza: sp.larghezza, altezza: sp.altezza,
       }))
-      // Multicollo senza nessuna misura per collo: si parte dai totali salvati alla creazione (peso reale e
-      // volume, gia' sommati collo per collo), non dal primo collo moltiplicato. Sulle monocollo le misure
-      // della spedizione SONO quelle del collo: resta tutto com'era.
+      // Multicollo senza misure per collo (o partita prima del 28/09): si parte dai totali salvati alla
+      // creazione (peso reale e volume), non dal primo collo moltiplicato. Sulle monocollo le misure della
+      // spedizione SONO quelle del collo: resta tutto com'era.
       const primaDaiTotali = !dett.length && n > 1
         ? Math.max(Number(sp.peso_reale) || 0, Number(sp.peso_volume) || 0)
         : 0
