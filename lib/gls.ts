@@ -153,22 +153,24 @@ export type ParcelGls = {
   telefono?: string              // <TelefonoDestinatario> (solo cifre, max 16)
 }
 
-// NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori (tabella GLS,
-// verificata sul contratto Quick 2/9). I codici sono 2 cifre; il tag ne accetta max 6 separati da virgola.
-// 01/02/03 sono le modalità del CONTRASSEGNO (contanti/assegno banc./assegno circ.), qui NON mappate:
-// la modalità COD la mette il ramo crea a parte. Torna null se il nome non è un servizio GLS trasmissibile.
+// NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori. I codici sono 2
+// cifre; il tag ne accetta max 6 separati da virgola. Torna null se il nome non è un servizio GLS
+// trasmissibile.
+// La tabella che GLS ci aveva dato il 2/9 è SBAGLIATA su diversi codici. Provati uno per uno il 30/10/2026
+// sul conto di Wave (spedizione creata, etichetta letta, annullata): 01 "ENTRO ORE 12", 02 "ORA FISSA",
+// 03 "ANTICIPATO", 07 "SERVIZIO AL SABATO", 14 "ENTRO ORE 13 VENEZIA LAGUNA", 21 "SERVIZIO AL SABATO
+// VENEZIA", 22 "EXPRESS12" sono servizi di consegna a orario; gli altri (00 05 06 08 15 16 23 24 25 27)
+// GLS li stampa solo come numero. Per questo Preavviso (era 14), Consegna al piano (era 22) e Flex (era 21)
+// non si mandano più: attivavano un'altra consegna, potenzialmente a pagamento.
 export function codiceServizioGls(nome: string): string | null {
   const n = (nome || '').toLowerCase()
   if (/exchange|cambio/.test(n)) return '24'
   if (/sabato|saturday/.test(n)) return '23'
-  if (/preavviso/.test(n)) return '14'
   if (/infoservice|info service|sms/.test(n)) return '15'
   if (/appuntamento/.test(n)) return '16'
-  if (/flex|e-?commerce/.test(n)) return '21'
-  if (/consegna al piano|al piano/.test(n)) return '22'
   if (/ident/.test(n)) return '25'
   if (/return|reso/.test(n)) return '27'
-  return null   // es. "Express12"/"Document Return": nessun codice ServiziAccessori → non trasmesso
+  return null   // es. "Express12"/"Document Return"/Preavviso/Consegna al piano: non trasmessi
 }
 
 export type RisultatoGls = {
