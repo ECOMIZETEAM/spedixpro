@@ -2,13 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { registraMovimento } from '@/lib/movimenti'
 import { eDiscendente } from '@/lib/rete-masters'
-import { fetchAll } from '@/lib/fetch-all'
+import { fetchAllStretto } from '@/lib/fetch-all'
+import { confineGiornoRoma } from '@/lib/date-roma'
 import { isAgente } from '@/lib/agente'
 
 // Le SPESE (quello che questa pagina chiama "consumabili"): tutto ciò che viene addebitato
 // fuori dalla spedizione. Restano fuori spedizioni, ricariche e abbonamenti, che hanno
 // le loro liste dedicate.
 const TIPI_SPESA = ['consumabile', 'rettifica', 'giacenza', 'reso']
+// Il REPORT Consumabili (?solo=consumabile) prende solo le spese vere e proprie. Con tutti e quattro i
+// tipi, per MULTI "Tutti" 1-14/10/2026 uscivano 695 righe per 1.311,22 €: 640 rettifiche, 22 giacenze,
+// 33 resi e NESSUN consumabile; piu' le correzioni manuali del credito registrate come 'rettifica' senza
+// spedizione (1.133 movimenti, −150.731 €, un cliente −6,5 milioni il 20/08). La Storia resta com'e'.
+const TIPI_REPORT = ['consumabile']
 
 // Rotta dell'area MASTER: legge e scrive col client admin (RLS bypassata) filtrando per
 // master_id, quindi DEVE essere chiusa a chi non è staff del master. Gli utenti del portale
@@ -81,18 +87,22 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json([])
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,cliente_id').eq('id', user.id).single()
   // Ogni riga porta il credito residuo: la vede solo lo staff del master. L'agente è escluso
   // come in Lista Movimenti; il cliente ha la sua rotta. Finché qui si leggeva la tabella
   // vuota il controllo non serviva, ora sì.
-  if (isAgente(utente as any) || nonStaff(utente)) return NextResponse.json([])
+  if (isAgente(utente as any) || nonStaff(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   let clienteIdRaw = req.nextUrl.searchParams.get('clienteId')
   // Stesso accorgimento di /api/movimenti/lista: l'id del sotto-master può arrivare come
   // "m%3A<id>" e senza decodificarlo il prefisso "m:" non verrebbe riconosciuto.
   if (clienteIdRaw?.includes('%')) { try { clienteIdRaw = decodeURIComponent(clienteIdRaw) } catch {} }
-  const dal = req.nextUrl.searchParams.get('dal')
-  const al = req.nextUrl.searchParams.get('al')
+  // Giorni di Roma: prima `dal` valeva dalla mezzanotte UTC e `al` + 'T23:59:59' fino alle 23:59 UTC,
+  // cioe' ogni giorno cominciava e finiva una o due ore dopo quello italiano.
+  const dal = confineGiornoRoma(req.nextUrl.searchParams.get('dal'), 'dal')
+  const al = confineGiornoRoma(req.nextUrl.searchParams.get('al'), 'al')
+  const soloConsumabili = req.nextUrl.searchParams.get('solo') === 'consumabile'
+  const tipi = soloConsumabili ? TIPI_REPORT : TIPI_SPESA
 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
@@ -120,57 +130,78 @@ export async function GET(req: NextRequest) {
     if (!ids.length) return righe
     const stornate = new Set<string>()
     for (let i = 0; i < ids.length; i += 200) {
-      const { data } = await admin.from('movimenti').select('spedizione_id')
-        .in('spedizione_id', ids.slice(i, i + 200)).eq('tipo', 'rimborso')
-      for (const r of (data || [])) stornate.add((r as any).spedizione_id)
+      const data = await fetchAllStretto(() => admin.from('movimenti').select('id,spedizione_id')
+        .in('spedizione_id', ids.slice(i, i + 200)).eq('tipo', 'rimborso').order('spedizione_id', { ascending: true }).order('id', { ascending: true }))
+      for (const r of data) stornate.add((r as any).spedizione_id)
     }
     return righe.filter((m) => !(m.tipo === 'rettifica' && stornate.has(m.spedizione_id)))
   }
   const perPeriodo = (q: any) => {
     if (dal) q = q.gte('created_at', dal)
-    if (al) q = q.lte('created_at', al + 'T23:59:59')
+    if (al) q = q.lte('created_at', al)
     // Secondo ordine sull'id: fetchAll legge a pagine, e righe con lo stesso istante cambiavano
     // posto fra una pagina e l'altra (doppie o perse).
-    return q.in('tipo', TIPI_SPESA).order('created_at', { ascending: false }).order('id', { ascending: false })
+    return q.in('tipo', tipi).order('created_at', { ascending: false }).order('id', { ascending: false })
   }
 
-  // Storia di un SOTTO-MASTER (clienteId = "m:<id>"): dai movimenti tra master.
-  // Vale per TUTTA la rete sotto di me, non solo per i figli diretti: da un nodo alto la
-  // storia di un sotto-master di secondo livello tornava vuota senza alcun motivo visibile.
-  if (clienteIdRaw && clienteIdRaw.startsWith('m:')) {
-    const targetMasterId = clienteIdRaw.slice(2)
-    const { data: sub } = await admin.from('masters').select('id,parent_master_id,nome').eq('id', targetMasterId).maybeSingle()
-    if (!sub || !(await eDiscendente(admin, targetMasterId, utente?.master_id))) return NextResponse.json([])
-    // Solo il conto RETE, cioe' le spese che il sotto-master ha verso la mia rete. Sul conto 'proprio'
-    // stanno giacenze e resi dei SUOI contratti, che io non gli ho mai addebitato: MULTI, scegliendo
-    // LOGIXIA, vedeva 123 giacenze e 57 resi (283 €) di LOGIXIA verso se stessa (1-14/10/2026).
-    const righe = await senzaStornate(await fetchAll(() => perPeriodo(admin.from('movimenti')
-      .select('id,tipo,descrizione,importo,saldo_dopo,created_at,spedizione_id').eq('master_target_id', targetMasterId)
-      .or('conto.is.null,conto.neq.proprio')
-      // Ordine fisso per le pagine (oltre 1000 si accavallavano): la data sta sull'indice del conto,
-      // l'id rompe la parità. Il solo id farebbe ordinare tutti i movimenti del master a ogni pagina.
-      .order('created_at', { ascending: false }).order('id', { ascending: false }))))
-    return NextResponse.json(righe.map((m: any) => riga(m, sub.nome)))
-  }
+  // Una pagina che non si legge non deve diventare "nessuna spesa": prima fetchAll chiudeva l'elenco
+  // in silenzio al primo errore e il report usciva vuoto o monco.
+  try {
+    // Storia di un SOTTO-MASTER (clienteId = "m:<id>"): dai movimenti tra master.
+    // Vale per TUTTA la rete sotto di me, non solo per i figli diretti: da un nodo alto la
+    // storia di un sotto-master di secondo livello tornava vuota senza alcun motivo visibile.
+    if (clienteIdRaw && clienteIdRaw.startsWith('m:')) {
+      const targetMasterId = clienteIdRaw.slice(2)
+      const { data: sub } = await admin.from('masters').select('id,parent_master_id,nome').eq('id', targetMasterId).maybeSingle()
+      if (!sub || !(await eDiscendente(admin, targetMasterId, utente?.master_id))) return NextResponse.json({ error: 'Il sotto-master non e\' della tua rete' }, { status: 403 })
+      // Solo il conto RETE, cioe' le spese che il sotto-master ha verso la mia rete. Sul conto 'proprio'
+      // stanno giacenze e resi dei SUOI contratti, che io non gli ho mai addebitato: MULTI, scegliendo
+      // LOGIXIA, vedeva 123 giacenze e 57 resi (283 €) di LOGIXIA verso se stessa (1-14/10/2026).
+      const righe = await senzaStornate(await fetchAllStretto(() => perPeriodo(admin.from('movimenti')
+        .select('id,tipo,descrizione,importo,saldo_dopo,created_at,spedizione_id').eq('master_target_id', targetMasterId)
+        .or('conto.is.null,conto.neq.proprio'))))
+      return NextResponse.json(righe.map((m: any) => riga(m, sub.nome)))
+    }
 
-  // CLIENTI: le spese stanno in 'movimenti' (ci scrive la POST qui sopra, come giacenze e
-  // rettifiche). Prima si leggeva 'movimenti_clienti', un registro parallelo mai popolato:
-  // la Storia usciva SEMPRE vuota anche con gli addebiti regolarmente fatti.
-  if (!utente?.master_id) return NextResponse.json([])
-  const clienteId = clienteIdRaw
-  const righe = await senzaStornate(await fetchAll(() => {
-    let q = admin.from('movimenti').select('id,tipo,descrizione,importo,saldo_dopo,created_at,cliente_id,spedizione_id')
-      .eq('master_id', utente.master_id).not('cliente_id', 'is', null)
-      // Ordine fisso per le pagine, come sopra: data (sull'indice del master) + id a parità di data.
-      .order('created_at', { ascending: false }).order('id', { ascending: false })
-    if (clienteId) q = q.eq('cliente_id', clienteId)
-    return perPeriodo(q)
-  }))
-  const ids = Array.from(new Set(righe.map((m: any) => m.cliente_id).filter(Boolean)))
-  const nomi = new Map<string, string>()
-  for (let i = 0; i < ids.length; i += 300) {
-    const { data: cli } = await admin.from('clienti').select('id,ragione_sociale').in('id', ids.slice(i, i + 300))
-    for (const c of (cli || [])) nomi.set(c.id, c.ragione_sociale)
+    // CLIENTI: le spese stanno in 'movimenti' (ci scrive la POST qui sopra, come giacenze e
+    // rettifiche). Prima si leggeva 'movimenti_clienti', un registro parallelo mai popolato:
+    // la Storia usciva SEMPRE vuota anche con gli addebiti regolarmente fatti.
+    if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    const clienteId = clienteIdRaw
+    const righe = await senzaStornate(await fetchAllStretto(() => {
+      let q = admin.from('movimenti').select('id,tipo,descrizione,importo,saldo_dopo,created_at,cliente_id,spedizione_id')
+        .eq('master_id', utente.master_id).not('cliente_id', 'is', null)
+      if (clienteId) q = q.eq('cliente_id', clienteId)
+      return perPeriodo(q)
+    }))
+    const ids = Array.from(new Set(righe.map((m: any) => m.cliente_id).filter(Boolean)))
+    const nomi = new Map<string, string>()
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data: cli, error } = await admin.from('clienti').select('id,ragione_sociale').in('id', ids.slice(i, i + 200))
+      if (error) throw new Error('clienti: ' + error.message)
+      for (const c of (cli || [])) nomi.set(c.id, c.ragione_sociale)
+    }
+    const out = righe.map((m: any) => riga(m, nomi.get(m.cliente_id) || '—'))
+
+    // Report, "Tutti": anche i sotto-master di PRIMA linea, che pagano a me come i clienti. MULTI addebita
+    // consumabili solo ai sotto-master (14 movimenti, 19.171,37 € al 15/10/2026): senza di loro il suo report
+    // "Tutti" usciva vuoto. La Storia resta sui soli clienti, com'era.
+    if (soloConsumabili && !clienteId) {
+      const { data: figli, error: eF } = await admin.from('masters').select('id,nome').eq('parent_master_id', utente.master_id)
+      if (eF) throw new Error('sotto-master: ' + eF.message)
+      const nomeFiglio = new Map<string, string>((figli || []).map((f: any) => [f.id, f.nome || '—']))
+      const ids = Array.from(nomeFiglio.keys())
+      for (let i = 0; i < ids.length; i += 200) {
+        const mv = await fetchAllStretto(() => perPeriodo(admin.from('movimenti')
+          .select('id,tipo,descrizione,importo,saldo_dopo,created_at,master_target_id').in('master_target_id', ids.slice(i, i + 200))
+          .is('cliente_id', null).or('conto.is.null,conto.neq.proprio')))
+        for (const m of mv as any[]) out.push(riga(m, nomeFiglio.get(m.master_target_id) || '—'))
+      }
+      out.sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id)))
+    }
+    return NextResponse.json(out)
+  } catch (e: any) {
+    console.error('[CONSUMABILI]', e?.message || e)
+    return NextResponse.json({ error: 'Lettura delle spese non riuscita: ' + (e?.message || 'errore') }, { status: 500 })
   }
-  return NextResponse.json(righe.map((m: any) => riga(m, nomi.get(m.cliente_id) || '—')))
 }

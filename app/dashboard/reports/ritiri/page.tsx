@@ -3,29 +3,54 @@ import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import ReportTable from '@/app/components/ReportTable'
+import { useDialog } from '@/app/components/DialogProvider'
 import { inviaReport } from '@/lib/report-client'
+import { giornoRoma, inizioGiornoRomaISO, fineGiornoRomaISO } from '@/lib/date-roma'
+import { vettoreFisico } from '@/lib/vettore'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
-const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
 export default function ReportRitiriPage() {
+  const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
+  const [corrieri, setCorrieri] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
+  const [erroreStorico, setErroreStorico] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [filtri, setFiltri] = useState({
+  // Primo del mese DI ROMA. `new Date(anno, mese, 1).toISOString()` dava l'ultimo giorno del mese
+  // prima: a ottobre MULTIEXPRESS si ritrovava dentro 591 ritiri del 30/09 (misurati il 15/10).
+  const [filtri, setFiltri] = useState(() => ({
     clienteId:'', vettore:'', contratto:'',
-    dal: new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+    dal: giornoRoma().slice(0, 8) + '01',
+    al: giornoRoma(),
     formato:'PDF'
-  })
+  }))
 
   useEffect(() => {
-    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
-    fetch('/api/reports/lista?tipo=ritiri').then(r=>r.json()).then(d=>setReports(d||[]))
+    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(Array.isArray(d)?d:[])).catch(()=>{})
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[])).catch(()=>{})
+    caricaStorico()
   }, [])
 
+  // Vettore FISICO del contratto (GLS, BRT, POSTE, SDA, UPS...) letto dai MIEI contratti per nome: il
+  // ritiro porta solo il nome, e i GLS/BRT diretti hanno nomi senza il marchio ("PF CE LIGHT").
+  const vettoreDiNome = new Map<string, string>()
+  for (const c of corrieri) vettoreDiNome.set(String(c.nome_contratto||'').trim(), vettoreFisico(c))
+  const vettori = Array.from(new Set(vettoreDiNome.values())).filter(Boolean).sort()
+  const contratti = Array.from(vettoreDiNome.keys()).filter(Boolean).sort((a,b)=>a.localeCompare(b,'it'))
+  const nomeContratto = (r: any) => String(r.corrieri?.nome_contratto||'').trim()
+  const vettoreDi = (r: any) => vettoreDiNome.get(nomeContratto(r)) || vettoreFisico({ nome_contratto: nomeContratto(r) })
+
   const setF = (k:string,v:string) => setFiltri(f=>({...f,[k]:v}))
+
+  // Lo storico dei report: se la rotta risponde con un errore lo si dice, invece di mostrare
+  // "Nessun report generato" come se non ce ne fossero.
+  async function caricaStorico() {
+    const d = await fetch('/api/reports/lista?tipo=ritiri').then(r=>r.json()).catch((e:any)=>({ error: String(e?.message||e) }))
+    setErroreStorico(d && !Array.isArray(d) && d.error ? String(d.error) : '')
+    setReports(Array.isArray(d) ? d : [])
+  }
 
   // Prima il report veniva solo scaricato al volo e la riga in elenco nasceva senza file:
   // restava un record vuoto, non riscaricabile. Ora il file parte davvero verso il bucket
@@ -33,10 +58,9 @@ export default function ReportRitiriPage() {
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
     const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
     const j = await inviaReport({ tipo: 'ritiri', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
-    // qui non c'e' il DialogProvider: l'errore finisce in console, senza inventare import
-    if (!j.success) { console.error('Errore salvataggio report ritiri: ' + (j.error||'')); return }
-    const lista = await fetch('/api/reports/lista?tipo=ritiri').then(x=>x.json())
-    setReports(Array.isArray(lista) ? lista : [])
+    // L'errore si mostra: in console non lo vedeva nessuno (il DialogProvider e' nel layout della dashboard).
+    if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
+    await caricaStorico()
   }
 
   // IL REPORT DICE QUANTI RITIRI, NON QUALI FILTRI HO SCELTO.
@@ -50,20 +74,25 @@ export default function ReportRitiriPage() {
   async function generaReport() {
     setGenerating(true)
     try {
+      // Giorni di ROMA. La rotta usa `dal` cosi' com'e', ma a `al` aggiunge le 23:59:59 di Greenwich
+      // (fino alle 2 di notte italiane del giorno dopo): il taglio esatto si fa qui sotto.
       const params = new URLSearchParams()
       if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
-      if (filtri.dal) params.set('dal', filtri.dal)
+      if (filtri.dal) params.set('dal', inizioGiornoRomaISO(filtri.dal))
       if (filtri.al) params.set('al', filtri.al)
       const res = await fetch('/api/ritiri?' + params.toString())
-      let ritiri: any[] = await res.json()
-      if (!Array.isArray(ritiri)) ritiri = []
-
-      // Il filtro Vettore lavora sul nome del contratto (sda, brt, gls, poste): il contratto si
-      // chiama come il corriere, ed e' l'unica cosa che il ritiro porta con se'.
-      if (filtri.vettore) {
-        const v = filtri.vettore.toLowerCase()
-        ritiri = ritiri.filter(r => String(r.corrieri?.nome_contratto || '').toLowerCase().includes(v))
+      const dati: any = await res.json().catch(() => null)
+      if (!res.ok || !Array.isArray(dati)) {
+        await dialog.alert({ title: 'Errore', message: (dati && dati.error) || `I ritiri non si sono caricati (errore ${res.status}).` })
+        return
       }
+      let ritiri: any[] = dati
+      if (filtri.al) { const fine = Date.parse(fineGiornoRomaISO(filtri.al)); ritiri = ritiri.filter((r: any) => Date.parse(r.created_at) <= fine) }
+
+      // Vettore FISICO, non il nome: "ups" per sottostringa non trovava i contratti UPS (247 ritiri
+      // dall'1/08 su MULTIEXPRESS) e "gls" perdeva i GLS diretti con nomi senza il marchio.
+      if (filtri.vettore) ritiri = ritiri.filter((r: any) => vettoreDi(r) === filtri.vettore)
+      if (filtri.contratto) ritiri = ritiri.filter((r: any) => nomeContratto(r) === filtri.contratto)
 
       // Un sotto-master (id "m:...") raccoglie piu' clienti: li' la classifica serve, il dettaglio no.
       const unCliente = !!filtri.clienteId && !filtri.clienteId.startsWith('m:')
@@ -128,7 +157,7 @@ export default function ReportRitiriPage() {
         await salvaReport(doc.output('datauristring'), nomeFile, 'pdf')
       }
     } catch (e: any) {
-      console.error('Report ritiri non riuscito:', e?.message || e)
+      await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (e?.message || e) })
     } finally {
       // Il bottone deve tornare cliccabile anche quando qualcosa va storto: prima, se la rete
       // falliva, restava per sempre su "Generazione...".
@@ -151,13 +180,13 @@ export default function ReportRitiriPage() {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              <option value="sda">SDA</option><option value="gls">GLS</option>
-              <option value="brt">BRT</option><option value="poste">Poste Italiane</option>
+              {vettori.map(v=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {contratti.map(n=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Data</label>
@@ -173,6 +202,7 @@ export default function ReportRitiriPage() {
           {generating?'Generazione...':'Genera Report'}
         </button>
       </div>
+      {erroreStorico && <div style={{background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',borderRadius:'6px',padding:'8px 12px',fontSize:'12px',marginBottom:'10px'}}>Storico dei report non caricato: {erroreStorico}</div>}
       <ReportTable reports={reports} onScarica={generaReport}/>
     </div>
   )

@@ -2,10 +2,28 @@
 import { useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { giornoRoma } from '@/lib/date-roma'
+
+const dataIt = (g: string) => (g || '').slice(0, 10).split('-').reverse().join('/')
+
+// Stati della spedizione con le etichette dell'elenco spedizioni del portale.
+const STATI: Record<string, string> = {
+  in_lavorazione: 'In Lavorazione', spedita: 'Spedita', in_transito: 'In transito', in_consegna: 'In Consegna',
+  consegnata: 'Consegnata', in_giacenza: 'In Giacenza', reso_mittente: 'Reso al mittente',
+  non_consegnato: 'Non consegnato', annullamento_pending: 'In annullamento', annullamento_manuale: 'Annullo in corso',
+  storno_richiesto: 'Annullo richiesto', annullata: 'Annullata',
+}
+// Stati del contrassegno: le chiavi sono quelle della rotta (calcolo.ts), che decide anche l'etichetta.
+const STATI_CONTR: [string, string][] = [
+  ['in_attesa', 'In attesa'], ['in_distinta', 'In lavorazione'], ['pagato', 'Pagato'],
+  ['reso', 'Annullato (reso)'], ['annullata', 'Annullata'],
+]
+
 export default function ReportContrassegniCliente() {
   const dialog = useDialog()
-  const [dal, setDal] = useState(new Date().toISOString().split('T')[0])
-  const [al, setAl] = useState(new Date().toISOString().split('T')[0])
+  // Default = oggi, giorno di ROMA (con toISOString() fra mezzanotte e le 2 "oggi" era ieri).
+  const [dal, setDal] = useState(giornoRoma())
+  const [al, setAl] = useState(giornoRoma())
   const [statoSped, setStatoSped] = useState('tutti')
   const [statoContr, setStatoContr] = useState('tutti')
   const [generating, setGenerating] = useState(false)
@@ -16,9 +34,13 @@ export default function ReportContrassegniCliente() {
       if (dal) params.set('dal', dal)
       if (al) params.set('al', al)
       if (statoSped) params.set('statoSpedizione', statoSped)
+      // Prima questo filtro c'era a video ma non partiva mai: il report usciva con tutti gli stati.
+      if (statoContr) params.set('statoContrassegno', statoContr)
       const res = await fetch('/api/cliente/reports/contrassegni?' + params.toString())
-      const { righe, master, cliente } = await res.json()
-      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun contrassegno trovato nel periodo.' }); setGenerating(false); return }
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (j?.error || 'errore ' + res.status) }); return }
+      const { righe, master, cliente } = j
+      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun contrassegno trovato nel periodo.' }); return }
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
       const doc = new jsPDF()
@@ -40,9 +62,8 @@ export default function ReportContrassegniCliente() {
       doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(40,40,40)
       doc.text(cliente.ragione_sociale || '', 14, 52)
       doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(90,90,90)
-      doc.text('( ' + new Date(dal).toLocaleDateString('it-IT') + ' - ' + new Date(al).toLocaleDateString('it-IT') + ' )', 14, 60)
+      doc.text('( ' + dataIt(dal) + ' - ' + dataIt(al) + ' )', 14, 60)
       doc.setDrawColor(200,200,200); doc.line(14, 68, 196, 68)
-      const STATI: Record<string,string> = {in_lavorazione:'In Lavorazione',spedita:'Spedita',in_transito:'In transito',in_consegna:'In Consegna',consegnata:'Consegnata',in_giacenza:'In Giacenza',reso_mittente:'Reso al mittente',annullata:'Annullata'}
       autoTable(doc, {
         startY: 74,
         styles: { fontSize: 9, cellPadding: 2.5, textColor: [80,80,80] },
@@ -56,9 +77,12 @@ export default function ReportContrassegniCliente() {
           STATI[r.statoSpedizione] || r.statoSpedizione,
         ]),
       })
-      doc.save('report_contrassegni_' + dal + '.pdf')
-    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report.' }) }
-    setGenerating(false)
+      doc.save('report_contrassegni_' + dal + '_' + al + '.pdf')
+    } catch (e: any) {
+      await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report: ' + (e?.message || e) })
+    } finally {
+      setGenerating(false)
+    }
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}
   const lbl = {fontSize:'12px',fontWeight:'700' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'6px'}
@@ -76,21 +100,14 @@ export default function ReportContrassegniCliente() {
             <label style={lbl}>Stato spedizione</label>
             <select value={statoSped} onChange={e=>setStatoSped(e.target.value)} style={inp}>
               <option value="tutti">Tutti</option>
-              <option value="in_lavorazione">In Lavorazione</option>
-              <option value="spedita">Spedita</option>
-              <option value="in_transito">In transito</option>
-              <option value="in_consegna">In Consegna</option>
-              <option value="consegnata">Consegnata</option>
-              <option value="in_giacenza">In Giacenza</option>
-              <option value="reso_mittente">Reso al mittente</option>
+              {Object.entries(STATI).map(([k, v])=><option key={k} value={k}>{v}</option>)}
             </select>
           </div>
           <div>
             <label style={lbl}>Stato Contrassegni</label>
             <select value={statoContr} onChange={e=>setStatoContr(e.target.value)} style={inp}>
               <option value="tutti">Tutti</option>
-              <option value="in_attesa">In attesa</option>
-              <option value="pagato">Pagato</option>
+              {STATI_CONTR.map(([k, v])=><option key={k} value={k}>{v}</option>)}
             </select>
           </div>
         </div>

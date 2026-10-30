@@ -14,6 +14,25 @@ import { spedizioniConColliLeggeri } from '@/lib/colli-senza-etichette'
 const TIPI = ['spedizione', 'rimborso', 'rettifica', 'reso', 'giacenza']
 const r2 = (x: number) => Math.round(x * 100) / 100
 
+// Una pagina che non si legge fa fallire il calcolo: fetchAll la saltava in silenzio, e il compenso
+// usciva calcolato su una parte delle spedizioni senza che nessuno lo sapesse.
+function leggiTutto(build: () => any): Promise<any[]> {
+  return fetchAll(() => {
+    const q = build()
+    return { range: (a: number, b: number) => q.range(a, b).then((r: any) => { if (r.error) throw new Error(r.error.message); return r }) }
+  })
+}
+// Liste di id a blocchi di 200: oltre ~25 KB di indirizzo PostgREST risponde 400.
+async function perBlocchi<T>(ids: string[], fn: (blocco: string[]) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = []
+  const blocchi: string[][] = []
+  for (let i = 0; i < ids.length; i += 200) blocchi.push(ids.slice(i, i + 200))
+  for (let i = 0; i < blocchi.length; i += 6) {
+    for (const parte of await Promise.all(blocchi.slice(i, i + 6).map(fn))) out.push(...parte)
+  }
+  return out
+}
+
 export type CompensoAgente = {
   master_id: string
   nome?: string | null
@@ -52,49 +71,58 @@ export async function calcolaGuadagnoAgente(
   if (!clienti.length) return vuoto
 
   // Spedizioni dei suoi clienti nel periodo (le annullate non contano).
-  // SENZA colli_dettaglio. Li' dentro ci sono anche le ETICHETTE dei colli in base64 (fino a qualche MB
-  // per spedizione SDA EXPRESS L), e qui si leggevano per tutto il periodo a blocchi da 1.000, 4 alla
-  // volta: domenica 25/10/2026 alle 17:46 il Report Agenti ha esaurito la memoria del database, che si e'
-  // fermato ed e' ripartito da solo alle 17:50 (5 minuti di portale fermo per tutti). Gli agenti di
-  // spedizioni 2000 da soli erano ~2,2 GB a testa nel mese — e senza listino agente quel campo non serve
-  // a niente. I colli servono solo al costo dal listino agente, qui sotto: li' si leggono peso e lati,
-  // senza le etichette (lib/colli-senza-etichette).
-  // Ordine con l'id come spareggio: senza, fetchAll a blocchi poteva ripetere o saltare spedizioni con
-  // lo stesso created_at al confine dei 1.000 (vedi lib/fetch-all).
-  const sped = await fetchAll(() => admin.from('spedizioni')
-    .select('id,cliente_id,costo_totale,costo_spedizione,stato,corriere_id,peso_reale,peso_fatturato,colli,dest_cap,dest_provincia,dest_citta,dest_paese,contrassegno,assicurazione,servizi_accessori,created_at')
-    .in('cliente_id', clienti).gte('created_at', dal).lte('created_at', alEnd)
+  // NIENTE colli_dettaglio: contiene le etichette in base64 (3,73 GB per i clienti degli agenti di
+  // spedizioni 2000 in due settimane), e il report andava in errore per memoria a 2,2 GB. Il calcolatore
+  // del listino agente tassa sul peso_fatturato salvato (gia' collo per collo) e, senza dettaglio, sulle
+  // misure della spedizione: sono le stesse colonne che usano il Report Spedizioni e la dashboard
+  // dell'agente. Provato su un mese di spedizioni vere degli agenti con listino, multicollo compresi:
+  // stesso costo agente su ogni spedizione (vedi rapporto del 15/10/2026).
+  // Ordine stabile (data + id): con la sola data le righe con lo stesso istante (import in blocco)
+  // potevano cambiare pagina fra una lettura e l'altra, e finire contate due volte o perse.
+  const sped = await perBlocchi(clienti, b => leggiTutto(() => admin.from('spedizioni')
+    .select('id,cliente_id,costo_totale,stato,corriere_id,peso_reale,peso_fatturato,colli,lunghezza,larghezza,altezza,dest_cap,dest_provincia,dest_citta,dest_paese,contrassegno,assicurazione,servizi_accessori,created_at')
+    .in('cliente_id', b).gte('created_at', dal).lte('created_at', alEnd)
     .not('stato', 'in', '(annullata)')
-    .order('created_at', { ascending: false }).order('id', { ascending: false }))
-  const numSpedizioni = (sped || []).length
+    .order('created_at', { ascending: false }).order('id', { ascending: false })))
+  const numSpedizioni = sped.length
   if (!numSpedizioni) return vuoto
-  const spedIds = (sped || []).map((s: any) => s.id)
+  const spedIds = sped.map((s: any) => s.id)
+  const clienteDi = new Map<string, string>(sped.map((s: any) => [s.id, s.cliente_id]))
+
+  // Movimenti delle spedizioni, letti una volta sola: servono sia al lordo sia al costo del master.
+  const mvs = await perBlocchi(spedIds, b => leggiTutto(() => admin.from('movimenti')
+    .select('id,spedizione_id,cliente_id,master_target_id,importo').in('tipo', TIPI)
+    .in('spedizione_id', b).order('spedizione_id', { ascending: true }).order('id', { ascending: true })))
 
   // LORDO per spedizione = quello che il cliente ha pagato DAVVERO (movimenti del cliente), come i
   // report. Segno: addebito negativo → +, rimborso positivo → − (le annullate si nettano a 0). Serve a
   // TUTTI i metodi — ora anche al FISSO — perché il margine dell'agente si calcola sempre.
+  // SOLO i movimenti del cliente della spedizione: giacenze, resi e rettifiche dei conti "(ingrosso)"
+  // dei contratti condivisi stanno sulla stessa spedizione d'origine, e contati qui gonfiavano il
+  // lordo (agenti di spedizioni 2000, 1-14/10/2026: +1.819,20 €).
   const lordoPerSped = new Map<string, number>()
-  for (let i = 0; i < spedIds.length; i += 300) {
-    const chunk = spedIds.slice(i, i + 300)
-    const mvs = await fetchAll(() => admin.from('movimenti')
-      .select('spedizione_id,importo').in('tipo', TIPI)
-      .in('spedizione_id', chunk).not('cliente_id', 'is', null)
-      .order('id', { ascending: true }))
-    for (const mv of (mvs || [])) {
-      const k = (mv as any).spedizione_id
-      lordoPerSped.set(k, (lordoPerSped.get(k) || 0) + -Number((mv as any).importo || 0))
+  // COSTO DEL MASTER per spedizione = tutto quello che gli viene addebitato su quella spedizione:
+  // movimenti con master_target_id = M e senza cliente, da chiunque arrivino. Contare solo quelli che
+  // M scrive a se stesso (master_id = M, il conto 'proprio') ignorava cio' che gli addebita il PADRE,
+  // cioe' quasi tutto: spedizioni 2000, 1-14/10/2026, compenso 3.576,49 € invece di ~804.
+  const costoMasterPerSped = new Map<string, number>()
+  for (const mv of mvs) {
+    const k = mv.spedizione_id
+    const imp = -Number(mv.importo || 0)
+    if (mv.cliente_id) {
+      if (mv.cliente_id === clienteDi.get(k)) lordoPerSped.set(k, (lordoPerSped.get(k) || 0) + imp)
+    } else if (mv.master_target_id === M) {
+      costoMasterPerSped.set(k, (costoMasterPerSped.get(k) || 0) + imp)
     }
   }
-  let lordoTot = 0
-  for (const s of (sped || [])) {
-    const id = (s as any).id
-    lordoTot += lordoPerSped.has(id) ? lordoPerSped.get(id)! : Number((s as any).costo_totale || 0)
-  }
-  lordoTot = r2(lordoTot)
+  const lordoDi = (s: any) => lordoPerSped.has(s.id) ? lordoPerSped.get(s.id)! : Number(s.costo_totale || 0)
+  const lordoTot = r2(sped.reduce((t: number, s: any) => t + lordoDi(s), 0))
 
   // MARGINE DELL'AGENTE (sempre, qualunque sia il metodo di compenso): lordo − costo del SUO listino.
   // È il dato che entra nel report ("Margine agente"), MAI il netto del master. Senza listino agente
   // assegnato non è calcolabile → null (il report mostra "—", non il margine del master).
+  // Spedizione su un contratto che il suo listino NON copre: margine 0 (costo = lordo), come nella
+  // dashboard dell'agente. Il ripiego di prima su costo_spedizione usava il costo di chi sta SOPRA.
   const listinoAg = agente.listino_agente_id || null
   let costoAgTot: number | null = null
   if (listinoAg) {
@@ -104,9 +132,9 @@ export async function calcolaGuadagnoAgente(
     const colli = await spedizioniConColliLeggeri(admin, spedIds, '')
     for (const s of (sped || [])) (s as any).colli_dettaglio = colli.get((s as any).id)?.colli_dettaglio ?? []
     let t = 0
-    for (const s of (sped || [])) {
+    for (const s of sped) {
       const cAg = calcCosto(s)?.totale
-      t += (cAg != null) ? cAg : Number((s as any).costo_spedizione || 0)
+      t += (cAg != null) ? cAg : lordoDi(s)
     }
     costoAgTot = r2(t)
   }
@@ -121,27 +149,14 @@ export async function calcolaGuadagnoAgente(
   }
 
   if (metodo === 'perc_netto') {
-    // NETTO = margine del MASTER = lordo − costo reale del master. Il costo del master per una
-    // spedizione sono i suoi movimenti di COSTO (master_id = M, master_target_id = M): stessa regola
-    // del Report Guadagno del master (riga "costo di M").
-    const costoMasterPerSped = new Map<string, number>()
-    for (let i = 0; i < spedIds.length; i += 300) {
-      const chunk = spedIds.slice(i, i + 300)
-      const mvs = await fetchAll(() => admin.from('movimenti')
-        .select('spedizione_id,importo').in('tipo', TIPI)
-        .in('spedizione_id', chunk).eq('master_id', M).eq('master_target_id', M)
-        .order('id', { ascending: true }))
-      for (const mv of (mvs || [])) {
-        const k = (mv as any).spedizione_id
-        costoMasterPerSped.set(k, (costoMasterPerSped.get(k) || 0) + -Number((mv as any).importo || 0))
-      }
-    }
+    // NETTO = margine del MASTER = lordo − costo reale del master (sopra).
+    // Una spedizione senza costo del master leggibile qui vale netto 0, non il lordo intero: succede se
+    // il master la paga SOLO sul suo conto "(ingrosso)" presso chi gli vende il contratto (cliente_id
+    // valorizzato, quindi fuori dalla somma). Al 15/10/2026 non ce n'e' nessuna (spedizioni 2000:
+    // costo trovato su tutte le 14.201 di ottobre dei clienti degli agenti), ma contarla a lordo
+    // pieno farebbe pagare all'agente la percentuale sull'intero prezzo.
     let nettoTot = 0
-    for (const s of (sped || [])) {
-      const id = (s as any).id
-      const l = lordoPerSped.has(id) ? lordoPerSped.get(id)! : Number((s as any).costo_totale || 0)
-      nettoTot += l - (costoMasterPerSped.get(id) || 0)
-    }
+    for (const s of sped) nettoTot += costoMasterPerSped.has(s.id) ? lordoDi(s) - costoMasterPerSped.get(s.id)! : 0
     nettoTot = r2(nettoTot)
     // base = netto del MASTER (serve solo a spiegare il calcolo del %); il report però mostra margineAgente.
     return { guadagno: r2(valore / 100 * nettoTot), numSpedizioni, lordo: lordoTot, base: nettoTot, margineAgente, metodo, valore }

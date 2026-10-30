@@ -826,7 +826,10 @@ export async function GET(req: NextRequest) {
       // quello del cliente. (Il totale paginato resta quello del filtro DB: approssimazione nota.)
       if (fStatoContr === 'pagato') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'pagato')
       else if (fStatoContr === 'in_attesa') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'in_distinta')
-      else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato'].includes(String(r.stato_contrassegno || '')))
+      // 'annullato' (reso: non si incassera' mai) fuori dai "da pagare", come nel filtro a DB qui sopra.
+      // Mancava solo qui: MULTIEXPRESS 1-14/10 in Elenco 1.775 "da pagare" contro i 1.711 del Report
+      // (misurati il 15/10): la differenza erano i 64 annullati.
+      else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato', 'annullato'].includes(String(r.stato_contrassegno || '')))
     }
   }
 

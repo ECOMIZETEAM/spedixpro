@@ -2,18 +2,25 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelectCercabile from '@/app/components/SelectCercabile'
+import DateRangePicker from '@/app/components/DateRangePicker'
 import { useAppNativa } from '@/lib/app-nativa'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 
 interface Cliente { id: string; ragione_sociale: string; credito_sms: number }
-interface Mov { tipo: string; descrizione: string; importo: number; quantita_sms: number | null; saldo_dopo: number | null; cliente_id: string | null; created_at: string }
+interface Mov { id?: string; tipo: string; descrizione: string; importo: number; quantita_sms: number | null; saldo_dopo: number | null; cliente_id: string | null; cliente?: string | null; created_at: string }
+const PER_PAGINA = 25
 
 const eur = (n: number) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
-const dataIt = (s: string) => { const d = new Date(s); return isNaN(d.getTime()) ? s : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+const dataIt = (s: string) => { const d = new Date(s); return isNaN(d.getTime()) ? s : d.toLocaleString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 const TIPO_LABEL: Record<string, string> = { acquisto: 'Acquisto', trasferimento: 'Trasferimento', consumo: 'Invio SMS', rettifica: 'Rettifica' }
 
 export default function NotificheSmsPage() {
   const dialog = useDialog()
-  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; clienti: Cliente[]; radice?: boolean; puoTestare?: boolean; gatewayPronto?: boolean; cartaSalvata?: boolean; auto?: { attiva: boolean; soglia: number; pacchetto: number } } | null>(null)
+  const [dati, setDati] = useState<{ creditoWallet: number; creditoSms: number; costoSms: number; movimenti: Mov[]; totaleMovimenti?: number; clienti: Cliente[]; radice?: boolean; puoTestare?: boolean; gatewayPronto?: boolean; cartaSalvata?: boolean; auto?: { attiva: boolean; soglia: number; pacchetto: number } } | null>(null)
+  // Storico: un portafoglio alla volta ('' = il tuo), un periodo nei giorni di Roma, a pagine. Ultimi
+  // 12 mesi di default: gli acquisti del master sono rari e "questo mese" li nasconderebbe quasi sempre.
+  const [storico, setStorico] = useState({ cliente: '', dal: giorniFaRoma(365), al: giornoRoma(), pagina: 1 })
+  const [errore, setErrore] = useState('')
   const [pacchetto, setPacchetto] = useState(1000)
   const [telProva, setTelProva] = useState('')
   const [clienteSel, setClienteSel] = useState('')
@@ -28,10 +35,20 @@ export default function NotificheSmsPage() {
 
   const carica = useCallback(async () => {
     try {
-      const r = await fetch('/api/sms/stato')
-      if (r.ok) { const j = await r.json(); setDati(j); setAAttiva(!!j.auto?.attiva); setASoglia(Number(j.auto?.soglia) || 100); setAPacchetto(Number(j.auto?.pacchetto) || 1000) }
-    } catch {}
-  }, [])
+      const params = new URLSearchParams()
+      if (storico.cliente) params.set('clienteId', storico.cliente)
+      if (storico.dal) params.set('dal', storico.dal)
+      if (storico.al) params.set('al', storico.al)
+      params.set('pagina', String(storico.pagina))
+      params.set('perPagina', String(PER_PAGINA))
+      const r = await fetch('/api/sms/stato?' + params.toString())
+      const j = await r.json().catch(() => ({}))
+      // Un errore non e' "Nessun movimento": prima la pagina restava muta.
+      if (!r.ok) { setErrore(j?.error || ('Errore ' + r.status)); return }
+      setErrore('')
+      setDati(j); setAAttiva(!!j.auto?.attiva); setASoglia(Number(j.auto?.soglia) || 100); setAPacchetto(Number(j.auto?.pacchetto) || 1000)
+    } catch (e: any) { setErrore(e?.message || 'Errore di rete') }
+  }, [storico])
   useEffect(() => { carica() }, [carica])
   // Ritorno dalla cassa Stripe: il webhook accredita in un attimo, ricarico il saldo dopo un istante.
   useEffect(() => {
@@ -43,6 +60,7 @@ export default function NotificheSmsPage() {
 
   const costoSms = dati?.costoSms || 0.084
   const smsDisponibili = dati ? Math.floor(dati.creditoSms / costoSms) : 0
+  const totalePagine = Math.max(1, Math.ceil((dati?.totaleMovimenti || 0) / PER_PAGINA))
 
   async function acquista() {
     if (busy) return
@@ -206,22 +224,35 @@ export default function NotificheSmsPage() {
 
       {/* Storico */}
       <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '12px 18px', borderBottom: '1px solid #e5e7eb', fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>Storico credito SMS</div>
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginRight: 'auto' }}>Storico credito SMS</div>
+          <div style={{ minWidth: '220px' }}>
+            <SelectCercabile value={storico.cliente} onChange={e => setStorico(s => ({ ...s, cliente: e.target.value, pagina: 1 }))} style={{ ...inp, width: '100%' }}>
+              <option value="">Il tuo credito SMS</option>
+              {(dati?.clienti || []).map(c => <option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
+            </SelectCercabile>
+          </div>
+          <div style={{ minWidth: '200px' }}>
+            <DateRangePicker dal={storico.dal} al={storico.al} onChange={(dal, al) => setStorico(s => ({ ...s, dal, al, pagina: 1 }))} />
+          </div>
+        </div>
+        {errore && <div style={{ padding: '10px 18px', fontSize: '12.5px', color: '#b91c1c', background: '#fef2f2', borderBottom: '1px solid #fecaca' }}>{errore}</div>}
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
               <tr style={{ background: '#f9fafb' }}>
-                {['Data', 'Movimento', 'Descrizione', 'Importo', 'Saldo'].map(h => (
+                {['Data', 'Cliente', 'Movimento', 'Descrizione', 'Importo', 'Saldo'].map(h => (
                   <th key={h} style={{ textAlign: 'left', padding: '9px 16px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {!dati?.movimenti?.length ? (
-                <tr><td colSpan={5} style={{ padding: '22px 16px', color: '#9ca3af', fontSize: '13px', textAlign: 'center' }}>Nessun movimento</td></tr>
+                <tr><td colSpan={6} style={{ padding: '22px 16px', color: '#9ca3af', fontSize: '13px', textAlign: 'center' }}>Nessun movimento</td></tr>
               ) : dati.movimenti.map((m, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                <tr key={m.id || i} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={{ padding: '9px 16px', color: '#6b7280', fontSize: '12px', whiteSpace: 'nowrap' }}>{dataIt(m.created_at)}</td>
+                  <td style={{ padding: '9px 16px', color: '#4b5563' }}>{m.cliente || '—'}</td>
                   <td style={{ padding: '9px 16px', color: '#1a1a1a', fontWeight: 600 }}>{TIPO_LABEL[m.tipo] || m.tipo}</td>
                   <td style={{ padding: '9px 16px', color: '#4b5563' }}>{m.descrizione}</td>
                   <td style={{ padding: '9px 16px', fontWeight: 700, color: m.importo < 0 ? '#dc2626' : '#16a34a', whiteSpace: 'nowrap' }}>{m.importo < 0 ? '' : '+'}{eur(m.importo)}</td>
@@ -231,6 +262,13 @@ export default function NotificheSmsPage() {
             </tbody>
           </table>
         </div>
+        {(dati?.totaleMovimenti || 0) > PER_PAGINA && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', padding: '12px', borderTop: '1px solid #e5e7eb', fontSize: '12px', color: '#1a1a1a' }}>
+            <button onClick={() => setStorico(s => ({ ...s, pagina: Math.max(1, s.pagina - 1) }))} disabled={storico.pagina <= 1} style={{ padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '5px', background: '#fff', fontSize: '12px', cursor: 'pointer', color: storico.pagina <= 1 ? '#ccc' : '#1a1a1a' }}>Precedente</button>
+            <span>Pagina {storico.pagina} di {totalePagine} · {dati?.totaleMovimenti} movimenti</span>
+            <button onClick={() => setStorico(s => ({ ...s, pagina: Math.min(totalePagine, s.pagina + 1) }))} disabled={storico.pagina >= totalePagine} style={{ padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '5px', background: '#fff', fontSize: '12px', cursor: 'pointer', color: storico.pagina >= totalePagine ? '#ccc' : '#1a1a1a' }}>Successivo</button>
+          </div>
+        )}
       </div>
     </div>
   )

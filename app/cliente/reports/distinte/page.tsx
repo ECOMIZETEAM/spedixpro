@@ -2,10 +2,16 @@
 import { useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { giornoRoma } from '@/lib/date-roma'
+
+const dataIt = (g: string) => (g || '').slice(0, 10).split('-').reverse().join('/')
+const NOTA_ANNULLATE = 'Le spedizioni annullate sono contate a parte; quelle rimborsate non entrano nel totale.'
+
 export default function ReportDistinteCliente() {
   const dialog = useDialog()
-  const [dal, setDal] = useState(new Date().toISOString().split('T')[0])
-  const [al, setAl] = useState(new Date().toISOString().split('T')[0])
+  // Default = oggi, giorno di ROMA (con toISOString() fra mezzanotte e le 2 "oggi" era ieri).
+  const [dal, setDal] = useState(giornoRoma())
+  const [al, setAl] = useState(giornoRoma())
   const [formato, setFormato] = useState('PDF')
   const [generating, setGenerating] = useState(false)
   async function genera() {
@@ -15,19 +21,27 @@ export default function ReportDistinteCliente() {
       if (dal) params.set('dal', dal)
       if (al) params.set('al', al)
       const res = await fetch('/api/cliente/reports/distinte?' + params.toString())
-      const { distinte, master, cliente } = await res.json()
-      if (!distinte || !distinte.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna distinta trovata nel periodo.' }); setGenerating(false); return }
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (j?.error || 'errore ' + res.status) }); return }
+      const { distinte, master, cliente } = j
+      if (!distinte || !distinte.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna distinta trovata nel periodo.' }); return }
+      const totSped = distinte.reduce((a: number, d: any) => a + Number(d.spedizioni || 0), 0)
+      const totAnn = distinte.reduce((a: number, d: any) => a + Number(d.annullate || 0), 0)
+      const totale = Math.round(distinte.reduce((a: number, d: any) => a + Number(d.totale || 0), 0) * 100) / 100
       const fmt = formato.toLowerCase()
       if (fmt === 'xlsx' || fmt === 'csv') {
         const { utils, writeFile } = await import('xlsx')
-        const rows = distinte.map((d: any) => ({
+        const rows: any[] = distinte.map((d: any) => ({
           'Numero Distinta': d.numero, 'Cliente': cliente.ragione_sociale,
-          'Spedizioni': d.spedizioni, 'Totale (€)': Number(d.totale||0).toFixed(2),
+          'Spedizioni': d.spedizioni, 'di cui annullate': d.annullate, 'Totale (€)': Number(d.totale||0).toFixed(2),
           'Data e Ora': new Date(d.data).toLocaleString('it-IT'),
         }))
+        rows.push({})
+        rows.push({ 'Numero Distinta': 'TOTALE', 'Spedizioni': totSped, 'di cui annullate': totAnn, 'Totale (€)': totale.toFixed(2) })
+        if (totAnn) rows.push({ 'Numero Distinta': NOTA_ANNULLATE })
         const ws = utils.json_to_sheet(rows)
         const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Distinte')
-        writeFile(wb, 'report_distinte_' + dal + '.' + (fmt==='xlsx'?'xlsx':'csv'))
+        writeFile(wb, 'report_distinte_' + dal + '_' + al + '.' + (fmt==='xlsx'?'xlsx':'csv'))
       } else {
         const { default: jsPDF } = await import('jspdf')
         const { default: autoTable } = await import('jspdf-autotable')
@@ -50,24 +64,37 @@ export default function ReportDistinteCliente() {
         doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(40,40,40)
         doc.text(cliente.ragione_sociale || '', 14, 52)
         doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(90,90,90)
-        doc.text('( ' + new Date(dal).toLocaleDateString('it-IT') + ' - ' + new Date(al).toLocaleDateString('it-IT') + ' )', 14, 60)
+        doc.text('( ' + dataIt(dal) + ' - ' + dataIt(al) + ' )', 14, 60)
         doc.setDrawColor(200,200,200); doc.line(14, 68, 196, 68)
         autoTable(doc, {
           startY: 74,
           styles: { fontSize: 9, cellPadding: 3, textColor: [80,80,80] },
           headStyles: { fillColor: [255,255,255], textColor: [80,80,80], fontStyle: 'bold', lineWidth: 0 },
-          columnStyles: { 0:{cellWidth:40}, 1:{cellWidth:40}, 2:{cellWidth:30}, 3:{cellWidth:35}, 4:{cellWidth:45} },
-          head: [['Numero Distinta','Cliente','Spedizioni','Totale','Data e Ora']],
-          body: distinte.map((d: any) => [
-            String(d.numero), cliente.ragione_sociale,
-            String(d.spedizioni), Number(d.totale||0).toFixed(2) + ' €',
-            new Date(d.data).toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }),
-          ]),
+          columnStyles: { 0:{cellWidth:32}, 1:{cellWidth:42}, 2:{cellWidth:24}, 3:{cellWidth:24}, 4:{cellWidth:28}, 5:{cellWidth:32} },
+          head: [['Numero Distinta','Cliente','Spedizioni','Annullate','Totale','Data e Ora']],
+          body: [
+            ...distinte.map((d: any) => [
+              String(d.numero), cliente.ragione_sociale,
+              String(d.spedizioni), String(d.annullate || 0), Number(d.totale||0).toFixed(2) + ' €',
+              new Date(d.data).toLocaleString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }),
+            ]),
+            [{ content: 'TOTALE', colSpan: 2, styles: { fontStyle: 'bold' } }, { content: String(totSped), styles: { fontStyle: 'bold' } },
+              { content: String(totAnn), styles: { fontStyle: 'bold' } }, { content: totale.toFixed(2) + ' €', styles: { fontStyle: 'bold' } }, ''],
+          ] as any,
         })
-        doc.save('report_distinte_' + dal + '.pdf')
+        if (totAnn) {
+          let y = (doc as any).lastAutoTable.finalY + 8
+          if (y > doc.internal.pageSize.getHeight() - 10) { doc.addPage(); y = 20 }
+          doc.setFontSize(8); doc.setTextColor(120,120,120)
+          doc.text(NOTA_ANNULLATE, 14, y)
+        }
+        doc.save('report_distinte_' + dal + '_' + al + '.pdf')
       }
-    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report.' }) }
-    setGenerating(false)
+    } catch (e: any) {
+      await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report: ' + (e?.message || e) })
+    } finally {
+      setGenerating(false)
+    }
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}
   const lbl = {fontSize:'12px',fontWeight:'700' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'6px'}

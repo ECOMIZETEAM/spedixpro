@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { piattaformaDa, ordiniSpeditiPerRiferimento } from '../route'
-import { fetchAll } from '@/lib/fetch-all'
+import { giornoRoma } from '@/lib/date-roma'
+import { piattaformaDa, ordiniSpediti, ANNULLATI } from '../ordini-spediti'
+import { erroreReport } from '../../comune'
 import { consegnaConMezziPropri } from '@/lib/vettore'
 
 export const dynamic = 'force-dynamic'
@@ -60,60 +61,26 @@ export async function GET(req: NextRequest) {
   // ANNULLATE ESCLUSE: confermare ad Amazon una spedizione annullata significa dare un tracking che
   // nessun corriere scansionera' mai -> Valid Tracking Rate giu', reclami A-to-Z, metriche account
   // a rischio. Prima non c'era alcun filtro sullo stato della spedizione.
-  // Ordinamento con TIEBREAKER su id: oltre le 1000 righe la paginazione senza chiave univoca puo'
-  // duplicare o perdere ordini (righe con lo stesso created_at).
-  const righe = await fetchAll(() => supabase
-    .from('ordini_importati')
-    .select('order_id, contenuto, colli, raw, articoli, spedizioni!inner(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings))')
-    .eq('cliente_id', utente.cliente_id)
-    .eq('stato', 'spedito')
-    .is('integrazione_id', null)
-    .not('spedizione_id', 'is', null)
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: true }))
-
-  // ORDINI "UNITI" (accoppiati nel capofila con "Unisci"): non hanno spedizione propria
-  // (spedizione_id null, stato 'unito'), ma vanno confermati al marketplace con il tracking del
-  // CAPOFILA — altrimenti restano "non spediti" su Amazon anche se il pacco è partito col capo, e il
-  // cliente prende metriche a rischio / reclami su ordini in realtà evasi. Il puntatore è `unito_in`
-  // (vedi /api/ordini/unisci). Uso i dati dell'ordine unito (order-id, articoli) + la spedizione del capo.
-  const uniti = await fetchAll(() => supabase
-    .from('ordini_importati')
-    .select('order_id, contenuto, colli, raw, articoli, unito_in')
-    .eq('cliente_id', utente.cliente_id)
-    .eq('stato', 'unito')
-    .is('integrazione_id', null)
-    .not('unito_in', 'is', null)
-    .order('id', { ascending: true }))
-  const capoIds = Array.from(new Set((uniti || []).map((u: any) => u.unito_in).filter(Boolean)))
-  const spedDiCapo = new Map<string, any>()
-  if (capoIds.length) {
-    const capi = await fetchAll(() => supabase
-      .from('ordini_importati')
-      .select('id, spedizioni(tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings))')
-      .in('id', capoIds).order('id', { ascending: true }))
-    for (const c of (capi || [])) if ((c as any).spedizioni) spedDiCapo.set((c as any).id, (c as any).spedizioni)
+  // Le righe sono le stesse del report a video (ordini agganciati, uniti nel capofila e spediti per
+  // riferimento, senza doppioni): vedi ordini-spediti.ts.
+  let righeTutte: any[]
+  try {
+    righeTutte = await ordiniSpediti(supabase, utente.cliente_id,
+      'id, tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings)')
+  } catch (e: any) {
+    return erroreReport(e)
   }
-  const unitiConSped = (uniti || [])
-    .map((u: any) => ({ ...u, spedizioni: spedDiCapo.get(u.unito_in) }))
-    .filter((u: any) => u.spedizioni)   // solo se il capofila ha davvero una spedizione
 
-  // Ordini spediti "per riferimento" (pacco creato da Nuova Spedizione col codice ordine nel
-  // riferimento, ordine importato dopo → mai agganciato): vanno confermati al marketplace col tracking
-  // di quella spedizione, altrimenti restano "non spediti" pur essendo partiti (spesso già consegnati).
-  const orfani = await ordiniSpeditiPerRiferimento(
-    supabase, utente.cliente_id,
-    'tracking_number, created_at, stato, cancellata_il, corrieri(nome_contratto, tipo, settings)')
+  // Data di spedizione = giorno di ROMA, come nel report a video: il file "di quel giorno" deve
+  // contenere esattamente gli ordini che la riga di quel giorno conta.
+  const giornoSped = (sp: any) => (sp?.created_at ? giornoRoma(new Date(sp.created_at)) : '')
 
-  const righeTutte = [...(righe || []), ...unitiConSped, ...orfani]
-
-  const ANNULLATI = ['annullata', 'annullamento_pending', 'annullamento_manuale']
   // Filtro per piattaforma (dal raw), data di spedizione e spedizione ancora valida
   const filtrate = righeTutte.filter((r: any) => {
     if (piattaformaDa(r.raw) !== piatt) return false
     const sp = r.spedizioni || {}
     if (sp.cancellata_il || ANNULLATI.includes(String(sp.stato || ''))) return false
-    if (data) { const d = (sp.created_at || '').slice(0, 10); if (d !== data) return false }
+    if (data && giornoSped(sp) !== data) return false
     return true
   })
 
@@ -131,7 +98,7 @@ export async function GET(req: NextRequest) {
       const raw = r.raw || {}
       const sp = r.spedizioni || {}
       const car = carrierAmazon(sp.corrieri)
-      const shipDate = (sp.created_at || '').slice(0, 10)   // YYYY-MM-DD
+      const shipDate = giornoSped(sp)   // YYYY-MM-DD, giorno di Roma
       // order-id: prima quello normalizzato salvato (ora popolato anche dai file 'amazon-order-id'),
       // poi i nomi grezzi come rete per gli ordini importati PRIMA della correzione dell'alias, che
       // avevano r.order_id nullo e uscivano con la colonna 'order-id' vuota (file rifiutato da Amazon).
@@ -165,7 +132,7 @@ export async function GET(req: NextRequest) {
       cell(r.order_id),
       cell(sp.tracking_number || ''),
       cell(sp.corrieri?.nome_contratto || ''),
-      cell((sp.created_at || '').slice(0, 10)),
+      cell(giornoSped(sp)),
       cell(r.contenuto || ''),
     ].join(',')
   })

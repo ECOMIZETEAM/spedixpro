@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
-import { fetchAll } from '@/lib/fetch-all'
+import { fetchAll, fetchAllStretto } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
+import { confineGiornoRoma } from '@/lib/date-roma'
 import { masterFornitoriDaNascondere } from '@/lib/gambe-visibilita'
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { borderoSenzaDettaglio } from '@/lib/report-spedizioni-cols'
@@ -13,8 +14,10 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json([])
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome,cliente_id').eq('id', user.id).single()
   const p = req.nextUrl.searchParams
-  const dal = p.get('dal')
-  const al = p.get('al')
+  // Giorni di Roma: 'YYYY-MM-DD' diventa mezzanotte e fine giornata italiane. Prima il ramo storico
+  // aggiungeva 'T23:59:59' (ora di Greenwich) e quello a pagine leggeva il giorno in UTC.
+  const dal = confineGiornoRoma(p.get('dal'), 'dal')
+  const al = confineGiornoRoma(p.get('al'), 'al')
   const ruolo = (utente?.ruolo || '').toLowerCase()
   // L'AUTISTA NON HA DISTINTE. "Non cliente e non agente" voleva dire anche autista: diventava un master
   // e riceveva le distinte di tutta la rete col client di servizio. Restano lo staff del master,
@@ -67,12 +70,26 @@ export async function GET(req: NextRequest) {
       const { data: ms } = await admin.from('masters').select('id,nome').in('id', reteIds)
       for (const m of (ms || [])) nomeRete.set((m as any).id, (m as any).nome)
     }
+    // Spedizioni delle distinte, a blocchi di 200 distinte e lette per intero. Prima era una lettura
+    // sola: oltre le 1.000 spedizioni PostgREST si fermava e le distinte rimaste fuori uscivano come
+    // "Spedizione propria" pur avendo clienti veri (126 di MULTIEXPRESS nell'1-14/10, misurate il 15/10);
+    // e con qualche centinaio di distinte l'elenco degli id superava la lunghezza ammessa dall'indirizzo.
+    // Una pagina che non si legge e' un errore, non "nessuna spedizione": altrimenti la distinta torna a
+    // dire "Spedizione propria", che e' proprio il difetto da togliere.
+    const spedizioniDi = async (ids: string[], sel: string) => {
+      const out: any[] = []
+      for (let i = 0; i < ids.length; i += 200) {
+        out.push(...await fetchAllStretto(() => admin.from('spedizioni').select('id,' + sel)
+          .in('distinta_id', ids.slice(i, i + 200)).order('id', { ascending: true })))
+      }
+      return out
+    }
     // Distinte senza cliente e senza rete -> deriva dalle spedizioni
     const daDerivare = distinte.filter((d: any) => !d.cliente_id && !d.master_rete_id).map((d: any) => d.id)
     const clientiPerDistinta = new Map<string, Set<string>>()
     if (daDerivare.length) {
-      const { data: sp } = await admin.from('spedizioni').select('distinta_id, clienti(ragione_sociale)').in('distinta_id', daDerivare)
-      for (const s of (sp || [])) {
+      const sp = await spedizioniDi(daDerivare, 'distinta_id, clienti(ragione_sociale)')
+      for (const s of sp) {
         const did = (s as any).distinta_id
         if (!clientiPerDistinta.has(did)) clientiPerDistinta.set(did, new Set())
         const nome = (s as any).clienti?.ragione_sociale
@@ -85,8 +102,8 @@ export async function GET(req: NextRequest) {
     const contrattiPerDistinta = new Map<string, Set<string>>()
     const vettoriPerDistinta = new Map<string, Set<string>>()
     if (distMiste.length) {
-      const { data: spc } = await admin.from('spedizioni').select('distinta_id, corrieri(nome_contratto,tipo)').in('distinta_id', distMiste)
-      for (const s of (spc || [])) {
+      const spc = await spedizioniDi(distMiste, 'distinta_id, corrieri(nome_contratto,tipo)')
+      for (const s of spc) {
         const did = (s as any).distinta_id; const c = (s as any).corrieri
         if (!did || !c) continue
         if (!contrattiPerDistinta.has(did)) { contrattiPerDistinta.set(did, new Set()); vettoriPerDistinta.set(did, new Set()) }
@@ -153,11 +170,15 @@ export async function GET(req: NextRequest) {
       // verifica). Il portale cliente ha /api/cliente/distinte; se arriva qui, non vede altro.
       if (ruolo === 'cliente') q = q.eq('cliente_id', utente?.cliente_id || noMaster[0])
       if (dal) q = q.gte('created_at', dal)
-      if (al) q = q.lte('created_at', al + 'T23:59:59')
+      if (al) q = q.lte('created_at', al)
       return q
     }
-    const distinte = await fetchAll(build)
-    return NextResponse.json(await arricchisci(distinte))
+    try {
+      const distinte = await fetchAllStretto(build)
+      return NextResponse.json(await arricchisci(distinte))
+    } catch (e: any) {
+      return NextResponse.json({ error: 'Lettura distinte non riuscita: ' + (e?.message || e) }, { status: 500 })
+    }
   }
 
   // ── MODALITÀ PAGINATA (?page=N): filtri + paginazione nel DB, arricchimento solo sulla pagina.
@@ -166,8 +187,8 @@ export async function GET(req: NextRequest) {
   const cerca = (p.get('cerca') || '').replace(/[%_]/g, ' ').trim()   // % e _ sono jolly di ilike: neutralizzati
   const fVettore = (p.get('vettore') || '').trim()
   const fContratto = (p.get('contratto') || '').trim()
-  const dalISO = dal ? new Date(dal + 'T00:00:00.000Z').toISOString() : null
-  const alISO = al ? new Date(al + 'T23:59:59.999Z').toISOString() : null
+  const dalISO = dal || null
+  const alISO = al || null
 
   // Corrieri della rete → mappa vettore (vettoreFisico resta in JS, niente regex in SQL).
   const corrNet = await fetchAll(() => admin.from('corrieri').select('id,tipo,nome_contratto').in('master_id', masterIdsDistinte.length ? masterIdsDistinte : noMaster))
@@ -189,7 +210,9 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const j: any = res || {}
 
-  const rows = await arricchisci(j.rows || [])
+  let rows: any[]
+  try { rows = await arricchisci(j.rows || []) }
+  catch (e: any) { return NextResponse.json({ error: 'Lettura distinte non riuscita: ' + (e?.message || e) }, { status: 500 }) }
   // Menu Vettore/Contratto: dai corrieri USATI nel periodo (mappati al vettore fisico in JS).
   const usati: any[] = j.corrieriUsati || []
   const vettoriSet = new Set<string>(), contrattiArr: { nome: string; vettore: string }[] = []

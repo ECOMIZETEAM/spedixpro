@@ -2,10 +2,20 @@
 import { useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { giornoRoma } from '@/lib/date-roma'
+
+const dataIt = (g: string) => (g || '').slice(0, 10).split('-').reverse().join('/')
+
+// Gli importi sono quelli ADDEBITATI sul credito: la spesa si registra gia' comprensiva dell'IVA,
+// quando il master la applica, e l'aliquota non resta scritta. Prima il PDF scriveva "Iva (22%)"
+// con accanto 0,00: un'IVA che non c'era. Ora non si scrive nessuna aliquota.
+const NOTA_IVA = 'Importi come addebitati sul credito (IVA compresa, se applicata).'
+
 export default function ReportConsumabiliCliente() {
   const dialog = useDialog()
-  const [dal, setDal] = useState(new Date().toISOString().split('T')[0])
-  const [al, setAl] = useState(new Date().toISOString().split('T')[0])
+  // Default = oggi, giorno di ROMA (con toISOString() fra mezzanotte e le 2 "oggi" era ieri).
+  const [dal, setDal] = useState(giornoRoma())
+  const [al, setAl] = useState(giornoRoma())
   const [formato, setFormato] = useState('PDF')
   const [generating, setGenerating] = useState(false)
   async function genera() {
@@ -15,19 +25,23 @@ export default function ReportConsumabiliCliente() {
       if (dal) params.set('dal', dal)
       if (al) params.set('al', al)
       const res = await fetch('/api/cliente/reports/consumabili?' + params.toString())
-      const { righe, master, cliente } = await res.json()
-      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun consumabile trovato nel periodo.' }); setGenerating(false); return }
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (j?.error || 'errore ' + res.status) }); return }
+      const { righe, master, cliente } = j
+      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun consumabile trovato nel periodo.' }); return }
+      const totale = Math.round(righe.reduce((a: number, r: any) => a + Number(r.importo || 0), 0) * 100) / 100
       const fmt = formato.toLowerCase()
       if (fmt === 'xlsx' || fmt === 'csv') {
         const { utils, writeFile } = await import('xlsx')
-        const rows = righe.map((r:any)=>({
-          Descrizione:r.descrizione, Quantita:r.quantita, CostoUnita:r.costoUnita.toFixed(2),
-          CostoTotale:r.costoTotale.toFixed(2), Iva:r.iva+' %',
-          Data:new Date(r.data).toLocaleDateString('it-IT'), TotaleIvaInc:r.totaleIvaInc.toFixed(2),
+        const rows: any[] = righe.map((r:any)=>({
+          Data: dataIt(r.data), Tipo: r.tipo, Descrizione: r.descrizione, Importo: r.importo,
         }))
+        rows.push({})
+        rows.push({ Descrizione: 'TOTALE', Importo: totale })
+        rows.push({ Descrizione: NOTA_IVA })
         const ws = utils.json_to_sheet(rows)
         const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Consumabili')
-        writeFile(wb, 'report_consumabili_'+dal+'.'+(fmt==='xlsx'?'xlsx':'csv'))
+        writeFile(wb, 'report_consumabili_'+dal+'_'+al+'.'+(fmt==='xlsx'?'xlsx':'csv'))
       } else {
         const { default: jsPDF } = await import('jspdf')
         const { default: autoTable } = await import('jspdf-autotable')
@@ -50,34 +64,32 @@ export default function ReportConsumabiliCliente() {
         doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(40,40,40)
         doc.text(cliente.ragione_sociale || '', 14, 52)
         doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(90,90,90)
-        doc.text('( ' + new Date(dal).toLocaleDateString('it-IT') + ' - ' + new Date(al).toLocaleDateString('it-IT') + ' )', 14, 60)
+        doc.text('( ' + dataIt(dal) + ' - ' + dataIt(al) + ' )', 14, 60)
         doc.setDrawColor(200,200,200); doc.line(14, 68, 196, 68)
         autoTable(doc, {
           startY: 74,
           styles: { fontSize: 9, cellPadding: 2.5, textColor: [80,80,80] },
           headStyles: { fillColor: [255,255,255], textColor: [80,80,80], fontStyle: 'bold', lineWidth: 0 },
-          head: [['Descrizione','Quantità','CostoUnita','CostoTotale','Iva','Data','TotaleIvaInc']],
+          columnStyles: { 3: { halign: 'right' } },
+          head: [['Data','Tipo','Descrizione','Importo']],
           body: righe.map((r: any) => [
-            r.descrizione, String(r.quantita),
-            r.costoUnita.toFixed(2)+' €', r.costoTotale.toFixed(2)+' €',
-            r.iva+' %', new Date(r.data).toLocaleDateString('it-IT'), r.totaleIvaInc.toFixed(2)+' €',
+            dataIt(r.data), r.tipo, r.descrizione, Number(r.importo).toFixed(2)+' €',
           ]),
         })
-        const subtotale = righe.reduce((a:number,r:any)=>a+r.costoTotale,0)
-        const ivaTot = righe.reduce((a:number,r:any)=>a+(r.totaleIvaInc-r.costoTotale),0)
-        const totale = righe.reduce((a:number,r:any)=>a+r.totaleIvaInc,0)
         let y = (doc as any).lastAutoTable.finalY + 14
-        doc.setFontSize(11); doc.setTextColor(80,80,80); doc.setFont('helvetica','bold')
-        doc.text('SUBTOTALE', 30, y); doc.text('€ '+subtotale.toLocaleString('it-IT',{minimumFractionDigits:2}), 100, y)
-        doc.setDrawColor(200,200,200); doc.line(28, y+4, 182, y+4); y+=12
-        doc.text('Iva (22%)', 30, y); doc.text('€ '+ivaTot.toLocaleString('it-IT',{minimumFractionDigits:2}), 100, y)
-        doc.setDrawColor(80,180,80); doc.line(28, y+4, 182, y+4); y+=13
-        doc.setFontSize(15); doc.setTextColor(60,160,60)
+        if (y + 20 > doc.internal.pageSize.getHeight()) { doc.addPage(); y = 20 }
+        doc.setDrawColor(80,180,80); doc.line(28, y-8, 182, y-8)
+        doc.setFontSize(15); doc.setTextColor(60,160,60); doc.setFont('helvetica','bold')
         doc.text('TOTALE', 30, y); doc.text('€ '+totale.toLocaleString('it-IT',{minimumFractionDigits:2}), 100, y)
-        doc.save('report_consumabili_'+dal+'.pdf')
+        doc.setFontSize(8); doc.setTextColor(120,120,120); doc.setFont('helvetica','normal')
+        doc.text(NOTA_IVA, 30, y + 8)
+        doc.save('report_consumabili_'+dal+'_'+al+'.pdf')
       }
-    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report.' }) }
-    setGenerating(false)
+    } catch (e: any) {
+      await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report: ' + (e?.message || e) })
+    } finally {
+      setGenerating(false)
+    }
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}
   const lbl = {fontSize:'12px',fontWeight:'700' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'6px'}
@@ -99,6 +111,9 @@ export default function ReportConsumabiliCliente() {
               <option value="CSV">CSV</option>
             </select>
           </div>
+        </div>
+        <div style={{padding:'0 20px 16px',fontSize:'12px',color:'#888'}}>
+          Materiale di consumo e servizi di magazzino addebitati nel periodo. Le rettifiche hanno il loro report; giacenze, resi e correzioni del credito sono nella Lista Movimenti.
         </div>
       </div>
       <button onClick={genera} disabled={generating} style={{padding:'10px 22px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',fontSize:'14px',fontWeight:'700',cursor:'pointer',opacity:generating?0.6:1}}>

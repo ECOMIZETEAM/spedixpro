@@ -1,9 +1,13 @@
 'use client'
 import { useState } from 'react'
 
-export default function ReportTable({ reports, onScarica }: { reports: any[], onScarica: () => void }) {
+export default function ReportTable({ reports: elenco, onScarica }: { reports: any[], onScarica: () => void }) {
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  // /api/reports/lista, se non riesce a leggere, risponde { error } invece di un elenco vuoto: le pagine
+  // lo passano qui com'e', e qui si dice che l'elenco non c'e' invece di fingere "nessun report".
+  const errore = !Array.isArray(elenco) && (elenco as any)?.error ? String((elenco as any).error) : ''
+  const reports: any[] = Array.isArray(elenco) ? elenco : []
   const totalePagine = Math.max(1, Math.ceil(reports.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const reportsPaginate = reports.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
@@ -27,9 +31,11 @@ export default function ReportTable({ reports, onScarica }: { reports: any[], on
           </tr></thead>
           <tbody>
             {!reports.length ? (
-              <tr><td colSpan={7} style={{ padding: '40px', textAlign: 'center' as const, color: '#1a1a1a' }}>Nessun report generato</td></tr>
+              <tr><td colSpan={7} style={{ padding: '40px', textAlign: 'center' as const, color: errore ? '#b91c1c' : '#1a1a1a' }}>{errore || 'Nessun report generato'}</td></tr>
             ) : reportsPaginate.map((r: any, i: number) => (
               <tr key={r.id} style={{ borderBottom: '1px solid #d1d5db' }}>
+                {/* Numero progressivo sull'INTERO elenco (il piu' recente e' il piu' alto), non sulla pagina:
+                    altrove `reports.length - i` ripartiva da capo a ogni pagina. */}
                 <td style={{ padding: '9px 14px', fontWeight: '600', color: '#1a1a1a' }}>{reports.length - ((paginaCorr - 1) * perPage + i)}</td>
                 <td style={{ padding: '9px 14px', fontSize: '12px', color: '#1a1a1a' }}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
                 <td style={{ padding: '9px 14px', color: '#1a1a1a', fontSize: '12px' }}>{String(r.filtri || '').split(' ').map((f: string, idx: number) => <div key={idx}>{f}</div>)}</td>

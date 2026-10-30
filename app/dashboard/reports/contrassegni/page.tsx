@@ -2,106 +2,209 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import ReportTable from '@/app/components/ReportTable'
+import { useDialog } from '@/app/components/DialogProvider'
+import { inviaReport } from '@/lib/report-client'
+import { giornoRoma, inizioGiornoRomaISO, fineGiornoRomaISO } from '@/lib/date-roma'
+import { vettoreFisico } from '@/lib/vettore'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
+const nota = {fontSize:'10px',color:'#6b7280',marginTop:'4px',lineHeight:1.3} as const
 
-import { useDialog } from '@/app/components/DialogProvider'
-import { inviaReport } from '@/lib/report-client'
+// GLI STATI DEL CONTRASSEGNO, E COSA VOGLIONO DIRE PER CHI GUARDA.
+// Per un master (e il suo staff) l'elenco spedizioni da' lo stato PER LIVELLO
+// (lib/contrassegni-stato-livello.ts): "pagato" vuol dire che la distinta del SUO livello e' pagata,
+// NON che il cliente finale sia stato pagato — su MULTIEXPRESS 1-14/10 42 contrassegni gia' pagati ai
+// clienti dai sotto-master risultano ancora da pagare al suo livello. La vecchia tendina offriva
+// "In attesa" = 'in_distinta', che per MULTIEXPRESS dava sempre 0, mentre i 1.708 contrassegni grigi
+// (nessuna distinta) stavano sotto "Da pagare" (1-14/10, misurato il 15/10).
+// L'agente vede lo stato del cliente finale: stesse quattro voci, significato verso il cliente.
+const STATI_COD = ['in_attesa', 'in_distinta', 'pagato', 'annullato'] as const
+const ETICHETTE_COD: Record<'rete' | 'agente', Record<string, string>> = {
+  rete: {
+    in_attesa: 'Da pagare (nessuna distinta al tuo livello)',
+    in_distinta: 'In distinta al tuo livello, non pagata',
+    pagato: 'Pagato al tuo livello (distinta pagata)',
+    annullato: 'Annullato (reso, non si incassa)',
+  },
+  agente: {
+    in_attesa: 'Da pagare al cliente',
+    in_distinta: 'In distinta, non ancora pagato al cliente',
+    pagato: 'Pagato al cliente',
+    annullato: 'Annullato (reso, non si incassa)',
+  },
+}
+const statoCod = (s: any) => (STATI_COD as readonly string[]).includes(String(s.stato_contrassegno)) ? String(s.stato_contrassegno) : 'in_attesa'
+const giornoIt = (v: any) => v ? new Date(v).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }) : '—'
+const valoreFiltro = (v: string) => String(v).replace(/ /g, '\u00A0')
+
 export default function ReportContrassegniPage() {
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
+  const [corrieri, setCorrieri] = useState<any[]>([])
+  const [vista, setVista] = useState<'rete' | 'agente'>('rete')
+  const [rimborso, setRimborso] = useState<Record<string, string>>({})
   const [reports, setReports] = useState<any[]>([])
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
+  const [erroreStorico, setErroreStorico] = useState('')
   const [generating, setGenerating] = useState(false)
   const [archivioZip, setArchivioZip] = useState(false)
-  const [filtri, setFiltri] = useState({
+  const [filtri, setFiltri] = useState(() => ({
     clienteId: '', vettore: '', contratto: '',
     statoSpedizione: '', statoContrassegni: '', periodoRimborso: '',
-    dalSpedizione: new Date().toISOString().split('T')[0],
-    alSpedizione: new Date().toISOString().split('T')[0],
-    dalEsito: new Date(Date.now() - 3*24*60*60*1000).toISOString().split('T')[0],
-    alEsito: new Date().toISOString().split('T')[0],
-  })
+    dalSpedizione: giornoRoma(),
+    alSpedizione: giornoRoma(),
+  }))
 
   useEffect(() => {
-    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
-    fetch('/api/reports/lista?tipo=contrassegni').then(r=>r.json()).then(d=>setReports(d||[]))
+    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(Array.isArray(d)?d:[])).catch(()=>{})
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[])).catch(()=>{})
+    fetch('/api/reports/opzioni-filtri').then(r=>r.json()).then(d=>{
+      if (d?.vista === 'agente') setVista('agente')
+      setRimborso(d?.rimborso && typeof d.rimborso === 'object' ? d.rimborso : {})
+    }).catch(()=>{})
+    caricaStorico()
   }, [])
+
+  const etichette = ETICHETTE_COD[vista]
+  // Vettore FISICO e contratti dai MIEI contratti (come Elenco e Giacenze): la vecchia tendina mandava
+  // 'sda/gls/brt/poste' minuscolo e la rotta confronta col MAIUSCOLO, quindi usciva sempre vuoto.
+  const vettoreDiNome = new Map<string, string>()
+  for (const c of corrieri) vettoreDiNome.set(String(c.nome_contratto||'').trim(), vettoreFisico(c))
+  const vettori = Array.from(new Set(vettoreDiNome.values())).filter(Boolean).sort()
+  const contratti = Array.from(vettoreDiNome.keys()).filter(Boolean).sort((a,b)=>a.localeCompare(b,'it'))
+  const nomeContratto = (s: any) => String(s.corrieri?.nome_contratto||'').trim()
+  const vettoreDi = (s: any) => vettoreDiNome.get(nomeContratto(s)) || vettoreFisico({ nome_contratto: nomeContratto(s) })
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  // Lo storico dei report: se la rotta risponde con un errore lo si dice, invece di mostrare
+  // "Nessun report generato" come se non ce ne fossero.
+  async function caricaStorico() {
+    const d = await fetch('/api/reports/lista?tipo=contrassegni').then(r=>r.json()).catch((e:any)=>({ error: String(e?.message||e) }))
+    setErroreStorico(d && !Array.isArray(d) && d.error ? String(d.error) : '')
+    setReports(Array.isArray(d) ? d : [])
+  }
+
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
-    const filtriTxt = 'dalla_data=' + (filtri.dalSpedizione||'') + ' alla_data=' + (filtri.alSpedizione||'')
-      + (filtri.statoContrassegni ? ' stato=' + filtri.statoContrassegni : '')
+    const filtriTxt = ['dalla_data=' + (filtri.dalSpedizione||''), 'alla_data=' + (filtri.alSpedizione||''),
+      ...(filtri.vettore ? ['vettore=' + filtri.vettore] : []),
+      ...(filtri.contratto ? ['contratto=' + valoreFiltro(filtri.contratto)] : []),
+      ...(filtri.statoSpedizione ? ['stato_spedizione=' + filtri.statoSpedizione] : []),
+      ...(filtri.statoContrassegni ? ['stato=' + valoreFiltro(etichette[filtri.statoContrassegni] || filtri.statoContrassegni)] : []),
+      ...(filtri.periodoRimborso ? ['rimborso=' + filtri.periodoRimborso] : []),
+    ].join(' ')
     const j = await inviaReport({ tipo: 'contrassegni', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
-    const lista = await fetch('/api/reports/lista?tipo=contrassegni').then(x=>x.json())
-    setReports(Array.isArray(lista) ? lista : [])
+    await caricaStorico()
   }
 
   async function generaReport() {
     setGenerating(true)
-    const params = new URLSearchParams()
-    if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
-    if (filtri.dalSpedizione) params.set('dal', filtri.dalSpedizione)
-    if (filtri.alSpedizione) params.set('al', filtri.alSpedizione + 'T23:59:59')
-    params.set('contrassegno', 'si')
-    // Filtri STATO SPEDIZIONE e VETTORE: prima non venivano MAI applicati (né passati all'API né
-    // filtrati) — "Consegnata" dava comunque tutti gli stati. Ora l'API filtra server-side (eq stato,
-    // vettore fisico), come nella lista spedizioni.
-    if (filtri.statoSpedizione) params.set('stato', filtri.statoSpedizione)
-    if (filtri.vettore) params.set('vettore', filtri.vettore)
-    const res = await fetch(`/api/spedizioni/lista?${params}`)
-    let spedizioni = await res.json()
-    // Filtro per stato contrassegno (stessa logica della lista spedizioni)
-    // 'annullato' = pacco reso/annullato: non si incassera' mai, fuori dai "da pagare".
-    if (filtri.statoContrassegni === 'da_pagare') spedizioni = spedizioni.filter((s:any) => Number(s.contrassegno)>0 && s.stato_contrassegno!=='in_distinta' && s.stato_contrassegno!=='pagato' && s.stato_contrassegno!=='annullato')
-    else if (filtri.statoContrassegni === 'in_attesa') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='in_distinta')
-    else if (filtri.statoContrassegni === 'pagato') spedizioni = spedizioni.filter((s:any) => s.stato_contrassegno==='pagato')
-    if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione con contrassegno trovata per i filtri selezionati.' }); setGenerating(false); return }
-    const { default: jsPDF } = await import('jspdf')
-    const { default: autoTable } = await import('jspdf-autotable')
-    const doc = new jsPDF({ orientation: 'landscape' })
-    doc.setFontSize(14)
-    doc.text(`Report Contrassegni — ${filtri.dalSpedizione} / ${filtri.alSpedizione}`, 14, 15)
-    const totContrassegni = spedizioni.reduce((acc: number, s: any) => acc + Number(s.contrassegno||0), 0)
-    doc.setFontSize(10)
-    doc.text(`Totale contrassegni: €${totContrassegni.toFixed(2)} — ${spedizioni.length} spedizioni`, 14, 22)
-    autoTable(doc, {
-      startY: 28,
-      head: [['N. Spedizione','Cliente','Destinatario','Città','Data','Stato','Contrassegno €','Totale €']],
-      body: spedizioni.map((s: any) => [
-        s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
-        `${s.dest_citta} (${s.dest_provincia})`,
-        new Date(s.created_at).toLocaleDateString('it-IT'),
-        s.stato.replace(/_/g,' '),
-        `€${Number(s.contrassegno).toFixed(2)}`,
-        `€${Number(s.costo_totale).toFixed(2)}`
-      ]),
-      styles: { fontSize: 7 },
-      headStyles: { fillColor: [249, 115, 22] },
-    })
-    // Non scarico subito: salvo il report nel registro (come Report Spedizioni),
-    // il download avviene poi dalla lista tramite il link "Scarica".
-    const nomeBase = `report_contrassegni_${filtri.dalSpedizione}_${filtri.alSpedizione}`
-    if (archivioZip) {
-      const { default: JSZip } = await import('jszip' as any)
-      const zip = new JSZip()
-      const pdfBytes = doc.output('arraybuffer')
-      zip.file('report_contrassegni.pdf', pdfBytes)
-      const zipB64 = await zip.generateAsync({ type: 'base64' })
-      await salvaReport('data:application/zip;base64,' + zipB64, nomeBase + '.zip', 'zip')
-    } else {
-      await salvaReport(doc.output('datauristring'), nomeBase + '.pdf', 'pdf')
-    }
-    setGenerating(false)
-  }
+    try {
+      const params = new URLSearchParams()
+      if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
+      // Giorni di ROMA: l'elenco usa i confini cosi' come arrivano.
+      if (filtri.dalSpedizione) params.set('dal', inizioGiornoRomaISO(filtri.dalSpedizione))
+      if (filtri.alSpedizione) params.set('al', fineGiornoRomaISO(filtri.alSpedizione))
+      params.set('contrassegno', 'si')
+      // Filtri STATO SPEDIZIONE e VETTORE: in origine non venivano MAI applicati (né passati all'API né
+      // filtrati) — "Consegnata" dava comunque tutti gli stati. Lo stato lo filtra la rotta; il vettore
+      // si filtra qui sotto, sul vettore fisico del contratto.
+      if (filtri.statoSpedizione) params.set('stato', filtri.statoSpedizione)
+      const res = await fetch(`/api/spedizioni/lista?${params}`)
+      let spedizioni = await res.json().catch(() => null)
+      if (!res.ok || !Array.isArray(spedizioni)) {
+        await dialog.alert({ title: 'Errore', message: (spedizioni && spedizioni.error) || `Le spedizioni non si sono caricate (errore ${res.status}).` })
+        return
+      }
+      if (filtri.vettore) spedizioni = spedizioni.filter((s: any) => vettoreDi(s) === filtri.vettore)
+      if (filtri.contratto) spedizioni = spedizioni.filter((s: any) => nomeContratto(s) === filtri.contratto)
+      // Lo stato che la rotta da' davvero: per livello per il master, del cliente per l'agente.
+      if (filtri.statoContrassegni) spedizioni = spedizioni.filter((s: any) => statoCod(s) === filtri.statoContrassegni)
+      // Il periodo di rimborso e' un'impostazione dei MIEI clienti: le righe della rete (clienti dei
+      // sotto-master) non ce l'hanno verso di me, ed escono solo con "Tutti".
+      if (filtri.periodoRimborso) spedizioni = spedizioni.filter((s: any) => !s.master_rete_id && !!s.cliente_id && rimborso[s.cliente_id] === filtri.periodoRimborso)
+      if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione con contrassegno trovata per i filtri selezionati.' }); return }
 
-  const totalePagine = Math.max(1, Math.ceil(reports.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const reportsPaginate = reports.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+      // La distinta del livello di chi guarda (la stessa che decide il colore): numero e data pagamento.
+      const resD = await fetch('/api/reports/contrassegni-distinte', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: spedizioni.map((s: any) => s.id) }),
+      })
+      const distinte = await resD.json().catch(() => null)
+      if (!resD.ok || !distinte || distinte.error) {
+        await dialog.alert({ title: 'Errore', message: (distinte && distinte.error) || `Le distinte dei contrassegni non si sono caricate (errore ${resD.status}).` })
+        return
+      }
+
+      // Gli annullati (resi) restano in elenco ma NON nel totale: quei soldi non arriveranno mai.
+      // Se si chiedono apposta ("Annullato") il totale e' il loro.
+      const soloAnnullati = filtri.statoContrassegni === 'annullato'
+      const annullati = spedizioni.filter((s: any) => statoCod(s) === 'annullato')
+      const tot = (arr: any[]) => Math.round(arr.reduce((acc: number, s: any) => acc + Number(s.contrassegno||0), 0) * 100) / 100
+      const totContrassegni = soloAnnullati ? tot(spedizioni) : tot(spedizioni.filter((s: any) => statoCod(s) !== 'annullato'))
+      const totAnnullati = tot(annullati)
+
+      const { default: jsPDF } = await import('jspdf')
+      const { default: autoTable } = await import('jspdf-autotable')
+      const doc = new jsPDF({ orientation: 'landscape' })
+      doc.setFontSize(14)
+      doc.text(`Report Contrassegni — spedizioni dal ${giornoIt(filtri.dalSpedizione + 'T12:00:00Z')} al ${giornoIt(filtri.alSpedizione + 'T12:00:00Z')}`, 14, 15)
+      doc.setFontSize(10)
+      doc.text(soloAnnullati
+        ? `Contrassegni annullati (resi, non si incassano): €${totContrassegni.toFixed(2)} — ${spedizioni.length} spedizioni`
+        : `Totale contrassegni: €${totContrassegni.toFixed(2)} — ${spedizioni.length - annullati.length} spedizioni`, 14, 22)
+      let y = 22
+      if (!soloAnnullati && annullati.length) {
+        y += 5
+        doc.text(`di cui annullati (in elenco, fuori dal totale: resi, non si incassano): ${annullati.length} spedizioni, €${totAnnullati.toFixed(2)}`, 14, y)
+      }
+      y += 5
+      doc.setFontSize(8)
+      doc.text(vista === 'rete'
+        ? 'Stato al TUO livello: "Pagato" = la distinta del tuo livello e\' pagata, non che il cliente finale sia stato pagato. Prezzo spedizione = quanto ti paga il tuo diretto.'
+        : 'Stato verso il cliente. Prezzo spedizione = prezzo pagato dal cliente.', 14, y)
+      autoTable(doc, {
+        startY: y + 4,
+        head: [['N. Spedizione','Cliente','Destinatario','Città','Data','Stato','Stato contrassegno','Distinta','Pagata il','Contrassegno €','Prezzo sped. €']],
+        body: spedizioni.map((s: any) => {
+          const d = distinte[s.id]
+          return [
+            s.numero, (s.clienti?.ragione_sociale||s.mitt_nome||'—') + (s.master_rete ? `\nRete: ${s.master_rete}` : ''), s.dest_nome,
+            `${s.dest_citta||''}${s.dest_provincia ? ` (${s.dest_provincia})` : ''}`,
+            giornoIt(s.created_at),
+            String(s.stato||'').replace(/_/g,' '),
+            etichette[statoCod(s)],
+            d ? `n. ${d.numero}` : '—',
+            d?.pagata_il ? giornoIt(d.pagata_il + 'T12:00:00Z') : '—',
+            `€${Number(s.contrassegno).toFixed(2)}`,
+            s.prezzo_cliente == null ? '—' : `€${Number(s.prezzo_cliente).toFixed(2)}`,
+          ]
+        }),
+        styles: { fontSize: 7 },
+        headStyles: { fillColor: [249, 115, 22] },
+      })
+      // Non scarico subito: salvo il report nel registro (come Report Spedizioni),
+      // il download avviene poi dalla lista tramite il link "Scarica".
+      const nomeBase = `report_contrassegni_${filtri.dalSpedizione}_${filtri.alSpedizione}`
+      if (archivioZip) {
+        const { default: JSZip } = await import('jszip' as any)
+        const zip = new JSZip()
+        const pdfBytes = doc.output('arraybuffer')
+        zip.file('report_contrassegni.pdf', pdfBytes)
+        const zipB64 = await zip.generateAsync({ type: 'base64' })
+        await salvaReport('data:application/zip;base64,' + zipB64, nomeBase + '.zip', 'zip')
+      } else {
+        await salvaReport(doc.output('datauristring'), nomeBase + '.pdf', 'pdf')
+      }
+    } catch (e: any) {
+      await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (e?.message || e) })
+    } finally {
+      // Il bottone torna cliccabile anche quando qualcosa va storto: prima restava su "Generazione...".
+      setGenerating(false)
+    }
+  }
 
   return (
     <div>
@@ -120,13 +223,13 @@ export default function ReportContrassegniPage() {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti i vettori</option>
-              <option value="sda">SDA</option><option value="gls">GLS</option>
-              <option value="brt">BRT</option><option value="poste">Poste Italiane</option>
+              {vettori.map(v=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {contratti.map(n=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato spedizione</label>
@@ -138,11 +241,12 @@ export default function ReportContrassegniPage() {
           </div>
           <div><label style={lbl}>Stato Contrassegni</label>
             <select value={filtri.statoContrassegni} onChange={e=>setF('statoContrassegni',e.target.value)} style={sel}>
-              <option value="">Tutti</option>
-              <option value="da_pagare">Da pagare</option>
-              <option value="in_attesa">In attesa</option>
-              <option value="pagato">Pagato</option>
+              <option value="">Tutti (annullati fuori dal totale)</option>
+              {STATI_COD.map(k=><option key={k} value={k}>{etichette[k]}</option>)}
             </select>
+            <div style={nota}>{vista === 'rete'
+              ? 'Stato al tuo livello: "pagato" non vuol dire pagato al cliente finale.'
+              : 'Stato verso il cliente.'}</div>
           </div>
           <div><label style={lbl}>Periodo di rimborso</label>
             <select value={filtri.periodoRimborso} onChange={e=>setF('periodoRimborso',e.target.value)} style={sel}>
@@ -151,15 +255,12 @@ export default function ReportContrassegniPage() {
               <option value="settimanale">Settimanale</option>
               <option value="mensile">Mensile</option>
             </select>
+            <div style={nota}>Dalla scheda dei tuoi clienti: le righe della rete escono solo con "Tutti".</div>
           </div>
         </div>
-        <div style={{marginBottom:'10px'}}>
+        <div style={{marginBottom:'14px'}}>
           <label style={lbl}>Data inserimento Spedizione</label>
           <DateRangePicker dal={filtri.dalSpedizione} al={filtri.alSpedizione} onChange={(dal,al)=>setFiltri(f=>({...f,dalSpedizione:dal,alSpedizione:al}))} />
-        </div>
-        <div style={{marginBottom:'14px'}}>
-          <label style={lbl}>Data esito contrassegno</label>
-          <DateRangePicker dal={filtri.dalEsito} al={filtri.alEsito} onChange={(dal,al)=>setFiltri(f=>({...f,dalEsito:dal,alEsito:al}))} />
         </div>
         <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}>
           <input type="checkbox" checked={archivioZip} onChange={e=>setArchivioZip(e.target.checked)} id="zip"/>
@@ -170,47 +271,8 @@ export default function ReportContrassegniPage() {
           {generating?'Generazione...':'Genera Report'}
         </button>
       </div>
-      <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'10px'}}>
-        <span style={{fontSize:'13px',color:'#1a1a1a'}}>Mostra</span>
-        <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
-        <span style={{fontSize:'13px',color:'#1a1a1a'}}>elementi</span>
-      </div>
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
-        <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
-          <thead><tr style={{background:'#f9fafb'}}>
-            {['ID','Data','Filtri','Formato','Utente','Status','Scarica'].map(h=>(
-              <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {!reports.length ? (
-              <tr><td colSpan={7} style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Nessun report generato</td></tr>
-            ) : reportsPaginate.map((r:any,i:number)=>(
-              <tr key={r.id} style={{borderBottom:'1px solid #d1d5db'}}>
-                <td style={{padding:'9px 14px',fontWeight:'600'}}>{reports.length-i}</td>
-                <td style={{padding:'9px 14px',fontSize:'12px'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
-                <td style={{padding:'9px 14px',color:'#f97316',fontSize:'12px'}}>{String(r.filtri||'').split(' ').map((f:string,idx:number)=><div key={idx}>{f}</div>)}</td>
-                <td style={{padding:'9px 14px'}}><span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span></td>
-                <td style={{padding:'9px 14px'}}>{r.utente}</td>
-                <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:'500'}}>{r.status}</td>
-                <td style={{padding:'9px 14px'}}>{r.file_url
-                  ? <a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a>
-                  : <span style={{color:'#999',fontSize:'13px'}}>—</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap'}}>
-          
-          <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-            <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-            {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n)=>(
-              <button key={n} onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',cursor:'pointer'}}>{n}</button>
-            ))}
-            <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-          </div>
-        </div>
-      </div>
+      {erroreStorico && <div style={{background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',borderRadius:'6px',padding:'8px 12px',fontSize:'12px',marginBottom:'10px'}}>Storico dei report non caricato: {erroreStorico}</div>}
+      <ReportTable reports={reports} onScarica={generaReport}/>
     </div>
   )
 }

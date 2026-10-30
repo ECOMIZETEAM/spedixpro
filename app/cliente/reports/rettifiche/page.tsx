@@ -1,34 +1,60 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
+
+const dataIt = (g: string) => (g || '').slice(0, 10).split('-').reverse().join('/')
+const kg = (v: number | null) => (v == null ? '—' : Number(v).toFixed(2) + ' kg')
+const euro = (v: number | null) => (v == null ? '—' : Number(v).toFixed(2) + ' €')
+
 export default function ReportRettificheCliente() {
   const dialog = useDialog()
-  const [dal, setDal] = useState(new Date(Date.now()-30*24*60*60*1000).toISOString().split('T')[0])
-  const [al, setAl] = useState(new Date().toISOString().split('T')[0])
-  const [vettore, setVettore] = useState('tutti')
+  // Ultimi 30 giorni, giorni di ROMA (con toISOString() fra mezzanotte e le 2 "oggi" era ieri).
+  const [dal, setDal] = useState(giorniFaRoma(30))
+  const [al, setAl] = useState(giornoRoma())
+  const [vettore, setVettore] = useState('')
+  const [vettori, setVettori] = useState<string[]>([])
   const [formato, setFormato] = useState('PDF')
   const [generating, setGenerating] = useState(false)
+
+  // Il filtro Vettore c'era ma senza voci e senza effetto. Ora: i marchi dei contratti con cui il
+  // cliente ha spedito, confrontati col marchio del contratto della spedizione rettificata.
+  useEffect(() => {
+    fetch('/api/cliente/reports/vettori').then(r => r.ok ? r.json() : { vettori: [] })
+      .then(j => setVettori(Array.isArray(j?.vettori) ? j.vettori : [])).catch(() => {})
+  }, [])
+
   async function genera() {
     setGenerating(true)
     try {
       const params = new URLSearchParams()
       if (dal) params.set('dal', dal)
       if (al) params.set('al', al)
+      if (vettore) params.set('vettore', vettore)
       const res = await fetch('/api/cliente/reports/rettifiche?' + params.toString())
-      const { righe, master, cliente } = await res.json()
-      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna rettifica trovata nel periodo.' }); setGenerating(false); return }
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (j?.error || 'errore ' + res.status) }); return }
+      const { righe, master, cliente } = j
+      if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna rettifica addebitata nel periodo.' }); return }
+      // Totale = somma dei movimenti di rettifica del periodo: addebiti positivi, accrediti negativi.
+      const totale = Math.round(righe.reduce((a: number, r: any) => a + Number(r.differenza || 0), 0) * 100) / 100
       const fmt = formato.toLowerCase()
       if (fmt === 'xlsx' || fmt === 'csv') {
         const { utils, writeFile } = await import('xlsx')
-        const rows = righe.map((r:any)=>({
-          'N. Spedizione':r.numero, 'Peso dichiarato':r.pesoDichiarato, 'Peso/volume dichiarato':r.pesoVolDichiarato,
-          'Peso reale':r.pesoReale, 'Peso/volume reale':r.pesoVolReale,
-          'Costo iniziale':r.costoIniziale.toFixed(2), 'Costo finale':r.costoFinale.toFixed(2), 'Differenza':r.differenza.toFixed(2),
+        const rows: any[] = righe.map((r:any)=>({
+          'N. Spedizione': r.numero, 'Data': dataIt(r.data), 'Corriere': r.corriere,
+          'Peso dichiarato': r.pesoDichiarato ?? '', 'Peso/volume dichiarato': r.pesoVolDichiarato ?? '',
+          'Peso reale': r.pesoReale ?? '', 'Peso/volume reale': r.pesoVolReale ?? '',
+          'Costo iniziale': r.costoIniziale ?? '', 'Costo finale': r.costoFinale ?? '',
+          'Differenza': r.differenza,
+          'Note': r.dettaglio ? '' : r.descrizione,
         }))
+        rows.push({})
+        rows.push({ 'N. Spedizione': 'TOTALE', 'Differenza': totale })
         const ws = utils.json_to_sheet(rows)
         const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Rettifiche')
-        writeFile(wb, 'report_rettifiche_'+dal+'.'+(fmt==='xlsx'?'xlsx':'csv'))
+        writeFile(wb, 'report_rettifiche_'+dal+'_'+al+'.'+(fmt==='xlsx'?'xlsx':'csv'))
       } else {
         const { default: jsPDF } = await import('jspdf')
         const { default: autoTable } = await import('jspdf-autotable')
@@ -51,24 +77,32 @@ export default function ReportRettificheCliente() {
         doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(40,40,40)
         doc.text(cliente.ragione_sociale || '', 14, 52)
         doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(90,90,90)
-        doc.text('( ' + new Date(dal).toLocaleDateString('it-IT') + ' - ' + new Date(al).toLocaleDateString('it-IT') + ' )', 14, 60)
+        doc.text('( ' + dataIt(dal) + ' - ' + dataIt(al) + ' )' + (vettore ? '  ·  ' + vettore : ''), 14, 60)
         doc.setDrawColor(200,200,200); doc.line(14, 68, 196, 68)
         autoTable(doc, {
           startY: 74,
-          styles: { fontSize: 8, cellPadding: 2, textColor: [80,80,80] },
+          styles: { fontSize: 7.5, cellPadding: 2, textColor: [80,80,80] },
           headStyles: { fillColor: [255,255,255], textColor: [80,80,80], fontStyle: 'bold', lineWidth: 0 },
-          head: [['N. Spedizione','Peso dich.','Peso/vol dich.','Peso reale','Peso/vol reale','Costo iniziale','Costo finale','Differenza']],
-          body: righe.map((r: any) => [
-            r.numero,
-            r.pesoDichiarato.toFixed(2)+' kg', r.pesoVolDichiarato.toFixed(2)+' kg',
-            r.pesoReale.toFixed(2)+' kg', r.pesoVolReale.toFixed(2)+' kg',
-            r.costoIniziale.toFixed(2)+' €', r.costoFinale.toFixed(2)+' €', r.differenza.toFixed(2)+' €',
-          ]),
+          head: [['N. Spedizione','Data','Peso dich.','Peso/vol dich.','Peso reale','Peso/vol reale','Costo iniziale','Costo finale','Differenza']],
+          body: [
+            ...righe.map((r: any) => r.dettaglio ? [
+              r.numero, dataIt(r.data),
+              kg(r.pesoDichiarato), kg(r.pesoVolDichiarato), kg(r.pesoReale), kg(r.pesoVolReale),
+              euro(r.costoIniziale), euro(r.costoFinale), euro(r.differenza),
+            ] : [
+              // Nessuna ripesatura dietro (supplemento, correzione): la descrizione dell'addebito.
+              r.numero, dataIt(r.data), { content: r.descrizione || 'Rettifica', colSpan: 6 }, euro(r.differenza),
+            ]),
+            [{ content: 'TOTALE', colSpan: 8, styles: { fontStyle: 'bold', halign: 'right' } }, { content: euro(totale), styles: { fontStyle: 'bold' } }],
+          ] as any,
         })
-        doc.save('report_rettifiche_'+dal+'.pdf')
+        doc.save('report_rettifiche_'+dal+'_'+al+'.pdf')
       }
-    } catch(e) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report.' }) }
-    setGenerating(false)
+    } catch (e: any) {
+      await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del report: ' + (e?.message || e) })
+    } finally {
+      setGenerating(false)
+    }
   }
   const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const,marginBottom:'16px'}
   const lbl = {fontSize:'12px',fontWeight:'700' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'6px'}
@@ -88,7 +122,8 @@ export default function ReportRettificheCliente() {
           <div>
             <label style={lbl}>Vettore</label>
             <select value={vettore} onChange={e=>setVettore(e.target.value)} style={inp}>
-              <option value="tutti">Tutti</option>
+              <option value="">Tutti</option>
+              {vettori.map(v=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div>
@@ -99,6 +134,9 @@ export default function ReportRettificheCliente() {
               <option value="CSV">CSV</option>
             </select>
           </div>
+        </div>
+        <div style={{padding:'0 20px 16px',fontSize:'12px',color:'#888'}}>
+          Le rettifiche addebitate (o accreditate) sul credito nel periodo, per data dell'addebito.
         </div>
       </div>
       <button onClick={genera} disabled={generating} style={{padding:'10px 22px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',fontSize:'14px',fontWeight:'700',cursor:'pointer',opacity:generating?0.6:1}}>

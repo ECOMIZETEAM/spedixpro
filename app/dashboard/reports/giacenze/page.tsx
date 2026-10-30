@@ -2,113 +2,153 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
-
-const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
-const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
-const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
-
+import ReportTable from '@/app/components/ReportTable'
 import { useDialog } from '@/app/components/DialogProvider'
 import { inviaReport } from '@/lib/report-client'
+import { giornoRoma } from '@/lib/date-roma'
+import { vettoreFisico } from '@/lib/vettore'
+
+const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
+const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
+
+// Le stesse etichette della pagina Giacenze del menu. Le giacenze appena rilevate hanno lo stato
+// vuoto: sono "in attesa di istruzioni".
+const STATO_GIACENZA: Record<string, string> = {
+  aperta: 'In attesa di istruzioni', in_gestione: 'In gestione', svincolata: 'Svincolata', chiusa: 'Chiusa',
+}
+const statoGiacenza = (g: any) => STATO_GIACENZA[g.giacenza_stato || 'aperta'] || String(g.giacenza_stato)
+const giornoIt = (v: any) => v ? new Date(v).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }) : '—'
+const euro = (v: any) => v == null ? '—' : `€${Number(v).toFixed(2)}`
+// Lo storico divide i filtri sugli spazi: dentro un valore ("Q GLS NL STANDARD") lo spazio diventa
+// indivisibile, cosi' ogni filtro resta su una riga sola.
+const valoreFiltro = (v: string) => String(v).replace(/ /g, '\u00A0')
+
 export default function ReportGiacenzePage() {
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [corrieri, setCorrieri] = useState<any[]>([])
-  const [staff, setStaff] = useState<any[]>([])
+  const [agenti, setAgenti] = useState<string[]>([])
   const [reports, setReports] = useState<any[]>([])
-  const [perPage, setPerPage] = useState(10)
-  const [pagina, setPagina] = useState(1)
+  const [erroreStorico, setErroreStorico] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [filtri, setFiltri] = useState({
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+  const [filtri, setFiltri] = useState(() => ({
+    dal: giornoRoma(),
+    al: giornoRoma(),
     clienteId: '', vettore: '', contratto: '', stato: '', agente: '', formato: 'PDF'
-  })
+  }))
 
   useEffect(() => {
-    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
-    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[]))
-    fetch('/api/staff').then(r=>r.json()).then(d=>setStaff(Array.isArray(d)?d.filter((u:any)=>{const ru=(u.ruolo||'').toLowerCase();return ru!=='cliente'&&ru!=='master'}):[]))
-    fetch('/api/reports/lista?tipo=giacenze').then(r=>r.json()).then(d=>setReports(d||[]))
+    fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(Array.isArray(d)?d:[])).catch(()=>{})
+    fetch('/api/corrieri/lista').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d)?d:[])).catch(()=>{})
+    fetch('/api/reports/opzioni-filtri').then(r=>r.json()).then(d=>setAgenti(Array.isArray(d?.agenti)?d.agenti:[])).catch(()=>{})
+    caricaStorico()
   }, [])
+
+  // Vettore FISICO (GLS, BRT, POSTE, SDA, UPS...) e nomi dei contratti dai MIEI contratti: la prima
+  // parola del nome non e' il vettore (i GLS di QUICK si chiamano "Q GLS ..." e "PF CK ...").
+  const vettori = Array.from(new Set(corrieri.map((c:any)=>vettoreFisico(c)).filter(Boolean))).sort()
+  const contratti = Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'it'))
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
 
+  // Lo storico dei report: se la rotta risponde con un errore lo si dice, invece di mostrare
+  // "Nessun report generato" come se non ce ne fossero.
+  async function caricaStorico() {
+    const d = await fetch('/api/reports/lista?tipo=giacenze').then(r=>r.json()).catch((e:any)=>({ error: String(e?.message||e) }))
+    setErroreStorico(d && !Array.isArray(d) && d.error ? String(d.error) : '')
+    setReports(Array.isArray(d) ? d : [])
+  }
+
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
-    const filtriTxt = 'dalla_data=' + (filtri.dal||'') + ' alla_data=' + (filtri.al||'')
+    const filtriTxt = ['dalla_data=' + (filtri.dal||''), 'alla_data=' + (filtri.al||''),
+      ...(['vettore','contratto','stato','agente'] as const).filter(k=>filtri[k]).map(k=>k + '=' + valoreFiltro(k==='stato' ? (STATO_GIACENZA[filtri.stato]||filtri.stato) : filtri[k]))].join(' ')
     const j = await inviaReport({ tipo: 'giacenze', filtri: filtriTxt, formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
-    const lista = await fetch('/api/reports/lista?tipo=giacenze').then(x=>x.json())
-    setReports(Array.isArray(lista) ? lista : [])
+    await caricaStorico()
   }
 
+  // IL REPORT DICE LE GIACENZE APERTE NEL PERIODO E QUANTO LE HA PAGATE IL DIRETTO.
+  // Prima prendeva le spedizioni CREATE nel periodo e ANCORA in giacenza: una giacenza svincolata il
+  // giorno dopo spariva (MULTIEXPRESS 1-14/10: 82 righe su 671 giacenze aperte, misurato il 15/10), e il
+  // "Totale" era il nolo della spedizione. Ora il periodo e' la data di apertura della giacenza (giorni di Roma), lo
+  // stato di oggi non conta, e l'importo e' la giacenza addebitata al cliente diretto o al sotto-master
+  // di prima linea (dai movimenti).
   async function generaReport() {
     setGenerating(true)
-    const params = new URLSearchParams()
-    if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
-    if (filtri.dal) params.set('dal', filtri.dal)
-    if (filtri.al) params.set('al', filtri.al + 'T23:59:59')
-    params.set('stato', 'in_giacenza')
+    try {
+      const params = new URLSearchParams({ report: '1' })
+      if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
+      if (filtri.dal) params.set('dal', filtri.dal)
+      if (filtri.al) params.set('al', filtri.al)
+      if (filtri.vettore) params.set('vettore', filtri.vettore)
+      if (filtri.contratto) params.set('contratto', filtri.contratto)
+      if (filtri.stato) params.set('stato', filtri.stato)
+      if (filtri.agente) params.set('agente', filtri.agente)
 
-    const res = await fetch(`/api/spedizioni/lista?${params}`)
-    let spedizioni = await res.json()
-    // Filtro vettore client-side (stessa logica della lista spedizioni)
-    if (filtri.vettore) spedizioni = spedizioni.filter((s:any) => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
-    // Filtro agente: match sul campo agente del cliente (= "Nome Cognome")
-    if (filtri.agente) spedizioni = spedizioni.filter((s:any) => (s.clienti?.agente||'') === filtri.agente)
+      const res = await fetch(`/api/giacenze?${params}`)
+      const giacenze = await res.json().catch(() => null)
+      // Un errore NON e' "nessun risultato": va detto con il suo messaggio.
+      if (!res.ok || !Array.isArray(giacenze)) {
+        await dialog.alert({ title: 'Errore', message: (giacenze && giacenze.error) || `Le giacenze non si sono caricate (errore ${res.status}).` })
+        return
+      }
+      if (!giacenze.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna giacenza aperta nel periodo per i filtri scelti.' }); return }
 
-    if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna giacenza trovata.' }); setGenerating(false); return }
-
-    const formato = filtri.formato.toLowerCase()
-    if (formato === 'xlsx' || formato === 'csv') {
-      const { utils, writeFile } = await import('xlsx')
-      const rows = spedizioni.map((s: any) => ({
-        'N. Spedizione': s.numero, 'Cliente': s.clienti?.ragione_sociale||s.mitt_nome,
-        'Destinatario': s.dest_nome, 'Città': s.dest_citta, 'Provincia': s.dest_provincia,
-        'Data': new Date(s.created_at).toLocaleDateString('it-IT'),
-        'Stato': s.stato, 'Totale (€)': s.costo_totale,
-      }))
-      const ws = utils.json_to_sheet(rows)
-      const wb = utils.book_new()
-      utils.book_append_sheet(wb, ws, 'Giacenze')
-      const XLSX = await import('xlsx'); const b64str = XLSX.write(wb, { bookType: formato==='csv'?'csv':'xlsx', type: 'base64' })
-      await salvaReport(b64str, `report_giacenze_${filtri.dal}.${formato==='xlsx'?'xlsx':'csv'}`, formato)
-    } else {
-      const { default: jsPDF } = await import('jspdf')
-      const { default: autoTable } = await import('jspdf-autotable')
-      const doc = new jsPDF({ orientation: 'landscape' })
-      doc.setFontSize(14)
-      doc.text(`Report Giacenze — ${filtri.dal} / ${filtri.al}`, 14, 15)
-      doc.setFontSize(10)
-      doc.text(`Totale: ${spedizioni.length} spedizioni in giacenza`, 14, 22)
-      const totGiacenze = spedizioni.reduce((acc: number, s: any) => acc + Number(s.costo_totale||0), 0)
-      autoTable(doc, {
-        startY: 28,
-        head: [['N. Spedizione','Cliente','Destinatario','Città','Provincia','Data','Stato','Totale €']],
-        body: spedizioni.map((s: any) => [
-          s.numero, s.clienti?.ragione_sociale||s.mitt_nome, s.dest_nome,
-          s.dest_citta, s.dest_provincia, new Date(s.created_at).toLocaleDateString('it-IT'),
-          s.stato.replace(/_/g,' '), `€${Number(s.costo_totale).toFixed(2)}`
-        ]),
-        styles: { fontSize: 7 },
-        headStyles: { fillColor: [249, 115, 22] },
-      })
-      const pageH = doc.internal.pageSize.getHeight()
-      const pageW = doc.internal.pageSize.getWidth()
-      let fy = (doc as any).lastAutoTable.finalY + 16
-      if (fy + 12 > pageH - 12) { doc.addPage(); fy = 24 }
-      doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(30,30,30)
-      doc.text('TOTALE', pageW - 80, fy)
-      doc.text(`EUR ${totGiacenze.toFixed(2)}`, pageW - 14, fy, {align:'right'})
-      const pdfB64 = doc.output('datauristring')
-      await salvaReport(pdfB64, `report_giacenze_${filtri.dal}.pdf`, 'pdf')
+      const totGiacenze = Math.round(giacenze.reduce((acc: number, g: any) => acc + Number(g.importo_giacenza||0), 0) * 100) / 100
+      const cliente = (g: any) => g.clienti?.ragione_sociale || g.mitt_nome || '—'
+      const formato = filtri.formato.toLowerCase()
+      if (formato === 'xlsx' || formato === 'csv') {
+        const XLSX = await import('xlsx')
+        const rows = giacenze.map((g: any) => ({
+          'N. Spedizione': g.numero, 'Cliente': cliente(g), 'Rete (sotto-master)': g.master_rete || '',
+          'Destinatario': g.dest_nome, 'Città': g.dest_citta, 'Provincia': g.dest_provincia,
+          'Contratto': g.corrieri?.nome_contratto || '', 'Vettore': g.vettore || '',
+          'Apertura giacenza': giornoIt(g.giacenza_data), 'Stato giacenza': statoGiacenza(g),
+          'Motivo': g.giacenza_motivo || '', 'Stato spedizione': String(g.stato||'').replace(/_/g,' '),
+          'Importo giacenza addebitato (€)': g.importo_giacenza == null ? '' : Number(g.importo_giacenza),
+        }))
+        const ws = XLSX.utils.json_to_sheet(rows)
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, 'Giacenze')
+        const b64str = XLSX.write(wb, { bookType: formato==='csv'?'csv':'xlsx', type: 'base64' })
+        await salvaReport(b64str, `report_giacenze_${filtri.dal}_${filtri.al}.${formato==='xlsx'?'xlsx':'csv'}`, formato)
+      } else {
+        const { default: jsPDF } = await import('jspdf')
+        const { default: autoTable } = await import('jspdf-autotable')
+        const doc = new jsPDF({ orientation: 'landscape' })
+        doc.setFontSize(14)
+        doc.text(`Report Giacenze — aperte dal ${giornoIt(filtri.dal + 'T12:00:00Z')} al ${giornoIt(filtri.al + 'T12:00:00Z')}`, 14, 15)
+        doc.setFontSize(9)
+        doc.text(`${giacenze.length} giacenze aperte nel periodo, qualunque sia lo stato di oggi. Importo = giacenza addebitata al tuo cliente diretto o al sotto-master di prima linea.`, 14, 22)
+        autoTable(doc, {
+          startY: 27,
+          head: [['N. Spedizione','Cliente','Destinatario','Città','Contratto','Apertura','Stato giacenza','Motivo','Stato spedizione','Importo €']],
+          body: giacenze.map((g: any) => [
+            g.numero, cliente(g) + (g.master_rete ? `\nRete: ${g.master_rete}` : ''), g.dest_nome,
+            `${g.dest_citta||''}${g.dest_provincia ? ` (${g.dest_provincia})` : ''}`, g.corrieri?.nome_contratto || '—',
+            giornoIt(g.giacenza_data), statoGiacenza(g), g.giacenza_motivo || '—',
+            String(g.stato||'').replace(/_/g,' '), euro(g.importo_giacenza),
+          ]),
+          styles: { fontSize: 7 },
+          headStyles: { fillColor: [249, 115, 22] },
+        })
+        const pageH = doc.internal.pageSize.getHeight()
+        const pageW = doc.internal.pageSize.getWidth()
+        let fy = (doc as any).lastAutoTable.finalY + 16
+        if (fy + 12 > pageH - 12) { doc.addPage(); fy = 24 }
+        doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(30,30,30)
+        doc.text('TOTALE ADDEBITATO', pageW - 110, fy)
+        doc.text(`EUR ${totGiacenze.toFixed(2)}`, pageW - 14, fy, {align:'right'})
+        const pdfB64 = doc.output('datauristring')
+        await salvaReport(pdfB64, `report_giacenze_${filtri.dal}_${filtri.al}.pdf`, 'pdf')
+      }
+    } catch (e: any) {
+      await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (e?.message || e) })
+    } finally {
+      // Il bottone torna cliccabile anche quando qualcosa va storto: prima restava su "Generazione...".
+      setGenerating(false)
     }
-
-    setGenerating(false)
   }
-
-  const totalePagine = Math.max(1, Math.ceil(reports.length / perPage))
-  const paginaCorr = Math.min(pagina, totalePagine)
-  const reportsPaginate = reports.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
   return (
     <div>
@@ -118,7 +158,7 @@ export default function ReportGiacenzePage() {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px',marginBottom:'16px'}}>
         <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>🔍 Nuovo report</div>
         <div style={{marginBottom:'12px'}}>
-          <label style={lbl}>Data</label>
+          <label style={lbl}>Data apertura giacenza</label>
           <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} />
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'12px',marginBottom:'16px'}}>
@@ -131,24 +171,25 @@ export default function ReportGiacenzePage() {
           <div><label style={lbl}>Vettore</label>
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
+              {vettori.map(v=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
+              {contratti.map(n=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
-          <div><label style={lbl}>Stato</label>
+          <div><label style={lbl}>Stato giacenza</label>
             <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
               <option value="">Tutte</option>
-              <option value="in_giacenza">In Giacenza</option>
+              {Object.entries(STATO_GIACENZA).map(([k,v])=><option key={k} value={k}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Agente</label>
             <select value={filtri.agente} onChange={e=>setF('agente',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {staff.map((u:any)=>{const nome=[u.nome,u.cognome].filter(Boolean).join(' ');return <option key={u.id} value={nome}>{nome||u.email||u.id}</option>})}
+              {agenti.map(n=><option key={n} value={n}>{n}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Formato</label>
@@ -164,43 +205,10 @@ export default function ReportGiacenzePage() {
           {generating?'Generazione...':'Genera Report'}
         </button>
       </div>
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
-        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-          <span style={{fontSize:'12px',color:'#666'}}>Mostra</span>
-          <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select>
-          <span style={{fontSize:'12px',color:'#666'}}>elementi</span>
-        </div>
-        
-        <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
-          <thead><tr style={{background:'#f9fafb'}}>
-            {['ID','Data','Filtri','Formato','Utente','Status','Scarica'].map(h=>(
-              <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db'}}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {!reports.length ? (
-              <tr><td colSpan={7} style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Nessun report generato</td></tr>
-            ) : reportsPaginate.map((r:any,i:number)=>(
-              <tr key={r.id} style={{borderBottom:'1px solid #d1d5db'}}>
-                <td style={{padding:'9px 14px',fontWeight:'600'}}>{reports.length-i}</td>
-                <td style={{padding:'9px 14px',fontSize:'12px'}}>{new Date(r.created_at).toLocaleString('it-IT')}</td>
-                <td style={{padding:'9px 14px',color:'#f97316',fontSize:'12px'}}>{Object.entries(r.filtri||{}).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(', ')}</td>
-                <td style={{padding:'9px 14px'}}><span style={{background:'#e0f2fe',color:'#0369a1',padding:'2px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{r.formato}</span></td>
-                <td style={{padding:'9px 14px'}}>{r.utente||'—'}</td>
-                <td style={{padding:'9px 14px',color:'#16a34a',fontWeight:'500'}}>{r.status||'—'}</td>
-                <td style={{padding:'9px 14px'}}><a href={r.file_url} target="_blank" rel="noopener noreferrer" download style={{color:'#f97316',fontWeight:'600',fontSize:'13px',cursor:'pointer',textDecoration:'none'}}>Scarica</a></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end',gap:'6px',padding:'12px'}}>
-          <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
-          {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n)=>(
-            <button key={n} onClick={()=>setPagina(n)} style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',cursor:'pointer'}}>{n}</button>
-          ))}
-          <button onClick={()=>setPagina(p=>Math.min(totalePagine,p+1))} disabled={paginaCorr>=totalePagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:'pointer',color:paginaCorr>=totalePagine?'#ccc':'#1a1a1a'}}>Successivo</button>
-        </div>
-      </div>
+      {/* Lo storico e' quello comune agli altri report: numerazione giusta anche dopo la prima pagina
+          (prima ripartiva da capo) e "non conservato" al posto di un link vuoto sulle righe senza file. */}
+      {erroreStorico && <div style={{background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',borderRadius:'6px',padding:'8px 12px',fontSize:'12px',marginBottom:'10px'}}>Storico dei report non caricato: {erroreStorico}</div>}
+      <ReportTable reports={reports} onScarica={generaReport}/>
     </div>
   )
 }
