@@ -2038,16 +2038,18 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       // MULTICOLLO: un peso per collo (GLS crea un <Parcel> per collo). Contrassegno/assicurazione
       // vanno solo sul primo collo (li mette lib/gls).
       const pesiColli = packages.map((p: any) => parseFloat(p?.weight) || 1)
-      // SERVIZI ACCESSORI GLS trasmessi via <ServiziAccessori> (tabella codici GLS, verificata 2/9).
-      // (1) modalità CONTRASSEGNO: 01 contanti, 02 assegno bancario (il form ha C/A → 01/02).
-      // (2) servizi scelti (Sabato 23, Exchange 24, Preavviso 14, …) mappati per nome.
+      // SERVIZI ACCESSORI GLS trasmessi via <ServiziAccessori>: solo i servizi scelti (Exchange 24, …),
+      // mappati per nome.
+      // La modalità del CONTRASSEGNO non va lì: viaggia soltanto in <ModalitaIncasso>, ed è quella che GLS
+      // stampa ("contante", "ass bancario"). Fino al 30/10/2026 mettevamo nei servizi anche 01/02/03,
+      // dalla tabella che GLS ci aveva dato il 2/9 ("01 contanti, 02 assegno bancario"); per GLS invece
+      // sono servizi di consegna: 01 stampava "ENTRO ORE 12" su ogni contrassegno in contanti (Wave, 77
+      // spedizioni dal 17/10; Quick 19) e 02 "ORA FISSA". Provato sul conto di Wave, prove annullate.
       const codiciGls: string[] = []
-      // Modalità contrassegno GLS: 'C' contanti (01/CONT), 'AB' assegno bancario (02/AB), 'AC' assegno
-      // circolare (03/AC). 'A' (vecchio valore generico del form) = bancario, per retro-compatibilità.
+      // Modalità contrassegno GLS: 'C' contanti (CONT), 'AB' assegno bancario, 'AC' assegno circolare.
+      // 'A' (vecchio valore generico del form) = bancario, per retro-compatibilità.
       const _im = String(body.incassoModalita || 'C')
-      const _codModalita = (_im === 'AB' || _im === 'A') ? '02' : _im === 'AC' ? '03' : '01'
       const _modalitaIncassoGls = (_im === 'AB' || _im === 'A') ? 'AB' : _im === 'AC' ? 'AC' : 'CONT'
-      if (body.codValue && Number(body.codValue) > 0) codiciGls.push(_codModalita)
       for (const sv of (serviziAccessori || [])) { const cod = codiceServizioGls(String((sv as any)?.nome || '')); if (cod) codiciGls.push(cod) }
 
       // FLEX DELIVERY SERVICE (FDS): GLS manda al DESTINATARIO email/SMS con il link per gestirsi la
@@ -2066,7 +2068,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         provincia: body.shipTo.state,
         pesiColli,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
-        // ModalitaIncasso coerente col codice ServiziAccessori: contante→CONT, assegno→AB (bancario=02).
+        // Modalità del contrassegno: contante→CONT, assegno bancario→AB, circolare→AC.
         modalitaIncasso: body.codValue ? _modalitaIncassoGls : undefined,
         serviziAccessori: codiciGls.length ? codiciGls : undefined,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
