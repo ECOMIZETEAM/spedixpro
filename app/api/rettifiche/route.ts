@@ -307,7 +307,29 @@ export async function POST(req: NextRequest) {
     const spedInfo = new Map<string, any>()
     // Senza le etichette dentro colli_dettaglio: servono solo peso e lati (vedi colli-senza-etichette).
     const { spedizioniConColliLeggeri } = await import('@/lib/colli-senza-etichette')
-    for (const [k, x] of await spedizioniConColliLeggeri(adminDb, idS, 'peso_reale,lunghezza,larghezza,altezza,corriere_id,master_id,corrieri(settings)')) spedInfo.set(k, x)
+    for (const [k, x] of await spedizioniConColliLeggeri(adminDb, idS, 'peso_reale,peso_volume,lunghezza,larghezza,altezza,corriere_id,master_id,corrieri(settings)')) spedInfo.set(k, x)
+    // SENZA IL DETTAGLIO DEI COLLI le misure della spedizione sono quelle di UN collo solo: ripeterle per
+    // tutti i colli inventa un volume che non c'e'. 050026152906222 (2 colli, 59x56x41 e 35x79x40, cioe'
+    // 27,09 + 22,12 = 49,21 kg) diceva «da 54,19 kg»: il primo collo contato due volte. Sulle multicollo
+    // del fornitore che non salvano il dettaglio i colli veri stanno nei `parcels` della sua risposta
+    // (colliDaRaw, come nel dettaglio spedizione): si leggono SOLO quelli, e solo per queste spedizioni.
+    // Verificato il 30/10/2026 sulle 136 multicollo senza dettaglio con rettifiche in 30 giorni: 133 hanno
+    // i parcels, uno per collo; il «da» veniva sbagliato su 32 (19 in piu', fino a 129 kg su 050275152901425;
+    // 13 in meno, fino a 75,6 kg su 050038152893060).
+    const { colliDaRaw } = await import('@/lib/colli-dettaglio')
+    const colliDalFornitore = new Map<string, any[]>()
+    {
+      const senzaDett = [...spedInfo.values()]
+        .filter((x: any) => (Number(x.colli) || 1) > 1 && !(Array.isArray(x.colli_dettaglio) && x.colli_dettaglio.length))
+        .map((x: any) => x.id)
+      for (let i = 0; i < senzaDett.length; i += 150) {
+        const { data } = await adminDb.from('spedizioni').select('id,parcels:raw_response->raw->data->parcels').in('id', senzaDett.slice(i, i + 150))
+        for (const x of (data || []) as any[]) {
+          const colli = colliDaRaw({ parcels: x.parcels })
+          if (colli.length) colliDalFornitore.set(x.id, colli)
+        }
+      }
+    }
     const fattori = new Map<string, number>()
     const fattoreDi = async (sp: any) => {
       const k = `${sp.master_id}|${sp.corriere_id}`
@@ -321,11 +343,19 @@ export async function POST(req: NextRequest) {
       const dopoColli = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
       if (!sp || !dopoColli.length) continue
       const f = await fattoreDi(sp)
-      const dett = Array.isArray(sp.colli_dettaglio) ? sp.colli_dettaglio : []
+      const dett = Array.isArray(sp.colli_dettaglio) && sp.colli_dettaglio.length
+        ? sp.colli_dettaglio
+        : (colliDalFornitore.get(r.spedizione_id) || [])
       const n = Math.max(1, Number(sp.colli) || 1)
       const primaColli = dett.length ? dett : Array.from({ length: n }, () => ({
         peso: (Number(sp.peso_reale) || 0) / n, lunghezza: sp.lunghezza, larghezza: sp.larghezza, altezza: sp.altezza,
       }))
+      // Multicollo senza nessuna misura per collo: si parte dai totali salvati alla creazione (peso reale e
+      // volume, gia' sommati collo per collo), non dal primo collo moltiplicato. Sulle monocollo le misure
+      // della spedizione SONO quelle del collo: resta tutto com'era.
+      const primaDaiTotali = !dett.length && n > 1
+        ? Math.max(Number(sp.peso_reale) || 0, Number(sp.peso_volume) || 0)
+        : 0
       // QUANDO VALE L'AGEVOLAZIONE SI PAGA SUL PESO REALE, non sul maggiore fra peso e volume:
       // scrivere il fatturato senza tenerne conto fa sembrare che il peso scenda mentre il prezzo
       // sale (1UW07WF292297: «da 6,89 a 6,30» con 2,50 EUR di addebito). La verita' e' che il collo
@@ -341,7 +371,7 @@ export async function POST(req: NextRequest) {
         ? ` — il collo misurato esce dalla scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul volume`
         : (!agevPrima && agevDopo) ? ` — il collo misurato rientra nella scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul peso reale` : ''
       pesiDi.set(r.id, {
-        prima: agevPrima ? pesoReale(primaColli) : fattDi(primaColli, f),
+        prima: agevPrima ? pesoReale(primaColli) : (primaDaiTotali > 0 ? primaDaiTotali : fattDi(primaColli, f)),
         dopo: agevDopo ? pesoReale(dopoColli) : fattDi(dopoColli, f),
         nota,
         colli: agevDopo ? dopoColli.map((c: any) => Number(c?.weight) || 0) : dopoColli.map((c: any) => {
