@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { isProviderTecnico } from '@/lib/corriere-logo'
 import WebhookSecretsPanel from '@/app/components/WebhookSecretsPanel'
+import CodiceContratto from '@/app/components/CodiceContratto'
 
 const DISPONIBILI = [
   // Il circuito interno sta per primo: e' l'unico che non dipende da nessuno.
@@ -179,6 +180,7 @@ export default function CorrieriPage() {
                       ? <span title="Un master superiore lo ha messo in pausa: lo sblocco tocca a lui. Il cliente non lo vede; il tuo listino resta salvato." style={{background:'#fef3c7',color:'#b45309',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>⏸ In pausa (livello superiore)</span>
                       : <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{c.attivo?'Attivo':'In pausa'}</span>}
                     <span style={{background:'#fff7ed',color:'#f97316',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>L{c.livello}</span>
+                    <CodiceContratto codice={c.codice} piccolo />
                   </div>
                 </div>
               </div>

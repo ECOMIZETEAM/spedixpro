@@ -74,7 +74,11 @@ export async function GET(req: NextRequest) {
   // sospeso_sopra: in pausa da un livello superiore -> lo vede col badge, prezzi in sola lettura (è ereditato).
   const { corrieriEreditatiIds } = await import('@/lib/rete-masters')
   const _ereditatiIds = await corrieriEreditatiIds(_admin, utente?.master_id)
-  const corrieri = corrieriBase.map((c:any) => ({ ...c, ereditato: _ereditatiIds.has(c.id), sospeso_sopra: _sospesoSopra(c) }))
+  // Il codice del contratto (CT-…) solo allo staff del master: mai al cliente, all'agente o all'autista.
+  const { codiciContratti } = await import('@/lib/codice-contratto')
+  const { gestisceLaRete } = await import('@/lib/ruoli')
+  const _codici = gestisceLaRete(utente as any) ? await codiciContratti(_admin, utente?.master_id) : new Map<string, string>()
+  const corrieri = corrieriBase.map((c:any) => ({ ...c, codice: _codici.get(c.id) || null, ereditato: _ereditatiIds.has(c.id), sospeso_sopra: _sospesoSopra(c) }))
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
 
   const corriereSelezionato = corrieri.find((c:any) => c.id === corriereId) || corrieri[0]

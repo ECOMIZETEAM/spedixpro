@@ -14,7 +14,7 @@ export default async function ModificaListinoPage({
   if (!user) redirect('/')
   const { id } = await params
   const { corriere: corriereQuery, preventivo: preventivoId } = await searchParams
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const { data: listino } = await supabase.from('listini_clienti').select('*').eq('id', id).single()
   if (!listino) redirect('/dashboard/listini')
   let { data: corrieriAssegnati } = await supabase.from('listini_clienti_corrieri')
@@ -51,7 +51,12 @@ export default async function ModificaListinoPage({
   const nomeById = new Map<string, string>((tuttiICorrieri||[]).map((c:any) => [c.id, c.nome_contratto]))
   const pausaCatena = (c:any) => sospesoDallaCatena(nomeById.get(c.id) || c.nome_contratto, sospesiSopra)
   const usabile = (c:any) => attivoById.get(c.id) !== false && !pausaCatena(c)
-  corrieri = corrieri.map((c:any) => ({ ...c, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
+  // Il codice del contratto (CT-…) solo allo staff del master (lib/codice-contratto).
+  const { gestisceLaRete } = await import('@/lib/ruoli')
+  const codici = gestisceLaRete(utente as any)
+    ? await (await import('@/lib/codice-contratto')).codiciContratti((await import('@/lib/supabase-admin')).createAdminSupabase(), utente?.master_id)
+    : new Map<string, string>()
+  corrieri = corrieri.map((c:any) => ({ ...c, codice: codici.get(c.id) || null, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
     .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
   // Da AGGIUNGERE al listino: ANCHE i contratti in pausa. Il master deve poter CREARE/preparare i prezzi
   // di un contratto sospeso; il CLIENTE non lo vedrà comunque (lo filtra /api/cliente/listino-prezzi).

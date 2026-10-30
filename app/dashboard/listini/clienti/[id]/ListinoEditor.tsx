@@ -4,6 +4,7 @@ import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import { setFlash } from '@/lib/flash'
 import { useDialog } from '@/app/components/DialogProvider'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
+import CodiceContratto from '@/app/components/CodiceContratto'
 import { peggioreSuNolo, type Nolo } from '@/lib/sotto-costo-formule'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
@@ -26,7 +27,7 @@ function NumInput({ value, onChange, style, placeholder }: { value: number; onCh
 }
 
 interface Zona { id: string; nome: string }
-interface Corriere { id: string; nome_contratto: string; tipo?: string; pausa?: boolean; pausaMotivo?: string | null }
+interface Corriere { id: string; nome_contratto: string; tipo?: string; pausa?: boolean; pausaMotivo?: string | null; codice?: string | null }
 type TipoFascia = 'fino_a' | 'oltre' | 'piccola' | 'media' | 'grande'
 // Fasce a TAGLIA (locker InPost & simili): il prezzo va alla taglia del box, non al peso.
 const TAGLIE: TipoFascia[] = ['piccola', 'media', 'grande']
@@ -884,6 +885,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                     <span style={{width:'40px',height:'40px',borderRadius:'8px',background:aperto?'#f97316':'#f3f4f6',color:aperto?'#fff':'#6b7280',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:0}}>{iniziali(c.nome_contratto)}</span>
                   )}
                   <span style={{flex:1,fontSize:'14px',fontWeight:'600',color:'#1a1a1a',display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap' as const}}>{c.nome_contratto}
+                    <CodiceContratto codice={c.codice} piccolo />
                     {c.pausa && <span title={c.pausaMotivo==='catena' ? 'Un master superiore lo ha messo in pausa: il cliente non lo vede e non puoi riattivarlo finché non lo riattiva chi lo ha fermato.' : 'Tu lo hai messo in pausa: il cliente non lo vede. Riattivalo da Corrieri.'} style={{background:'#fef2f2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'20px',fontSize:'10.5px',fontWeight:700,padding:'2px 8px'}}>⏸ {c.pausaMotivo==='catena' ? 'In pausa da un livello superiore' : 'In pausa'}</span>}</span>
                   {!isCorriere && (
                     <button onClick={(e)=>{e.stopPropagation(); apriDaCosto(c)}} title="Riempi i prezzi dal TUO costo con una maggiorazione (% o € fisso)"

@@ -194,38 +194,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   // tocca decine di master: tenerla DENTRO la risposta faceva aspettare l'utente anche mezzo minuto
   // dopo il clic su Salva. Il listino e' gia' scritto qui sopra (il salvataggio e' completo e
   // atomico dal punto di vista dell'utente); la cascata prosegue con after() e finisce da sola.
+  // Stessa funzione degli aumenti in percentuale: sotto-master e master collegati (ingrosso).
   after(async () => {
-    try {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const { propagaListinoACascata } = await import('@/lib/copia-listino-submaster')
-      const t0 = Date.now()
-      const n = await propagaListinoACascata(createAdminSupabase(), id)
-      console.log(`[LISTINO][PROPAGA] listino ${id} -> ${n} sotto-master in ${Date.now() - t0}ms`)
-    } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
-  })
-
-  // AUTO RE-SYNC CONDIVISIONE: se questo listino è il prezzo d'ingrosso di un master collegato (è il
-  // listino_cliente_id di un cliente-ledger), riporta i costi sui contratti che gli sono già condivisi —
-  // così ritoccare i prezzi qui aggiorna da solo il costo mostrato al collegato. NON crea contratti nuovi
-  // né sostituisce le sue copie: salvare un listino lo può anche un operatore, e ricreerebbe un contratto
-  // che il collegato ha tolto. Quelli li attiva un master dalla scheda del collegato (Aggiorna / Assegna).
-  // L'addebito era già live. Background, best-effort.
-  after(async () => {
-    try {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const { risincronizzaCondivisione } = await import('@/lib/condivisione-engine')
-      const admin = createAdminSupabase()
-      const { data: ledgers } = await admin.from('clienti').select('id').eq('ledger', true).eq('listino_cliente_id', id)
-      // Tutti i collegamenti attivi del ledger, anche quello del vecchio tipo (un contratto solo, con
-      // corriere_id valorizzato: LOGIXIA → Wave). Il filtro `corriere_id is null` lo escludeva, e dal 3/10
-      // al 29/10 nessun salvataggio di LOGIXIA è arrivato a Wave: il secondo scaglione del contrassegno
-      // restava a 2.000 € mentre l'ingrosso diceva 5.000. risincronizzaCondivisione a quel tipo riallinea
-      // solo il costo, senza creargli contratti nuovi.
-      for (const l of (ledgers || [])) {
-        const { data: links } = await admin.from('corrieri_condivisi').select('id').eq('cliente_ledger_id', (l as any).id).eq('stato', 'attiva')
-        for (const link of (links || [])) await risincronizzaCondivisione(admin, (link as any).id)
-      }
-    } catch (e) { console.error('Re-sync condivisione dopo salvataggio listino:', e) }
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { propagaListinoModificato } = await import('@/lib/listino-modificato')
+    await propagaListinoModificato(createAdminSupabase(), id)
   })
 
   return NextResponse.json({ ok: true, propagazione: 'in corso' })

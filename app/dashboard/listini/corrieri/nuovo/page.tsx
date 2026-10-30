@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
+import CodiceContratto from '@/app/components/CodiceContratto'
 
 const inp = {padding:'6px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const inpFull = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',textAlign:'right' as const,boxSizing:'border-box' as const}
@@ -645,6 +646,7 @@ export default function ListinoCorrierePage() {
                     <span style={{width:'40px',height:'40px',borderRadius:'8px',background:aperto?'#f97316':'#f3f4f6',color:aperto?'#fff':'#6b7280',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:0}}>{iniziali(c.nome_contratto)}</span>
                   )}
                   <span style={{flex:1,fontSize:'14px',fontWeight:'600',color:'#1a1a1a',display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap' as const}}>{c.nome_contratto}
+                    <CodiceContratto codice={c.codice} piccolo />
                     {c.sospeso_sopra && <span title="Un master superiore lo ha messo in pausa: tu lo vedi e ne prepari i prezzi, ma il cliente non lo vede finché non viene riattivato a monte." style={{background:'#fef2f2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'20px',fontSize:'10.5px',fontWeight:700,padding:'2px 8px'}}>⏸ In pausa da un livello superiore</span>}</span>
                   <span style={{fontSize:'18px',color:'#9ca3af',transform:aperto?'rotate(90deg)':'none',transition:'transform 0.15s'}}>›</span>
                 </div>
