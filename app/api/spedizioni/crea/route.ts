@@ -2052,12 +2052,13 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       const _modalitaIncassoGls = (_im === 'AB' || _im === 'A') ? 'AB' : _im === 'AC' ? 'AC' : 'CONT'
       for (const sv of (serviziAccessori || [])) { const cod = codiceServizioGls(String((sv as any)?.nome || '')); if (cod) codiciGls.push(cod) }
 
-      // CONTATTI DEL DESTINATARIO: su GLS DIRETTO vanno sempre quelli veri (email e cellulare).
+      // CONTATTI DEL DESTINATARIO: su GLS DIRETTO vanno sempre quelli veri (email, cellulare, telefono).
       // La schermatura con l'email di servizio vale per i provider, non per i contratti diretti
       // (Lorenzo, 30/10/2026): prima partivano solo dove era acceso settings.flex_delivery (i GLS di
       // Quick), e su tutti gli altri GLS l'autista e GLS non avevano un numero. Con email e cellulare
       // GLS avvisa il destinatario e, dove il contratto ha il FlexDeliveryService, gli manda il link per
-      // gestirsi la consegna. Sono gli stessi campi che GLS accetta sui contratti di Quick dall'11/9.
+      // gestirsi la consegna. Email e cellulare GLS li accetta sui contratti di Quick dall'11/9; il telefono
+      // (TelefonoDestinatario) provato sul conto di Wave il 30/10: 1 e 2 colli accettati, multicollo intero.
       const ris = await creaSpedizioneGls(credGls, {
         ragioneSociale: body.shipTo.name,
         indirizzo: body.shipTo.street1,
@@ -2074,9 +2075,10 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         bda,
         email: body.shipTo.email || undefined,
         cellulare: body.shipTo.phone || undefined,
+        telefono: body.shipTo.phone || undefined,
         ...(parcelGls ? {
           tipoSpedizione: 'P' as const, paese: body.shipTo.country,
-          personaRiferimento: body.shipTo.name, telefono: body.shipTo.phone,
+          personaRiferimento: body.shipTo.name,
         } : {}),
       })
 
@@ -2291,6 +2293,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         localita: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state,
         paese: body.shipTo.country || 'IT',
         contatto: body.shipTo.name, telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined,
+        cellulare: body.shipTo.phone || undefined,
         pesoTotKg: pesoTot, numeroColli: packages.length, volumeM3: volTot > 0 ? volTot : undefined,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
         codPaymentType: _codPaymentTypeBrt,

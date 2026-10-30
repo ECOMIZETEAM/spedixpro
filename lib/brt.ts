@@ -43,6 +43,7 @@ export type ParcelBrt = {
   contatto?: string
   telefono?: string
   email?: string
+  cellulare?: string       // consigneeMobilePhoneNumber: il numero che BRT usa per gli SMS al destinatario
   // PESO TOTALE della spedizione (BRT vuole il totale, non per collo) e NUMERO COLLI (max 30).
   pesoTotKg: number
   numeroColli: number
@@ -95,6 +96,14 @@ async function chiamaBrt(path: string, body: unknown, method: 'POST' | 'PUT' = '
   }
 }
 
+function cellulareBrt(tel: unknown, paese: unknown): string {
+  let d = String(tel ?? '').replace(/\D/g, '')
+  const italia = !paese || String(paese).toUpperCase() === 'IT'
+  if (italia && d.startsWith('0039')) d = d.slice(4)
+  else if (italia && d.startsWith('39') && d.length >= 11) d = d.slice(2)
+  return d.length >= 6 ? d.slice(0, 16) : ''
+}
+
 // Riferimento numerico univoco per la spedizione (precision 15): ms + 2 cifre casuali. Serve a creare e
 // poi a ritrovare la spedizione per l'annullo. Univoco per non farsi rifiutare da BRT una creazione dup.
 function generaNumericRef(): number {
@@ -128,6 +137,10 @@ export async function creaSpedizioneBrt(cred: CredenzialiBrt, p: ParcelBrt): Pro
     consigneeContactName: s(p.contatto, 35) || undefined,
     consigneeTelephone: s(p.telefono, 16) || undefined,
     consigneeEMail: s(p.email, 70) || undefined,
+    // Prima il numero andava solo nel campo del telefono fisso: il cellulare (quello degli SMS BRT al
+    // destinatario) restava vuoto. Solo cifre, senza il prefisso italiano; un estero resta col suo.
+    // Provato sul BRT di Wave il 30/10: BRT accetta (code 0), spedizione di prova annullata.
+    consigneeMobilePhoneNumber: cellulareBrt(p.cellulare, p.paese) || undefined,
     isAlertRequired: '0',
     pricingConditionCode: s(cred.codice_tariffa, 3) || '',
     serviceType: s(p.serviceType, 1) || '',

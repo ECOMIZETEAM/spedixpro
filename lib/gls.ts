@@ -147,7 +147,7 @@ export type ParcelGls = {
   tipoSpedizione?: ServizioGls
   paese?: string                 // ISO 3166 del paese di destinazione (solo Parcel)
   personaRiferimento?: string    // <PersonaRiferimento> (max 50)
-  telefono?: string              // <TelefonoDestinatario> (solo cifre, max 16)
+  telefono?: string              // <TelefonoDestinatario> (solo cifre, max 16): obbligatorio sul Parcel, facoltativo sul nazionale
 }
 
 // NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori. I codici sono 2
@@ -217,6 +217,15 @@ function faultString(xml: string): string | null {
   return estraiTag(xml, 'faultstring')
 }
 
+// <TelefonoDestinatario> sul nazionale: numerico, max 16. Le ultime 10 cifre come per il Cellulare1
+// taglierebbero un fisso di 11 (es. 0331 1234567): si toglie solo il prefisso italiano.
+function telefonoNazionaleGls(tel: unknown): string {
+  let d = String(tel ?? '').replace(/\D/g, '')
+  if (d.startsWith('0039')) d = d.slice(4)
+  else if (d.startsWith('39') && d.length >= 11) d = d.slice(2)
+  return d.length >= 6 ? d.slice(0, 16) : ''
+}
+
 // Costruisce l'XMLInfoParcel per AddParcel (STRUTTURA VERIFICATA). Un <Parcel> PER COLLO.
 export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): string {
   const info =
@@ -244,6 +253,9 @@ export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): str
       // senza riferimento, ci si agganciava sopra: Hard2Buff → Salerno, 2 pacchi, su GLS 665264142 a
       // 3 colli più la 665264141 (19/10/2026; 9 casi di Quick dal 01/10).
       p.bda ? tag('Bda', String(p.bda).substring(0, 20)) : '',
+      // Telefono del destinatario su ogni collo, come gli altri dati del destinatario: è quello che
+      // l'autista vede per chiamare. Solo cifre, senza il prefisso italiano (+39/0039).
+      tag('TelefonoDestinatario', telefonoNazionaleGls(p.telefono)),
       // Contrassegno / assicurazione / note SOLO sul primo collo (dati di spedizione, non di collo:
       // ripeterli su ogni Parcel rischia di moltiplicarli).
       primo && p.importoContrassegno && p.importoContrassegno > 0 ? tag('Importocontrassegno', euroIt(p.importoContrassegno)) : '',
