@@ -147,9 +147,10 @@ export async function GET(req: NextRequest) {
       }
     }
     // Il reso che il sotto-master scrive su SE STESSO e' un addebito verso di me solo se sto nella catena
-    // di quel pacco: stessa regola di Rettifiche, Giacenze e Fatture (lib/catena-report).
-    const conMovSelf = idsGambe.filter((sid) => (movPerSped.get(sid) || []).some((m: any) => !m.cliente_id && m.master_id === m.master_target_id))
-    const inCatena = await spedizioniInCatena(admin, mio, conMovSelf)
+    // di quel pacco: stessa regola di Rettifiche, Giacenze e Fatture (lib/catena-report). La prova si fa su
+    // tutte le gambe: il mio costo d'acquisto sul conto "(ingrosso)" spesso sta su un'altra gamba.
+    const conSelf = visibili.filter((s: any) => gambe(s).some((sid) => (movPerSped.get(sid) || []).some((m: any) => !m.cliente_id && m.master_id === m.master_target_id)))
+    const gambeInCatena = await spedizioniInCatena(admin, mio, conSelf.flatMap(gambe))
 
     const tDal = Date.parse(dal), tAl = Date.parse(al)
     const out: any[] = []
@@ -162,6 +163,7 @@ export async function GET(req: NextRequest) {
       const tPrimo = Date.parse(primo)
       if (tPrimo < tDal || tPrimo > tAl) continue
       const fl = s.master_id === mio ? null : (primaLinea.get(s.master_id) || null)
+      const paccoInCatena = gambe(s).some((sid) => gambeInCatena.has(sid))
       let importo: number | null = null
       if ((s.master_id === mio && s.cliente_id) || fl) {
         let somma = 0
@@ -171,7 +173,7 @@ export async function GET(req: NextRequest) {
           const alDiretto = s.master_id === mio
             ? (!!m.cliente_id && m.cliente_id === s.cliente_id)
             : (!m.cliente_id && m.master_target_id === fl && m.conto !== 'proprio'
-              && (m.master_id === mio || (m.master_id === fl && inCatena.has(m.spedizione_id))))
+              && (m.master_id === mio || (m.master_id === fl && paccoInCatena)))
           if (alDiretto) somma += Number(m.importo || 0)
         }
         // Importi con segno: l'addebito e' negativo, lo storno positivo.
