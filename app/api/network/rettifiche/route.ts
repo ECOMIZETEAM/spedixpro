@@ -174,7 +174,13 @@ export async function POST(req: NextRequest) {
     // un importo FISSO che per regola scende INVARIATO a prescindere dal listino: se c'e', la figlia
     // si crea COMUNQUE — anche quando il collo ripesato e' oltre la fascia massima del figlio — con la
     // sola parte ripesatura a zero, altrimenti il supplemento si fermerebbe a questo livello.
-    const reweighGirabile = liv.differenza != null && liv.differenza >= 0.01
+    // LA PENALE BRT NON E' UN CAMBIO DI PESO (regola di Lorenzo, 7/10): scende soltanto lei, invariata,
+    // fino al cliente che ha sforato. Qui pero' il motore riprezzava anche i chili col listino del figlio
+    // e li sommava alla penale: l'8/10 BL SISTEMI ha pagato 18,60 di penale + 3,90 di peso
+    // (050187292960523), e il 30/10, sulle penali messe per errore, SENDGO ha pagato 5,39 di peso
+    // + 3,53 di "penale" per gli stessi chili (050026152906222).
+    const penale = String((r as any).supplementi_nomi || '').toLowerCase().includes('penale')
+    const reweighGirabile = !penale && liv.differenza != null && liv.differenza >= 0.01
     if (!reweighGirabile && fs === 0) {
       // Niente supplemento e niente ripesatura da girare: se il listino non copre proprio il collo
       // (differenza null) e' ritentabile; se lo copre ma esce <= 0 e' una scelta presa (assorbita).
@@ -214,7 +220,7 @@ export async function POST(req: NextRequest) {
       peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo,   // il volume, cosi' si vede perche' il costo sale
       // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0. A zero per
       // passaggio: resta quello pagato, un dovuto piu' basso sembrerebbe un rimborso che non c'e'.
-      costo_iniziale: liv.pagato, costo_finale: soloPassaggio ? liv.pagato : (liv.dovuto ?? liv.pagato),
+      costo_iniziale: liv.pagato, costo_finale: (soloPassaggio || penale) ? liv.pagato : (liv.dovuto ?? liv.pagato),
       differenza: -diffFiglia,            // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
       fuori_sagoma: fs,                   // il supplemento fisso scende INVARIATO, NON si riprezza
       supplementi_nomi: (r as any).supplementi_nomi || null,   // e col nome, altrimenti sotto si legge "fuori sagoma" per tutto

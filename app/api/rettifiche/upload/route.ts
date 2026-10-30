@@ -364,8 +364,17 @@ export async function POST(req: NextRequest) {
           // banda normale NON la recupera. Si gira l'INTERO costo fornitore come supplemento fisso, che
           // cascata invariato fino al cliente che ha sforato — differenza a 0 (non e' un cambio-peso: il
           // peso_fatturato non si tocca). Verificato su 050187292960523 (5→18,6kg, costo 18,60 = 18,6×1€).
+          // LA PENALE E' DI CHI HA USATO IL SERVIZIO A PESO REALE: un collo DICHIARATO entro la soglia,
+          // e per questo tassato sul peso reale (stessa condizione di lib/agevolazione-misure pesoSuReale),
+          // che il corriere trova piu' pesante. Un collo dichiarato gia' sopra la soglia e' stato prezzato
+          // sul volumetrico come tutti: il sovrapprezzo e' una ripesatura normale e si riprezza col listino.
+          // Senza questa condizione il 30/10/2026 sono finiti "in penale" 121 pacchi dichiarati da 6,3 a
+          // 300 kg (es. 050026152906222, dichiarato 30,4 kg): sotto si pagavano i chili in piu' due volte,
+          // una col listino del livello e una con la "penale", che era il costo degli stessi chili.
           const pen = penalePerSped.get(e.spedizioneId)
-          const isPenaleBrt = !!pen && Number(e.pesoDopo || 0) > pen.sogliaKg && Number(e.addebitoFornitore || 0) > 0
+          const dichiaratoReale = Number(e.pesoRealePrima || 0)
+          const isPenaleBrt = !!pen && dichiaratoReale > 0 && dichiaratoReale <= pen.sogliaKg
+            && Number(e.pesoDopo || 0) > pen.sogliaKg && Number(e.addebitoFornitore || 0) > 0
           const fsEff = isPenaleBrt ? Math.round(Number(e.addebitoFornitore) * 100) / 100 : fs
           // A ZERO MA NON FERMA: il figlio non deve niente, ma qualcuno sotto di lui si' (vedi
           // qualcunoSottoDeve). La riga nasce a zero cosi' la catena prosegue e chi sta sotto la gira ai suoi.
