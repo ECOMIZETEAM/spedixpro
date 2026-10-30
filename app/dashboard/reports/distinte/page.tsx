@@ -136,7 +136,8 @@ export default function ReportDistintePage() {
       } else {
         const { default: jsPDF } = await import('jspdf')
         const { default: autoTable } = await import('jspdf-autotable')
-        const doc = new jsPDF({ orientation: filtri.tipo === 'reso' ? 'portrait' : 'landscape' })
+        // compress: senza, il PDF esce 12 volte piu' grosso e oltre i 25 MB l'archivio lo rifiuta (lib/report-client.ts).
+        const doc = new jsPDF({ orientation: filtri.tipo === 'reso' ? 'portrait' : 'landscape', compress: true })
         doc.setFontSize(14)
         doc.text(`Report ${TIPI[filtri.tipo]} — ${giornoIt(filtri.dal + 'T12:00:00Z')} / ${giornoIt(filtri.al + 'T12:00:00Z')}`, 14, 15)
         doc.setFontSize(10)

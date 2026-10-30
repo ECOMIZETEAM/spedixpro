@@ -132,7 +132,8 @@ function totaliPDF(doc: any, prezzoNetto: number, iva: number, etichetta: string
 
 async function nuovoDoc() {
   const { default: jsPDF } = await import('jspdf'); await import('jspdf-autotable')
-  return new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  // compress: senza, il PDF esce 12 volte piu' grosso e oltre i 25 MB l'archivio lo rifiuta (lib/report-client.ts).
+  return new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
 }
 
 // RIEPILOGO PDF (foto 1)

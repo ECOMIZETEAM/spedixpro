@@ -43,7 +43,8 @@ export default function ReportContrassegniCliente() {
       if (!righe || !righe.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessun contrassegno trovato nel periodo.' }); return }
       const { default: jsPDF } = await import('jspdf')
       const { default: autoTable } = await import('jspdf-autotable')
-      const doc = new jsPDF()
+      // compress: senza, il PDF esce 12 volte piu' grosso e oltre i 25 MB l'archivio lo rifiuta (lib/report-client.ts).
+      const doc = new jsPDF({ compress: true })
       if (master?.logo_url) {
         try {
           const img = await fetch(master.logo_url).then(r=>r.blob()).then(b=>new Promise<string>((res)=>{const fr=new FileReader();fr.onload=()=>res(fr.result as string);fr.readAsDataURL(b)}))

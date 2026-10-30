@@ -12,9 +12,22 @@ import { BUCKET_RISERVATI } from '@/lib/file-riservati'
 //
 // Quindi: i file piccoli continuano per la strada di prima, che e' semplice e funziona. I grossi
 // se ne vanno per conto loro allo spazio di archiviazione, con un permesso monouso valido per un
-// percorso solo, e al server arriva solo il percorso. Nessun limite pratico, e il bucket resta
-// privato come prima.
+// percorso solo, e al server arriva solo il percorso. Il bucket resta privato come prima.
 const SOGLIA = 3 * 1024 * 1024
+// Il limite c'e' comunque: il bucket dei report accetta file fino a 25 MB. Il 30/10/2026 il Report
+// Rettifiche di MULTIEXPRESS di ottobre (18.914 righe) pesava 44 MB senza compressione e non si salvava
+// ("The object exceeded the maximum allowed size"); compresso pesa 4 MB. Se un file resta comunque
+// troppo grosso, o l'archivio non risponde, il report non va perso: si scarica sul computer di chi
+// l'ha chiesto, e glielo si dice.
+const LIMITE_ARCHIVIO = 25 * 1024 * 1024
+
+function scaricaSulComputer(blob: Blob, nomeFile: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = nomeFile
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
 
 function tipoContenuto(formato: string): string {
   const f = String(formato || '').toLowerCase()
@@ -49,22 +62,29 @@ export async function inviaReport(opts: {
 
   if (peso <= SOGLIA) return registra({ fileBase64 })
 
+  const contentType = tipoContenuto(formato)
+  const blob = inBlob(puro, contentType)
+  const soloSulComputer = (motivo: string): EsitoReport => {
+    scaricaSulComputer(blob, nomeFile)
+    return { success: false, error: motivo + '. Il report è stato scaricato direttamente sul tuo computer, ma non resta nell\'elenco.' }
+  }
+  if (blob.size > LIMITE_ARCHIVIO) {
+    return soloSulComputer('Il file pesa ' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB, oltre i 25 MB dell\'archivio')
+  }
   try {
     const permesso = await fetch('/api/reports/upload-url', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nomeFile }),
     }).then(r => r.json())
     if (!permesso?.success || !permesso?.token) {
-      return { success: false, error: permesso?.error || 'Caricamento non disponibile' }
+      return soloSulComputer('Archivio non disponibile (' + (permesso?.error || 'nessun permesso di caricamento') + ')')
     }
-    const contentType = tipoContenuto(formato)
-    const blob = inBlob(puro, contentType)
     const sb = createClient()
     const { error } = await sb.storage.from(BUCKET_RISERVATI)
       .uploadToSignedUrl(permesso.path, permesso.token, blob, { contentType })
-    if (error) return { success: false, error: error.message }
+    if (error) return soloSulComputer('Archiviazione non riuscita (' + error.message + ')')
     return registra({ pathCaricato: permesso.path, dimensione: blob.size })
   } catch (e: any) {
-    return { success: false, error: String(e?.message || e) }
+    return soloSulComputer('Archiviazione non riuscita (' + String(e?.message || e) + ')')
   }
 }

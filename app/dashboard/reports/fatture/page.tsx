@@ -138,7 +138,8 @@ export default function ReportFatturePage() {
       } else {
         const { default: jsPDF } = await import('jspdf')
         const { default: autoTable } = await import('jspdf-autotable')
-        const doc = new jsPDF()
+        // compress: senza, il PDF esce 12 volte piu' grosso e oltre i 25 MB l'archivio lo rifiuta (lib/report-client.ts).
+        const doc = new jsPDF({ compress: true })
         doc.setFontSize(14)
         doc.text(`${intestazione} — ${filtri.dal} / ${filtri.al}`, 14, 15)
         doc.setFontSize(10)

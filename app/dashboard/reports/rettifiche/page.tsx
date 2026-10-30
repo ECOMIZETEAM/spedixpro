@@ -93,7 +93,8 @@ export default function ReportRettifichePage() {
         const { default: jsPDF } = await import('jspdf')
         const { default: autoTable } = await import('jspdf-autotable')
         // Orizzontale: con la causale (e il cliente, se sono tutti) in verticale le colonne non ci stanno.
-        const doc = new jsPDF({ orientation: 'landscape' })
+        // compress: senza, il PDF esce 12 volte piu' grosso e oltre i 25 MB l'archivio lo rifiuta (lib/report-client.ts).
+        const doc = new jsPDF({ orientation: 'landscape', compress: true })
         const dx = 283
         if (master?.logo_url) {
           try {
