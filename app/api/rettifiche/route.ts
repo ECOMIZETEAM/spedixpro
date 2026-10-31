@@ -21,9 +21,13 @@ export async function GET(req: NextRequest) {
   if (!vedeLaRete(utente)) return NextResponse.json([])
   const fileId = req.nextUrl.searchParams.get('fileId')
   const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // L'agente legge con la chiave di servizio, filtrato qui sotto sul suo master e sui SUOI clienti: il
+  // database non gli lascia piu' leggere la tabella, perche' con la sua sessione aveva ogni colonna,
+  // costo_fornitore compreso (31/10/2026: un agente ne vedeva 598 righe, 57 col costo del fornitore).
+  const db = filtroAgente ? (await import('@/lib/supabase-admin')).createAdminSupabase() : supabase
   // fetchAll: senza, oltre 1000 rettifiche da confermare non comparivano (e non erano confermabili).
   const build = () => {
-    let q = supabase.from('rettifiche')
+    let q = db.from('rettifiche')
       .select('*, clienti(ragione_sociale), masters:target_master_id(nome)')
       .eq('master_id', utente?.master_id)
       .eq('confermata', false)
