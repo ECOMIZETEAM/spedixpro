@@ -300,6 +300,7 @@ export async function POST(req: NextRequest) {
   // I PESI FATTURATI, riga per riga: quello dichiarato alla partenza e quello dopo la ripesatura,
   // calcolati come li calcola il motore (per collo, col fattore volumetrico DEL CONTRATTO).
   const pesiDi = new Map<string, { prima: number; dopo: number; colli: number[]; nota: string }>()
+  const sogliaDi = new Map<string, number>()   // spedizione -> kg del servizio a peso reale (penale BRT)
   {
     const { fattoreVolumeCorriere } = await import('@/lib/pricing')
     const { pesoSuReale, descriviAgevolazione } = await import('@/lib/agevolazione-misure')
@@ -308,6 +309,7 @@ export async function POST(req: NextRequest) {
     // Senza le etichette dentro colli_dettaglio: servono solo peso e lati (vedi colli-senza-etichette).
     const { spedizioniConColliLeggeri } = await import('@/lib/colli-senza-etichette')
     for (const [k, x] of await spedizioniConColliLeggeri(adminDb, idS, 'peso_reale,peso_volume,lunghezza,larghezza,altezza,corriere_id,master_id,created_at,corrieri(settings)')) spedInfo.set(k, x)
+    for (const [k, x] of spedInfo) { const kgSoglia = Number(x?.corrieri?.settings?.peso_reale_soglia?.kg) || 0; if (kgSoglia > 0) sogliaDi.set(k, kgSoglia) }
     // SENZA IL DETTAGLIO DEI COLLI le misure della spedizione sono quelle di UN collo solo: ripeterle per
     // tutti i colli inventa un volume che non c'e'. 050026152906222 (2 colli, 59x56x41 e 35x79x40, cioe'
     // 27,09 + 22,12 = 49,21 kg) diceva «da 54,19 kg»: il primo collo contato due volte.
@@ -417,7 +419,15 @@ export async function POST(req: NextRequest) {
     }
     if (extraFS > 0) {
       const nomi = String(r.supplementi_nomi || '').trim()
-      parti.push(`Supplemento${nomi ? ' ' + nomi : ''} ${r.numero_spedizione} €${extraFS.toFixed(2)}${dimDi(r)}`)
+      if (/penale/i.test(nomi)) {
+        // LA PENALE DICE I CHILI. «Supplemento penale BRT peso reale sforato 050187292960523 €18.60» diceva
+        // quanto, non perche': BL SISTEMI leggeva 18,60 € e doveva aprire il report per scoprire che aveva
+        // dichiarato 5 kg su un servizio fino a 5 kg e il corriere ne aveva pesati 18,6. Lorenzo, 31/10/2026.
+        const soglia = r.spedizione_id ? sogliaDi.get(r.spedizione_id) : undefined
+        parti.push(`Penale BRT ${r.numero_spedizione}: dichiarato ${kg(Number(r.peso_iniziale) || 0)}, pesato ${kg(Number(r.peso_reale) || 0)}${soglia ? ` (servizio fino a ${kg(soglia)})` : ''} €${extraFS.toFixed(2)}`)
+      } else {
+        parti.push(`Supplemento${nomi ? ' ' + nomi : ''} ${r.numero_spedizione} €${extraFS.toFixed(2)}${dimDi(r)}`)
+      }
     }
     return parti.length ? parti.join(' + ') : `Rettifica ${r.numero_spedizione}`
   }
