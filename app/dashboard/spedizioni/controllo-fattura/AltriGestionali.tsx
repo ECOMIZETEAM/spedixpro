@@ -30,7 +30,10 @@ const vociDi = (r: RigaFatturaBrt) => [
 
 export type EsternoIniziale = { nome: string; formatoId: string; spedizioni: SpedizioneEsterna[] }
 
-export default function AltriGestionali({ righe, numeroFattura, iniziali }: { righe: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[] }) {
+export default function AltriGestionali({ righe, numeroFattura, iniziali, onScaricato }: {
+  righe: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]
+  onScaricato?: (x: { nome: string; righe: number }) => void   // scaricare il file è un'azione: la fattura resta nello storico
+}) {
   const dialog = useDialog()
   const [file, setFile] = useState<FileCaricato[]>(() => (iniziali || [])
     .map(x => ({ nome: x.nome, formato: FORMATI.find(f => f.id === x.formatoId)!, spedizioni: x.spedizioni })).filter(x => x.formato))
@@ -75,7 +78,9 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali }: { ri
     const t = e.formato.rettifiche
     const ws = XLSX.utils.aoa_to_sheet([t.colonne, ...righeRettificheEsterne(e.abbinate).map(t.riga)])
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, t.foglio)
-    XLSX.writeFile(wb, `rettifiche-fattura-${numeroFattura}-${e.nome.replace(/\.[^.]+$/, '')}.xlsx`)
+    const nome = `rettifiche-fattura-${numeroFattura}-${e.nome.replace(/\.[^.]+$/, '')}.xlsx`
+    XLSX.writeFile(wb, nome)
+    onScaricato?.({ nome, righe: righeRettificheEsterne(e.abbinate).length })
   }
 
   const tutte = esiti.flatMap(e => e.abbinate)

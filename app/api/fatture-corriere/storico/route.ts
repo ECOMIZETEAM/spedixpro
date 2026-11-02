@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { utenteDetentore } from '@/lib/controllo-fattura-accesso'
+import { fatturaConAzioni } from '@/lib/controllo-fattura-riepilogo'
 
 // LO STORICO DELLE FATTURE DEL CORRIERE, mese per mese, solo quelle del master che chiede.
 //   GET            → l'elenco, con quanto è stato girato ai clienti con la Rettifica e quanto resta a suo carico
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: fatture, error } = await admin.from('fatture_corriere')
-    .select('id,corriere_id,nome_contratto,numero_fattura,etichetta,data_fattura,nome_file,stato,righe,andate,rientri,totale_corriere,totale_trovate,costo_moove,differenza,non_trovate,totale_non_trovate,da_girare,euro_da_girare,rettifiche_file_id,created_at')
+    .select('id,corriere_id,nome_contratto,numero_fattura,etichetta,data_fattura,nome_file,stato,righe,andate,rientri,totale_corriere,totale_trovate,costo_moove,differenza,non_trovate,totale_non_trovate,da_girare,euro_da_girare,rettifiche_file_id,riepilogo,created_at')
     .eq('master_id', u.masterId).eq('stato', 'completa').order('data_fattura', { ascending: false }).order('created_at', { ascending: false }).limit(240)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest) {
   }
   const r2 = (n: number) => Math.round(n * 100) / 100
   return NextResponse.json({
-    fatture: (fatture || []).map((f: any) => {
+    fatture: (fatture || []).filter(fatturaConAzioni).map((f: any) => {
       const g = f.rettifiche_file_id ? perFile.get(f.rettifiche_file_id) : null
       const recuperato = r2(g?.euroConfermati || 0)
       return { ...f, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa) } : null, aTuoCarico: r2(Number(f.differenza) - recuperato) }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { contrattiDelDetentore, utenteDetentore } from '@/lib/controllo-fattura-accesso'
 import { analizzaFatturaBrt } from '@/lib/controllo-fattura'
-import { riepilogaFattura, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
+import { riepilogaFattura, fatturaConAzioni, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
 
 // Mille e più righe, ognuna col listino rifatto dalla funzione dell'addebito: serve più del minuto standard.
@@ -27,6 +27,7 @@ type Corpo = {
   testata?: { numeroFattura?: string; dataFattura?: string | null; nomeFile?: string }
   chiudi?: boolean
   rettificheFileId?: string
+  fileEsterno?: { nome?: string; righe?: number }
 }
 
 export async function POST(req: NextRequest) {
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
   // Una fattura già aperta si tocca solo se è del master e di un suo contratto BRT.
   let fattura: any = null
   if (corpo.fatturaId) {
-    const { data } = await admin.from('fatture_corriere').select('id,master_id,corriere_id,stato').eq('id', corpo.fatturaId).maybeSingle()
+    const { data } = await admin.from('fatture_corriere').select('id,master_id,corriere_id,stato,riepilogo').eq('id', corpo.fatturaId).maybeSingle()
     if (!data || data.master_id !== u.masterId) return NextResponse.json({ error: 'Fattura non trovata.' }, { status: 404 })
     fattura = data
   }
@@ -48,6 +49,15 @@ export async function POST(req: NextRequest) {
     const { data: f } = await admin.from('rettifiche_files').select('id,master_id').eq('id', corpo.rettificheFileId).maybeSingle()
     if (!f || f.master_id !== u.masterId) return NextResponse.json({ error: 'File di rettifiche non tuo.' }, { status: 403 })
     await admin.from('fatture_corriere').update({ rettifiche_file_id: f.id }).eq('id', fattura.id)
+    return NextResponse.json({ ok: true })
+  }
+
+  // ── FILE DI RETTIFICHE SCARICATO PER UN ALTRO GESTIONALE: è un'azione, la fattura resta nello storico ──
+  if (corpo.fileEsterno && fattura) {
+    const voce = { nome: String(corpo.fileEsterno.nome || '').slice(0, 200), righe: Math.max(0, Math.round(Number(corpo.fileEsterno.righe) || 0)), il: new Date().toISOString() }
+    const riepilogo = { ...(fattura.riepilogo || {}), fileEsterni: [...(fattura.riepilogo?.fileEsterni || []), voce] }
+    const { error } = await admin.from('fatture_corriere').update({ riepilogo }).eq('id', fattura.id)
+    if (error) return NextResponse.json({ error: 'Non riesco a segnare il file scaricato: ' + error.message }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
 
@@ -65,7 +75,7 @@ export async function POST(req: NextRequest) {
       righe: t.righe, andate: t.andate, rientri: t.rientri,
       totale_corriere: t.totaleCorriere, totale_trovate: t.totaleTrovate, costo_moove: t.costoMoove, differenza: t.differenza,
       non_trovate: t.nonTrovate, totale_non_trovate: t.totaleNonTrovate, da_girare: t.daGirare, euro_da_girare: t.euroDaGirare,
-      riepilogo: { perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri },
+      riepilogo: { ...(fattura.riepilogo || {}), perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri },
     }).eq('id', fattura.id)
     return NextResponse.json({ ok: true })
   }
@@ -79,16 +89,25 @@ export async function POST(req: NextRequest) {
   if (righe.length > 1000) return NextResponse.json({ error: 'Troppe righe in una volta.' }, { status: 400 })
   if (fattura && fattura.stato !== 'in_corso') return NextResponse.json({ error: 'Questa fattura è già stata controllata.' }, { status: 409 })
 
-  // Primo pacchetto: si apre la fattura nello storico. La stessa fattura caricata due volte non si rifà:
-  // si dice quando è stata caricata e la pagina la riapre. Una interrotta a metà, invece, si riprende da capo.
+  // Primo pacchetto: si apre la fattura nello storico. La stessa fattura caricata due volte non si rifà se ci
+  // si è già fatto qualcosa: si dice quando è stata caricata e la pagina la riapre. Una senza azioni, o
+  // interrotta a metà, si rifà da capo (con le regole di oggi).
   if (!fattura) {
     const numero = String(corpo.testata?.numeroFattura || righe[0]?.numeroFattura || '').trim()
     if (!numero) return NextResponse.json({ error: 'Nel file manca il numero della fattura.' }, { status: 400 })
-    const { data: esistente } = await admin.from('fatture_corriere').select('id,stato,created_at')
-      .eq('master_id', u.masterId).eq('corriere_id', contratto.id).eq('numero_fattura', numero).maybeSingle()
-    if (esistente?.stato === 'completa') return NextResponse.json({ giaCaricata: { id: esistente.id, il: esistente.created_at } })
+    // Le fatture del master caricate e lasciate lì senza azioni non restano: le toglie il caricamento dopo.
+    // Quelle in corso solo se ferme da più di un giorno (un'altra scheda potrebbe starne caricando una).
+    const { data: sue } = await admin.from('fatture_corriere').select('id,numero_fattura,corriere_id,stato,created_at,rettifiche_file_id,riepilogo').eq('master_id', u.masterId)
+    const ieri = Date.now() - 86400000
+    const daTogliere = (sue || []).filter((f: any) => !(f.numero_fattura === numero && f.corriere_id === contratto.id) && !fatturaConAzioni(f)
+      && (f.stato === 'completa' || new Date(f.created_at).getTime() < ieri)).map((f: any) => f.id)
+    if (daTogliere.length) await admin.from('fatture_corriere').delete().in('id', daTogliere)
+    const esistente = (sue || []).find((f: any) => f.numero_fattura === numero && f.corriere_id === contratto.id)
+    if (esistente?.stato === 'completa' && fatturaConAzioni(esistente)) return NextResponse.json({ giaCaricata: { id: esistente.id, il: esistente.created_at } })
     if (esistente) {
       await admin.from('fatture_corriere_righe').delete().eq('fattura_id', esistente.id)
+      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo: null, etichetta: null, completata_at: null,
+        nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId, created_at: new Date().toISOString() }).eq('id', esistente.id)
       fattura = { id: esistente.id, stato: 'in_corso' }
     } else {
       const { data: nuova, error } = await admin.from('fatture_corriere').insert({

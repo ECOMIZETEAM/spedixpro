@@ -49,3 +49,9 @@ export function riepilogaFattura(esiti: EsitoPagina[]) {
     perMotivo, perVoce,
   }
 }
+
+// UNA FATTURA RESTA NELLO STORICO SOLO SE CI SI È FATTO QUALCOSA (Lorenzo, 02/11): differenze mandate alla
+// Rettifica, oppure il file di rettifiche scaricato per un altro gestionale. Caricata e guardata e basta
+// impiccia: non compare, si può ricaricare da capo, e il caricamento successivo la toglie.
+export const fatturaConAzioni = (f: { rettifiche_file_id?: string | null; riepilogo?: any } | null | undefined) =>
+  !!f && (!!f.rettifiche_file_id || (Array.isArray(f.riepilogo?.fileEsterni) && f.riepilogo.fileEsterni.length > 0))

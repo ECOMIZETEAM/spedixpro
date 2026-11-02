@@ -22,6 +22,7 @@ type FatturaStorico = {
   righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
   da_girare: number; euro_da_girare: number; rettifiche_file_id: string | null; created_at: string
   girate: { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number } | null; aTuoCarico: number
+  riepilogo?: { fileEsterni?: { nome: string; righe: number; il: string }[] } | null
 }
 type Filtro = 'perdita' | 'tutte' | 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_trovata' | 'rientri'
 
@@ -88,6 +89,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null) }
+
+  // Scaricare il file di rettifiche per un altro gestionale è un'azione: da qui la fattura resta nello storico.
+  async function registraFileEsterno(x: { nome: string; righe: number }) {
+    if (!fatturaId) return
+    await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, fileEsterno: x }) }).catch(() => null)
+    caricaStorico()
+  }
 
   // Il nome che il detentore dà alla fattura nello storico; vuoto = torna il numero di BRT.
   async function salvaNome() {
@@ -345,7 +353,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', borderBottom: `1px solid ${C.filo}` }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>Fatture controllate</div>
-                <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2 }}>Mese per mese: quanto ha fatturato il corriere, quanto hai girato ai clienti e quanto è rimasto a te</div>
+                <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2 }}>Mese per mese: quanto ha fatturato il corriere, quanto hai girato ai clienti e quanto è rimasto a te. Restano qui le fatture su cui hai fatto qualcosa: differenze mandate alla Rettifica o file di rettifiche scaricato per un altro gestionale.</div>
               </div>
               <div style={{ fontSize: 12.5, color: C.attenuato, ...cifre }}>
                 Totale a tuo carico: <b style={{ color: coloreImporto(storico.reduce((t, f) => t + f.aTuoCarico, 0)), fontSize: 14 }}>{conSegno(r2(storico.reduce((t, f) => t + f.aTuoCarico, 0)))}</b>
@@ -392,7 +400,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                       {f.girate ? (<>
                         <div style={{ fontWeight: 600 }}>{euro(f.girate.euroConfermati)}</div>
                         {f.girate.euroInAttesa > 0.005 && <div style={{ fontSize: 12, color: C.ambra, marginTop: 2 }}>{euro(f.girate.euroInAttesa)} da confermare</div>}
-                      </>) : f.da_girare ? <span style={{ fontSize: 12, color: C.ambra }}>{f.da_girare} da mandare</span> : <span style={{ color: '#98a2b3' }}>—</span>}
+                      </>) : f.da_girare ? <span style={{ fontSize: 12, color: C.ambra }}>{f.da_girare} da mandare</span> : !f.riepilogo?.fileEsterni?.length ? <span style={{ color: '#98a2b3' }}>—</span> : null}
+                      {!!f.riepilogo?.fileEsterni?.length && (
+                        <div style={{ fontSize: 12, color: C.attenuato, marginTop: 2 }}>
+                          {/* Lo stesso file scaricato due volte conta una: vale l'ultimo download per nome. */}
+                          {Array.from(new Map(f.riepilogo.fileEsterni.map(x => [x.nome, x.righe || 0])).values()).reduce((n, x) => n + x, 0).toLocaleString('it-IT')} rettifiche nel file per il gestionale
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', ...cifre }}>
                       <span style={{ display: 'inline-block', padding: '3px 9px', borderRadius: 8, fontWeight: 700, color: coloreImporto(f.aTuoCarico), background: f.aTuoCarico > 0.005 ? C.rossoTenue : f.aTuoCarico < -0.005 ? C.verdeTenue : C.fondoTenue }}>{conSegno(f.aTuoCarico)}</span>
@@ -443,6 +457,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             </div>
             <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2 }}>
               {nomeFile} · {esiti.length.toLocaleString('it-IT')} righe: {totali.andate.toLocaleString('it-IT')} spedizioni e {totali.rientri} rientri · contratto {contrattoNome}
+              {!(storico || []).some(f => f.id === fatturaId) && <> · resta nello storico se mandi le differenze alla Rettifica o scarichi il file per il gestionale</>}
             </div>
           </div>
           <button onClick={chiudiFattura} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
@@ -564,7 +579,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
 
         {/* ── LE SPEDIZIONI FATTE ALTROVE: si abbinano all'export di quel gestionale ── */}
         {totali.nonTrovate > 0 && (
-          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} />
+          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} onScaricato={registraFileEsterno} />
         )}
 
         {/* ── LE SPEDIZIONI ── */}
