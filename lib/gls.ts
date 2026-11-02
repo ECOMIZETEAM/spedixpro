@@ -512,14 +512,19 @@ export type SvincoloGls = {
   nuovo?: { nome: string; indirizzo: string; localita: string; cap: string; provincia: string }
 }
 
-// Data per GLS (GG/MM/AA). Senza una data scelta si riconsegna il primo giorno lavorativo dopo oggi
-// (ora italiana): il sabato e la domenica GLS non consegna con il servizio normale.
+// Data per GLS (GG/MM/AA). Si riconsegna nel giorno scelto se è ancora davanti; senza una data, o con una
+// data di oggi o già passata, il primo giorno lavorativo dopo oggi (ora italiana): il sabato e la
+// domenica GLS non consegna con il servizio normale. La richiesta del cliente porta spesso la data del
+// giorno in cui l'ha fatta (2/11/2026, NI665450263): confermata dopo, sarebbe andata a GLS già scaduta.
 export function dataSvincoloGls(scelta?: string | null): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(scelta || ''))
-  if (m) return `${m[3]}/${m[2]}/${m[1].slice(2)}`
   const oggi = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome' }))
   const d = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() + 1)
   while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1)
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(scelta || ''))
+  if (m) {
+    const s = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    if (s.getTime() >= d.getTime()) return `${m[3]}/${m[2]}/${m[1].slice(2)}`
+  }
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`
 }
 
