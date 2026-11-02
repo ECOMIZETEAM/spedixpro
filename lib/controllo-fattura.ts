@@ -82,9 +82,9 @@ async function aOndate<T, R>(items: T[], quanti: number, fn: (x: T) => Promise<R
 
 export async function analizzaFatturaBrt(
   admin: any,
-  params: { contrattoId: string; masterId: string; righe: RigaFatturaBrt[] },
+  params: { contrattoId: string; masterId: string; righe: RigaFatturaBrt[]; legenda?: Record<string, string> | null },
 ): Promise<EsitoRiga[]> {
-  const { contrattoId, masterId, righe } = params
+  const { contrattoId, masterId, righe, legenda } = params
 
   // Il contratto e TUTTE le sue copie (sotto-master, collegati): sullo stesso conto BRT passano anche le
   // spedizioni di chi lo compra dal detentore, e la fattura le porta tutte.
@@ -161,7 +161,7 @@ export async function analizzaFatturaBrt(
 
   return aOndate(righe.map((r, i) => ({ r, a: abbinate[i] })), 8, async ({ r, a }): Promise<EsitoRiga> => {
     const vociPerCategoria: EsitoRiga['vociPerCategoria'] = { nolo: r.nolo }
-    for (const v of r.voci) { const c = descriviVoce(v.sigla).categoria; vociPerCategoria[c] = r2((vociPerCategoria[c] || 0) + v.importo) }
+    for (const v of r.voci) { const c = descriviVoce(v.sigla, legenda).categoria; vociPerCategoria[c] = r2((vociPerCategoria[c] || 0) + v.importo) }
     const base = { riga: r, spedizione: a.s as SpedizioneAbbinata | null, abbinataPer: a.per, brt: r2(r.totale), vociPerCategoria }
     if (!a.s) return { ...base, moove: null, listino: null, differenza: null, motivi: [] }
 
@@ -200,11 +200,11 @@ export async function analizzaFatturaBrt(
     // BRT calcola il carburante anche sopra le voci extra (sulla "i" da 6,90 € sono 0,55 € in più): quel
     // carburante appartiene alla voce, non al nolo, altrimenti un listino giusto sembrerebbe sotto costo.
     // La percentuale si ricava dalla riga stessa: carburante / (tutto ciò che non è carburante né contrassegno).
-    const baseCarburante = r.nolo + r.voci.reduce((s, v) => { const c = descriviVoce(v.sigla).categoria; return c === 'carburante' || c === 'contrassegno' ? s : s + v.importo }, 0)
+    const baseCarburante = r.nolo + r.voci.reduce((s, v) => { const c = descriviVoce(v.sigla, legenda).categoria; return c === 'carburante' || c === 'contrassegno' ? s : s + v.importo }, 0)
     const quotaCarburante = baseCarburante > 0 ? (vociPerCategoria.carburante || 0) / baseCarburante : 0
     let fuori = 0
     for (const v of r.voci) {
-      const d = descriviVoce(v.sigla)
+      const d = descriviVoce(v.sigla, legenda)
       if (CATEGORIE_IN_LISTINO.has(d.categoria) || Math.abs(v.importo) < 0.005) continue
       const conCarburante = r2(v.importo * (1 + quotaCarburante))
       fuori += conCarburante

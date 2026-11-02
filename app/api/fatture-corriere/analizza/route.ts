@@ -24,10 +24,19 @@ type Corpo = {
   contrattoId?: string
   righe?: RigaFatturaBrt[]
   fatturaId?: string
-  testata?: { numeroFattura?: string; dataFattura?: string | null; nomeFile?: string }
+  testata?: { numeroFattura?: string; dataFattura?: string | null; nomeFile?: string; legenda?: Record<string, string> }
   chiudi?: boolean
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
+  legenda?: Record<string, string>   // il PDF aggiunto dopo, a fattura già controllata
+}
+
+// La legenda arriva dal browser: si tengono solo coppie sigla di un carattere → nome corto.
+const pulisciLegenda = (l: any): Record<string, string> | null => {
+  if (!l || typeof l !== 'object') return null
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(l).slice(0, 40)) if (/^\S$/.test(k) && typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, 20)
+  return Object.keys(out).length ? out : null
 }
 
 export async function POST(req: NextRequest) {
@@ -58,6 +67,15 @@ export async function POST(req: NextRequest) {
     const riepilogo = { ...(fattura.riepilogo || {}), fileEsterni: [...(fattura.riepilogo?.fileEsterni || []), voce] }
     const { error } = await admin.from('fatture_corriere').update({ riepilogo }).eq('id', fattura.id)
     if (error) return NextResponse.json({ error: 'Non riesco a segnare il file scaricato: ' + error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  }
+
+  // ── IL PDF DELLA FATTURA AGGIUNTO DOPO: la sua legenda si salva con la fattura ──
+  if (corpo.legenda && fattura && !corpo.righe) {
+    const legenda = pulisciLegenda(corpo.legenda)
+    if (!legenda) return NextResponse.json({ error: 'Legenda vuota.' }, { status: 400 })
+    const { error } = await admin.from('fatture_corriere').update({ riepilogo: { ...(fattura.riepilogo || {}), legenda } }).eq('id', fattura.id)
+    if (error) return NextResponse.json({ error: 'Legenda non salvata: ' + error.message }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
 
@@ -94,6 +112,7 @@ export async function POST(req: NextRequest) {
   // interrotta a metà, si rifà da capo (con le regole di oggi).
   if (!fattura) {
     const numero = String(corpo.testata?.numeroFattura || righe[0]?.numeroFattura || '').trim()
+    const legendaTestata = pulisciLegenda(corpo.testata?.legenda)
     if (!numero) return NextResponse.json({ error: 'Nel file manca il numero della fattura.' }, { status: 400 })
     // Le fatture del master caricate e lasciate lì senza azioni non restano: le toglie il caricamento dopo.
     // Quelle in corso solo se ferme da più di un giorno (un'altra scheda potrebbe starne caricando una).
@@ -106,7 +125,7 @@ export async function POST(req: NextRequest) {
     if (esistente?.stato === 'completa' && fatturaConAzioni(esistente)) return NextResponse.json({ giaCaricata: { id: esistente.id, il: esistente.created_at } })
     if (esistente) {
       await admin.from('fatture_corriere_righe').delete().eq('fattura_id', esistente.id)
-      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo: null, etichetta: null, completata_at: null,
+      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo: legendaTestata ? { legenda: legendaTestata } : null, etichetta: null, completata_at: null,
         nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId, created_at: new Date().toISOString() }).eq('id', esistente.id)
       fattura = { id: esistente.id, stato: 'in_corso' }
     } else {
@@ -114,6 +133,7 @@ export async function POST(req: NextRequest) {
         master_id: u.masterId, corriere_id: contratto.id, nome_contratto: contratto.nome_contratto,
         numero_fattura: numero, data_fattura: corpo.testata?.dataFattura || righe[0]?.dataFattura || null,
         nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId,
+        ...(legendaTestata ? { riepilogo: { legenda: legendaTestata } } : {}),
       }).select('id').single()
       if (error || !nuova) return NextResponse.json({ error: 'Non riesco ad aprire la fattura nello storico: ' + (error?.message || '') }, { status: 500 })
       fattura = { id: nuova.id, stato: 'in_corso' }
@@ -122,7 +142,9 @@ export async function POST(req: NextRequest) {
 
   let esiti
   try {
-    esiti = await analizzaFatturaBrt(admin, { contrattoId: contratto.id, masterId: u.masterId, righe })
+    // La legenda del PDF, se c'è: col primo pacchetto arriva nella testata, poi sta nella fattura salvata.
+    const legenda = pulisciLegenda(corpo.testata?.legenda) || fattura.riepilogo?.legenda || null
+    esiti = await analizzaFatturaBrt(admin, { contrattoId: contratto.id, masterId: u.masterId, righe, legenda })
   } catch (e: any) {
     // Una lettura saltata non deve diventare "spedizione non trovata": meglio fermarsi e dirlo.
     return NextResponse.json({ error: 'Controllo non riuscito: ' + String(e?.message || e) }, { status: 500 })

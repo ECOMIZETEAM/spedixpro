@@ -162,37 +162,58 @@ export function leggiFatturaBrt(testo: string): LetturaFatturaBrt {
 export type CategoriaVoce = 'carburante' | 'contrassegno' | 'isole' | 'ingombro' | 'servizio' | 'rientro' | 'altro'
 // `voceListino`: la voce dei supplementi del corriere (lib/supplementi-corriere) che la rappresenta nel
 // listino del detentore. Se lì c'è un prezzo, la voce è prevista e va girata al cliente; se no, manca.
-export type SiglaBrt = { nome: string; categoria: CategoriaVoce; certa: boolean; voceListino?: string }
+// `legendaBrt`: come BRT la scrive nella legenda del PDF. Se un PDF dice altro, BRT ha cambiato la sigla e
+// la pagina lo dice invece di continuare a chiamarla col nome vecchio.
+export type SiglaBrt = { nome: string; categoria: CategoriaVoce; certa: boolean; voceListino?: string; legendaBrt?: string; dallaFattura?: boolean }
 export const SIGLE_BRT: Record<string, SiglaBrt> = {
   // FUEL SURCH. Una percentuale fissa (8% a giugno, 12,5% a ottobre) del nolo e dei supplementi, mai del contrassegno.
-  f: { nome: 'Carburante', categoria: 'carburante', certa: true },
+  f: { nome: 'Carburante', categoria: 'carburante', certa: true, legendaBrt: 'FUEL SURCH' },
   // COMP.ASSEG. Max(1,29 €; 1,5% dell'incassato): 86 righe su 86 (importi incassati dall'export del gestionale).
-  G: { nome: 'Contrassegno', categoria: 'contrassegno', certa: true },
+  G: { nome: 'Contrassegno', categoria: 'contrassegno', certa: true, legendaBrt: 'COMP.ASSEG' },
   // TRAGHETTI. Solo Sicilia e Sardegna, su un conto (2802246); sull'altro (677742) le isole stanno nel nolo.
-  g: { nome: 'Traghetti (Sicilia e Sardegna)', categoria: 'isole', certa: true },
+  g: { nome: 'Traghetti (Sicilia e Sardegna)', categoria: 'isole', certa: true, legendaBrt: 'TRAGHETTI' },
   // ISOLA. Solo dove BRT segna TIPO INOLTRO "I": isole minori, Venezia.
-  J: { nome: 'Isole minori', categoria: 'isole', certa: true },
+  J: { nome: 'Isole minori', categoria: 'isole', certa: true, legendaBrt: 'ISOLA' },
   // COLLI INCO: colli INCOMPATIBILI con lo smistamento automatico (guida BRT "Fuori misura e incompatibili":
   // buste, sacchi, cilindri, forme irregolari), spostati a mano. Sui materassi 6,90 €, su buste da 1 kg 2,90 €.
-  i: { nome: 'Colli incompatibili', categoria: 'ingombro', certa: true, voceListino: 'Incompatibile' },
+  i: { nome: 'Colli incompatibili', categoria: 'ingombro', certa: true, voceListino: 'Incompatibile', legendaBrt: 'COLLI INCO' },
   // FUORI MISU. Il fuori misura vero (per BRT un lato oltre 300 cm): 40 €, su colli da 0,7 a 1,2 m³.
-  F: { nome: 'Fuori misura', categoria: 'ingombro', certa: true, voceListino: 'Fuori misura' },
+  F: { nome: 'Fuori misura', categoria: 'ingombro', certa: true, voceListino: 'Fuori misura', legendaBrt: 'FUORI MISU' },
   // SP.GIACENZ. Solo su resi (A2) e bolle accessorie (F3) di pacchi andati in giacenza.
-  I: { nome: 'Spese di giacenza', categoria: 'rientro', certa: true },
+  I: { nome: 'Spese di giacenza', categoria: 'rientro', certa: true, legendaBrt: 'SP.GIACENZ' },
   // ZTL. Solo dove BRT segna TIPO INOLTRO "T" o "Z" (38 righe su 38).
-  Q: { nome: 'ZTL', categoria: 'altro', certa: true },
+  Q: { nome: 'ZTL', categoria: 'altro', certa: true, legendaBrt: 'ZTL' },
   // APPUNTAMEN. 3% del nolo; ha il codice "A" in 1 CONSEGNA PARTICOLARE: è un servizio chiesto in creazione.
-  A: { nome: 'Consegna su appuntamento', categoria: 'servizio', certa: true },
+  A: { nome: 'Consegna su appuntamento', categoria: 'servizio', certa: true, legendaBrt: 'APPUNTAMEN' },
   // SUPER./GDO. 10 €; codice "S" in 1 CONSEGNA PARTICOLARE: anche questo un servizio con codice.
-  S: { nome: 'Consegna GDO', categoria: 'servizio', certa: true },
+  S: { nome: 'Consegna GDO', categoria: 'servizio', certa: true, legendaBrt: 'SUPER./GDO' },
   // A.C. PLUS. Solo con IMPORTO DA ASSICURARE: 0,6% del valore, minimo 2 € (700 → 4,20; 169 → 2,00).
-  R: { nome: 'Assicurazione', categoria: 'servizio', certa: true },
+  R: { nome: 'Assicurazione', categoria: 'servizio', certa: true, legendaBrt: 'A.C. PLUS' },
   // RITIRO.
-  U: { nome: 'Ritiro', categoria: 'servizio', certa: true },
+  U: { nome: 'Ritiro', categoria: 'servizio', certa: true, legendaBrt: 'RITIRO' },
   // DIROTTAM.T. 4 € su bolle A3.
-  '*': { nome: 'Dirottamento', categoria: 'altro', certa: true },
+  '*': { nome: 'Dirottamento', categoria: 'altro', certa: true, legendaBrt: 'DIROTTAM.T' },
 }
 
-export function descriviVoce(sigla: string): SiglaBrt {
-  return SIGLE_BRT[sigla] || { nome: `Voce "${sigla}" sconosciuta`, categoria: 'altro', certa: false }
+// Una sigla che non conosciamo prende il nome dalla legenda del PDF di quella fattura, se c'è: com'è
+// scritto da BRT ("DIROTTAM.T"), senza tradurlo a occhio.
+export function descriviVoce(sigla: string, legenda?: Record<string, string> | null): SiglaBrt {
+  if (SIGLE_BRT[sigla]) return SIGLE_BRT[sigla]
+  if (legenda?.[sigla]) return { nome: `${legenda[sigla]} (dalla legenda BRT)`, categoria: 'altro', certa: true, dallaFattura: true }
+  return { nome: `Voce "${sigla}" sconosciuta`, categoria: 'altro', certa: false }
 }
+
+// La legenda di un PDF confrontata con quella che conosciamo: sigle nuove e sigle che BRT ha cambiato.
+export function confrontaLegenda(legenda: Record<string, string>) {
+  const nuove: { sigla: string; nome: string }[] = [], cambiate: { sigla: string; prima: string; ora: string }[] = []
+  for (const [sigla, nome] of Object.entries(legenda || {})) {
+    const nota = SIGLE_BRT[sigla]
+    if (!nota) nuove.push({ sigla, nome })
+    else if (nota.legendaBrt && nota.legendaBrt.toUpperCase() !== nome.toUpperCase()) cambiate.push({ sigla, prima: nota.legendaBrt, ora: nome })
+  }
+  return { nuove, cambiate }
+}
+
+// Le sigle della fattura che non sappiamo leggere (né conosciute né nella legenda del PDF).
+export const sigleSconosciute = (righe: RigaFatturaBrt[], legenda?: Record<string, string> | null) =>
+  Array.from(new Set(righe.flatMap(r => r.voci.map(v => v.sigla)))).filter(s => !SIGLE_BRT[s] && !legenda?.[s])

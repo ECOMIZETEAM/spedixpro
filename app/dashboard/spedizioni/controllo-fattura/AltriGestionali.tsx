@@ -23,15 +23,15 @@ function comeTassata(r: RigaFatturaBrt) {
   if (r.volumeFatturare * KG_PER_M3_BRT >= m - 0.001) return `volume in bolla ${r.volumeFatturare.toLocaleString('it-IT')} m³ = ${kg(m)}${tassata}`
   return `tassata ${kg(r.pesoTassato)}`
 }
-const vociDi = (r: RigaFatturaBrt) => [
+const vociDi = (r: RigaFatturaBrt, legenda?: Record<string, string> | null) => [
   ...(r.nolo ? [`nolo ${euro(r.nolo)}`] : []),
-  ...r.voci.filter(v => Math.abs(v.importo) >= 0.005).map(v => `${descriviVoce(v.sigla).nome} ${euro(v.importo)}`),
+  ...r.voci.filter(v => Math.abs(v.importo) >= 0.005).map(v => `${descriviVoce(v.sigla, legenda).nome} ${euro(v.importo)}`),
 ].join(' + ')
 
 export type EsternoIniziale = { nome: string; formatoId: string; spedizioni: SpedizioneEsterna[] }
 
-export default function AltriGestionali({ righe, numeroFattura, iniziali, onScaricato }: {
-  righe: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]
+export default function AltriGestionali({ righe, numeroFattura, iniziali, onScaricato, legenda }: {
+  righe: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]; legenda?: Record<string, string> | null
   onScaricato?: (x: { nome: string; righe: number }) => void   // scaricare il file è un'azione: la fattura resta nello storico
 }) {
   const dialog = useDialog()
@@ -249,9 +249,9 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
                         <Pillola colore={netto < -0.005 ? C.rosso : C.verde} fondo={netto < -0.005 ? C.rossoTenue : C.verdeTenue} orlo={netto < -0.005 ? C.rossoOrlo : C.verdeOrlo}>{conSegno(netto)}</Pillola>
                       </td>
                       <td style={{ padding: '10px 12px', fontSize: 12.5, color: '#475467', lineHeight: 1.5, minWidth: 280 }}>
-                        {r && <div>Andata: {vociDi(r)}.{a.daRettificare ? ` BRT l'ha ${comeTassata(r)}, il gestionale aveva ${kg(a.sped.peso)}.` : ''}</div>}
+                        {r && <div>Andata: {vociDi(r, legenda)}.{a.daRettificare ? ` BRT l'ha ${comeTassata(r)}, il gestionale aveva ${kg(a.sped.peso)}.` : ''}</div>}
                         {a.rientri.map(x => (
-                          <div key={x.segnacollo + x.numeroSpedizione}>{x.tipoBolla.startsWith('A') ? 'Reso al mittente' : 'Bolla accessoria (giacenza)'}: {vociDi(x)}.</div>
+                          <div key={x.segnacollo + x.numeroSpedizione}>{x.tipoBolla.startsWith('A') ? 'Reso al mittente' : 'Bolla accessoria (giacenza)'}: {vociDi(x, legenda)}.</div>
                         ))}
                       </td>
                     </tr>

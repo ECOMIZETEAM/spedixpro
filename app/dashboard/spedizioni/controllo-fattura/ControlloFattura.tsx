@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useDialog } from '@/app/components/DialogProvider'
-import { leggiFatturaBrt, descriviVoce, pesoTassatoBrt, KG_PER_M3_BRT } from '@/lib/fattura-brt'
+import { leggiFatturaBrt, descriviVoce, pesoTassatoBrt, KG_PER_M3_BRT, sigleSconosciute, type RigaFatturaBrt } from '@/lib/fattura-brt'
 import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera, Pillola } from './ui'
 import AltriGestionali, { type EsternoIniziale } from './AltriGestionali'
@@ -61,6 +61,10 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const [storico, setStorico] = useState<FatturaStorico[] | null>(iniziale?.storico ?? null)
   const [rinomina, setRinomina] = useState<{ id: string; valore: string } | null>(null)
   const [etichettaAperta, setEtichettaAperta] = useState<string | null>(null)
+  // La legenda delle sigle letta dal PDF della fattura (se caricato), e cosa ha detto il confronto col file.
+  const [legenda, setLegenda] = useState<Record<string, string> | null>(null)
+  const [notePdf, setNotePdf] = useState<string[]>([])
+  const pdfRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const caricaStorico = () => fetch('/api/fatture-corriere/storico').then(r => r.json()).then(d => setStorico(d.fatture || [])).catch(() => setStorico([]))
@@ -77,6 +81,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     const d = await fetch('/api/fatture-corriere/storico?fattura=' + id).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
     if (d.error) { await dialog.alert({ title: 'Fattura non aperta', message: d.error }); return }
     setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setRettificheInviate(!!d.fattura.rettifiche_file_id); setEtichettaAperta(d.fattura.etichetta || null)
+    setLegenda(d.fattura.riepilogo?.legenda || null); setNotePdf([])
     if (d.fattura.corriere_id) setContrattoId(d.fattura.corriere_id)
     // Le fatture salvate prima del 02/11 hanno il peso tassato senza l'arrotondamento di BRT: si rifà qui dai
     // quattro pesi della riga, così il file di rettifiche esce col peso che BRT ha davvero tassato (3, non 2,8).
@@ -88,7 +93,43 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     setAvvisi([]); setPagina(1); setFiltro('perdita'); setCerca('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null) }
+  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null); setLegenda(null); setNotePdf([]) }
+
+  // IL PDF DELLA FATTURA: lo legge il server (legenda, numero, totali); qui si confronta col file.
+  async function leggiPdf(f: File): Promise<any> {
+    const b = new Uint8Array(await f.arrayBuffer()); let bin = ''
+    for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode(...b.subarray(i, i + 0x8000))
+    return fetch('/api/fatture-corriere/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pdfBase64: btoa(bin) }) })
+      .then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
+  }
+  // Cosa dice il PDF rispetto al file: note (in verde) e avvisi (in giallo). Se è di un'altra fattura non si usa.
+  function esitoPdf(p: any, righe: RigaFatturaBrt[]): { legenda: Record<string, string> | null; note: string[]; avvisi: string[] } {
+    if (p.error) return { legenda: null, note: [], avvisi: [`PDF non letto: ${p.error}`] }
+    if (p.numeroFattura && p.numeroFattura !== righe[0].numeroFattura)
+      return { legenda: null, note: [], avvisi: [`Il PDF è della fattura n. ${p.numeroFattura}, il file della n. ${righe[0].numeroFattura}: il PDF non l'ho usato.`] }
+    const note: string[] = [], avv: string[] = []
+    const tot = righe.reduce((s, r) => s + r.totale, 0)
+    if (p.totale != null && Math.abs(p.totale - tot) < 0.0015) note.push(`PDF della fattura letto: ${Object.keys(p.legenda || {}).length} sigle in legenda, e il totale torna con il file al millesimo (${euro(r2(tot))}).`)
+    else if (p.totale != null) avv.push(`Il totale del PDF (${euro(r2(p.totale))}) non torna con il file (${euro(r2(tot))}): controlla che file e PDF siano della stessa fattura.`)
+    for (const n of p.nuove || []) note.push(`Sigla nuova letta dalla legenda BRT: "${n.sigla}" = ${n.nome}.`)
+    for (const c of p.cambiate || []) avv.push(`BRT ha cambiato la sigla "${c.sigla}": nel PDF c'è "${c.ora}", finora era "${c.prima}".`)
+    return { legenda: Object.keys(p.legenda || {}).length ? p.legenda : null, note, avvisi: avv }
+  }
+  const avvisoSigle = (righe: RigaFatturaBrt[], leg: Record<string, string> | null) => {
+    const ignote = sigleSconosciute(righe, leg)
+    return ignote.length ? [`Nella fattura ci sono sigle che non conosciamo (${ignote.map(s => `"${s}"`).join(', ')}): aggiungi il PDF della fattura, BRT ci stampa la legenda.`] : []
+  }
+  // Il PDF aggiunto a fattura già aperta: la legenda si salva con la fattura.
+  async function aggiungiPdf(f: File) {
+    if (pdfRef.current) pdfRef.current.value = ''
+    const righe = esiti.map(e => e.riga)
+    const r = esitoPdf(await leggiPdf(f), righe)
+    setAvvisi(prev => [...prev.filter(a => !a.startsWith('Nella fattura ci sono sigle') && !a.startsWith('PDF non letto') && !a.startsWith('Il PDF è della fattura')), ...r.avvisi, ...avvisoSigle(righe, r.legenda)])
+    setNotePdf(r.note)
+    if (!r.legenda) return
+    setLegenda(r.legenda)
+    if (fatturaId) await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, legenda: r.legenda }) }).catch(() => null)
+  }
 
   // Scaricare il file di rettifiche per un altro gestionale è un'azione: da qui la fattura resta nello storico.
   async function registraFileEsterno(x: { nome: string; righe: number }) {
@@ -109,15 +150,23 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     setRinomina(null)
   }
 
-  async function caricaFile(file: File) {
-    if (!contrattoId) { await dialog.alert({ title: 'Scegli il contratto', message: 'Prima scegli il contratto BRT a cui si riferisce la fattura.' }); return }
+  async function caricaFile(lista: File[]) {
     if (fileRef.current) fileRef.current.value = ''
+    // Il TIVAF (.csv) e, se c'è, il PDF della fattura: possono arrivare insieme.
+    const file = lista.find(f => /\.csv$/i.test(f.name)), pdf = lista.find(f => /\.pdf$/i.test(f.name))
+    if (!file) {
+      if (pdf && esiti.length) { await aggiungiPdf(pdf); return }
+      await dialog.alert({ title: 'Manca il file TIVAF', message: 'Il controllo parte dal file TIVAF (.csv) di BRT. Il PDF della fattura si aggiunge insieme, per leggere la legenda delle sigle.' }); return
+    }
+    if (!contrattoId) { await dialog.alert({ title: 'Scegli il contratto', message: 'Prima scegli il contratto BRT a cui si riferisce la fattura.' }); return }
     // BRT scrive il file in ISO-8859-1: letto come UTF-8, le accentate dei destinatari diventerebbero rombi.
     const testo = new TextDecoder('iso-8859-1').decode(await file.arrayBuffer())
     const { righe, errori } = leggiFatturaBrt(testo)
     if (!righe.length) { await dialog.alert({ title: 'File non letto', message: errori.join(' ') || 'Nessuna riga nel file.' }); return }
+    const pdfLetto = pdf ? esitoPdf(await leggiPdf(pdf), righe) : { legenda: null, note: [], avvisi: [] }
     chiudiFattura()
-    setNomeFile(file.name); setAvvisi(errori); setPagina(1); setFiltro('perdita'); setCerca('')
+    setLegenda(pdfLetto.legenda); setNotePdf(pdfLetto.note)
+    setNomeFile(file.name + (pdf ? ` + ${pdf.name}` : '')); setAvvisi([...errori, ...pdfLetto.avvisi, ...avvisoSigle(righe, pdfLetto.legenda)]); setPagina(1); setFiltro('perdita'); setCerca('')
     const tutti: EsitoControllo[] = []
     const inizio = Date.now()
     let id: string | null = null
@@ -127,7 +176,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(id
           ? { fatturaId: id, righe: righe.slice(i, i + PACCHETTO) }
-          : { contrattoId, righe: righe.slice(i, i + PACCHETTO), testata: { numeroFattura: righe[0].numeroFattura, dataFattura: righe[0].dataFattura, nomeFile: file.name } }),
+          : { contrattoId, righe: righe.slice(i, i + PACCHETTO), testata: { numeroFattura: righe[0].numeroFattura, dataFattura: righe[0].dataFattura, nomeFile: file.name, legenda: pdfLetto.legenda || undefined } }),
       })
       const d: any = await res.json().catch(() => ({ error: 'Risposta non valida' }))
       // La stessa fattura già controllata non si rifà: si riapre quella salvata.
@@ -253,7 +302,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       'Destinazione': `${e.riga.cap} ${e.riga.localita} (${e.riga.provincia})`, 'Bolla': e.riga.tipoBolla,
       'Peso Moove (kg)': e.spedizione?.peso ?? '', 'Peso tassato BRT (kg)': r2(e.riga.pesoTassato),
       'BRT (€)': e.brt, 'Nolo BRT (€)': e.riga.nolo,
-      'Voci BRT': e.riga.voci.map(v => `${descriviVoce(v.sigla).nome} ${v.importo.toFixed(2)}`).join(' + '),
+      'Voci BRT': e.riga.voci.map(v => `${descriviVoce(v.sigla, legenda).nome} ${v.importo.toFixed(2)}`).join(' + '),
       'Costo Moove (€)': e.moove ?? '', 'Listino al peso BRT (€)': e.listino ?? '', 'Differenza (€)': e.differenza ?? '',
       'Perché': e.spedizione ? e.motivi.map(m => m.testo).join(' | ') : 'Non trovata in Moove',
     }))
@@ -308,8 +357,10 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   return (
     <div style={{ color: C.testo }}>
       {testata}
-      <input ref={fileRef} type="file" accept=".csv,.CSV,text/csv" style={{ display: 'none' }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) caricaFile(f) }} />
+      <input ref={fileRef} type="file" multiple accept=".csv,.CSV,text/csv,.pdf,.PDF,application/pdf" style={{ display: 'none' }}
+        onChange={e => { const l = Array.from(e.target.files || []); if (l.length) caricaFile(l) }} />
+      <input ref={pdfRef} type="file" accept=".pdf,.PDF,application/pdf" style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) aggiungiPdf(f) }} />
 
       {/* ── CARICAMENTO: area grande, si trascina o si clicca ── */}
       {!conRisultati && (<>
@@ -317,7 +368,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           role="button" tabIndex={0} onClick={scegliFile} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') scegliFile() }}
           onDragOver={e => { e.preventDefault(); if (!avanz) setTrascina(true) }}
           onDragLeave={() => setTrascina(false)}
-          onDrop={e => { e.preventDefault(); setTrascina(false); const f = e.dataTransfer.files?.[0]; if (f && !avanz) caricaFile(f) }}
+          onDrop={e => { e.preventDefault(); setTrascina(false); const l = Array.from(e.dataTransfer.files || []); if (l.length && !avanz) caricaFile(l) }}
           style={{
             ...carta, borderRadius: 16, border: `2px dashed ${trascina ? C.arancio : '#d0d5dd'}`, background: trascina ? C.arancioTenue : '#fff',
             padding: avanz ? '28px 28px' : '48px 24px', textAlign: 'center', cursor: avanz ? 'default' : 'pointer', transition: 'all .15s',
@@ -335,14 +386,14 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
               <Icona nome="carica" size={30} />
             </span>
             <div style={{ fontSize: 18, fontWeight: 700, marginTop: 16 }}>Trascina qui la fattura BRT</div>
-            <div style={{ fontSize: 13.5, color: C.attenuato, marginTop: 6 }}>oppure scegli il file dal computer</div>
+            <div style={{ fontSize: 13.5, color: C.attenuato, marginTop: 6 }}>il file TIVAF (.csv) e, se ce l'hai, anche il PDF della fattura: insieme, o scegli i file dal computer</div>
             <button type="button" onClick={e => { e.stopPropagation(); scegliFile() }}
               style={{ marginTop: 18, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 10, border: 'none', background: C.arancio, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', boxShadow: '0 1px 2px rgba(16,24,40,.1)' }}>
-              <Icona nome="carica" size={17} /> Scegli il file
+              <Icona nome="carica" size={17} /> Scegli i file
             </button>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 18 }}>
               <Pillola colore={C.attenuato} fondo={C.fondoTenue} orlo={C.filo}>Dettaglio fattura BRT "TIVAF", file .csv</Pillola>
-              <Pillola colore={C.attenuato} fondo={C.fondoTenue} orlo={C.filo}>Arriva con la fattura, una volta al mese</Pillola>
+              <Pillola colore={C.attenuato} fondo={C.fondoTenue} orlo={C.filo}>PDF della fattura: per leggere la legenda delle sigle</Pillola>
               {contrattoNome && <Pillola colore={C.arancioScuro} fondo={C.arancioTenue} orlo={C.arancioOrlo}>Contratto {contrattoNome}</Pillola>}
             </div>
           </>)}
@@ -441,6 +492,11 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         )}
       </>)}
 
+      {notePdf.map((a, i) => (
+        <div key={'n' + i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: C.verde, background: C.verdeTenue, border: `1px solid ${C.verdeOrlo}`, borderRadius: 10, padding: '10px 12px', marginTop: 12 }}>
+          <Icona nome="spunta" size={16} /> {a}
+        </div>
+      ))}
       {avvisi.map((a, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: C.ambra, background: C.ambraTenue, border: `1px solid ${C.ambraOrlo}`, borderRadius: 10, padding: '10px 12px', marginTop: 12 }}>
           <Icona nome="avviso" size={16} /> {a}
@@ -466,6 +522,12 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           <button onClick={scegliFile} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
             <Icona nome="carica" size={16} /> Carica un'altra fattura
           </button>
+          {!legenda && (
+            <button onClick={() => pdfRef.current?.click()} title="Dal PDF leggo la legenda delle sigle e controllo che i totali tornino"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.arancioOrlo}`, background: C.arancioTenue, fontSize: 13, fontWeight: 600, color: C.arancioScuro, cursor: 'pointer' }}>
+              <Icona nome="fattura" size={16} /> Aggiungi il PDF
+            </button>
+          )}
         </div>
 
         {/* ── I NUMERI ── */}
@@ -503,7 +565,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                 </div>
                 {k === 'voce' && Object.entries(totali.perVoce).sort((a, b) => b[1].euro - a[1].euro).map(([s, w]) => (
                   <div key={s} style={{ display: 'flex', fontSize: 12.5, color: C.attenuato, marginTop: 5, marginLeft: 27 }}>
-                    <span style={{ flex: 1 }}>{descriviVoce(s).nome} <span style={{ opacity: .7 }}>· sigla "{s}"</span></span>
+                    <span style={{ flex: 1 }}>{descriviVoce(s, legenda).nome} <span style={{ opacity: .7 }}>· sigla "{s}"</span></span>
                     <span style={{ ...cifre }}>{w.n} · {euro(r2(w.euro))}</span>
                   </div>
                 ))}
@@ -579,7 +641,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
 
         {/* ── LE SPEDIZIONI FATTE ALTROVE: si abbinano all'export di quel gestionale ── */}
         {totali.nonTrovate > 0 && (
-          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} onScaricato={registraFileEsterno} />
+          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} onScaricato={registraFileEsterno} legenda={legenda} />
         )}
 
         {/* ── LE SPEDIZIONI ── */}
