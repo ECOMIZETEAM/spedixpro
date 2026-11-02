@@ -117,6 +117,9 @@ export type CredenzialiGls = {
   user_webservice?: string   // CodiceClienteGls / CodiceCliente
   password_webservice?: string // PasswordClienteGls / Password
   codice_contratto?: string  // CodiceContrattoGls / CodiceContratto
+  // Password del Weblabeling (area clienti GLS): la vuole il servizio di svincolo giacenze, che NON
+  // accetta quella del webservice etichette (svincolaGiacenzaGls).
+  password_weblabeling?: string
 }
 
 export type ParcelGls = {
@@ -490,6 +493,108 @@ export function numeroNudoGls(s: { numero?: string | null; tracking_number?: str
   let n = raw?.numero ? String(raw.numero) : ''
   if (!n) { const mm = String(s?.numero || s?.tracking_number || '').match(/\d{6,}/); n = mm ? mm[0] : '' }
   return n
+}
+
+// SVINCOLO GIACENZE (manuale GLS MU276). È un servizio a parte, fuori dal webservice etichette: un POST
+// di XML con il profilo dell'area clienti, cioè codice cliente + password del Weblabeling. Il profilo
+// deve avere la "gestione giacenze" abilitata sul contratto. GLS risponde per ogni spedizione con
+// <Svincolo>Ok</Svincolo> oppure col motivo del rifiuto ("Password Errata", "Spedizione non trovata",
+// "Giacenza Scaduta"…). Con la password del webservice risponde "Password Errata": provato il 2/11/2026
+// sul conto di Wave con un numero inesistente.
+// TipoSvincolo: 1 riconsegna allo stesso indirizzo, 2 ad altro indirizzo, 3 reso al mittente.
+const GLS_SVINCOLO_ENDPOINT = 'https://www.gls-italy.com/PHPApps/redelivery_parcel.php'
+
+export type SvincoloGls = {
+  numero: string                 // sede + numero, es. NI665432282
+  tipo: 1 | 2 | 3
+  dataRiconsegna?: string        // GG/MM/AA, obbligatoria per 1 e 2
+  note?: string
+  nuovo?: { nome: string; indirizzo: string; localita: string; cap: string; provincia: string }
+}
+
+// Data per GLS (GG/MM/AA). Senza una data scelta si riconsegna il primo giorno lavorativo dopo oggi
+// (ora italiana): il sabato e la domenica GLS non consegna con il servizio normale.
+export function dataSvincoloGls(scelta?: string | null): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(scelta || ''))
+  if (m) return `${m[3]}/${m[2]}/${m[1].slice(2)}`
+  const oggi = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome' }))
+  const d = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() + 1)
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1)
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`
+}
+
+function cdataGls(v: unknown): string {
+  return `<![CDATA[${String(v ?? '').replace(/]]>/g, ']]]]><![CDATA[>')}]]>`
+}
+
+export async function svincolaGiacenzaGls(
+  cred: CredenzialiGls, s: SvincoloGls, timeoutMs = 20000,
+): Promise<{ ok: boolean; esito: string }> {
+  if (!cred.password_weblabeling) {
+    return { ok: false, esito: 'Manca la password Weblabeling GLS nel contratto: senza, GLS non accetta lo svincolo.' }
+  }
+  // Limiti di GLS sul nuovo indirizzo: tagliare indirizzo o località manderebbe il pacco altrove, quindi
+  // si chiede di accorciarli. Il nome (20 caratteri) si accorcia: serve all'autista, non all'instradamento.
+  if (s.tipo === 2) {
+    const n = s.nuovo
+    if (!n?.indirizzo || !n.localita || !n.cap) return { ok: false, esito: 'Per la consegna a un altro indirizzo servono indirizzo, località e CAP.' }
+    if (n.indirizzo.trim().length > 30) return { ok: false, esito: 'GLS accetta al massimo 30 caratteri per il nuovo indirizzo: accorcialo e riprova.' }
+    if (n.localita.trim().length > 30) return { ok: false, esito: 'GLS accetta al massimo 30 caratteri per la nuova località: accorciala e riprova.' }
+  }
+  const campi = [
+    `<NumeroSpedizione>${cdataGls(s.numero)}</NumeroSpedizione>`,
+    `<TipoSvincolo>${s.tipo}</TipoSvincolo>`,
+    // Le spese della riconsegna sono del mittente: è lui che paga lo svincolo (lo addebitiamo noi).
+    `<SpeseAdMittente>S</SpeseAdMittente>`,
+    s.tipo !== 3 && s.dataRiconsegna ? `<DataRiconsegna>${cdataGls(s.dataRiconsegna)}</DataRiconsegna>` : '',
+    s.note ? `<Note>${cdataGls(String(s.note).substring(0, 65))}</Note>` : '',
+    ...(s.tipo === 2 && s.nuovo ? [
+      `<CognomeNome>${cdataGls(s.nuovo.nome.trim().substring(0, 20).trim())}</CognomeNome>`,
+      `<NuovoIndirizzo>${cdataGls(s.nuovo.indirizzo.trim())}</NuovoIndirizzo>`,
+      `<NuovaLocalita>${cdataGls(s.nuovo.localita.trim())}</NuovaLocalita>`,
+      `<NuovoZipcode>${cdataGls(String(s.nuovo.cap).replace(/\s+/g, '').substring(0, 5))}</NuovoZipcode>`,
+      `<NuovaProvincia>${cdataGls(String(s.nuovo.provincia || '').toUpperCase().substring(0, 3))}</NuovaProvincia>`,
+    ] : []),
+  ].filter(Boolean).join('')
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Info>`
+    + `<SedeProfiloGls>${cdataGls(cred.sigla_sede)}</SedeProfiloGls>`
+    + `<CodiceProfiloGls>${cdataGls(cred.user_webservice)}</CodiceProfiloGls>`
+    + `<PasswordClienteGls>${cdataGls(cred.password_weblabeling)}</PasswordClienteGls>`
+    + `<Redelivery>${campi}</Redelivery></Info>`
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  let testo = ''
+  try {
+    // XML grezzo nel corpo: inviato come campo di un form, GLS risponde con una pagina vuota.
+    const res = await fetch(GLS_SVINCOLO_ENDPOINT, {
+      method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8' }, body: xml, signal: ctrl.signal,
+    })
+    testo = await res.text()
+  } catch (e) {
+    return { ok: false, esito: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)) }
+  } finally {
+    clearTimeout(t)
+  }
+  const esito = (estraiTag(testo, 'Svincolo') || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim()
+  if (!esito) return { ok: false, esito: 'Risposta di GLS non leggibile: ' + testo.replace(/\s+/g, ' ').substring(0, 160) }
+  return { ok: /^ok$/i.test(esito), esito }
+}
+
+// Impronta non reversibile della password Weblabeling. Quando GLS la rifiuta, si salva nelle impostazioni
+// del contratto (svincolo_gls_password_rifiutata) e non la si rimanda: GLS blocca i profili dopo accessi
+// errati (è successo al conto RITIRO di MULTI a ottobre). Cambiata la password, l'impronta non torna più.
+export async function improntaPasswordWeblabeling(cred: CredenzialiGls): Promise<string> {
+  const { createHash } = await import('crypto')
+  return createHash('sha256').update(String(cred.password_weblabeling || '')).digest('hex').slice(0, 16)
+}
+
+// Prova della password Weblabeling SENZA toccare nessun pacco: si chiede lo svincolo di una spedizione
+// che non esiste. Se GLS risponde "Spedizione non trovata" vuol dire che profilo e password li ha
+// accettati; altrimenti torna il motivo ("Password Errata", "Profilo GLS inesistente"…).
+export async function provaPasswordWeblabelingGls(cred: CredenzialiGls): Promise<{ ok: boolean; esito: string }> {
+  const r = await svincolaGiacenzaGls(cred, { numero: `${(cred.sigla_sede || '').trim()}000000001`, tipo: 1, dataRiconsegna: dataSvincoloGls() })
+  if (/non\s+trovata/i.test(r.esito)) return { ok: true, esito: 'Password Weblabeling accettata da GLS.' }
+  return { ok: false, esito: r.esito }
 }
 
 // Chiusura GLS di una DISTINTA (stessa forma di chiudiBorderoSpedisci/chiudiBordereauSpediamopro).

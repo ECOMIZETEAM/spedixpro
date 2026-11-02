@@ -39,6 +39,8 @@ async function salvaCorriere(formData: FormData) {
     credenziali.user_webservice = formData.get('user_webservice') as string || ''
     credenziali.password_webservice = formData.get('password_webservice') as string || ''
     credenziali.codice_contratto = formData.get('codice_contratto') as string || ''
+    // Facoltativa: serve solo allo svincolo delle giacenze (servizio GLS a parte, lib/gls.svincolaGiacenzaGls).
+    credenziali.password_weblabeling = formData.get('password_weblabeling') as string || ''
     settings.tipo_collo = formData.get('tipo_collo') as string || 'Normale'
     // Nazionale (Italia) o Parcel (Europa): e' un altro servizio GLS con le stesse credenziali, e
     // decide dove il contratto puo' spedire (lib/gls.ts, servizioGls).
@@ -194,6 +196,7 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['user_webservice','User Webservice (API)','username','text'],
       ['password_webservice','Password Webservice (API)','••••••••','password'],
       ['codice_contratto','Codice Contratto','es. 123456','text'],
+      ['password_weblabeling','Password Weblabeling (svincolo giacenze)','password del Weblabeling GLS','password',true],
     ],
   },
   sda: {

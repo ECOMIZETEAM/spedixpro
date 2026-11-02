@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { creaSpedizioneConEtichettaGls, annullaSpedizioneGls, type CredenzialiGls } from '@/lib/gls'
+import { creaSpedizioneConEtichettaGls, annullaSpedizioneGls, provaPasswordWeblabelingGls, improntaPasswordWeblabeling, type CredenzialiGls } from '@/lib/gls'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST connessione GLS diretto — SOLO IL PROPRIETARIO del contratto.
@@ -58,7 +58,25 @@ export async function POST(req: Request) {
       annullato = await annullaSpedizioneGls(cred, ris.numeroSpedizione)
     }
 
+    // Password Weblabeling (svincolo giacenze): si prova con una spedizione inesistente, nessun pacco
+    // coinvolto. Così chi la inserisce sa subito se è giusta, senza aspettare la prima giacenza vera.
+    // Una password che GLS ha già rifiutato non si rimanda (vedi lib/gls.improntaPasswordWeblabeling).
+    let giacenze: { ok: boolean; esito: string } | null = null
+    if (cred.password_weblabeling) {
+      const impronta = await improntaPasswordWeblabeling(cred)
+      const settingsC = ((c as any).settings || {}) as Record<string, any>
+      if (settingsC.svincolo_gls_password_rifiutata === impronta) {
+        giacenze = { ok: false, esito: 'GLS ha già rifiutato questa password: inseriscine una nuova' }
+      } else {
+        giacenze = await provaPasswordWeblabelingGls(cred)
+        if (!giacenze.ok && /password|profilo/i.test(giacenze.esito)) {
+          await createAdminSupabase().from('corrieri').update({ settings: { ...settingsC, svincolo_gls_password_rifiutata: impronta } }).eq('id', corriereId)
+        }
+      }
+    }
+
     return NextResponse.json({
+      giacenze,
       ok: !!ris.numeroSpedizione,
       numeroSpedizione: ris.numeroSpedizione,
       tracking: ris.tracking,
