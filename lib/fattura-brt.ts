@@ -44,6 +44,7 @@ export type RigaFatturaBrt = {
   nazione: string
   destinatario: string
   mittente: string                 // RAGIONE SOCIALE MITTENTE (sui rientri è il destinatario dell'andata)
+  capMittente: string              // sul reso è il CAP di chi ha ricevuto l'andata: serve a ritrovarla
   mittenteOriginale: string
   nolo: number                     // PORTO
   voci: VoceFattura[]
@@ -128,6 +129,7 @@ export function leggiFatturaBrt(testo: string): LetturaFatturaBrt {
       nazione: v('NAZIONE DESTINATARIO').toUpperCase() || 'IT',
       destinatario: v('RAGIONE SOCIALE DESTINAT.'),
       mittente: v('RAGIONE SOCIALE MITTENTE'),
+      capMittente: v('CAP MITTENTE'),
       mittenteOriginale: v('RAG.SOC. MITTENTE ORIGINALE'),
       nolo, voci, altreVarie, totale,
       // BRT scrive le voci a tre decimali (0,665): si confronta la somma esatta, non i due importi già
@@ -159,10 +161,15 @@ export const SIGLE_BRT: Record<string, SiglaBrt> = {
   // Isole minori e Venezia (8 / 10 €).
   J: { nome: 'Isole minori e località disagiate', categoria: 'isole', certa: true },
   // 6,90 / 1,50 € solo su andate di due mittenti di materassi e arredo, ci si calcola sopra il carburante:
-  // un supplemento di ingombro, non una giacenza.
+  // un supplemento di ingombro, non una giacenza. Ma a ottobre (conto 677742) vale 2,90 € su tre pacchi
+  // dichiarati da 1 kg e non misurati da BRT: il significato resta da confermare con BRT.
   i: { nome: 'Supplemento ingombro (da confermare)', categoria: 'ingombro', certa: false, voceListino: 'Fuori misura' },
-  Q: { nome: 'Servizio di consegna (da confermare)', categoria: 'servizio', certa: false },
-  I: { nome: 'Voce sui rientri (da confermare)', categoria: 'rientro', certa: false },
+  // Solo dove BRT classifica la destinazione con TIPO INOLTRO "T" o "Z" (38 righe su 38, quattro fatture):
+  // un supplemento della località, non un servizio chiesto dal mittente. A volte è il 10% esatto del nolo.
+  Q: { nome: 'Supplemento località T/Z (da confermare)', categoria: 'servizio', certa: false },
+  // Solo su resi (A2) e bolle accessorie (F3) di pacchi andati in giacenza: sulla fattura di ottobre le
+  // bolle accessorie sono di pacchi poi consegnati (riconsegna), i resi di pacchi tornati al mittente.
+  I: { nome: 'Giacenza (da confermare)', categoria: 'rientro', certa: false },
   F: { nome: 'Voce da 40 € (da confermare)', categoria: 'altro', certa: false },
   A: { nome: 'Voce minore (da confermare)', categoria: 'altro', certa: false },
   U: { nome: 'Voce minore (da confermare)', categoria: 'altro', certa: false },

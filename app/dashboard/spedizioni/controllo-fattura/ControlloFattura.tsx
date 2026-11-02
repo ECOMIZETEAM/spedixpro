@@ -1,9 +1,11 @@
 'use client'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useDialog } from '@/app/components/DialogProvider'
 import { leggiFatturaBrt, descriviVoce } from '@/lib/fattura-brt'
 import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
+import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera, Pillola } from './ui'
+import AltriGestionali, { type EsternoIniziale } from './AltriGestionali'
 
 /* CONTROLLO FATTURA CORRIERE. Il detentore carica la fattura di BRT (il file TIVAF) e vede spedizione per
  * spedizione quanto ha fatturato BRT, quanto Moove gli ha registrato come costo, e il perché di ogni
@@ -28,55 +30,8 @@ type Filtro = 'perdita' | 'tutte' | 'peso' | 'supplemento' | 'voce' | 'tariffa' 
 const PACCHETTO = 200
 const PER_PAGINA = 50
 
-const C = {
-  testo: '#101828', attenuato: '#667085', filo: '#eaecf0', fondoTenue: '#f9fafb',
-  arancio: '#f97316', arancioScuro: '#c2410c', arancioTenue: '#fff7ed', arancioOrlo: '#fed7aa',
-  rosso: '#d92d20', rossoTenue: '#fef3f2', rossoOrlo: '#fecdca',
-  verde: '#067647', verdeTenue: '#ecfdf3', verdeOrlo: '#abefc6',
-  ambra: '#b54708', ambraTenue: '#fffaeb', ambraOrlo: '#fedf89',
-}
-const carta = { background: '#fff', border: `1px solid ${C.filo}`, borderRadius: '14px', boxShadow: '0 1px 2px rgba(16,24,40,.05)' }
-const cifre = { fontVariantNumeric: 'tabular-nums' as const }
-
-const euro = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
-const conSegno = (n: number) => (n > 0.005 ? '+' : n < -0.005 ? '−' : '') + euro(Math.abs(n))
-const kg = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) + ' kg'
-const r2 = (n: number) => Math.round(n * 100) / 100
 const FASCE = [3, 5, 10, 20, 30, 50, 100]
 const fascia = (p: number) => { const f = FASCE.find(x => p <= x); return f ? `fino a ${f} kg` : 'oltre 100 kg' }
-const coloreImporto = (n: number) => n > 0.005 ? C.rosso : n < -0.005 ? C.verde : C.attenuato
-
-// Icone a linea (griglia 24, tratto 1,7, estremi tondi), nel colore del testo che le contiene.
-const TRATTI: Record<string, string> = {
-  fattura: 'M6 3h12v18l-3-2-3 2-3-2-3 2z M9 8h6 M9 12h6 M9 16h3',
-  carica: 'M12 15V4 M7.5 8.5 12 4l4.5 4.5 M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15',
-  bilancia: 'M12 4v16 M8 20h8 M5 8h14 M5 8l-3 6.5a3 3 0 0 0 6 0z M19 8l-3 6.5a3 3 0 0 0 6 0z',
-  etichetta: 'M3 12.2V4a1 1 0 0 1 1-1h8.2a1 1 0 0 1 .7.3l7.8 7.8a1 1 0 0 1 0 1.4l-8.2 8.2a1 1 0 0 1-1.4 0l-7.8-7.8a1 1 0 0 1-.3-.7z M7.5 7.5h.01',
-  cursori: 'M4 20v-6 M4 10V4 M12 20v-8 M12 8V4 M20 20v-4 M20 12V4 M2 14h4 M10 8h4 M18 16h4',
-  annullata: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M15 9l-6 6 M9 9l6 6',
-  pacco: 'M21 8 12 3 3 8l9 5 9-5z M3 8v8l9 5 9-5V8 M12 13v8',
-  cerca: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z M20 20l-4-4',
-  scarica: 'M12 4v11 M7.5 10.5 12 15l4.5-4.5 M4 19h16',
-  freccia: 'M5 12h14 M13 6l6 6-6 6',
-  euro: 'M17 6.5A6.5 6.5 0 1 0 17 17.5 M4 10h9 M4 14h9',
-  sale: 'M3 17l6-6 4 4 8-8 M15 7h6v6',
-  spunta: 'M20 6 9 17l-5-5',
-  avviso: 'M12 9v4 M12 17h.01 M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
-  rientro: 'M9 14 4 9l5-5 M4 9h11a5 5 0 0 1 0 10h-3',
-}
-function Icona({ nome, size = 18, colore }: { nome: string; size?: number; colore?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={colore || 'currentColor'} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-      {TRATTI[nome].split(' M').map((d, i) => <path key={i} d={(i ? 'M' : '') + d} />)}
-    </svg>
-  )
-}
-function Tessera({ nome, colore, fondo }: { nome: string; colore: string; fondo: string }) {
-  return <span style={{ width: 36, height: 36, borderRadius: 10, background: fondo, color: colore, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icona nome={nome} size={19} /></span>
-}
-function Pillola({ children, colore, fondo, orlo }: { children: ReactNode; colore: string; fondo: string; orlo: string }) {
-  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, fontSize: 11.5, fontWeight: 600, color: colore, background: fondo, border: `1px solid ${orlo}`, whiteSpace: 'nowrap' }}>{children}</span>
-}
 
 const MOTIVI: Record<string, { nome: string; icona: string }> = {
   peso: { nome: 'Peso o volume rimisurato da BRT', icona: 'bilancia' },
@@ -87,7 +42,7 @@ const MOTIVI: Record<string, { nome: string; icona: string }> = {
   non_calcolabile: { nome: 'Destinazione senza prezzo nel listino', icona: 'avviso' },
 }
 
-export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string; storico?: FatturaStorico[] } }) {
+export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string; storico?: FatturaStorico[]; esterni?: EsternoIniziale[] } }) {
   const dialog = useDialog()
   const [contratti, setContratti] = useState<Contratto[] | null>(iniziale?.contratti ?? null)
   const [contrattoId, setContrattoId] = useState(iniziale?.contratti?.[0]?.id ?? '')
@@ -463,7 +418,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           {[
             { ic: 'fattura', t: 'Fatturato da BRT', v: euro(totali.totaleCorriere), n: `${esiti.length.toLocaleString('it-IT')} righe in fattura`, c: C.testo },
             { ic: 'euro', t: 'Costo registrato in Moove', v: euro(totali.costoMoove), n: `sulle ${trovate.length.toLocaleString('it-IT')} spedizioni trovate`, c: C.testo },
-            { ic: 'sale', t: 'Differenza', v: conSegno(diff), n: diff > 0.005 ? 'BRT ti costa più di quanto vedi' : diff < -0.005 ? 'vedi un costo più alto del vero' : 'torna al centesimo', c: coloreImporto(diff), evid: true },
+            { ic: 'sale', t: 'Differenza', v: conSegno(diff), n: !trovate.length ? 'nessuna spedizione di Moove da confrontare' : diff > 0.005 ? 'BRT ti costa più di quanto vedi' : diff < -0.005 ? 'vedi un costo più alto del vero' : 'torna al centesimo', c: coloreImporto(diff), evid: trovate.length > 0 },
             { ic: 'bilancia', t: 'Da girare ai clienti', v: String(daRettificare.length), n: 'spedizioni col peso BRT più alto', c: daRettificare.length ? C.arancioScuro : C.testo },
             { ic: 'pacco', t: 'Non trovate in Moove', v: String(totali.nonTrovate), n: totali.nonTrovate ? `${euro(totali.totaleNonTrovate)} spedite fuori dal portale` : 'tutte abbinate', c: totali.nonTrovate ? C.ambra : C.testo },
           ].map(k => (
@@ -499,7 +454,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                 ))}
               </div>
             ))}
-            {!Object.keys(totali.perMotivo).length && <div style={{ fontSize: 13, color: C.verde, display: 'flex', gap: 6, alignItems: 'center' }}><Icona nome="spunta" size={16} /> Nessuna differenza: la fattura torna con Moove.</div>}
+            {!Object.keys(totali.perMotivo).length && (trovate.length
+              ? <div style={{ fontSize: 13, color: C.verde, display: 'flex', gap: 6, alignItems: 'center' }}><Icona nome="spunta" size={16} /> Nessuna differenza: la fattura torna con Moove.</div>
+              : <div style={{ fontSize: 13, color: C.attenuato, display: 'flex', gap: 6, alignItems: 'center' }}><Icona nome="pacco" size={16} /> Nessuna spedizione di questa fattura è in Moove: le trovi qui sotto, fra quelle fatte con un altro gestionale.</div>)}
             {totali.rientri > 0 && (
               <div style={{ display: 'flex', gap: 8, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 9, padding: '9px 11px', marginTop: 10 }}>
                 <Icona nome="rientro" size={16} /> {totali.rientri} rientri per {euro(totali.totaleRientri)}: non si confrontano col nolo dell'andata, il reso si addebita col suo flusso.
@@ -563,6 +520,11 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
               </button>
             )}
           </div>
+        )}
+
+        {/* ── LE SPEDIZIONI FATTE ALTROVE: si abbinano all'export di quel gestionale ── */}
+        {totali.nonTrovate > 0 && (
+          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} />
         )}
 
         {/* ── LE SPEDIZIONI ── */}
