@@ -2,6 +2,7 @@ import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, 
 import { costruisciCatena } from '@/lib/cascata'
 import { catenaDaCorriere } from '@/lib/condivisione-catena'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { colliDettaglioOEredita } from '@/lib/colli-dettaglio'
 import type { Ripesatura } from '@/lib/ripesature'
 
 // COSA DEVE PAGARE OGNUNO, DOPO CHE IL FORNITORE HA RIMISURATO IL COLLO.
@@ -81,6 +82,35 @@ export type EsitoRipesatura = {
 
 const arrotonda = (n: number) => Math.round(n * 100) / 100
 
+// L'addebito di un livello non supera il salto fatto con lo stesso listino: dovuto sul ripesato meno
+// dovuto sul dichiarato (vedi «LA RETTIFICA CONTA I CHILI» in calcolaRipesature). Il livello torna
+// com'era quando non c'e' niente da limitare: nessun addebito, dichiarato non prezzabile, o un salto che
+// supera gia' la differenza (listino sceso, o il livello aveva pagato di piu' alla partenza).
+function soloIlSalto<T extends { pagato: number; dovuto: number | null; differenza: number | null }>(l: T, dovutoDichiarato: number | null | undefined): T {
+  if (l.dovuto == null || l.differenza == null || l.differenza < 0.01 || dovutoDichiarato == null) return l
+  const salto = Math.max(0, arrotonda(l.dovuto - dovutoDichiarato))
+  if (salto >= l.differenza) return l
+  return { ...l, dovuto: arrotonda(l.pagato + salto), differenza: salto } as T
+}
+
+// IL COLLO COME ERA STATO DICHIARATO, da prezzare col listino di oggi accanto a quello ripesato. Torna []
+// quando non lo si conosce con certezza, e allora la rettifica resta com'era. Multicollo: dal dettaglio
+// salvato, o dai `parcels` del fornitore (sui pacchi SpediamoPro `raw` e' una stringa JSON); mai la misura
+// unica ripetuta per il numero dei colli, che su 050039152917364 (70×55×55 + 75×35×55) faceva 84,7 kg di
+// volume invece dei 71,22 fatturati: un dichiarato gonfiato farebbe pagare meno chili di quelli veri.
+function colliDichiarati(s: any, rawResponse: any): { weight: number; length: number; width: number; height: number }[] {
+  const n = Math.max(1, Number(s.colli) || 1)
+  if (n === 1) {
+    const peso = Number(s.peso_reale) || 0
+    return peso > 0 ? [{ weight: peso, length: Number(s.lunghezza) || 0, width: Number(s.larghezza) || 0, height: Number(s.altezza) || 0 }] : []
+  }
+  let raw = rawResponse
+  if (typeof raw?.raw === 'string') { try { raw = JSON.parse(raw.raw) } catch { raw = null } }
+  const dett = colliDettaglioOEredita(s.colli_dettaglio, raw)
+  if (dett.length !== n) return []
+  return dett.map(c => ({ weight: Number(c.peso) || 0, length: Number(c.lunghezza) || 0, width: Number(c.larghezza) || 0, height: Number(c.altezza) || 0 }))
+}
+
 // QUALCUNO SOTTO DEVE ANCORA PAGARE? Un livello puo' aver gia' pagato il giusto (differenza zero)
 // mentre chi sta sotto di lui no: il cliente ha fasce piu' fitte, o il sotto-master all'origine aveva
 // pagato meno di quanto pagava il suo padre. Se la rettifica si fermasse al livello a zero, chi sta
@@ -127,7 +157,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     }
 
     const { data: legs } = await admin.from('spedizioni')
-      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,dest_provincia,dest_cap,dest_citta,dest_paese,mitt_cap,mitt_provincia,contrassegno,assicurazione,valore_merce,servizi_accessori,numero,tracking_number')
+      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,lunghezza,larghezza,altezza,colli,colli_dettaglio,dest_provincia,dest_cap,dest_citta,dest_paese,mitt_cap,mitt_provincia,contrassegno,assicurazione,valore_merce,servizi_accessori,numero,tracking_number')
       .eq('tracking_number', r.ldv)
     // CONDIVISIONE: più gambe condividono il tracking; prendo l'ORIGINANTE (numero pulito = tracking, è
     // quella col cliente finale e la catena-fornitore giusta). Spedizione normale = una riga sola.
@@ -232,8 +262,10 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // Estratta in una funzione così la si può rifare un SECONDO giro forzando 'Italia' quando le zone
     // dei livelli non coincidono (evita MULTI su SCS + Ecomize su Italia) o quando un livello, che il
     // listino coprirebbe su Italia, resta bloccato dall'esclusione zona-disagiata.
-    const costruisciLivelli = async (zonaForzata?: string) => {
+    // `pk` = i colli da prezzare: quelli ripesati, oppure quelli dichiarati per limitaAiChili.
+    const costruisciLivelli = async (zonaForzata?: string, pk = packages) => {
       const livelli: LivelloRettifica[] = []
+      const detentori: string[] = []
       const zone: (string | null)[] = []
       let pesoVolumeDopo: number | null = null
       let motivo: string | undefined
@@ -249,7 +281,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         let dovuto: number | null = null
         if (cl?.listino_cliente_id) {
           const ris = await calcolaPrezzoListino(admin, {
-            listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages, ...dest, zonaForzata,
+            listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest, zonaForzata,
           })
           if (ris) {
             zone.push(ris.zona)
@@ -304,7 +336,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       if (corr) {
         const { catena, errore } = await costruisciCatena(admin, {
           masterDirettoId: s.master_id, corriereOwnerId: corr.master_id,
-          costoSpedizione: 0, provincia: dest.provincia, packages,
+          costoSpedizione: 0, provincia: dest.provincia, packages: pk,
           cap: dest.cap, citta: dest.citta, paese: dest.paese,
           corriereNome: corr.nome_contratto,
           contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
@@ -326,13 +358,14 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           if (liv.isProprietario && liv.prezzo > 0) {
             costoDetentore = { masterId: liv.masterId, pagato, dovuto: arrotonda(liv.prezzo), differenza: arrotonda(liv.prezzo - pagato) }
           }
+          if (liv.isProprietario) detentori.push(liv.masterId)
           livelli.push({
             chi: liv.nome, clienteId: null, masterId: liv.masterId,
             pagato, dovuto, differenza: arrotonda(dovuto - pagato),
           })
         }
       }
-      return { livelli, zone, pesoVolumeDopo, motivo, catenaDalBasso, catenaCompleta, bloccato, costoDetentore }
+      return { livelli, zone, pesoVolumeDopo, motivo, catenaDalBasso, catenaCompleta, bloccato, costoDetentore, detentori }
     }
 
     // ── CONDIVISIONE: livelli sulla catena-FORNITORE (non l'albero), senza toccare costruisciCatena
@@ -341,21 +374,21 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // VENDITORE (come /api/v1); owner → corriere reale. differenza = dovuto(ripesato) − pagato(movimenti,
     // dal ledger per i codice). catenaDalBasso = catena-fornitore → l'upload e la propagazione trovano il
     // master che carica (prima cadeva "fuori catena" perché l'owner non è nell'albero dell'originante). ──
-    const costruisciLivelliCondivisione = async () => {
+    const costruisciLivelliCondivisione = async (pk = packages) => {
       // La fila del contratto dai puntatori, dalla riga della gamba originante: chi carica il file del
       // fornitore (il detentore vero) ci sta dentro anche quando il ponte è comprato da una copia d'albero.
       const catena = await catenaDaCorriere(admin, s.corriere_id, { master: s.master_id, nomeContratto: corr!.nome_contratto })
       if (!catena.length) return null
       const { data: nomiM } = await admin.from('masters').select('id,nome').in('id', catena.map(l => l.master))
       const nomeM = new Map((nomiM || []).map((m: any) => [m.id, m.nome]))
-      const pesoRip = packages.reduce((a, p) => a + (Number(p.weight) || 0), 0) || 1
+      const pesoRip = pk.reduce((a, p) => a + (Number(p.weight) || 0), 0) || 1
       const livelli: LivelloRettifica[] = []
       let catenaCompleta = true
       if (s.cliente_id) {
         const { data: cl } = await admin.from('clienti').select('ragione_sociale,listino_cliente_id').eq('id', s.cliente_id).maybeSingle()
         let dovuto: number | null = null
         if ((cl as any)?.listino_cliente_id) {
-          const ris = await calcolaPrezzoListino(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, packages, ...dest })
+          const ris = await calcolaPrezzoListino(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest })
           if (ris) {
             const sup = await calcolaSupplementiCliente(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
             if (sup.disponibile) {
@@ -378,7 +411,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto)
           pag = arrotonda(pagatoPerCliente.get(liv.ledgerClienteId) || 0)
           if ((lc as any)?.listino_cliente_id && corrVend) {
-            const ris = await calcolaPrezzoListino(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, packages, ...dest })
+            const ris = await calcolaPrezzoListino(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, packages: pk, ...dest })
             if (ris) {
               const sup = await calcolaSupplementiCliente(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
               dovuto = sup.disponibile ? arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione) : arrotonda(ris.prezzo)
@@ -387,7 +420,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         } else {
           // ALBERO / OWNER: dal listino del livello per il suo corriere (reale per l'owner).
           pag = arrotonda(pagatoMaster.get(liv.master) || 0)
-          const d = await calcolaPrezzoCorriereDettaglio(admin, { corriereId: liv.corriereId, masterId: liv.master, provincia: dest.provincia, cap: dest.cap, citta: dest.citta, paese: dest.paese, pesoReale: pesoRip, packages, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), mittCap: dest.mittCap, mittProvincia: dest.mittProvincia, mittPaese: dest.mittPaese })
+          const d = await calcolaPrezzoCorriereDettaglio(admin, { corriereId: liv.corriereId, masterId: liv.master, provincia: dest.provincia, cap: dest.cap, citta: dest.citta, paese: dest.paese, pesoReale: pesoRip, packages: pk, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), mittCap: dest.mittCap, mittProvincia: dest.mittProvincia, mittPaese: dest.mittPaese })
           if (d && (d as any).totale != null && isFinite((d as any).totale)) dovuto = arrotonda((d as any).totale)
           else catenaCompleta = false
         }
@@ -400,7 +433,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       const top = livelli.find(l => l.masterId === catena[catena.length - 1]?.master)
       const costoDetentore: EsitoRipesatura['costoDetentore'] = top && top.dovuto != null && top.masterId
         ? { masterId: top.masterId, pagato: top.pagato, dovuto: top.dovuto, differenza: arrotonda(top.dovuto - top.pagato) } : null
-      return { livelli, zone: [] as (string | null)[], pesoVolumeDopo: null as number | null, motivo: undefined as string | undefined, catenaDalBasso: catena.map(l => l.master), catenaCompleta, bloccato: false, costoDetentore }
+      return { livelli, zone: [] as (string | null)[], pesoVolumeDopo: null as number | null, motivo: undefined as string | undefined, catenaDalBasso: catena.map(l => l.master), catenaCompleta, bloccato: false, costoDetentore, detentori: [] as string[] }
     }
 
     // PASSO 1: normale (ogni livello con la sua zona). PASSO 2 (solo se serve): stessa fascia 'Italia'
@@ -408,12 +441,48 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // della fascia disagiata. Si usa il forzato SOLO se sblocca davvero: altrimenti resta il passo 1
     // (identico a oggi -> nessuna regressione sulle spedizioni che gia' funzionano).
     // CONDIVISIONE (corriere ponte): catena-fornitore, un passo solo (zone coerenti, stesso contratto).
-    let res = corr?.tipo === 'moovexpress' ? (await costruisciLivelliCondivisione() || await costruisciLivelli()) : await costruisciLivelli()
+    const condivisa = corr?.tipo === 'moovexpress' ? await costruisciLivelliCondivisione() : null
+    let res = condivisa || await costruisciLivelli()
+    let zonaUsata: string | undefined
     const zoneValide = res.zone.filter((z): z is string => !!z)
     const incoerente = new Set(zoneValide).size > 1
     if (res.bloccato || incoerente) {
       const forzato = await costruisciLivelli('Italia')
-      if (!forzato.bloccato) res = forzato
+      if (!forzato.bloccato) { res = forzato; zonaUsata = 'Italia' }
+    }
+
+    // LA RETTIFICA CONTA I CHILI, NON I CAMBI DI PREZZO. `dovuto` e' il listino di OGGI sul collo
+    // ripesato, `pagato` quello che si e' pagato il giorno della spedizione: se nel frattempo il listino
+    // e' salito, la differenza si porta dietro l'aumento. L'1-2/11/2026 MULTI, Velox, GTS, spedizioni 2000
+    // ed Ecomize hanno alzato BRT del 2-2,5%, e 050039152917364 (per il fornitore da 75 a 100 kg, nei
+    // listini sempre "fino a 100") sarebbe uscito 0,42 a Ecomize e 0,46 a DELYFAST con zero chili in piu'.
+    // Regola di Lorenzo (02/11): un pacco che resta nella stessa fascia non paga ne' la rettifica ne'
+    // l'aumento. Quindi l'addebito non supera il SALTO fatto con lo stesso listino: oggi sul ripesato meno
+    // oggi sul dichiarato. Si limita solo un addebito, mai un rimborso; se il listino e' sceso, o il
+    // dichiarato non si conosce con certezza, il conto resta quello di prima.
+    const deveQualcosa = res.livelli.some(l => (l.differenza ?? 0) >= 0.01) || (res.costoDetentore?.differenza ?? 0) >= 0.01
+    if (deveQualcosa) {
+      let rawResponse: any = null
+      if (Math.max(1, Number(s.colli) || 1) > 1 && !(Array.isArray(s.colli_dettaglio) && s.colli_dettaglio.length)) {
+        const { data: sr } = await admin.from('spedizioni').select('raw_response').eq('id', s.id).maybeSingle()
+        rawResponse = sr?.raw_response ?? null
+      }
+      const dichiarati = colliDichiarati(s, rawResponse)
+      const resDich = !dichiarati.length ? null
+        : condivisa && res === condivisa ? await costruisciLivelliCondivisione(dichiarati)
+        : await costruisciLivelli(zonaUsata, dichiarati)
+      if (resDich) {
+        const chiave = (l: LivelloRettifica) => `${l.clienteId || ''}|${l.masterId || ''}|${l.ledgerClienteId || ''}`
+        const dovutoDich = new Map(resDich.livelli.filter(l => l.dovuto != null).map(l => [chiave(l), l.dovuto as number]))
+        // Il detentore col contratto proprio non ha un listino qui: il suo dovuto e' pagato + addebito del
+        // fornitore, uguale nei due giri, e il salto verrebbe zero.
+        const detentori = new Set(res.detentori)
+        res = {
+          ...res,
+          livelli: res.livelli.map(l => (l.masterId && detentori.has(l.masterId)) ? l : soloIlSalto(l, dovutoDich.get(chiave(l)))),
+          costoDetentore: res.costoDetentore ? soloIlSalto(res.costoDetentore, resDich.costoDetentore?.dovuto) : res.costoDetentore,
+        }
+      }
     }
     base.livelli = res.livelli
     if (res.pesoVolumeDopo != null) base.pesoVolumeDopo = res.pesoVolumeDopo
