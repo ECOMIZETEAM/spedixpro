@@ -28,6 +28,9 @@ const NAV: NavItem[] = [
   { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '¤', sub: [
     { label: 'Lista Contrassegni', href: '/dashboard/contrassegni', perm: 'admin.cod.index' },
     { label: 'Distinte Contrassegni', href: '/dashboard/contrassegni/distinte', perm: 'admin.codlists.index' },
+    // La compensazione di BRT la riceve il detentore: la pagina la vede chi vede le distinte, la rotta poi
+    // cerca le spedizioni Moove solo fra i contratti BRT suoi.
+    { label: 'Check Contrassegni', href: '/dashboard/contrassegni/check', perm: 'admin.codlists.index' },
   ]},
   { label: 'Ritiri', href: '/dashboard/ritiri', icon: '↩', sub: [
     { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo', perm: 'admin.pickups.index' },

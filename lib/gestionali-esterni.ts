@@ -21,6 +21,7 @@ export type SpedizioneEsterna = {
   prezzoCliente: number            // quanto ha pagato il cliente, contrassegno compreso
   contrassegno: number
   data: string
+  dataRitiro?: string              // il giorno in cui il pacco è partito (distinta), se l'export lo dice
   stato: string
 }
 
@@ -52,7 +53,7 @@ export const FORMATI: FormatoEsterno[] = [
     leggi: r => ({
       ldv: txt(r.ldv), cliente: txt(r.Cliente), destinatario: txt(r.destinatario), cap: txt(r.cap), citta: txt(r.citta),
       provincia: txt(r.provincia), colli: num(r.colli) || 1, peso: num(r.peso_tassabile) || num(r.peso),
-      prezzoCliente: num(r.costo_cliente), contrassegno: num(r.contrassegno), data: txt(r.Data_spedizione), stato: txt(r.status),
+      prezzoCliente: num(r.costo_cliente), contrassegno: num(r.contrassegno), data: txt(r.Data_spedizione), dataRitiro: txt(r.Data_distinta), stato: txt(r.status),
     }),
     rettifiche: {
       foglio: 'Rettifiche',
@@ -72,9 +73,9 @@ export const riconosciFormato = (colonne: string[]) => FORMATI.find(f => f.ricon
 // 067087…). Sulla fattura di Wave di ottobre: 13 su 14, ognuna con un solo candidato. Se i candidati sono
 // due, o nessuno, la riga resta non abbinata: meglio dirlo che attaccarla al pacco sbagliato.
 
-const parole = (s: string) => new Set(String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+export const parole = (s: string) => new Set(String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
   .replace(/[^A-Z ]/g, ' ').split(/\s+/).filter(w => w.length > 1))
-const somiglianza = (a: string, b: string) => {
+export const somiglianza = (a: string, b: string) => {
   const A = parole(a), B = parole(b)
   if (!A.size || !B.size) return 0
   let k = 0; for (const w of A) if (B.has(w)) k++
