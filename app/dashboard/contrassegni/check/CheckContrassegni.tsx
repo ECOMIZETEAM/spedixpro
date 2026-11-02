@@ -144,6 +144,16 @@ export default function CheckContrassegni() {
     </div>
   )
 
+  // Gli export caricati: si vedono anche prima del PDF, se arrivano per primi.
+  const fileEsportati = esportati.map(x => (
+    <div key={x.nome} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 10, padding: '9px 12px', marginBottom: 12 }}>
+      <Icona nome="fattura" size={16} />
+      <span style={{ flex: 1 }}>Export <b style={{ color: C.testo }}>{x.nome}</b>: {x.spedizioni.length.toLocaleString('it-IT')} spedizioni, {x.spedizioni.filter(s => s.contrassegno > 0).length.toLocaleString('it-IT')} con contrassegno{comp ? '' : ' · ora trascina il PDF della compensazione'}</span>
+      <button onClick={() => setEsportati(prev => prev.filter(y => y.nome !== x.nome))}
+        style={{ padding: '5px 10px', borderRadius: 8, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 12.5, fontWeight: 600, color: C.attenuato, cursor: 'pointer' }}>Togli</button>
+    </div>
+  ))
+
   const testata = (
     <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 20 }}>
       <Tessera nome="euro" colore={C.arancio} fondo={C.arancioTenue} />
@@ -162,6 +172,7 @@ export default function CheckContrassegni() {
   if (!comp) return (
     <div style={{ color: C.testo }}>
       {testata}{input}
+      {fileEsportati}
       {dropzone(true, 'Trascina qui la compensazione contrassegni di BRT', 'il PDF e, se ce l\'hai, l\'export spedizioni dell\'altro gestionale: insieme, o scegli i file dal computer')}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginTop: 16 }}>
         {[
@@ -221,12 +232,13 @@ export default function CheckContrassegni() {
       {/* ── I NUMERI ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 14 }}>
         {[
-          { ic: 'euro', t: 'Compensati da BRT', v: euro(comp.totale ?? sommaRighe), n: `${comp.righe.length} contrassegni`, c: C.testo },
-          { ic: 'pacco', t: 'Spedizioni Moove', v: euro(somma(moove)), n: `${moove.length} contrassegni`, c: moove.length ? C.verde : C.testo },
-          { ic: 'fattura', t: 'File col riferimento', v: euro(somma(perRif)), n: `${perRif.length} contrassegni`, c: C.testo },
-          { ic: 'etichetta', t: 'File con lettera di vettura', v: euro(somma(perLdv)), n: `${perLdv.length} contrassegni`, c: C.testo },
-          { ic: 'avviso', t: 'Da sistemare', v: euro(somma(daSistemare)), n: daSistemare.length ? `${daSistemare.length} contrassegni` : 'nessuno', c: daSistemare.length ? C.rosso : C.testo },
-        ].map(k => (
+          { ic: 'euro', t: 'Compensati da BRT', v: euro(comp.totale ?? sommaRighe), n: `${comp.righe.length} contrassegni`, c: C.testo, l: esiti },
+          { ic: 'pacco', t: 'Spedizioni Moove', v: euro(somma(moove)), n: `${moove.length} contrassegni`, c: C.verde, l: moove },
+          { ic: 'fattura', t: 'File col riferimento', v: euro(somma(perRif)), n: `${perRif.length} contrassegni`, c: C.testo, l: perRif },
+          { ic: 'etichetta', t: 'File con lettera di vettura', v: euro(somma(perLdv)), n: `${perLdv.length} contrassegni`, c: C.testo, l: perLdv },
+          { ic: 'avviso', t: 'Da sistemare', v: euro(somma(daSistemare)), n: `${daSistemare.length} contrassegni`, c: C.rosso, l: daSistemare },
+        // Le tessere vuote in grigio: l'occhio va su quelle dove c'è qualcosa da fare.
+        ].map(k => ({ ...k, ...(k.l.length ? {} : { c: '#98a2b3', n: 'nessuno' }) })).map(k => (
           <div key={k.t} style={{ ...carta, padding: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: C.attenuato }}><Icona nome={k.ic} size={15} /> {k.t}</div>
             <div style={{ fontSize: 24, fontWeight: 700, color: k.c, marginTop: 8, letterSpacing: '-.02em', ...cifre }}>{k.v}</div>
@@ -266,23 +278,19 @@ export default function CheckContrassegni() {
           <button onClick={() => scarica(tipo)} style={bottone(true)}><Icona nome="scarica" size={16} /> Scarica il file</button>
         </div>
       ))}
-      {servonoLdv.length > 0 && !esportati.length && (
+      {servonoLdv.length > 0 && (
         <div style={{ ...carta, padding: '14px 16px', marginBottom: 12 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{servonoLdv.length} contrassegni vogliono la lettera di vettura</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{servonoLdv.length} contrassegni vogliono la lettera di vettura{esportati.length ? ' e nell\'export non li trovo' : ''}</div>
           <div style={{ fontSize: 12.5, color: C.attenuato, marginBottom: 10, lineHeight: 1.45 }}>
-            Hanno il riferimento corto che mette il gestionale che numera le sue spedizioni ({servonoLdv.slice(0, 4).map(e => e.riga.rifNumerico).join(', ')}{servonoLdv.length > 4 ? '…' : ''}). Nel PDF di BRT la lettera di vettura non c'è: carica l'export spedizioni di quel gestionale, che copra i giorni di questi pacchi, e la prendo da lì.
+            Hanno il riferimento corto che mette il gestionale che numera le sue spedizioni ({servonoLdv.slice(0, 4).map(e => e.riga.rifNumerico).join(', ')}{servonoLdv.length > 4 ? '…' : ''}). Nel PDF di BRT la lettera di vettura non c'è
+            {esportati.length
+              ? <>, e nell'export caricato non c'è una spedizione con lo stesso destinatario e lo stesso contrassegno: di solito è l'export di un altro conto BRT, o non copre i giorni dal {dataIt(servonoLdv.map(e => e.riga.data).sort()[0])} al {dataIt(servonoLdv.map(e => e.riga.data).sort().pop()!)}. Aggiungi quello giusto.</>
+              : <>: carica l'export spedizioni di quel gestionale, che copra i giorni di questi pacchi, e la prendo da lì.</>}
           </div>
           {dropzone(false, 'Carica l\'export spedizioni del gestionale', 'Trascina qui il file Excel, o clicca per sceglierlo. Si abbina per destinatario, importo del contrassegno e data.')}
         </div>
       )}
-      {esportati.map(x => (
-        <div key={x.nome} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 10, padding: '9px 12px', marginBottom: 12 }}>
-          <Icona nome="fattura" size={16} />
-          <span style={{ flex: 1 }}>Export <b style={{ color: C.testo }}>{x.nome}</b>: {x.spedizioni.length.toLocaleString('it-IT')} spedizioni, {x.spedizioni.filter(s => s.contrassegno > 0).length.toLocaleString('it-IT')} con contrassegno</span>
-          <button onClick={() => setEsportati(prev => prev.filter(y => y.nome !== x.nome))}
-            style={{ padding: '5px 10px', borderRadius: 8, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 12.5, fontWeight: 600, color: C.attenuato, cursor: 'pointer' }}>Togli</button>
-        </div>
-      ))}
+      {fileEsportati}
 
       {/* ── I CONTRASSEGNI, UNO PER UNO ── */}
       <div style={{ ...carta, overflow: 'hidden' }}>
