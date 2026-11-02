@@ -298,11 +298,11 @@ export async function POST(req: NextRequest) {
   }, 0)
 
   // I PESI FATTURATI, riga per riga: quello dichiarato alla partenza e quello dopo la ripesatura,
-  // calcolati come li calcola il motore (per collo, col fattore volumetrico DEL CONTRATTO).
+  // calcolati come li calcola il motore (per collo, col fattore volumetrico di CHI PAGA).
   const pesiDi = new Map<string, { prima: number; dopo: number; colli: number[]; nota: string }>()
   const sogliaDi = new Map<string, number>()   // spedizione -> kg del servizio a peso reale (penale BRT)
   {
-    const { fattoreVolumeCorriere } = await import('@/lib/pricing')
+    const { fattoreVolumeCorriere, fattoreVolumeCliente } = await import('@/lib/pricing')
     const { pesoSuReale, descriviAgevolazione } = await import('@/lib/agevolazione-misure')
     const idS = [...new Set(rettifiche.map((r: any) => r.spedizione_id).filter(Boolean))]
     const spedInfo = new Map<string, any>()
@@ -345,11 +345,38 @@ export async function POST(req: NextRequest) {
       try { f = Number(await fattoreVolumeCorriere(adminDb, sp.master_id, sp.corriere_id)) || 4000 } catch { /* resta il predefinito */ }
       fattori.set(k, f); return f
     }
+    // IL DIVISORE E' QUELLO DI CHI PAGA. Il cliente paga col SUO listino, che puo' avere un fattore
+    // diverso dal contratto: 282343J020715 (SDA EXPRESS L) e' stato addebitato a Nova Vision da 132 a
+    // 752,4 kg (listino a 5000), ma la riga diceva «da 120 kg a 627 kg», i chili del contratto a 6000.
+    // Col suo listino 627 kg fanno 161 €, cioe' 115 di rettifica e non i 138 pagati: i conti non gli
+    // tornavano. Lorenzo, 02/11/2026: la descrizione coi chili di ogni livello.
+    const listinoDelCliente = new Map<string, string>()
+    {
+      const idsCli = [...new Set((rettifiche as any[]).map((r: any) => r.cliente_id).filter(Boolean))]
+      for (let i = 0; i < idsCli.length; i += 200) {
+        const { data } = await adminDb.from('clienti').select('id,listino_cliente_id').in('id', idsCli.slice(i, i + 200))
+        for (const c of (data || []) as any[]) if (c.listino_cliente_id) listinoDelCliente.set(c.id, c.listino_cliente_id)
+      }
+    }
+    const fattoriCliente = new Map<string, { f: number; soloReale: boolean }>()
+    const fattoreDelCliente = async (listinoId: string, corriereId: string) => {
+      const k = `${listinoId}|${corriereId}`
+      if (fattoriCliente.has(k)) return fattoriCliente.get(k)!
+      let v = { f: 0, soloReale: false }
+      try {
+        const f = Number(await fattoreVolumeCliente(adminDb, listinoId, corriereId)) || 0
+        const { data: l } = await adminDb.from('listini_clienti').select('solo_peso_reale').eq('id', listinoId).maybeSingle()
+        v = { f, soloReale: !!(l as any)?.solo_peso_reale }
+      } catch { /* resta il fattore del contratto */ }
+      fattoriCliente.set(k, v); return v
+    }
     for (const r of rettifiche as any[]) {
       const sp = r.spedizione_id ? spedInfo.get(r.spedizione_id) : null
       const dopoColli = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
       if (!sp || !dopoColli.length) continue
-      const f = await fattoreDi(sp)
+      const lc = r.cliente_id ? listinoDelCliente.get(r.cliente_id) : undefined
+      const delCliente = lc ? await fattoreDelCliente(lc, sp.corriere_id) : null
+      const f = delCliente?.f || await fattoreDi(sp)
       const dett = Array.isArray(sp.colli_dettaglio) && sp.colli_dettaglio.length
         ? sp.colli_dettaglio
         : (colliDalFornitore.get(r.spedizione_id) || [])
@@ -372,8 +399,9 @@ export async function POST(req: NextRequest) {
         length: Number(c?.length ?? c?.lunghezza) || 0, width: Number(c?.width ?? c?.larghezza) || 0, height: Number(c?.height ?? c?.altezza) || 0,
       }))
       const pesoReale = (colli: any[]) => colli.reduce((t: number, c: any) => t + (Number(c?.weight ?? c?.peso) || 0), 0)
-      const agevPrima = pesoSuReale(sett, perAgev(primaColli), pesoReale(primaColli))
-      const agevDopo = pesoSuReale(sett, perAgev(dopoColli), pesoReale(dopoColli))
+      // Un listino cliente "solo peso reale" fa pagare sempre i chili veri, come nel prezzo.
+      const agevPrima = pesoSuReale(sett, perAgev(primaColli), pesoReale(primaColli), !!delCliente?.soloReale)
+      const agevDopo = pesoSuReale(sett, perAgev(dopoColli), pesoReale(dopoColli), !!delCliente?.soloReale)
       const nota = (agevPrima && !agevDopo)
         ? ` — il collo misurato esce dalla scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul volume`
         : (!agevPrima && agevDopo) ? ` — il collo misurato rientra nella scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul peso reale` : ''
