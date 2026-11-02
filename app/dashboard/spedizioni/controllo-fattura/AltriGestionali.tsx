@@ -23,7 +23,7 @@ function comeTassata(r: RigaFatturaBrt) {
 }
 const vociDi = (r: RigaFatturaBrt) => [
   ...(r.nolo ? [`nolo ${euro(r.nolo)}`] : []),
-  ...r.voci.filter(v => Math.abs(v.importo) >= 0.005).map(v => `${descriviVoce(v.sigla).nome.replace(/ \(da confermare\)/, '')} ${euro(v.importo)}`),
+  ...r.voci.filter(v => Math.abs(v.importo) >= 0.005).map(v => `${descriviVoce(v.sigla).nome} ${euro(v.importo)}`),
 ].join(' + ')
 
 export type EsternoIniziale = { nome: string; formatoId: string; spedizioni: SpedizioneEsterna[] }
@@ -181,7 +181,7 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali }: { ri
           <div style={{ display: 'flex', gap: 8, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 9, padding: '9px 11px', marginBottom: 10, lineHeight: 1.45 }}>
             <Icona nome="avviso" size={16} />
             <span>
-              {nonAbbinate.length} righe ({euro(totaleNonAbbinate)}) non trovano la spedizione in nessun file:{' '}
+              {nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione in nessun file:{' '}
               {nonAbbinate.slice(0, 6).map(r => `${r.tipoBolla === 'F1' ? 'andata' : r.tipoBolla.startsWith('A') ? 'reso' : 'bolla accessoria'} ${r.segnacollo} (${r.tipoBolla.startsWith('A') ? r.mittente : r.destinatario}, ${euro(r.totale)})`).join('; ')}
               {nonAbbinate.length > 6 ? '…' : ''}. Di solito è un pacco partito in un periodo che l'export non copre.
             </span>
@@ -233,11 +233,11 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali }: { ri
                           ? <>{kg(a.sped.peso)} <span style={{ color: C.attenuato }}>→</span> <b style={{ color: a.daRettificare ? C.rosso : C.testo }}>{kg(a.pesoBrt)}</b></>
                           : <span style={{ color: C.attenuato }}>andata in un'altra fattura</span>}
                       </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', ...cifre }}>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap', ...cifre }}>
                         <div style={{ fontWeight: 700 }}>{euro(r2(a.brtAndata + a.brtRientri))}</div>
-                        {a.brtRientri > 0 && <div style={{ fontSize: 12, color: C.ambra }}>di cui resi e giacenze {euro(r2(a.brtRientri))}</div>}
+                        {a.andata && a.brtRientri > 0 && <div style={{ fontSize: 12, color: C.ambra, whiteSpace: 'nowrap' }}>+ resi e giacenze {euro(r2(a.brtRientri))}</div>}
                       </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', ...cifre }}>{a.andata ? euro(a.sped.prezzoCliente) : <span style={{ color: C.attenuato }}>—</span>}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap', ...cifre }}>{a.andata ? euro(a.sped.prezzoCliente) : <span style={{ color: C.attenuato }}>—</span>}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right' }}>
                         <Pillola colore={netto < -0.005 ? C.rosso : C.verde} fondo={netto < -0.005 ? C.rossoTenue : C.verdeTenue} orlo={netto < -0.005 ? C.rossoOrlo : C.verdeOrlo}>{conSegno(netto)}</Pillola>
                       </td>

@@ -125,6 +125,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   }
 
   const trovate = useMemo(() => esiti.filter(e => e.spedizione), [esiti])
+  // I rientri delle spedizioni fatte altrove li racconta la sezione degli altri gestionali.
+  const rientriMoove = useMemo(() => trovate.filter(e => !e.riga.andata), [trovate])
   const daRettificare = useMemo(() => esiti.filter(daGirare), [esiti])
   const totali = useMemo(() => riepilogaFattura(esiti), [esiti])
 
@@ -457,9 +459,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             {!Object.keys(totali.perMotivo).length && (trovate.length
               ? <div style={{ fontSize: 13, color: C.verde, display: 'flex', gap: 6, alignItems: 'center' }}><Icona nome="spunta" size={16} /> Nessuna differenza: la fattura torna con Moove.</div>
               : <div style={{ fontSize: 13, color: C.attenuato, display: 'flex', gap: 6, alignItems: 'center' }}><Icona nome="pacco" size={16} /> Nessuna spedizione di questa fattura è in Moove: le trovi qui sotto, fra quelle fatte con un altro gestionale.</div>)}
-            {totali.rientri > 0 && (
+            {rientriMoove.length > 0 && (
               <div style={{ display: 'flex', gap: 8, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 9, padding: '9px 11px', marginTop: 10 }}>
-                <Icona nome="rientro" size={16} /> {totali.rientri} rientri per {euro(totali.totaleRientri)}: non si confrontano col nolo dell'andata, il reso si addebita col suo flusso.
+                <Icona nome="rientro" size={16} /> {rientriMoove.length} rientri di spedizioni Moove per {euro(r2(rientriMoove.reduce((s, e) => s + e.riga.totale, 0)))}: non si confrontano col nolo dell'andata, il reso si addebita col suo flusso.
               </div>
             )}
           </div>

@@ -25,10 +25,13 @@ export function riepilogaFattura(esiti: EsitoPagina[]) {
   const perMotivo: Record<string, { n: number; euro: number }> = {}
   const perVoce: Record<string, { n: number; euro: number }> = {}
   for (const e of esiti) {
-    t.totaleCorriere += e.brt
-    if (e.riga.andata) t.andate++; else { t.rientri++; t.totaleRientri += e.brt }
-    if (!e.spedizione) { t.nonTrovate++; t.totaleNonTrovate += e.brt; continue }
-    t.trovate++; t.totaleTrovate += e.brt; t.costoMoove += e.moove || 0
+    // L'importo della riga com'è nel file (BRT scrive tre decimali), non quello arrotondato per lo schermo:
+    // arrotondare riga per riga e poi sommare spostava il totale di 0,23 € su 181 righe (fattura 68967).
+    const brt = Number(e.riga.totale ?? e.brt) || 0
+    t.totaleCorriere += brt
+    if (e.riga.andata) t.andate++; else { t.rientri++; t.totaleRientri += brt }
+    if (!e.spedizione) { t.nonTrovate++; t.totaleNonTrovate += brt; continue }
+    t.trovate++; t.totaleTrovate += brt; t.costoMoove += e.moove || 0
     if (daGirare(e)) { t.daGirare++; t.euroDaGirare += e.motivi.find(m => m.tipo === 'peso')?.importo || 0 }
     for (const m of e.motivi) {
       const v = perMotivo[m.tipo] || { n: 0, euro: 0 }; v.n++; v.euro = r2(v.euro + m.importo); perMotivo[m.tipo] = v
