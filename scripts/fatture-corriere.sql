@@ -52,3 +52,8 @@ alter table public.fatture_corriere enable row level security;
 alter table public.fatture_corriere_righe enable row level security;
 revoke all on public.fatture_corriere from anon, authenticated;
 revoke all on public.fatture_corriere_righe from anon, authenticated;
+
+-- 02/11/2026: il nome che il detentore dà alla fattura nello storico ("BRT W settembre"). Il numero di BRT resta
+-- com'è: è la chiave che impedisce di caricare due volte la stessa fattura. Le grant restano quelle della tabella
+-- (revoke da anon e authenticated): scrive solo la rotta, col client di servizio.
+alter table public.fatture_corriere add column if not exists etichetta text;

@@ -36,6 +36,7 @@ export const TRATTI: Record<string, string> = {
   spunta: 'M20 6 9 17l-5-5',
   avviso: 'M12 9v4 M12 17h.01 M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
   rientro: 'M9 14 4 9l5-5 M4 9h11a5 5 0 0 1 0 10h-3',
+  matita: 'M4 20h4L19 9l-4-4L4 16z M14 6l4 4',
 }
 export function Icona({ nome, size = 18, colore }: { nome: string; size?: number; colore?: string }) {
   return (

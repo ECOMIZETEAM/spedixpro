@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: fatture, error } = await admin.from('fatture_corriere')
-    .select('id,corriere_id,nome_contratto,numero_fattura,data_fattura,nome_file,stato,righe,andate,rientri,totale_corriere,totale_trovate,costo_moove,differenza,non_trovate,totale_non_trovate,da_girare,euro_da_girare,rettifiche_file_id,created_at')
+    .select('id,corriere_id,nome_contratto,numero_fattura,etichetta,data_fattura,nome_file,stato,righe,andate,rientri,totale_corriere,totale_trovate,costo_moove,differenza,non_trovate,totale_non_trovate,da_girare,euro_da_girare,rettifiche_file_id,created_at')
     .eq('master_id', u.masterId).eq('stato', 'completa').order('data_fattura', { ascending: false }).order('created_at', { ascending: false }).limit(240)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -50,4 +50,18 @@ export async function GET(req: NextRequest) {
       return { ...f, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa) } : null, aTuoCarico: r2(Number(f.differenza) - recuperato) }
     }),
   })
+}
+
+// IL NOME DELLA FATTURA NELLO STORICO ("BRT W settembre"): lo dà il detentore, solo alle sue. Il numero di
+// BRT non si tocca: è quello che impedisce di caricare due volte la stessa fattura.
+export async function POST(req: NextRequest) {
+  const u = await utenteDetentore(); if (u.errore) return u.errore
+  const corpo = await req.json().catch(() => ({})) as { fattura?: string; etichetta?: string | null }
+  const admin = createAdminSupabase()
+  const { data: f } = await admin.from('fatture_corriere').select('id,master_id').eq('id', String(corpo.fattura || '')).maybeSingle()
+  if (!f || f.master_id !== u.masterId) return NextResponse.json({ error: 'Fattura non trovata.' }, { status: 404 })
+  const etichetta = String(corpo.etichetta ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || null
+  const { error } = await admin.from('fatture_corriere').update({ etichetta }).eq('id', f.id)
+  if (error) return NextResponse.json({ error: 'Nome non salvato: ' + error.message }, { status: 500 })
+  return NextResponse.json({ ok: true, etichetta })
 }

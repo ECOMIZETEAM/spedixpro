@@ -18,7 +18,7 @@ import AltriGestionali, { type EsternoIniziale } from './AltriGestionali'
 export type EsitoControllo = EsitoPagina
 type Contratto = { id: string; nome: string; attivo: boolean }
 type FatturaStorico = {
-  id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; data_fattura: string | null; nome_file: string | null
+  id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; etichetta: string | null; data_fattura: string | null; nome_file: string | null
   righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
   da_girare: number; euro_da_girare: number; rettifiche_file_id: string | null; created_at: string
   girate: { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number } | null; aTuoCarico: number
@@ -58,6 +58,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const [fatturaId, setFatturaId] = useState<string | null>(null)
   const [rettificheInviate, setRettificheInviate] = useState(false)
   const [storico, setStorico] = useState<FatturaStorico[] | null>(iniziale?.storico ?? null)
+  const [rinomina, setRinomina] = useState<{ id: string; valore: string } | null>(null)
+  const [etichettaAperta, setEtichettaAperta] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const caricaStorico = () => fetch('/api/fatture-corriere/storico').then(r => r.json()).then(d => setStorico(d.fatture || [])).catch(() => setStorico([]))
@@ -73,7 +75,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   async function apriFattura(id: string) {
     const d = await fetch('/api/fatture-corriere/storico?fattura=' + id).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
     if (d.error) { await dialog.alert({ title: 'Fattura non aperta', message: d.error }); return }
-    setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setRettificheInviate(!!d.fattura.rettifiche_file_id)
+    setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setRettificheInviate(!!d.fattura.rettifiche_file_id); setEtichettaAperta(d.fattura.etichetta || null)
     if (d.fattura.corriere_id) setContrattoId(d.fattura.corriere_id)
     // Le fatture salvate prima del 02/11 hanno il peso tassato senza l'arrotondamento di BRT: si rifà qui dai
     // quattro pesi della riga, così il file di rettifiche esce col peso che BRT ha davvero tassato (3, non 2,8).
@@ -85,7 +87,19 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     setAvvisi([]); setPagina(1); setFiltro('perdita'); setCerca('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false) }
+  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null) }
+
+  // Il nome che il detentore dà alla fattura nello storico; vuoto = torna il numero di BRT.
+  async function salvaNome() {
+    if (!rinomina) return
+    const { id, valore } = rinomina
+    const d = await fetch('/api/fatture-corriere/storico', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fattura: id, etichetta: valore }) })
+      .then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
+    if (d.error) { await dialog.alert({ title: 'Nome non salvato', message: d.error }); return }
+    setStorico(prev => (prev || []).map(f => f.id === id ? { ...f, etichetta: d.etichetta } : f))
+    if (fatturaId === id) setEtichettaAperta(d.etichetta)
+    setRinomina(null)
+  }
 
   async function caricaFile(file: File) {
     if (!contrattoId) { await dialog.alert({ title: 'Scegli il contratto', message: 'Prima scegli il contratto BRT a cui si riferisce la fattura.' }); return }
@@ -350,9 +364,26 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                       <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>{f.data_fattura ? new Date(f.data_fattura).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : '—'}</div>
                       <div style={{ fontSize: 12, color: C.attenuato, marginTop: 2 }}>{f.nome_contratto}</div>
                     </td>
-                    <td style={{ padding: '11px 14px' }}>
-                      <div style={{ fontWeight: 600 }}>n. {f.numero_fattura}</div>
-                      <div style={{ fontSize: 12, color: C.attenuato, marginTop: 2 }}>{f.righe.toLocaleString('it-IT')} righe{f.non_trovate ? ` · ${f.non_trovate} fuori Moove` : ''}</div>
+                    <td style={{ padding: '11px 14px', minWidth: 220 }}>
+                      {rinomina?.id === f.id ? (
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <input autoFocus value={rinomina.valore} maxLength={80} placeholder={`n. ${f.numero_fattura}`}
+                            onChange={e => setRinomina({ id: f.id, valore: e.target.value })}
+                            onKeyDown={e => { if (e.key === 'Enter') salvaNome(); if (e.key === 'Escape') setRinomina(null) }}
+                            style={{ flex: 1, minWidth: 140, padding: '6px 9px', border: `1px solid ${C.arancioOrlo}`, borderRadius: 8, fontSize: 13, fontWeight: 600, color: C.testo, outline: 'none' }} />
+                          <button onClick={salvaNome} style={{ padding: '6px 10px', borderRadius: 8, border: 'none', background: C.arancio, color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>Salva</button>
+                          <button onClick={() => setRinomina(null)} style={{ padding: '6px 9px', borderRadius: 8, border: `1px solid ${C.filo}`, background: '#fff', color: C.attenuato, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Annulla</button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ fontWeight: 600 }}>{f.etichetta || `n. ${f.numero_fattura}`}</span>
+                          <button onClick={() => setRinomina({ id: f.id, valore: f.etichetta || '' })} title="Dai un nome a questa fattura"
+                            style={{ display: 'inline-flex', padding: 3, borderRadius: 6, border: 'none', background: 'transparent', color: C.attenuato, cursor: 'pointer' }}>
+                            <Icona nome="matita" size={14} />
+                          </button>
+                        </div>
+                      )}
+                      <div style={{ fontSize: 12, color: C.attenuato, marginTop: 2 }}>{f.etichetta ? `n. ${f.numero_fattura} · ` : ''}{f.righe.toLocaleString('it-IT')} righe{f.non_trovate ? ` · ${f.non_trovate} fuori Moove` : ''}</div>
                     </td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontWeight: 600, ...cifre }}>{euro(Number(f.totale_corriere))}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', ...cifre }}>{euro(Number(f.costo_moove))}</td>
@@ -408,7 +439,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           <Tessera nome="fattura" colore={C.arancio} fondo={C.arancioTenue} />
           <div style={{ flex: 1, minWidth: 220 }}>
             <div style={{ fontSize: 15, fontWeight: 700 }}>
-              Fattura BRT n. {esiti[0].riga.numeroFattura}{esiti[0].riga.dataFattura ? ` del ${new Date(esiti[0].riga.dataFattura).toLocaleDateString('it-IT')}` : ''}
+              {etichettaAperta ? <>{etichettaAperta} <span style={{ fontWeight: 500, color: C.attenuato }}>· </span></> : null}Fattura BRT n. {esiti[0].riga.numeroFattura}{esiti[0].riga.dataFattura ? ` del ${new Date(esiti[0].riga.dataFattura).toLocaleDateString('it-IT')}` : ''}
             </div>
             <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2 }}>
               {nomeFile} · {esiti.length.toLocaleString('it-IT')} righe: {totali.andate.toLocaleString('it-IT')} spedizioni e {totali.rientri} rientri · contratto {contrattoNome}
