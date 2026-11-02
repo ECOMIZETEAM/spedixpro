@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useDialog } from '@/app/components/DialogProvider'
-import { leggiFatturaBrt, descriviVoce } from '@/lib/fattura-brt'
+import { leggiFatturaBrt, descriviVoce, pesoTassatoBrt, KG_PER_M3_BRT } from '@/lib/fattura-brt'
 import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera, Pillola } from './ui'
 import AltriGestionali, { type EsternoIniziale } from './AltriGestionali'
@@ -75,7 +75,14 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     if (d.error) { await dialog.alert({ title: 'Fattura non aperta', message: d.error }); return }
     setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setRettificheInviate(!!d.fattura.rettifiche_file_id)
     if (d.fattura.corriere_id) setContrattoId(d.fattura.corriere_id)
-    setEsiti(d.esiti || []); setAvvisi([]); setPagina(1); setFiltro('perdita'); setCerca('')
+    // Le fatture salvate prima del 02/11 hanno il peso tassato senza l'arrotondamento di BRT: si rifà qui dai
+    // quattro pesi della riga, così il file di rettifiche esce col peso che BRT ha davvero tassato (3, non 2,8).
+    setEsiti((d.esiti || []).map((e: EsitoControllo) => {
+      const r: any = e.riga
+      const m = r.pesoMisurato ?? Math.max(r.pesoDichiarato, r.pesoRilevato, r.volumeFatturare * KG_PER_M3_BRT, r.volumeRilevato * KG_PER_M3_BRT)
+      return { ...e, riga: { ...r, pesoMisurato: m, pesoTassato: pesoTassatoBrt(m) } }
+    }))
+    setAvvisi([]); setPagina(1); setFiltro('perdita'); setCerca('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false) }
