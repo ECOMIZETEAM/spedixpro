@@ -190,8 +190,10 @@ export async function analizzaFatturaBrt(
       const come = r.pesoRilevato > dich + 0.001 ? `pesato ${kg(r.pesoRilevato)} kg`
         : Math.max(r.volumeFatturare, r.volumeRilevato) * 200 > dich + 0.001 ? `misurato ${Math.max(r.volumeFatturare, r.volumeRilevato).toLocaleString('it-IT')} m³ (${kg(Math.max(r.volumeFatturare, r.volumeRilevato) * 200)} kg di volume)`
         : `tassato ${kg(r.pesoTassato)} kg`
+      // BRT arrotonda (al kg fino a 100, ai 50 kg oltre): se l'arrotondamento cambia il peso, si dice.
+      const arrot = Math.abs(r.pesoTassato - (r.pesoMisurato ?? r.pesoTassato)) > 0.001 && !come.startsWith('tassato') ? `, tassato ${kg(r.pesoTassato)} kg` : ''
       motivi.push({ tipo: 'peso', importo: peso, testo: peso > 0
-        ? `Moove ${kg(dich)} kg, BRT ha ${come}: col tuo listino il costo sale da ${euro(moove)} a ${euro(listino.totale)}.`
+        ? `Moove ${kg(dich)} kg, BRT ha ${come}${arrot}: col tuo listino il costo sale da ${euro(moove)} a ${euro(listino.totale)}.`
         : `Moove ha addebitato ${euro(moove)}, ma al peso di BRT (${kg(r.pesoTassato)} kg) il tuo listino dice ${euro(listino.totale)}.` })
     }
 

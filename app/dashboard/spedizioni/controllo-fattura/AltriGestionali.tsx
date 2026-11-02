@@ -14,11 +14,13 @@ type FileCaricato = { nome: string; formato: FormatoEsterno; spedizioni: Spedizi
 type Filtro = 'perdita' | 'tutte' | 'rettifica' | 'rientri'
 const PER_PAGINA = 50
 
-// Perché BRT l'ha tassata così: pesata, misurata, o il volume scritto sulla bolla.
+// Perché BRT l'ha tassata così: pesata, misurata, o il volume scritto sulla bolla; poi l'arrotondamento.
 function comeTassata(r: RigaFatturaBrt) {
-  if (r.pesoRilevato >= r.pesoTassato - 0.001 && r.pesoRilevato > r.pesoDichiarato + 0.001) return `pesata ${kg(r.pesoRilevato)}`
-  if (r.volumeRilevato * KG_PER_M3_BRT >= r.pesoTassato - 0.001 && r.volumeRilevato > 0) return `misurata ${r.volumeRilevato.toLocaleString('it-IT')} m³ = ${kg(r.pesoTassato)}`
-  if (r.volumeFatturare * KG_PER_M3_BRT >= r.pesoTassato - 0.001) return `volume in bolla ${r.volumeFatturare.toLocaleString('it-IT')} m³ = ${kg(r.pesoTassato)}`
+  const m = r.pesoMisurato ?? r.pesoTassato   // le righe salvate nello storico prima del 02/11 non l'hanno
+  const tassata = Math.abs(r.pesoTassato - m) > 0.001 ? `, tassata ${kg(r.pesoTassato)}` : ''
+  if (r.pesoRilevato >= m - 0.001 && r.pesoRilevato > r.pesoDichiarato + 0.001) return `pesata ${kg(r.pesoRilevato)}${tassata}`
+  if (r.volumeRilevato * KG_PER_M3_BRT >= m - 0.001 && r.volumeRilevato > 0) return `misurata ${r.volumeRilevato.toLocaleString('it-IT')} m³ = ${kg(m)}${tassata}`
+  if (r.volumeFatturare * KG_PER_M3_BRT >= m - 0.001) return `volume in bolla ${r.volumeFatturare.toLocaleString('it-IT')} m³ = ${kg(m)}${tassata}`
   return `tassata ${kg(r.pesoTassato)}`
 }
 const vociDi = (r: RigaFatturaBrt) => [

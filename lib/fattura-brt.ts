@@ -16,6 +16,15 @@ import Papa from 'papaparse'
 // "VOLUME DA FATTURARE" e "VOLUME RILEVATO"; le fatture lo confermano (materasso 0,181 m³ → 36,2 kg).
 export const KG_PER_M3_BRT = 200
 
+// Il peso su cui BRT fa il prezzo è il più alto dei quattro, ARROTONDATO: al chilo in su fino a 100 kg, ai
+// 50 kg in su oltre (106 → 150, 280 → 300). È la colonna "PESO TASS." del PDF della fattura: 11.630 righe su
+// 11.630 in 24 fatture di Wave (maggio-ottobre 2026). Senza arrotondare si mandava in rettifica 7,2 kg dove
+// BRT ne aveva tassati 8.
+export function pesoTassatoBrt(kg: number): number {
+  const x = kg - 1e-9   // 110.00000000000001 viene dal prodotto volume × 200: è 110, non 110 e un pelo
+  return kg <= 100 + 1e-9 ? Math.ceil(x) : Math.ceil(x / 50) * 50
+}
+
 export type VoceFattura = { sigla: string; importo: number }
 
 export type RigaFatturaBrt = {
@@ -34,7 +43,8 @@ export type RigaFatturaBrt = {
   pesoRilevato: number             // solo se BRT ha pesato il pacco
   volumeFatturare: number          // m³
   volumeRilevato: number           // m³, solo se BRT l'ha misurato
-  pesoTassato: number              // il più alto dei quattro (volumi × 200): è il peso su cui BRT fa la fascia
+  pesoMisurato: number             // il più alto dei quattro (volumi × 200), prima dell'arrotondamento
+  pesoTassato: number              // pesoMisurato arrotondato come BRT (pesoTassatoBrt): il peso su cui fa il prezzo
   rifNumerico: string              // RIFERIM.MITTENTE NUMERICO = numericSenderReference della creazione
   rifAlfabetico: string
   segnacollo: string
@@ -119,7 +129,8 @@ export function leggiFatturaBrt(testo: string): LetturaFatturaBrt {
       dataRitiro: amg(v('DATA RITIRO (AMG)')),
       colli: Math.max(1, Math.round(num(v('NUMERO COLLI')))),
       pesoDichiarato, pesoRilevato, volumeFatturare, volumeRilevato,
-      pesoTassato: Math.max(pesoDichiarato, pesoRilevato, volumeFatturare * KG_PER_M3_BRT, volumeRilevato * KG_PER_M3_BRT),
+      pesoMisurato: Math.max(pesoDichiarato, pesoRilevato, volumeFatturare * KG_PER_M3_BRT, volumeRilevato * KG_PER_M3_BRT),
+      pesoTassato: pesoTassatoBrt(Math.max(pesoDichiarato, pesoRilevato, volumeFatturare * KG_PER_M3_BRT, volumeRilevato * KG_PER_M3_BRT)),
       rifNumerico: v('RIFERIM.MITTENTE NUMERICO').replace(/^0+(?=\d)/, ''),
       rifAlfabetico: v('RIFERIM.MITTENTE ALFABETICO'),
       segnacollo: v('SEGNAC.'),
@@ -142,38 +153,44 @@ export function leggiFatturaBrt(testo: string): LetturaFatturaBrt {
   return { righe, errori }
 }
 
-/* LE SIGLE DELLE VOCI EXTRA. BRT non le spiega nel file: queste vengono dalle fatture vere, e `certa`
- * dice se il significato è DIMOSTRATO dai numeri o solo dedotto. Una legenda trovata in rete (28/10/2026)
- * dava "f = fuori misura" e "i = giacenza": i dati la smentiscono (vedi sotto), per questo il significato
- * delle sigle incerte resta modificabile e segnato "da confermare" finché non arriva quella ufficiale.
+/* LE SIGLE DELLE VOCI EXTRA. Il file non le spiega, il PDF della fattura sì: in fondo all'ultima pagina BRT
+ * stampa la legenda delle sigle usate in quella fattura ("I=SP.GIACENZ f=FUEL SURCH G=COMP.ASSEG…"). Qui c'è
+ * l'unione delle legende di 26 fatture di Wave (maggio-ottobre 2026, conti 2802246 e 677742), con accanto
+ * quello che i numeri confermano. Una legenda trovata in rete (28/10) dava "f = fuori misura" e "i = giacenza":
+ * era sbagliata, e anche la nostra prima lettura della "i" (ingombro) lo era.
  * Le minuscole e le maiuscole sono sigle DIVERSE (g ≠ G, i ≠ I). */
 export type CategoriaVoce = 'carburante' | 'contrassegno' | 'isole' | 'ingombro' | 'servizio' | 'rientro' | 'altro'
 // `voceListino`: la voce dei supplementi del corriere (lib/supplementi-corriere) che la rappresenta nel
 // listino del detentore. Se lì c'è un prezzo, la voce è prevista e va girata al cliente; se no, manca.
 export type SiglaBrt = { nome: string; categoria: CategoriaVoce; certa: boolean; voceListino?: string }
 export const SIGLE_BRT: Record<string, SiglaBrt> = {
-  // Sempre l'8% esatto del nolo (più le voci "i" e "g"), anche sui pacchi da 1 kg: è il carburante.
+  // FUEL SURCH. Una percentuale fissa (8% a giugno, 12,5% a ottobre) del nolo e dei supplementi, mai del contrassegno.
   f: { nome: 'Carburante', categoria: 'carburante', certa: true },
-  // 1,29 € fisso + una parte che cresce con l'importo: la commissione contrassegno.
+  // COMP.ASSEG. Max(1,29 €; 1,5% dell'incassato): 86 righe su 86 (importi incassati dall'export del gestionale).
   G: { nome: 'Contrassegno', categoria: 'contrassegno', certa: true },
-  // Solo destinazioni in Sicilia e Sardegna (1,00 / 1,90 €).
-  g: { nome: 'Supplemento isole', categoria: 'isole', certa: true },
-  // Isole minori e Venezia (8 / 10 €).
-  J: { nome: 'Isole minori e località disagiate', categoria: 'isole', certa: true },
-  // 6,90 / 1,50 € solo su andate di due mittenti di materassi e arredo, ci si calcola sopra il carburante:
-  // un supplemento di ingombro, non una giacenza. Ma a ottobre (conto 677742) vale 2,90 € su tre pacchi
-  // dichiarati da 1 kg e non misurati da BRT: il significato resta da confermare con BRT.
-  i: { nome: 'Supplemento ingombro (da confermare)', categoria: 'ingombro', certa: false, voceListino: 'Fuori misura' },
-  // Solo dove BRT classifica la destinazione con TIPO INOLTRO "T" o "Z" (38 righe su 38, quattro fatture):
-  // un supplemento della località, non un servizio chiesto dal mittente. A volte è il 10% esatto del nolo.
-  Q: { nome: 'Supplemento località T/Z (da confermare)', categoria: 'servizio', certa: false },
-  // Solo su resi (A2) e bolle accessorie (F3) di pacchi andati in giacenza: sulla fattura di ottobre le
-  // bolle accessorie sono di pacchi poi consegnati (riconsegna), i resi di pacchi tornati al mittente.
-  I: { nome: 'Giacenza (da confermare)', categoria: 'rientro', certa: false },
-  F: { nome: 'Voce da 40 € (da confermare)', categoria: 'altro', certa: false },
-  A: { nome: 'Voce minore (da confermare)', categoria: 'altro', certa: false },
-  U: { nome: 'Voce minore (da confermare)', categoria: 'altro', certa: false },
-  '*': { nome: 'Spese varie', categoria: 'altro', certa: false },
+  // TRAGHETTI. Solo Sicilia e Sardegna, su un conto (2802246); sull'altro (677742) le isole stanno nel nolo.
+  g: { nome: 'Traghetti (Sicilia e Sardegna)', categoria: 'isole', certa: true },
+  // ISOLA. Solo dove BRT segna TIPO INOLTRO "I": isole minori, Venezia.
+  J: { nome: 'Isole minori', categoria: 'isole', certa: true },
+  // COLLI INCO: colli INCOMPATIBILI con lo smistamento automatico (guida BRT "Fuori misura e incompatibili":
+  // buste, sacchi, cilindri, forme irregolari), spostati a mano. Sui materassi 6,90 €, su buste da 1 kg 2,90 €.
+  i: { nome: 'Colli incompatibili', categoria: 'ingombro', certa: true, voceListino: 'Incompatibile' },
+  // FUORI MISU. Il fuori misura vero (per BRT un lato oltre 300 cm): 40 €, su colli da 0,7 a 1,2 m³.
+  F: { nome: 'Fuori misura', categoria: 'ingombro', certa: true, voceListino: 'Fuori misura' },
+  // SP.GIACENZ. Solo su resi (A2) e bolle accessorie (F3) di pacchi andati in giacenza.
+  I: { nome: 'Spese di giacenza', categoria: 'rientro', certa: true },
+  // ZTL. Solo dove BRT segna TIPO INOLTRO "T" o "Z" (38 righe su 38).
+  Q: { nome: 'ZTL', categoria: 'altro', certa: true },
+  // APPUNTAMEN. 3% del nolo; ha il codice "A" in 1 CONSEGNA PARTICOLARE: è un servizio chiesto in creazione.
+  A: { nome: 'Consegna su appuntamento', categoria: 'servizio', certa: true },
+  // SUPER./GDO. 10 €; codice "S" in 1 CONSEGNA PARTICOLARE: anche questo un servizio con codice.
+  S: { nome: 'Consegna GDO', categoria: 'servizio', certa: true },
+  // A.C. PLUS. Solo con IMPORTO DA ASSICURARE: 0,6% del valore, minimo 2 € (700 → 4,20; 169 → 2,00).
+  R: { nome: 'Assicurazione', categoria: 'servizio', certa: true },
+  // RITIRO.
+  U: { nome: 'Ritiro', categoria: 'servizio', certa: true },
+  // DIROTTAM.T. 4 € su bolle A3.
+  '*': { nome: 'Dirottamento', categoria: 'altro', certa: true },
 }
 
 export function descriviVoce(sigla: string): SiglaBrt {

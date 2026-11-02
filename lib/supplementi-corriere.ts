@@ -1,8 +1,9 @@
-/* I SUPPLEMENTI DEL CORRIERE: fuori misura, fuori sagoma, non sovrapponibile, fuori dimensione.
+/* I SUPPLEMENTI DEL CORRIERE: fuori misura, incompatibile, fuori sagoma, non sovrapponibile, fuori dimensione.
  *
  * Non sono servizi. Un servizio (contrassegno, assicurazione, Priority, 10:30) ha un codice che va al
  * corriere in creazione, e il prezzo si sa prima di partire. Questi no: nessuno li sceglie, li mette il
- * corriere in fattura DOPO, quando misura il pacco (BRT li scrive con una sigla, "i" per il fuori misura).
+ * corriere in fattura DOPO, quando misura il pacco (BRT li scrive con una sigla: "F" fuori misura, "i" colli
+ * incompatibili con lo smistamento automatico, come buste e sacchi).
  * Per questo stanno nella sezione Giacenze del listino — dove ci sono già le voci che arrivano dopo — ma
  * con un tipo loro: le righe 'giacenza' le leggono lo svincolo, il reso e il Check Sotto Costo come
  * operazioni di giacenza, e un "Fuori misura" letto lì diventerebbe un'operazione che non esiste.
@@ -12,7 +13,7 @@
 
 export const TIPO_SUPPLEMENTO_CORRIERE = 'supplemento_corriere'
 
-export const VOCI_SUPPLEMENTO_CORRIERE = ['Fuori misura', 'Fuori sagoma', 'Non sovrapponibile', 'Fuori dimensione'] as const
+export const VOCI_SUPPLEMENTO_CORRIERE = ['Fuori misura', 'Incompatibile', 'Fuori sagoma', 'Non sovrapponibile', 'Fuori dimensione'] as const
 
 // Per ora solo la famiglia di BRT EXPRESS W di Wave (Lorenzo, 29/10): il detentore e le sue copie ai
 // sotto-master, riconosciute dal contratto_id. Allargarla vuol dire aggiungere qui il detentore.
