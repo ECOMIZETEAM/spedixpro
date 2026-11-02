@@ -98,6 +98,8 @@ function soloIlSalto<T extends { pagato: number; dovuto: number | null; differen
 // salvato, o dai `parcels` del fornitore (sui pacchi SpediamoPro `raw` e' una stringa JSON); mai la misura
 // unica ripetuta per il numero dei colli, che su 050039152917364 (70×55×55 + 75×35×55) faceva 84,7 kg di
 // volume invece dei 71,22 fatturati: un dichiarato gonfiato farebbe pagare meno chili di quelli veri.
+// Lo stesso istante della Conferma (app/api/rettifiche/route.ts): da li' il prezzo si fa collo per collo.
+const PREZZO_COLLO_PER_COLLO_DAL = Date.parse('2026-09-28T13:51:34Z')
 function colliDichiarati(s: any, rawResponse: any): { weight: number; length: number; width: number; height: number }[] {
   const n = Math.max(1, Number(s.colli) || 1)
   if (n === 1) {
@@ -108,7 +110,18 @@ function colliDichiarati(s: any, rawResponse: any): { weight: number; length: nu
   if (typeof raw?.raw === 'string') { try { raw = JSON.parse(raw.raw) } catch { raw = null } }
   const dett = colliDettaglioOEredita(s.colli_dettaglio, raw)
   if (dett.length !== n) return []
-  return dett.map(c => ({ weight: Number(c.peso) || 0, length: Number(c.lunghezza) || 0, width: Number(c.larghezza) || 0, height: Number(c.altezza) || 0 }))
+  const colli = dett.map(c => ({ weight: Number(c.peso) || 0, length: Number(c.lunghezza) || 0, width: Number(c.larghezza) || 0, height: Number(c.altezza) || 0 }))
+  // FINO AL 28/09/2026 (dc000a54) LE MULTICOLLO SI PAGAVANO SUI TOTALI, max(somma dei pesi, somma dei
+  // volumi), e il dichiarato va prezzato come si e' pagato: collo per collo pesa sempre uguale o di piu',
+  // e uno scalino vero sparirebbe. Un collo solo col peso e il volume di tutti da' lo stesso prezzo a
+  // ogni livello, ciascuno col suo divisore; il lato lungo lo tiene fuori dalla scatola agevolata, che
+  // sulle multicollo non vale.
+  if (Date.parse(s.created_at) < PREZZO_COLLO_PER_COLLO_DAL) {
+    const volume = colli.reduce((t, c) => t + (c.length && c.width && c.height ? c.length * c.width * c.height : 0), 0)
+    const peso = colli.reduce((t, c) => t + c.weight, 0)
+    return peso > 0 ? [{ weight: peso, length: volume, width: volume ? 1 : 0, height: volume ? 1 : 0 }] : []
+  }
+  return colli
 }
 
 // QUALCUNO SOTTO DEVE ANCORA PAGARE? Un livello puo' aver gia' pagato il giusto (differenza zero)
@@ -157,7 +170,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     }
 
     const { data: legs } = await admin.from('spedizioni')
-      .select('id,cliente_id,master_id,corriere_id,stato,peso_fatturato,peso_reale,peso_volume,lunghezza,larghezza,altezza,colli,colli_dettaglio,dest_provincia,dest_cap,dest_citta,dest_paese,mitt_cap,mitt_provincia,contrassegno,assicurazione,valore_merce,servizi_accessori,numero,tracking_number')
+      .select('id,cliente_id,master_id,corriere_id,stato,created_at,peso_fatturato,peso_reale,peso_volume,lunghezza,larghezza,altezza,colli,colli_dettaglio,dest_provincia,dest_cap,dest_citta,dest_paese,mitt_cap,mitt_provincia,contrassegno,assicurazione,valore_merce,servizi_accessori,numero,tracking_number')
       .eq('tracking_number', r.ldv)
     // CONDIVISIONE: più gambe condividono il tracking; prendo l'ORIGINANTE (numero pulito = tracking, è
     // quella col cliente finale e la catena-fornitore giusta). Spedizione normale = una riga sola.
