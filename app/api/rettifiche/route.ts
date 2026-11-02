@@ -384,11 +384,18 @@ export async function POST(req: NextRequest) {
       const primaColli = dett.length ? dett : Array.from({ length: n }, () => ({
         peso: (Number(sp.peso_reale) || 0) / n, lunghezza: sp.lunghezza, larghezza: sp.larghezza, altezza: sp.altezza,
       }))
-      // Multicollo senza misure per collo (o partita prima del 28/09): si parte dai totali salvati alla
-      // creazione (peso reale e volume), non dal primo collo moltiplicato. Sulle monocollo le misure della
-      // spedizione SONO quelle del collo: resta tutto com'era.
-      const primaDaiTotali = !dett.length && n > 1
-        ? Math.max(Number(sp.peso_reale) || 0, Number(sp.peso_volume) || 0)
+      // Multicollo senza misure per collo: si parte dai totali salvati alla creazione (peso reale e volume),
+      // non dal primo collo moltiplicato. Partita prima del 28/09 col dettaglio: sui totali dei suoi colli,
+      // col divisore di chi paga, perche' si e' pagata cosi' (1UW0S0W188578: 16,98 pagati = prezzo sui
+      // totali, collo per collo 25,20). Sulle monocollo le misure della spedizione SONO quelle del collo.
+      const primaDaiTotali = n <= 1 ? 0
+        : !dett.length ? Math.max(Number(sp.peso_reale) || 0, Number(sp.peso_volume) || 0)
+        : Date.parse(sp.created_at) < PREZZO_COLLO_PER_COLLO_DAL ? Math.max(
+          dett.reduce((t: number, c: any) => t + (Number(c?.weight ?? c?.peso) || 0), 0),
+          dett.reduce((t: number, c: any) => {
+            const L = Number(c?.length ?? c?.lunghezza) || 0, W = Number(c?.width ?? c?.larghezza) || 0, H = Number(c?.height ?? c?.altezza) || 0
+            return t + (L && W && H ? L * W * H : 0)
+          }, 0) / f)
         : 0
       // QUANDO VALE L'AGEVOLAZIONE SI PAGA SUL PESO REALE, non sul maggiore fra peso e volume:
       // scrivere il fatturato senza tenerne conto fa sembrare che il peso scenda mentre il prezzo
