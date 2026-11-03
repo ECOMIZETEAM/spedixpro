@@ -143,7 +143,11 @@ export async function DELETE(req: NextRequest) {
   // SpediamoPro). Quindi NON è qui: cade nel ramo 48h (pending, ripristinabile) e il cron manda l'annullo
   // vero dopo. Se FedEx lo rifiuta (già ritirato) la spedizione torna valida SENZA rimborso e le consegnate
   // sono escluse dal cron: nessun rimborso a vuoto. (Scelta 21/09/2026, coerente col comportamento reale.)
-  if (corr?.tipo === 'gls' || corr?.tipo === 'brt') {
+  //
+  // ECOSMOS sta QUI e non nel ramo 48h: annulla solo finche' la spedizione non e' validata per il giro di
+  // ritiro, che parte in giornata (orario limite 13:00). Fra 48 ore il pacco sarebbe gia' consegnato e
+  // l'annullo fallirebbe sempre; tentato subito, o riesce e si rimborsa, o resta valida col motivo.
+  if (corr?.tipo === 'gls' || corr?.tipo === 'brt' || corr?.tipo === 'ecosmos') {
     // "Trasmessa a GLS" = la sua DISTINTA e' confermata_vettore (il flag vive sulla distinta, NON sulla
     // spedizione). Lo leggo qui e lo attacco a `sped`, cosi' vale anche la guardia in annullaSpedizione.
     if (corr.tipo === 'gls' && (sped as any).distinta_id) {

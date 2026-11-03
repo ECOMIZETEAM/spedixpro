@@ -25,7 +25,7 @@ type Risposta = { ok: boolean; status: number; j: any; codice: string | null; by
 
 async function chiama(c: EcosmosCred, metodo: 'GET' | 'POST', percorso: string, corpo?: any, intestazioni?: Record<string, string>, binario = false): Promise<Risposta> {
   const chiave = String(c?.api_key || '').trim()
-  if (!chiave) throw new Error('Ecosmos: chiave API mancante nel contratto')
+  if (!chiave) throw Object.assign(new Error('Contratto Ecosmos senza chiave API: va inserita dal master nel contratto.'), { ecosmos: true })
   const res = await fetch(BASE + percorso, {
     method: metodo,
     headers: { 'x-api-key': chiave, ...(corpo !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(intestazioni || {}) },
@@ -60,13 +60,17 @@ const ERRORI: Record<string, string> = {
   RATE_LIMIT_EXCEEDED: 'Ecosmos sta ricevendo troppe richieste: riprova fra un minuto.',
 }
 
+// Gli errori scritti qui sono gia' frasi per chi spedisce: il segno `ecosmos` dice a chi li riceve di
+// mostrarli cosi', senza passarli dal traduttore generico degli errori dei corrieri.
+const avviso = (testo: string): Error => Object.assign(new Error(testo), { ecosmos: true })
+
 function errore(r: Risposta, cosa: string): Error {
   const codice = r.codice || ''
   const campo = r.j?.error?.field ? ` (campo ${r.j.error.field})` : ''
-  if (ERRORI[codice]) return new Error(ERRORI[codice])
-  if (codice === 'MISSING_FIELD' || codice === 'INVALID_FIELD') return new Error(`Ecosmos: dato mancante o non valido${campo}. Controlla indirizzi, CAP, provincia e telefono.`)
-  if (r.status >= 500) return new Error(`Ecosmos non risponde (${cosa}): riprova fra qualche minuto.`)
-  return new Error(`Ecosmos: ${cosa} non riuscita${codice ? ` (${codice})` : ''}${campo}`)
+  if (ERRORI[codice]) return avviso(ERRORI[codice])
+  if (codice === 'MISSING_FIELD' || codice === 'INVALID_FIELD') return avviso(`Ecosmos: dato mancante o non valido${campo}. Controlla indirizzi, CAP, provincia e telefono.`)
+  if (r.status >= 500) return avviso(`Ecosmos non risponde (${cosa}): riprova fra qualche minuto.`)
+  return avviso(`Ecosmos: ${cosa} non riuscita${codice ? ` (${codice})` : ''}${campo}`)
 }
 
 // --- Account, servizi, copertura ------------------------------------------------------------------
@@ -198,13 +202,13 @@ const leggiPrezzo = (j: any): number | null => {
 export async function creaSpedizioneEcosmos(c: EcosmosCred, d: SpedizioneEcosmosInput): Promise<EsitoCreazioneEcosmos> {
   const servizi = await serviziEcosmos(c)
   const peso = Math.round((Number(d.pesoKg) || 0) * 100) / 100
-  if (peso > servizi.pesoMassimo) throw new Error(ERRORI.WEIGHT_LIMIT_EXCEEDED)
+  if (peso > servizi.pesoMassimo) throw avviso(ERRORI.WEIGHT_LIMIT_EXCEEDED)
   let fascia: string | null = null
   if (servizi.fasce.length) {
     fascia = fasciaPesoEcosmos(servizi.fasce, peso)
-    if (!fascia) throw new Error(`Ecosmos: nessuna fascia di peso riconoscibile per ${peso} kg (fasce dichiarate: ${servizi.fasce.join(', ')}). Contatta l'assistenza.`)
+    if (!fascia) throw avviso(`Ecosmos: nessuna fascia di peso riconoscibile per ${peso} kg (fasce dichiarate: ${servizi.fasce.join(', ')}). Contatta l'assistenza.`)
   }
-  if (d.contrassegno && !servizi.contrassegno) throw new Error('Il contratto Ecosmos non ha il contrassegno attivo: rimuovilo o scegli un altro contratto.')
+  if (d.contrassegno && !servizi.contrassegno) throw avviso('Il contratto Ecosmos non ha il contrassegno attivo: rimuovilo o scegli un altro contratto.')
 
   const corpo: Record<string, any> = {
     service: d.servizio,

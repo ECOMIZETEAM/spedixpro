@@ -401,6 +401,38 @@ export async function GET(req: NextRequest) {
           }
         } catch (e: any) { console.error('[TRACKING][DIELLE][EVENTI]', s.numero, e?.message) }
 
+      } else if (tipo === 'ecosmos') {
+        // ECOSMOS (corriere elettrico di Roma): stato ed eventi da /shipments/{numero}/tracking, con la chiave
+        // del contratto dalla join. Gli stati sono codici fissi (lib/ecosmos.ts li mappa uno per uno), non
+        // testo da interpretare. Le loro notifiche di cambio stato sono un'aggiunta da attivare con
+        // Ecosmos; questo giro resta comunque la rete di sicurezza che la loro guida raccomanda.
+        if (!s.tracking_number || !cred?.api_key) return
+        const { trackingEcosmos, mapStatoEcosmos } = await import('@/lib/ecosmos')
+        const ec = await trackingEcosmos({ api_key: String(cred.api_key) }, String(s.tracking_number))
+        for (const str of ec.stati) {
+          const m = mapStatoEcosmos(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (ec.consegnata && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        // Il pacco tornato al mittente chiude con una consegna che NON e' quella al destinatario: vince il reso.
+        if (ec.stati.some((str) => mapStatoEcosmos(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+        try {
+          const cambiatoEc = nuovo !== s.stato
+          if (cambiatoEc || budgetCronologie > 0) {
+            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(ec.eventi, {
+              data: ['data'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length) {
+              if (!cambiatoEc) budgetCronologie--
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][ECOSMOS][EVENTI]', s.numero, e?.message) }
+
       } else if (tipo === 'poste') {
         // POSTE Delivery Business diretto via KSync/ParcelPilot: lo stato si legge da /tracking (formato
         // Poste PDB) con la LDV. Credenziali (clientId/secretId/costCenterCode/ambiente) dalla join. Sul

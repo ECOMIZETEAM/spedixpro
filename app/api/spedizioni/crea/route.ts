@@ -3110,6 +3110,160 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
     }
   }
 
+  if (corriereRecord.tipo === 'ecosmos') {
+    // ECOSMOS (corriere elettrico di Roma): diretto, contratto PROPRIO del master (lib/ecosmos.ts). Una
+    // spedizione = una lettera di vettura e un PDF anche con più colli, e Ecosmos prezza il peso TOTALE.
+    // Il ritiro lo fa Ecosmos dal mittente senza prenotazione (entro il loro orario limite parte in
+    // giornata): qui non si prenota nessun ritiro. Si annulla via API, quindi una spedizione creata da loro
+    // e non registrata da noi si annulla subito, come FedEx: un pacco fantasma verrebbe ritirato e fatturato.
+    const credEc = { api_key: String(cred.api_key || '') }
+    const servizioEc = String(((corriereRecord as any)?.settings || {}).servizio || 'express_24h')
+    if (!credEc.api_key) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto Ecosmos senza chiave API: va inserita dal master nel contratto.' }, { status: 400 })
+    }
+    try {
+      const { creaSpedizioneEcosmos, annullaEcosmos } = await import('@/lib/ecosmos')
+
+      let costoCorrente = costoMaster
+      if (!isProprio) {
+        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          pesoReale, packages,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })) ?? 0
+      }
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      let ris: Awaited<ReturnType<typeof creaSpedizioneEcosmos>>
+      try {
+        ris = await creaSpedizioneEcosmos(credEc, {
+          servizio: servizioEc, colli: packages.length, pesoKg: pesoReale,
+          mittente: {
+            nome: body.shipFrom.name, indirizzo: body.shipFrom.street1, citta: body.shipFrom.city,
+            cap: body.shipFrom.postalCode, provincia: body.shipFrom.state,
+            telefono: body.shipFrom.phone || null, email: body.shipFrom.email || null,
+          },
+          destinatario: {
+            nome: body.shipTo.name, indirizzo: body.shipTo.street1, citta: body.shipTo.city,
+            cap: body.shipTo.postalCode, provincia: body.shipTo.state,
+            telefono: body.shipTo.phone || null, email: body.shipTo.email || null,
+          },
+          noteConsegna: body.notes ? String(body.notes) : null,
+          contenuto: body.contenuto ? String(body.contenuto) : null,
+          contrassegno: Number(body.codValue || 0) || null,
+          riferimento: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || null,
+          idempotenza: crypto.randomUUID(),
+        })
+      } catch (e: any) {
+        // Ecosmos ha risposto 200 ma senza un numero leggibile: forse la spedizione c'e'. Non si storna
+        // alla cieca (il giro delle prenotazioni scadute la libera se davvero non c'e'): si dice di
+        // controllare, col dettaglio nei log per ritrovarla.
+        if (e?.forseCreata) {
+          console.error('[CREA][ECOSMOS] risposta senza numero', JSON.stringify(e.raw || {}).slice(0, 800))
+          return NextResponse.json({ error: e.message }, { status: 502 })
+        }
+        throw e
+      }
+      const numeroFinale = ris.numero
+      const etichettaUrl = ris.etichettaBase64 ? `data:application/pdf;base64,${ris.etichettaBase64}` : null
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
+        .map((c: any, i: number) => ({
+          numero: i + 1,
+          lunghezza: c.lunghezza || packages[i]?.length || null,
+          larghezza: c.larghezza || packages[i]?.width || null,
+          altezza: c.altezza || packages[i]?.height || null,
+          peso: packages[i]?.weight || null,
+          etichetta_url: etichettaUrl,   // Ecosmos: una LDV, un PDF per l'intera spedizione
+        }))
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        // Niente prezzo Ecosmos qui: e' il costo del master, e raw_response non deve portare a nessuno
+        // dei suoi clienti quanto paga lui.
+        raw_response: { _ecosmos: true, numero: numeroFinale, stato: ris.stato, servizio: servizioEc, tracking_url: ris.trackingUrl },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: false, data_ritiro: null, intervallo_ritiro: null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        console.error('[CREA][ECOSMOS][INSERT]', numeroFinale, insertError.message)
+        after(async () => {
+          try {
+            const a = await annullaEcosmos(credEc, numeroFinale)
+            if (a.annullata) console.log('[CREA][ECOSMOS] pacco fantasma annullato', numeroFinale)
+            else console.error('[CREA][ECOSMOS] pacco fantasma NON annullato, annullare dal portale Ecosmos', numeroFinale, a.messaggio)
+          } catch (e) { console.error('[CREA][ECOSMOS] annullo fantasma:', e) }
+        })
+        return NextResponse.json({
+          error: `Spedizione non registrata a sistema (rif. ${numeroFinale}): riprova. Se ricompare, contatta l'assistenza.`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          // Diretto: nessuna quotazione esterna, il listino È il costo → costoSpedizione:0 (come FedEx/GLS).
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][ECOSMOS] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][ECOSMOS]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: err?.ecosmos ? err.message : erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
   if (corriereRecord.tipo === 'moovexpress') {
     // CONDIVISIONE CONTRATTI (CONDIVISIONE-CONTRATTI.md): questo master RIVENDE il contratto di un altro
     // master. Il corriere punta all'`/api/v1` del VENDITORE con la api_key ricevuta all'Accetta: il venditore

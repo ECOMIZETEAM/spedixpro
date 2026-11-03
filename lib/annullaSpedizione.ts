@@ -130,6 +130,18 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: (a.errore || 'FedEx non consente l\'annullo in questo momento').slice(0, 160) }
   }
 
+  // ECOSMOS: annullabile via API finche' non e' stata validata per il giro di ritiro. Il rimborso parte
+  // SOLO su un annullo confermato da loro: senza questo ramo si cadeva nell'`ok: true` qui sotto, e si
+  // rimborsava un pacco che Ecosmos avrebbe ritirato e fatturato lo stesso.
+  if (corr.tipo === 'ecosmos') {
+    const numero = raw.numero || sped.tracking_number
+    if (!numero) return { ok: false, reason: 'numero Ecosmos mancante per l\'annullo' }
+    const { annullaEcosmos } = await import('@/lib/ecosmos')
+    const a = await annullaEcosmos({ api_key: String(cred.api_key || '') }, String(numero))
+    if (a.annullata) return { ok: true }
+    return { ok: false, reason: a.messaggio.slice(0, 160) }
+  }
+
   // CIRCUITO INTERNO: non c'e' nessuno a cui mandare l'annullo, il corriere siamo noi. Basta non
   // farlo partire — ma se e' gia' stato consegnato non c'e' piu' niente da fermare, e dire ok
   // qui vorrebbe dire rimborsare cliente e catena per un pacco che il destinatario ha in casa.
