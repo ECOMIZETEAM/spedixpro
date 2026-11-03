@@ -1,6 +1,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import TestGls from './TestGls'
+import TestEcosmos from './TestEcosmos'
 
 async function salvaCorriere(formData: FormData) {
   'use server'
@@ -15,10 +16,10 @@ async function salvaCorriere(formData: FormData) {
   const credenziali: Record<string,string> = {}
   const settings: Record<string,string|boolean> = {}
 
-  // INTEGRAZIONI RISERVATE (dielle, poste-diretto/KSync): le può aggiungere/modificare solo un master in
+  // INTEGRAZIONI RISERVATE (dielle, poste-diretto/KSync, ecosmos): le può aggiungere/modificare solo un master in
   // masters.integrazioni_riservate (difesa server, oltre a non mostrarle nel menu). Così non ci si aggancia
   // indovinando l'URL ?tipo=. La lista la decide il super master (colonna protetta dal trigger).
-  if (tipo === 'dielle' || tipo === 'poste') {
+  if (tipo === 'dielle' || tipo === 'poste' || tipo === 'ecosmos') {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { data: m } = await createAdminSupabase().from('masters').select('integrazioni_riservate').eq('id', utente.master_id).maybeSingle()
     const ris = (m as any)?.integrazioni_riservate
@@ -95,6 +96,13 @@ async function salvaCorriere(formData: FormData) {
     settings.codice_contrassegno = formData.get('codice_contrassegno') as string || ''
     settings.modalita_pagamento_cod = formData.get('modalita_pagamento_cod') as string || ''
     settings.codice_assicurazione = formData.get('codice_assicurazione') as string || ''
+  } else if (tipo === 'ecosmos') {
+    // Ecosmos (corriere elettrico di Roma): una chiave API per account (lib/ecosmos.ts). Un contratto per
+    // SERVIZIO (in giornata, 24 ore, 72 ore): ognuno ha copertura e prezzi suoi. Il servizio e' una scelta
+    // fra tre codici fissi, non un testo: un codice scritto male fermerebbe tutte le spedizioni.
+    credenziali.api_key = ((formData.get('api_key') as string) || '').trim()
+    const srvEc = formData.get('servizio_ecosmos') as string
+    settings.servizio = ['same_day', 'express_24h', 'standard_72h'].includes(srvEc) ? srvEc : 'express_24h'
   } else if (tipo === 'inpost') {
     // InPost diretto — Global API OAuth2 (merchant.inpost-group.com). Un account = clientId/secretId/
     // organizationId + ambiente (stage per collaudo, prod per il live). Le spedizioni verso locker usano
@@ -257,6 +265,14 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['accessorio_crono','Accessorio crono','es. LK, FP','text',true],
     ],
   },
+  ecosmos: {
+    titolo: 'Ecosmos',
+    info: 'Consegne con mezzi elettrici a Roma e nei comuni vicini. Incolla la chiave API che ti ha dato Ecosmos (inizia con eco_live_) e scegli il servizio: crea un contratto per ogni servizio che vuoi vendere. Il ritiro lo fa Ecosmos dal mittente, senza prenotarlo: le spedizioni fatte entro le 13 partono in giornata. Ritiro e consegna devono essere entrambi nella zona coperta.',
+    campi: [
+      ['nome_contratto','Nome del contratto','es. Ecosmos 24 ore','text'],
+      ['api_key','Chiave API','eco_live_…','password'],
+    ],
+  },
   poste: {
     titolo: 'Poste Delivery Business',
     info: 'Contratto Poste Delivery Business diretto. Un account (Client ID/Secret ID/centro di costo) con dentro più prodotti: crea un contratto per OGNI prodotto Poste indicando il suo codice. Scegli l’ambiente: Demo per collaudare, Produzione quando è tutto pronto.',
@@ -373,6 +389,16 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
               </div>
             </>
           )}
+          {tipo === 'ecosmos' && (
+            <div>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Servizio</label>
+              <select name="servizio_ecosmos" defaultValue={['same_day','express_24h','standard_72h'].includes(settingsEsistenti.servizio) ? settingsEsistenti.servizio : 'express_24h'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                <option value="express_24h">Consegna in 24 ore (giorno lavorativo dopo il ritiro)</option>
+                <option value="same_day">Consegna in giornata (solo parte della zona)</option>
+                <option value="standard_72h">Consegna entro 72 ore</option>
+              </select>
+            </div>
+          )}
           {tipo === 'sda' && (
             <div>
               <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Contratto</label>
@@ -447,6 +473,7 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
 
       {/* Test connessione: solo per un contratto GLS diretto già salvato (proprietario). */}
       {tipo === 'gls' && corriereEsistente && <TestGls corriereId={corriereEsistente.id} />}
+      {tipo === 'ecosmos' && corriereEsistente && <TestEcosmos corriereId={corriereEsistente.id} />}
     </div>
   )
 }

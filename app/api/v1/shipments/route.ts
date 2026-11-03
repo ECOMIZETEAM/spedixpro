@@ -544,6 +544,38 @@ export async function POST(req: NextRequest) {
       console.error('[V1][DIELLE]', e?.message)
       return errore(erroreCorrierePulito(e?.message))
     }
+  } else if (corriere.tipo === 'ecosmos') {
+    // ECOSMOS (corriere elettrico di Roma): diretto, contratto proprio del master (lib/ecosmos.ts). Una LDV
+    // e un PDF per tutta la spedizione; il ritiro lo fa Ecosmos dal mittente, senza prenotazione. Il
+    // "presso" va nelle note di consegna e non attaccato alla via: Ecosmos vuole via e civico separati.
+    const credEc = { api_key: String(cred.api_key || '') }
+    const servizioEc = String(((corriere as any)?.settings || {}).servizio || 'express_24h')
+    if (!credEc.api_key) return errore('Contratto non configurato correttamente')
+    try {
+      const { creaSpedizioneEcosmos } = await import('@/lib/ecosmos')
+      const noteEc = [pressoTo ? `Presso ${pressoTo}` : '', body.notes ? String(body.notes) : ''].filter(Boolean).join(' — ')
+      const risEc = await creaSpedizioneEcosmos(credEc, {
+        servizio: servizioEc, colli: packages.length, pesoKg: pesoReale,
+        mittente: { nome: body.shipFrom.name, indirizzo: body.shipFrom.street1 || '', citta: body.shipFrom.city, cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, telefono: body.shipFrom.phone || null, email: body.shipFrom.email || null },
+        destinatario: { nome: body.shipTo.name, indirizzo: body.shipTo.street1 || '', citta: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state, telefono: body.shipTo.phone || null, email: body.shipTo.email || null },
+        noteConsegna: noteEc || null,
+        contenuto: body.contenuto ? String(body.contenuto) : null,
+        contrassegno: Number(body.codValue || 0) || null,
+        riferimento: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || null,
+        idempotenza: crypto.randomUUID(),
+      })
+      numero = risEc.numero
+      costoCorrente = 0
+      etichettaUrl = risEc.etichettaBase64 ? `data:application/pdf;base64,${risEc.etichettaBase64}` : null
+      // Niente prezzo Ecosmos: e' il costo del master, non deve viaggiare con la spedizione.
+      raw = { _ecosmos: true, numero, stato: risEc.stato, servizio: servizioEc, tracking_url: risEc.trackingUrl }
+    } catch (e: any) {
+      console.error('[V1][ECOSMOS]', e?.message)
+      // Risposta senza numero: la spedizione forse c'e'. Il credito non si restituisce alla cieca (lo
+      // libera il giro delle prenotazioni scadute se davvero non c'e').
+      if (e?.forseCreata) return NextResponse.json({ error: e.message }, { status: 502 })
+      return errore(e?.ecosmos ? e.message : erroreCorrierePulito(e?.message))
+    }
   } else if (corriere.tipo === 'poste') {
     // POSTE Delivery Business diretto via KSync/ParcelPilot: diretto (costoCorrente=0). Il prodotto è nel
     // `product` (settings). Etichetta dal downloadURL. Niente annullo via API (come gli altri Poste).
