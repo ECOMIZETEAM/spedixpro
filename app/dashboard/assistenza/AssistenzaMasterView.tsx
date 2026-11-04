@@ -157,6 +157,11 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => { setPodFile(null) }, [sel?.id])   // reset PDF caricato quando cambia/chiude il ticket
+  // Inoltro di una POD: dal 04/11/2026 chi la inoltra al superiore la paga (api/assistenza/[id]/inoltra).
+  // Prima di inoltrare si mostra il costo e si chiede il si', come al cliente che apre la POD.
+  const [inoltroCosto, setInoltroCosto] = useState<{ prezzo: number; padre: string | null } | null>(null)
+  const [inoltroOk, setInoltroOk] = useState(false)
+  useEffect(() => { setInoltroCosto(null); setInoltroOk(false) }, [sel?.id])
 
   // Riconosce un allegato immagine anche se manca il content-type corretto
   const isImg = (a: any) => String(a?.tipo || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|avif)(\?|$)/i.test(String(a?.nome || a?.url || ''))
@@ -496,6 +501,14 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   {sel.pod_url
                     ? <a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica la POD ricevuta</a>
                     : <div style={{ fontSize: '12.5px', color: '#555' }}>In attesa che il tuo master carichi la POD.</div>}
+                  {/* Dal 04/11/2026 la POD chiesta al superiore si paga: chi l'ha chiesta vede quanto. */}
+                  {sel.pod_prezzo != null && Number(sel.pod_prezzo) > 0 && (
+                    <div style={{ marginTop: '8px', fontSize: '12px', fontWeight: 700, color: sel.pod_addebitato_il ? '#15803d' : '#c2410c' }}>
+                      {sel.pod_addebitato_il
+                        ? `Costo di questa POD: ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))}, addebitati all'apertura.`
+                        : `Costo di questa POD: ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))}.`}
+                    </div>
+                  )}
                 </div>
               )}
               {sel.categoria === 'pod' && (ruoloChat === 'master' || ruoloChat === 'rete') && (
@@ -505,12 +518,13 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   onDrop={e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f) caricaPodDentro(f) }}
                   style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px', textAlign: 'center' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
-                  {/* Solo l'owner (chi ha il cliente e il listino POD) vede l'addebito: non si mostra alla catena a monte. */}
+                  {/* Solo l'owner (chi ha il richiedente e il listino POD) vede l'addebito: non si mostra alla catena a monte.
+                      Il richiedente e' un cliente o, dal 04/11/2026, un master sotto: si scrive il nome, non "il cliente". */}
                   {ruoloChat === 'master' && sel.pod_prezzo != null && Number(sel.pod_prezzo) > 0 && (
                     <div style={{ marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 700, color: sel.pod_addebitato_il ? '#15803d' : '#c2410c' }}>
                       {sel.pod_addebitato_il
-                        ? `✓ Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente per questa POD.`
-                        : `Inviando la POD, o un qualsiasi allegato in chat, verranno addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente.`}
+                        ? `✓ Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} a ${sel.aperto_da || 'chi l\'ha chiesta'} per questa POD.`
+                        : `Inviando la POD, o un qualsiasi allegato in chat, verranno addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} a ${sel.aperto_da || 'chi l\'ha chiesta'}.`}
                     </div>
                   )}
                   {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}
@@ -583,16 +597,37 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
               {/* Inoltro alla linea superiore: il ticket resta unico, il cliente non lo sa */}
               {(ruoloChat === 'master' || ruoloChat === 'rete') && sel.stato !== 'chiuso' && (
                 <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
-                  <button disabled={salvando} onClick={async () => {
-                    setSalvando(true); setMsg('')
-                    const r = await fetch('/api/assistenza/' + sel.id + '/inoltra', { method: 'POST' })
-                    const j = await r.json().catch(() => ({})); setSalvando(false)
-                    if (j.error) { setMsg(j.error); return }
+                  {inoltroCosto && (
+                    <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600, background: '#fff7ed', border: '1px solid #fed7aa', color: '#c2410c' }}>
+                      <div style={{ marginBottom: '8px' }}>Inoltrando questa POD a {inoltroCosto.padre || 'il tuo master superiore'} ti vengono addebitati {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(inoltroCosto.prezzo)}.</div>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: '#1a1a1a', fontWeight: 500 }}>
+                        <input type="checkbox" checked={inoltroOk} onChange={e => setInoltroOk(e.target.checked)} style={{ marginTop: '2px', accentColor: '#f97316' }} />
+                        <span>Accetto l&apos;addebito di {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(inoltroCosto.prezzo)} subito, all&apos;inoltro.</span>
+                      </label>
+                    </div>
+                  )}
+                  <button disabled={salvando || (!!inoltroCosto && !inoltroOk)} onClick={async () => {
                     setMsg('')
+                    // POD: prima il costo. Se c'e' un prezzo, si mostra e si aspetta il si' (secondo clic).
+                    if (isPod && !inoltroCosto) {
+                      const c = await fetch('/api/assistenza/' + sel.id + '/inoltra').then(x => x.json()).catch(() => null)
+                      if (!c || c.error) { setMsg(c?.error || 'Non riesco a calcolare il costo dell\'inoltro: riprova.'); return }
+                      if (Number(c.prezzo) > 0) { setInoltroCosto({ prezzo: Number(c.prezzo), padre: c.padre || null }); setInoltroOk(false); return }
+                    }
+                    setSalvando(true)
+                    const corpo = inoltroCosto ? { accetto_addebito: true, prezzo_accettato: inoltroCosto.prezzo } : {}
+                    const r = await fetch('/api/assistenza/' + sel.id + '/inoltra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) })
+                    const j = await r.json().catch(() => ({})); setSalvando(false)
+                    if (j.error) {
+                      // Prezzo cambiato (o non ancora mostrato): si rimostra la cifra nuova e si richiede il si'.
+                      if (r.status === 409 && Number(j.pod_prezzo) > 0) { setInoltroCosto({ prezzo: Number(j.pod_prezzo), padre: inoltroCosto?.padre || null }); setInoltroOk(false) }
+                      setMsg(j.error); return
+                    }
+                    setMsg(''); setInoltroCosto(null); setInoltroOk(false)
                     const d = await fetch('/api/assistenza/' + sel.id).then(x => x.json()).catch(() => null)
                     if (d && !d.error) { setThread(d.messaggi || []); setSel((s: any) => ({ ...s, ...d.ticket })) }
                     carica(true)
-                  }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>⤴ Inoltra al mio master superiore</button>
+                  }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: salvando || (!!inoltroCosto && !inoltroOk) ? 'not-allowed' : 'pointer', opacity: salvando || (!!inoltroCosto && !inoltroOk) ? 0.5 : 1 }}>{inoltroCosto ? 'Conferma e inoltra' : '⤴ Inoltra al mio master superiore'}</button>
                   <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>{isPod ? 'Se la POD non ce l\'hai tu, la carica il master superiore su QUESTA richiesta: arriva al cliente da sola, senza riaprire una seconda richiesta.' : 'Il master superiore vedrà tutta la conversazione; il cliente non ne saprà nulla.'}</span>
                 </div>
               )}

@@ -245,7 +245,9 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // (282224J031018: da 1 a 0,02 kg). Uno storno di reso si riconosce dai soldi, non dalla descrizione (che
     // un lavoro pianificato riscrive): stesso pagante, stesso riferimento, importo esattamente opposto a un
     // addebito 'reso' o 'giacenza'. Le correzioni di peso a mano (MAN-), gli allineamenti di margine e i
-    // riaddebiti dopo un annullo restano: quelli sono nolo.
+    // riaddebiti dopo un annullo restano: quelli sono nolo. Fuori anche la POD (riferimento POD-, dal
+    // 04/11/2026, scripts/pod-addebito.sql): e' la prova di consegna, non il viaggio, e contata qui
+    // abbasserebbe la rettifica dopo di quanto il cliente o il master ha pagato la POD.
     const { data: movTutti } = await admin.from('movimenti')
       .select('importo,cliente_id,master_id,master_target_id,tipo,riferimento')
       .in('spedizione_id', (legs || []).map((x: any) => x.id)).in('tipo', ['spedizione', 'rettifica', 'reso', 'giacenza'])
@@ -260,7 +262,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       if (m.tipo === 'spedizione') return true
       if (m.tipo !== 'rettifica') return false
       const rif = String(m.riferimento || '')
-      if (/^(RESOFORN|GIACFORN|STORNOFORN)-/.test(rif)) return false
+      if (/^(RESOFORN|GIACFORN|STORNOFORN|POD)-/.test(rif)) return false
       const k = `${paganteDi(m)}|${rif}|${Math.round(Number(m.importo || 0) * 100)}`
       const n = addebitiResi.get(k) || 0
       if (n > 0) { addebitiResi.set(k, n - 1); return false }

@@ -6,7 +6,52 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // superiore entra nella catena (rete_master_ids) e vede tutta la conversazione; i suoi messaggi
 // sono SEMPRE interni (visibilita 'rete') e il cliente non saprà mai dell'inoltro.
 // Possono inoltrare: l'owner (assistenza diretta) e i master già in catena (escalation a salire).
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+//
+// POD INOLTRATA: CHI INOLTRA PAGA. Dal 04/11/2026 il master che inoltra al suo superiore una POD
+// (di un suo cliente, o arrivata a lui dal basso) la paga al superiore, quanto dice il listino POD
+// del superiore per i master sotto di lui — come se l'avesse aperta lui dal pulsante della
+// spedizione. Vede il prezzo prima (GET qui sotto), accetta, e l'addebito parte prima dell'inoltro,
+// una volta sola per ogni master che inoltra (scripts/pod-prezzi-master.sql, addebita_pod_inoltro).
+// Decisione del committente: l'inoltro era la strada piu' battuta (Velox 71, spedizioni 2000 62,
+// GTS 40 POD inoltrate a MULTIEXPRESS) e restava gratis.
+async function prezzoInoltroPod(admin: any, t: any, mio: string, padreId: string): Promise<number> {
+  let corriereId: string | null = null
+  if (t.spedizione_id) {
+    const { data: sp } = await admin.from('spedizioni').select('corriere_id').eq('id', t.spedizione_id).maybeSingle()
+    corriereId = sp?.corriere_id || null
+  }
+  const { risolviPrezzoPod } = await import('@/lib/pod-prezzo')
+  return risolviPrezzoPod(admin, { masterId: padreId, sottoMasterId: mio, corriereId })
+}
+
+// GET: quanto costa a me inoltrare questa POD al mio superiore (la pagina lo mostra prima del si').
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  const mio = utente?.master_id
+  const ruolo = (utente?.ruolo || '').toLowerCase()
+  if (!mio || ruolo === 'cliente' || utente?.cliente_id || ruolo === 'agente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  const { id } = await params
+  const admin = createAdminSupabase()
+  const { data: t } = await admin.from('tickets').select('id,categoria,owner_master_id,rete_master_ids,spedizione_id,pod_inoltri').eq('id', id).maybeSingle()
+  if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
+  const rete: string[] = Array.isArray(t.rete_master_ids) ? t.rete_master_ids : []
+  if (mio !== t.owner_master_id && !rete.includes(mio)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  if (t.categoria !== 'pod') return NextResponse.json({ pod: false })
+  const { data: me } = await admin.from('masters').select('parent_master_id').eq('id', mio).maybeSingle()
+  if (!me?.parent_master_id) return NextResponse.json({ pod: true, prezzo: 0 })
+  if ((t.pod_inoltri as any)?.[mio]) return NextResponse.json({ pod: true, prezzo: 0, gia_pagata: true })
+  const { data: padre } = await admin.from('masters').select('nome').eq('id', me.parent_master_id).maybeSingle()
+  try {
+    return NextResponse.json({ pod: true, prezzo: await prezzoInoltroPod(admin, t, mio, me.parent_master_id), padre: padre?.nome || null })
+  } catch {
+    return NextResponse.json({ error: 'Non riesco a calcolare il costo dell\'inoltro: riprova tra poco.' }, { status: 503 })
+  }
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
@@ -23,7 +68,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const { data: t } = await admin.from('tickets')
     // oggetto/messaggio/cliente_id servono alla guardia qui sotto: i ticket aperti dal modulo libero
     // non hanno spedizione_id e portano il numero del pacco scritto nel testo.
-    .select('id,stato,owner_master_id,aperto_master_id,rete_master_ids,rete_non_letti,spedizione_id,cliente_id,oggetto,messaggio')
+    .select('id,stato,categoria,owner_master_id,aperto_master_id,rete_master_ids,rete_non_letti,spedizione_id,cliente_id,oggetto,messaggio,pod_inoltri')
     .eq('id', id).maybeSingle()
   if (!t) return NextResponse.json({ error: 'Ticket non trovato' }, { status: 404 })
   if (t.stato === 'chiuso') return NextResponse.json({ error: 'Ticket chiuso: non inoltrabile.' }, { status: 400 })
@@ -89,6 +134,40 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   }
   const { data: padre } = await admin.from('masters').select('nome').eq('id', padreId).maybeSingle()
 
+  // POD: chi inoltra paga al superiore, PRIMA che la richiesta salga (vedi in cima). Se l'addebito
+  // non riesce l'inoltro non parte: la richiesta resta dov'e' e si riprova. Una seconda volta (doppio
+  // clic, risposta persa) non paga di nuovo: lo impedisce la funzione del database.
+  let podAddebitato = 0
+  if (t.categoria === 'pod') {
+    // A pagare e' il master: inoltra la POD solo chi lo governa, non l'autista.
+    const { vedeLaRete } = await import('@/lib/perimetro')
+    if (!vedeLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato a inoltrare la POD per il master' }, { status: 403 })
+  }
+  if (t.categoria === 'pod' && !(t.pod_inoltri as any)?.[mio]) {
+    const body = await req.json().catch(() => ({}))
+    let prezzo = 0
+    try { prezzo = await prezzoInoltroPod(admin, t, mio, padreId) } catch {
+      return NextResponse.json({ error: 'Non riesco a calcolare il costo dell\'inoltro: riprova tra poco.' }, { status: 503 })
+    }
+    if (prezzo > 0) {
+      const cifra = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(prezzo)
+      if (body?.accetto_addebito !== true) {
+        return NextResponse.json({ error: `Inoltrando questa POD a ${padre?.nome || 'il tuo master superiore'} ti vengono addebitati ${cifra}: conferma per inoltrarla.`, pod_prezzo: prezzo }, { status: 409 })
+      }
+      if (!(Math.abs(Number(body?.prezzo_accettato) - prezzo) < 0.005)) {
+        return NextResponse.json({ error: `Il costo dell'inoltro è cambiato: ora è ${cifra}. Controlla e conferma di nuovo.`, pod_prezzo: prezzo }, { status: 409 })
+      }
+    }
+    const { data: addebitato, error: errAdd } = await admin.rpc('addebita_pod_inoltro', {
+      p_ticket_id: id, p_master_id: mio, p_padre_id: padreId, p_prezzo: prezzo, p_created_by: user.id,
+    })
+    if (errAdd) {
+      console.error('[POD][INOLTRO] addebito non riuscito, inoltro fermato — ticket', id, errAdd.message)
+      return NextResponse.json({ error: 'Addebito della POD non riuscito: l\'inoltro non è partito, riprova.' }, { status: 500 })
+    }
+    podAddebitato = Number(addebitato) || 0
+  }
+
   await admin.from('tickets').update({
     inoltrato_a_master_id: padreId,
     rete_master_ids: [...rete, padreId],
@@ -105,5 +184,5 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     testo: `📤 Ticket inoltrato da ${me?.nome || 'master'} a ${padre?.nome || 'master superiore'}.`,
   })
 
-  return NextResponse.json({ success: true, inoltrato_a: padre?.nome || null })
+  return NextResponse.json({ success: true, inoltrato_a: padre?.nome || null, pod_addebitato: podAddebitato })
 }

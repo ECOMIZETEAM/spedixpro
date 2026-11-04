@@ -200,9 +200,12 @@ export async function addebitaResi(admin: any, righe: RigaReso[], createdBy?: st
 
 // Quanto quel soggetto aveva pagato la spedizione andata: e' il ripiego quando nel suo listino la
 // riga del reso non c'e' proprio (diverso da configurata a zero, che vuol dire reso gratis).
+// La POD (riferimento POD-, dal 04/11/2026) non e' andata: un reso su un pacco con la POD pagata
+// costerebbe la POD in piu'.
 export async function pagatoDaMaster(admin: any, spedizioneId: string, masterId: string): Promise<number> {
   const { data } = await admin.from('movimenti')
-    .select('importo').eq('spedizione_id', spedizioneId).eq('master_target_id', masterId)
+    .select('importo,riferimento').eq('spedizione_id', spedizioneId).eq('master_target_id', masterId)
     .in('tipo', ['spedizione', 'rettifica'])
-  return Math.abs((data || []).reduce((a: number, m: any) => a + (Number(m.importo) || 0), 0))
+  return Math.abs((data || []).filter((m: any) => !/^POD-/.test(String(m.riferimento || '')))
+    .reduce((a: number, m: any) => a + (Number(m.importo) || 0), 0))
 }

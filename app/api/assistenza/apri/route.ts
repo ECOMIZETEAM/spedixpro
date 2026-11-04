@@ -91,8 +91,12 @@ export async function POST(req: NextRequest) {
   if (!record.spedizione_id) {
     const ldv = oggetto.trim()
     if (ldv.length >= 4 && ldv.length <= 40) {
-      // case-insensitive: l'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo.
-      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id,stato').ilike('numero', ldv).limit(2)
+      // L'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo: si cerca la LDV com'è
+      // scritta, in maiuscolo e in minuscolo, per UGUAGLIANZA. Prima era un ilike, che su `numero` non
+      // usa l'indice: ogni apertura scorreva tutta la tabella delle spedizioni (piano verificato il
+      // 04/11/2026: scansione completa contro una lettura d'indice; vedi il crash del 26/10).
+      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id,stato')
+        .in('numero', [...new Set([ldv, ldv.toUpperCase(), ldv.toLowerCase()])]).limit(2)
       if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) { record.spedizione_id = (sps[0] as any).id; spCorriereId = (sps[0] as any).corriere_id || null; spStato = (sps[0] as any).stato || null; spClienteId = (sps[0] as any).cliente_id || null }
     }
   }
@@ -162,13 +166,30 @@ export async function POST(req: NextRequest) {
   // POD mandata come allegato in chat arrivava gratis). La cifra accettata dev'essere quella di adesso:
   // se il listino e' cambiato fra l'anteprima e l'invio si rifiuta e si mostra la nuova, invece di
   // addebitare una cifra diversa da quella che il cliente ha visto.
-  if (categoria === 'pod' && record.cliente_id) {
+  // Dal 04/11/2026 vale uguale per il MASTER che chiede la POD al suo master superiore: paga quanto
+  // dice il listino POD del superiore per i master sotto di lui (decisione del committente: prima
+  // non la pagava nessuno — QUICK SRL a MULTIEXPRESS, TK-07821 e altre nove in tre settimane).
+  // La chiede solo chi governa il master: agente e autista no, perche' a pagare e' il master.
+  const podDelMaster = categoria === 'pod' && !record.cliente_id && record.tipo_apertura === 'master' && !!record.owner_master_id
+  // E al superiore la si chiede solo se il pacco viaggia su un contratto che lui VENDE (lib/pod-prezzo,
+  // superioreVendeContratto): su un contratto del master sotto non ha ne' il pacco ne' il corriere.
+  if (podDelMaster) {
+    const { vedeLaRete } = await import('@/lib/perimetro')
+    if (!vedeLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato a chiedere la POD per il master' }, { status: 403 })
+    const { superioreVendeContratto } = await import('@/lib/pod-prezzo')
+    if (!(await superioreVendeContratto(admin, record.owner_master_id, spCorriereId))) {
+      return NextResponse.json({ error: 'Questa spedizione viaggia su un contratto che il tuo master superiore non vende: la POD non si può chiedere a lui. Chiedila a chi ti fornisce quel contratto.' }, { status: 400 })
+    }
+  }
+  if (categoria === 'pod' && (record.cliente_id || podDelMaster)) {
     const { risolviPrezzoPod } = await import('@/lib/pod-prezzo')
-    record.pod_prezzo = await risolviPrezzoPod(admin, {
-      masterId: record.owner_master_id,
-      clienteId: record.cliente_id,
-      corriereId: spCorriereId,
-    })
+    try {
+      record.pod_prezzo = await risolviPrezzoPod(admin, record.cliente_id
+        ? { masterId: record.owner_master_id, clienteId: record.cliente_id, corriereId: spCorriereId }
+        : { masterId: record.owner_master_id, sottoMasterId: masterId, corriereId: spCorriereId })
+    } catch {
+      return NextResponse.json({ error: 'Non riesco a calcolare il costo della POD in questo momento: riprova tra poco.' }, { status: 503 })
+    }
     if (record.pod_prezzo > 0) {
       const cifra = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(record.pod_prezzo)
       if (body?.accetto_addebito !== true) {
@@ -267,7 +288,7 @@ export async function POST(req: NextRequest) {
   }
   // ADDEBITO ALL'APERTURA (lib/pod-addebito, una volta sola). Se non riesce, la richiesta resta "da
   // addebitare" e si riprova quando l'assistenza manda la POD: aprirla non si blocca per questo.
-  const podAddebitato = categoria === 'pod' && record.cliente_id && data?.id ? await addebitaPod(admin, data.id, user.id) : 0
+  const podAddebitato = categoria === 'pod' && (record.cliente_id || podDelMaster) && data?.id ? await addebitaPod(admin, data.id, user.id) : 0
   // per_cliente / riservato: il nome del cliente della spedizione, perche' chi l'ha aperto sappia se
   // il cliente lo legge o no, e che in entrambi i casi verso l'alto va inoltrato a mano.
   return NextResponse.json({ success: true, id: data?.id, codice: data?.codice, pod_prezzo: record.pod_prezzo ?? null, pod_addebitato: podAddebitato,

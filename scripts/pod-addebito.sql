@@ -13,9 +13,17 @@
 -- entrambi o nessuno. E due chiamate simultanee (apertura + POD, POD + allegato) non passano entrambe:
 -- il secondo UPDATE aspetta il primo e non trova piu' pod_addebitato_il vuoto.
 --
--- Addebita il MASTER OWNER (chi ha il cliente e il listino POD), non chi la carica in catena, la
--- cifra BLOCCATA all'apertura (tickets.pod_prezzo). Prezzo 0 = gratuita: marcata, nessun movimento.
--- Movimento identico a quello che scriveva la rotta: tipo 'rettifica', "POD <ldv>", riferimento ldv.
+-- Incassa il MASTER OWNER (chi riceve la richiesta e ha il listino POD), non chi la carica in catena,
+-- la cifra BLOCCATA all'apertura (tickets.pod_prezzo). Prezzo 0 = gratuita: marcata, nessun movimento.
+-- Paga chi l'ha chiesta: il CLIENTE (registra_movimento_cliente) oppure, dal 04/11/2026, il MASTER che
+-- l'ha chiesta al suo master superiore (registra_movimento_master: scala il conto del master sotto a
+-- favore di quello sopra, come rettifiche e giacenze). Decisione del committente: prima la POD chiesta
+-- da un master non la pagava nessuno (QUICK SRL a MULTIEXPRESS, 10 richieste in tre settimane).
+-- Movimento: tipo 'rettifica' e "POD <ldv>" come sempre (cosi' estratto conto e report guadagno la
+-- contano come prima), riferimento "POD-<ldv>" dal 04/11/2026: e' il marcatore che tiene la POD
+-- FUORI dai calcoli del nolo pagato (ripesature, ripiego dei resi, controllo perdite), che sommano le
+-- rettifiche del pacco come spedizione. Prima il riferimento era l'LDV nuda e la POD ci finiva dentro.
+-- La descrizione no: un lavoro pianificato la riscrive, il riferimento resta.
 -- Ritorna l'importo addebitato (0 se non c'era niente da addebitare).
 
 create or replace function public.addebita_pod(p_ticket_id uuid, p_created_by uuid default null)
@@ -32,19 +40,27 @@ begin
      set pod_addebitato_il = now()
    where id = p_ticket_id
      and categoria = 'pod'
-     and cliente_id is not null
      and pod_addebitato_il is null
-  returning owner_master_id, cliente_id, spedizione_id, oggetto, pod_prezzo into t;
+     and owner_master_id is not null
+     and (cliente_id is not null
+          or (tipo_apertura = 'master' and aperto_master_id is not null))
+  returning owner_master_id, cliente_id, aperto_master_id, spedizione_id, oggetto, pod_prezzo into t;
   if not found then
-    return 0;                                      -- gia' addebitata, non e' una POD, o non l'ha aperta un cliente
+    return 0;                                      -- gia' addebitata, non e' una POD, o non ha nessuno che paga
   end if;
   if coalesce(t.pod_prezzo, 0) <= 0 then
     return 0;                                      -- POD gratuita: marcata evasa, nessun movimento
   end if;
   v_ldv := left(regexp_replace(coalesce(t.oggetto, ''), '^\s+|\s+$', '', 'g'), 40);
-  perform public.registra_movimento_cliente(
-    t.owner_master_id, t.cliente_id, 'rettifica', 'POD ' || v_ldv, -t.pod_prezzo,
-    nullif(v_ldv, ''), t.spedizione_id, p_created_by, false);
+  if t.cliente_id is not null then
+    perform public.registra_movimento_cliente(
+      t.owner_master_id, t.cliente_id, 'rettifica', 'POD ' || v_ldv, -t.pod_prezzo,
+      'POD-' || v_ldv, t.spedizione_id, p_created_by, false);
+  else
+    perform public.registra_movimento_master(
+      t.owner_master_id, t.aperto_master_id, 'rettifica', 'POD ' || v_ldv, -t.pod_prezzo,
+      'POD-' || v_ldv, t.spedizione_id, p_created_by);
+  end if;
   return t.pod_prezzo;
 end;
 $$;
