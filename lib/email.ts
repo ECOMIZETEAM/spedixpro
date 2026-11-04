@@ -116,8 +116,8 @@ export async function inviaEmailDoganaFerma({ to, destNome, numero, paese, maste
       }
     }
     const inner = `
-      <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">La tua spedizione è ferma in dogana</h2>
-      <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 14px">${destNome ? 'Ciao ' + esc(destNome) + ', ' : ''}la spedizione <strong>${esc(numero)}</strong>${paese ? ' verso ' + esc(paese) : ''} è bloccata in dogana e non può partire finché non riceviamo alcuni dati obbligatori per l'esportazione:</p>
+      <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">Servono documenti doganali per la tua spedizione</h2>
+      <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 14px">${destNome ? 'Ciao ' + esc(destNome) + ', ' : ''}la spedizione <strong>${esc(numero)}</strong>${paese ? ' verso ' + esc(paese) : ''} non è ancora partita: il corriere emette la lettera di vettura solo dopo aver ricevuto alcuni dati obbligatori per l'esportazione:</p>
       <ul style="color:#555;font-size:14px;line-height:1.7;margin:0 0 16px;padding-left:20px">
         <li><strong>Codice EORI</strong> del mittente (l'identificativo doganale dell'esportatore)</li>
         <li><strong>Contenuto dettagliato</strong> della spedizione, articolo per articolo, con il valore di ciascuno</li>
@@ -127,7 +127,7 @@ export async function inviaEmailDoganaFerma({ to, destNome, numero, paese, maste
       ${link ? `<p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#f97316;color:#fff;text-decoration:none;border-radius:8px;padding:12px 26px;font-size:14px;font-weight:700;display:inline-block">Apri il ticket e invia i documenti</a></p>` : ''}
     `
     const html = brand ? wrapBrand(inner, { logo: brand.logo, nome: brand.nome }) : wrap(inner)
-    const r: any = await invia({ from, to, subject: `Spedizione ${numero} ferma in dogana — servono alcuni dati`, html })
+    const r: any = await invia({ from, to, subject: `Spedizione ${numero}: servono documenti doganali`, html })
     if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
     return { ok: true }
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
