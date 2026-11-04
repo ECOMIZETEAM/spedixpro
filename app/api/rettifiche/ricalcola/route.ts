@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
+import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 
 // RICALCOLA UNA RETTIFICA col listino AGGIORNATO (passo A, pagina Rettifiche "da controllare").
 //
@@ -31,6 +32,10 @@ export async function POST(req: NextRequest) {
   if (!r) return NextResponse.json({ error: 'Rettifica non trovata o gia\' confermata' }, { status: 404 })
   if (String(r.supplementi_nomi || '').toLowerCase().includes('penale')) {
     return NextResponse.json({ error: 'E\' una penale del corriere: non si recupera col listino. Decidi se girarla al cliente o assorbirla.' }, { status: 400 })
+  }
+  // Riprezzarla rimetterebbe dentro i chili, che su questo pacco sono gia' stati chiesti: si gira com'e'.
+  if (eSupplementoTardivo(r)) {
+    return NextResponse.json({ error: 'E\' un supplemento arrivato dopo i chili: si gira com\'e\', i chili di questo pacco sono già stati rettificati.' }, { status: 400 })
   }
 
   const { data: sp } = await admin.from('spedizioni').select('numero,tracking_number,stato')

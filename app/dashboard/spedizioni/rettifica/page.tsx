@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { giorniFaRoma, giornoRoma } from '@/lib/date-roma'
+import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function RettificaCostiPage() {
@@ -447,6 +448,8 @@ export default function RettificaCostiPage() {
     const addebito = Math.round((diff - fs) * 100) / 100
     const isDaRett = r.stato === 'da_rettificare'
     const isPenale = String(r.supplementi_nomi||'').toLowerCase().includes('penale')
+    // Il supplemento arrivato dopo i chili non si riprezza (il Ricalcola lo rifiuta): niente bottone.
+    const isTardivo = eSupplementoTardivo(r)
     const pIni = Number(r.peso_iniziale)||0, pvIni = Number(r.peso_volume_iniziale)||0
     const pRe  = Number(r.peso_reale)||0,    pvRe  = Number(r.peso_volume_reale)||0
     const volIni = r.base_prima ? r.base_prima === 'volume' : pvIni > pIni
@@ -479,7 +482,7 @@ export default function RettificaCostiPage() {
           {r.classe==='da_controllare' && r.motivo && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#92400e',background:'#fffbeb',border:'1px solid #fcd34d',borderRadius:'4px',padding:'3px 7px',whiteSpace:'normal',maxWidth:'380px'}}>
               ⚠️ {r.motivo}
-              {!isPenale && isDaRett && (
+              {!isPenale && !isTardivo && isDaRett && (
                 <button onClick={()=>ricalcolaRiga(r.id)} disabled={ricalcolando===r.id}
                   style={{marginLeft:'8px',padding:'2px 9px',background:'#f97316',color:'#fff',border:'none',borderRadius:'4px',fontSize:'10.5px',fontWeight:700,cursor:'pointer',opacity:ricalcolando===r.id?0.6:1}}>
                   {ricalcolando===r.id?'Ricalcolo…':'🔄 Ricalcola'}

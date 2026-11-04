@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
+import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 
 // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena: su un blocco intero sono
 // centinaia di viaggi al database.
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
   const tutteMie: any[] = []
   for (let i = 0; i < ids.length; i += 500) {
     const { data, error } = await adminDb.from('rettifiche')
-      .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma,supplementi_nomi')
+      .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma,supplementi_nomi,differenza')
       .in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true)
     if (error) { console.error('[NETWORK] lettura rettifiche selezionate:', error.message); break }
     tutteMie.push(...(data || []))
@@ -180,7 +181,10 @@ export async function POST(req: NextRequest) {
     // (050187292960523), e il 30/10, sulle penali messe per errore, SENDGO ha pagato 5,39 di peso
     // + 3,53 di "penale" per gli stessi chili (050026152906222).
     const penale = String((r as any).supplementi_nomi || '').toLowerCase().includes('penale')
-    const reweighGirabile = !penale && liv.differenza != null && liv.differenza >= 0.01
+    // IL SUPPLEMENTO ARRIVATO DOPO I CHILI (lib/supplemento-tardivo) scende come la penale: solo lui, invariato. I chili
+    // di quel pacco sono gia' stati chiesti, e riprezzarli qui li chiederebbe una seconda volta.
+    const tardivo = eSupplementoTardivo(r)
+    const reweighGirabile = !penale && !tardivo && liv.differenza != null && liv.differenza >= 0.01
     if (!reweighGirabile && fs === 0) {
       // Niente supplemento e niente ripesatura da girare: se il listino non copre proprio il collo
       // (differenza null) e' ritentabile; se lo copre ma esce <= 0 e' una scelta presa (assorbita).
@@ -219,9 +223,13 @@ export async function POST(req: NextRequest) {
       // dichiarato e ripesato: reale + volumetrico, il volume col divisore del figlio (e' lui che paga),
       // cosi' si vede perche' il costo sale
       peso_iniziale: esito.pesoRealePrima, peso_reale: esito.pesoDopo, ...volumiDelLivello(esito, liv),
+      // Il supplemento arrivato dopo tiene lo stesso peso prima e dopo, come la riga di sopra: con i chili del motore
+      // trg_rettifica_no_doppia_ripesatura lo prenderebbe per una seconda ripesatura e qui sotto passerebbe per
+      // "gia' propagata", senza figlia.
+      ...(tardivo ? { peso_iniziale: (r as any).peso_reale, peso_reale: (r as any).peso_reale, peso_volume_iniziale: volumiDelLivello(esito, liv).peso_volume_reale } : {}),
       // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0. A zero per
       // passaggio: resta quello pagato, un dovuto piu' basso sembrerebbe un rimborso che non c'e'.
-      costo_iniziale: liv.pagato, costo_finale: (soloPassaggio || penale) ? liv.pagato : (liv.dovuto ?? liv.pagato),
+      costo_iniziale: liv.pagato, costo_finale: (soloPassaggio || penale || tardivo) ? liv.pagato : (liv.dovuto ?? liv.pagato),
       differenza: -diffFiglia,            // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
       fuori_sagoma: fs,                   // il supplemento fisso scende INVARIATO, NON si riprezza
       supplementi_nomi: (r as any).supplementi_nomi || null,   // e col nome, altrimenti sotto si legge "fuori sagoma" per tutto

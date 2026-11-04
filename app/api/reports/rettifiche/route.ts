@@ -41,7 +41,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 // RIP-<spedizione>-<destinatario>: la chiave con cui la conferma di una riga di `rettifiche` scrive il
 // movimento (app/api/rettifiche). Il destinatario e' target_master_id || cliente_id della riga: per un
 // master collegato il movimento sta sul ledger ma la riga ha target_master_id, ed e' da qui che si ritrova.
-const RE_RIP = /^RIP-([0-9a-f-]{36})-([0-9a-f-]{36})$/i
+// Con -SUP in coda e' il supplemento arrivato dopo i chili (lib/supplemento-tardivo): stessa spedizione, stesso
+// destinatario, la sua riga e' quella col solo supplemento.
+const RE_RIP = /^RIP-([0-9a-f-]{36})-([0-9a-f-]{36})(?:-SUP)?$/i
 
 async function aBlocchi<T>(ids: string[], leggi: (blocco: string[]) => Promise<T[]>): Promise<T[]> {
   const blocchi: string[][] = []

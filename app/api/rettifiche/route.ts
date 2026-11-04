@@ -5,6 +5,7 @@ import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { fetchAll } from '@/lib/fetch-all'
+import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 
 // Confermare cento rettifiche vuol dire cento chiamate di credito in fila. Col limite di durata
 // breve la funzione veniva uccisa a meta' — ed e' proprio meta' lavoro fatto il caso peggiore.
@@ -159,6 +160,9 @@ export async function GET(req: NextRequest) {
     let motivo: string
     if (nomi.includes('penale')) {
       motivo = `Penale corriere ${costoForn.toFixed(2)}€ (servizio a peso reale sforato): il riprezzo normale non la recupera. Il Ricalcola NON la sistema — decidi se girare l'intera penale al cliente o assorbirla.`
+    } else if (eSupplementoTardivo(r)) {
+      // Il resto del costo non e' un listino da alzare: i chili di questo pacco sono gia' stati chiesti prima.
+      motivo = `Supplemento arrivato dopo i chili: sotto si gira solo il supplemento (${daGirare.toFixed(2)}€), i chili di questo pacco sono già stati rettificati prima.`
     } else {
       const dims = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
       const senzaMisure = dims.length > 0 && dims.every((c: any) => !((Number(c?.length) || 0) || (Number(c?.width) || 0) || (Number(c?.height) || 0)))
@@ -606,7 +610,11 @@ export async function POST(req: NextRequest) {
     // per il caso diff>=0: NON si riapre, altrimenti tornerebbe in elenco per sempre. La garanzia vera
     // e' l'indice unico su movimenti(riferimento) per 'RIP-%'; questo pre-controllo evita solo il throw.
     // Con gli STORNI: se l'addebito di prima e' stato stornato, la chiave successiva (vedi chiaveLibera).
-    const rifRett = r.spedizione_id ? await chiaveLibera(`RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}`) : null
+    // IL SUPPLEMENTO ARRIVATO DOPO I CHILI ha una chiave sua, RIP-<spedizione>-<destinatario>-SUP: la prima e'
+    // gia' presa dai chili, e senza questa il supplemento si fermava qui (lib/supplemento-tardivo). Sta sotto
+    // 'RIP-%', quindi l'indice unico ne lascia passare uno solo per pacco e destinatario.
+    const baseRett = `RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}`
+    const rifRett = r.spedizione_id ? await chiaveLibera(eSupplementoTardivo(r) ? `${baseRett}-SUP` : baseRett) : null
     if (r.spedizione_id && !rifRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); return }
 
     try {

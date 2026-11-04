@@ -7,6 +7,7 @@ import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supaba
 import { controllaColliXL } from '@/lib/ripesature-xl'
 import { colliDalPesoTotale } from '@/lib/ripesature-pesi'
 import { inserisciRettifica, fattureGiaPagate } from '@/lib/ripesature-crea'
+import { nomeTardivo } from '@/lib/supplemento-tardivo'
 
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
@@ -205,8 +206,10 @@ export async function POST(req: NextRequest) {
       // una volta sola: la spesa del fornitore c'è anche se non creo una seconda rettifica.)
       const spedEsiti = Array.from(new Set(esiti.filter(e => e.spedizioneId).map(e => e.spedizioneId as string)))
       const giaRettificateSet = new Set<string>()
+      // Di queste, quelle che un supplemento l'avevano gia': il supplemento arrivato dopo (piu' sotto) non si chiede due volte.
+      const giaConSupplemento = new Set<string>()
       for (let i = 0; i < spedEsiti.length; i += 200) {
-        const { data: gr } = await adminRip.from('rettifiche').select('spedizione_id,master_id,target_master_id,propagazione')
+        const { data: gr } = await adminRip.from('rettifiche').select('spedizione_id,master_id,target_master_id,propagazione,fuori_sagoma')
           .in('spedizione_id', spedEsiti.slice(i, i + 200)).or('confermata.eq.true,stato.eq.da_rettificare')
         for (const x of (gr || []) as any[]) {
           // Non contano: il COSTO DEL DETENTORE (riga intestata a se' stesso: non e' un addebito a
@@ -219,6 +222,7 @@ export async function POST(req: NextRequest) {
           // MULTI ha gia' pagato) lo ferma il database, trg_rettifica_no_doppia_ripesatura (stesso pagante).
           if (x.master_id !== myMaster && x.target_master_id !== myMaster) continue
           if (x.spedizione_id) giaRettificateSet.add(x.spedizione_id)
+          if (x.spedizione_id && Number(x.fuori_sagoma) > 0) giaConSupplemento.add(x.spedizione_id)
         }
       }
       let giaRettificateCount = 0
@@ -312,13 +316,50 @@ export async function POST(req: NextRequest) {
             colli_ripesati: e.colli_ripesati || null,
           })
         }
+        // SUPPLEMENTO ARRIVATO DOPO I CHILI (lib/supplemento-tardivo): il pacco e' gia' rettificato, ma il fornitore
+        // addebita ora un supplemento fisso che la rettifica di allora non aveva. I chili non si richiedono, il
+        // supplemento si': al figlio diretto, come le righe normali, col costo del fornitore che resta a chi carica.
+        // Se la catena non si ricostruisce, o il supplemento c'era gia', resta "solo a tuo carico" come prima.
+        let supplementiArrivatiDopo = 0
+        const supplementoTardivo = (e: any, rip: any, costo: number): boolean => {
+          const fs = Number(rip?.supplementi || 0)
+          if (!(fs > 0) || rip?.reso || giaConSupplemento.has(e.spedizioneId) || giaPagate.has(e.idOrdine)) return false
+          const cat = e.catenaDalBasso || []
+          const mio = cat.indexOf(myMaster)
+          if (mio < 0 || e.catenaCompleta === false) return false
+          const figlio = mio > 0 ? cat[mio - 1] : null
+          const liv = figlio ? e.livelli.find((l: any) => l.masterId === figlio) : e.livelli.find((l: any) => l.clienteId)
+          if (!liv) return false
+          const vol = volumiDelLivello(e, liv)
+          daScrivere.push({
+            master_id: myMaster, file_id: creaturaFile,
+            spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
+            cliente_id: figlio ? null : liv.clienteId, target_master_id: figlio,
+            // Stesso peso prima e dopo: non e' una ripesatura, e trg_rettifica_no_doppia_ripesatura la lascia passare.
+            peso_iniziale: e.pesoDopo, peso_reale: e.pesoDopo, ...vol, peso_volume_iniziale: vol.peso_volume_reale,
+            costo_iniziale: liv.pagato, costo_finale: liv.pagato,
+            differenza: 0, fuori_sagoma: fs,
+            supplementi_nomi: nomeTardivo(rip?.supplementiNomi || []),
+            costo_fornitore: costo,
+            stato: 'da_rettificare',
+            rif_fornitore: e.idOrdine,
+            colli_ripesati: e.colli_ripesati || null,
+          })
+          supplementiArrivatiDopo++
+          return true
+        }
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
           const rip = ripPerOrdine.get(e.idOrdine) as any
           const costo = costoProprio(e)
           // Già rettificata (OneTracking o import precedente) → non se ne crea una seconda. Il costo del
-          // fornitore pero' c'e' lo stesso: resta "solo a tuo carico".
-          if (giaRettificateSet.has(e.spedizioneId)) { giaRettificateCount++; if (costo > 0) soloMio(e, rip, costo); continue }
+          // fornitore pero' c'e' lo stesso: resta "solo a tuo carico", salvo un supplemento arrivato dopo.
+          if (giaRettificateSet.has(e.spedizioneId)) {
+            giaRettificateCount++
+            if (supplementoTardivo(e, rip, costo)) continue
+            if (costo > 0) soloMio(e, rip, costo)
+            continue
+          }
           // RESO: il "peso reale" del file è il peso del RITORNO, non una ripesatura dell'andata:
           // darlo al motore riprezzerebbe l'andata su un peso che non è suo. Il reso ha il suo flusso
           // (prezzo = nolo di fascia), quindi qui NON si crea un addebito cliente. Il costo fornitore
@@ -550,6 +591,7 @@ export async function POST(req: NextRequest) {
           aTuoCarico: Math.round(aTuoCarico * 100) / 100,   // costo di chi carica, da pagare alla conferma
           soloATuoCarico,                    // righe col solo costo di chi carica (sotto non c'e' niente da chiedere)
           passateAZero,                      // create a zero: al figlio non costano, servono a chi sta sotto
+          supplementiArrivatiDopo,           // gia' rettificate per i chili: sotto si gira solo il supplemento
           // Formato XL di Poste: spedizioni con colli non misurati (in attesa del prossimo file), con
           // piu' righe che colli (da guardare a mano), e — per tutto il file — LDV senza nessuna misura.
           misureIncomplete, colliInPiu, senzaMisure: lette.senzaMisure || 0,
