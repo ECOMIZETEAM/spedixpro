@@ -127,6 +127,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     // Spedisci: tracking sul dominio del contratto
     const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/tracking/${encodeURIComponent(sped.tracking_number || '')}`, {
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+      // Il 04/11/2026 Spedisci lasciava le connessioni appese e questa rotta restava ferma fino ai 300 s
+      // (026032010029772, due volte alle 15:03). Oltre il tempo massimo si va nel catch qui sotto, che
+      // risponde con la cronologia salvata.
+      signal: AbortSignal.timeout(15_000),
     })
     const text = await res.text()
     let data: any; try { data = JSON.parse(text) } catch { data = {} }

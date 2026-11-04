@@ -153,8 +153,11 @@ export async function spedisciTrackingStati(
 ): Promise<{ stati: string[]; raw: any; ok: boolean }> {
   // Endpoint CORRETTO: /api/v2/tracking/{tracking} (NON /shipping/tracking, che dà 404).
   // Struttura risposta: { return: { shipment: [ { shipment: {...stato...}, tracking: [ {data, StatusDescription, phase, officeDescription}, ... ] } ] } }
+  // Tempo massimo: chi chiama (il giro del tracking) tratta l'errore come "fornitore giu'" e smette di
+  // chiedere per il resto del giro, invece di restare appeso a ogni spedizione.
   const res = await fetch(`https://${cred.master_domain}/api/v2/tracking/${tracking}`, {
     headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15_000),
   })
   const text = await res.text()
   let data: any

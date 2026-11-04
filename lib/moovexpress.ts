@@ -151,6 +151,9 @@ export async function trackingMoovexpress(cred: MoovexpressCred, tracking: strin
   try {
     r = await fetch(`${baseUrl(cred)}/api/v1/tracking/${encodeURIComponent(tracking)}`, {
       headers: { Authorization: `Bearer ${cred.api_key}` },
+      // Senza tempo massimo una risposta che non arriva tiene fermo chi chiede: il 04/11/2026 due di
+      // queste sono rimaste appese 300 s e il giro del tracking e' morto con loro.
+      signal: AbortSignal.timeout(20_000),
     })
   } catch (e: any) {
     throw new Error('Fornitore non raggiungibile: ' + (e?.message || 'rete'))
@@ -164,4 +167,76 @@ export async function trackingMoovexpress(cred: MoovexpressCred, tracking: strin
     luogo: String(e?.location || ''),
   })) : []
   return { stato, consegnata: stato === 'consegnata', eventi }
+}
+
+// Il venditore sta su QUESTO portale: nessun base_url sul contratto e nessun indirizzo fissato per tutti.
+// Al 04/11/2026 vale per tutti i 53 contratti condivisi.
+export function venditoreSuQuestoPortale(cred: MoovexpressCred): boolean {
+  return !cred?.base_url && !process.env.MOOVEXPRESS_API_BASE
+}
+
+// TRACKING DAL DATABASE, quando il venditore sta su questo portale: la sua spedizione e' una riga della
+// nostra tabella, e chiederla alla nostra stessa /api/v1/tracking via HTTP costava un'altra funzione e una
+// dozzina di letture per ogni pacco (il giro ne fa decine di migliaia). Risponde come quella rotta: stessa
+// chiave, stesso blocco per chi non paga, stessa spedizione (del cliente della chiave, per LDV o numero),
+// stesso stato, cronologia salvata; e se anche il venditore ha comprato il contratto da un altro, si sale
+// la catena come fa la rotta, un salto alla volta, fino a chi spedisce davvero (provato il 04/11 su 300
+// spedizioni attive contro la rotta vera: senza salire, 27 catene a due salti leggevano l'anello di mezzo
+// rimasto indietro). Non chiama il corriere del venditore: la sua spedizione e' anch'essa nel giro e si
+// aggiorna da se'. Il freno di frequenza della chiave qui non conta: protegge le API dagli integratori, e
+// questa lettura non passa dalle API.
+// `memo`: una verifica per chiave e una risoluzione per contratto a giro, non una per pacco.
+export type MemoTrackingLocale = {
+  accessi: Map<string, Promise<any>>
+  chiaveDi: (masterId: string, nomeContratto: string) => Promise<MoovexpressCred | null>
+}
+export async function trackingMoovexpressLocale(
+  admin: any, cred: MoovexpressCred, tracking: string, memo: MemoTrackingLocale, salto = 1,
+): Promise<MoovexpressTracking> {
+  if (!cred?.api_key) throw new Error('Contratto senza chiave: rifare la condivisione.')
+  if (!tracking) return { stato: null, consegnata: false, eventi: [] }
+  if (!memo.accessi.has(cred.api_key)) {
+    const { autenticaApiKey } = await import('@/lib/api-auth')
+    memo.accessi.set(cred.api_key, autenticaApiKey(new Request('https://interno/api/v1/tracking', {
+      headers: { authorization: `Bearer ${cred.api_key}` },
+    })))
+  }
+  const ctx = await memo.accessi.get(cred.api_key)
+  if (!ctx) throw new Error('API key non valida o mancante')
+  if (ctx.blocco) throw new Error(`API del venditore ferme per il cliente (${ctx.blocco.motivo})`)
+  const trk = String(tracking).trim().replace(/[^A-Za-z0-9._-]/g, '')
+  if (!trk) throw new Error('Numero di tracking mancante o non valido')
+  const { data: sped } = await admin.from('spedizioni')
+    .select('id,stato,numero,tracking_number,master_id,corrieri(tipo,nome_contratto)')
+    .eq('cliente_id', ctx.clienteId)
+    .or(`tracking_number.eq.${trk},numero.eq.${trk}`)
+    .limit(1).maybeSingle()
+  if (!sped) throw new Error('Spedizione non trovata')
+  const salvati = async () => {
+    const { data: ev } = await admin.from('tracking_events')
+      .select('stato,descrizione,luogo,data_evento')
+      .eq('spedizione_id', sped.id)
+      .order('data_evento', { ascending: false })
+    return (ev || []).map((e: any) => ({
+      data: String(e.data_evento || ''),
+      descrizione: String(e.descrizione || e.stato || 'Evento'),
+      luogo: String(e.luogo || ''),
+    }))
+  }
+  const statoQui = typeof sped.stato === 'string' && sped.stato ? sped.stato : null
+  // Un salto in piu' (il tetto evita di girare per sempre su una catena chiusa ad anello).
+  if (sped.corrieri?.tipo === 'moovexpress' && salto < 6) {
+    try {
+      const credSu = await memo.chiaveDi(sped.master_id, sped.corrieri.nome_contratto)
+      if (credSu?.api_key) {
+        const trkSu = String(sped.tracking_number || sped.numero || '')
+        const su = venditoreSuQuestoPortale(credSu)
+          ? await trackingMoovexpressLocale(admin, credSu, trkSu, memo, salto + 1)
+          : await trackingMoovexpress(credSu, trkSu)
+        const stato = su.stato || statoQui
+        return { stato, consegnata: stato === 'consegnata', eventi: su.eventi.length ? su.eventi : await salvati() }
+      }
+    } catch { /* come la rotta: se il salto sopra non risponde, vale cio' che c'e' qui */ }
+  }
+  return { stato: statoQui, consegnata: statoQui === 'consegnata', eventi: await salvati() }
 }

@@ -12,8 +12,20 @@
       "schedule": "0 6 1 * *"
     },
     {
-      "path": "/api/tracking/aggiorna",
-      "schedule": "*/30 * * * *"
+      "path": "/api/tracking/aggiorna/1-di-4",
+      "schedule": "0,10,20,30,40,50 * * * *"
+    },
+    {
+      "path": "/api/tracking/aggiorna/2-di-4",
+      "schedule": "2,12,22,32,42,52 * * * *"
+    },
+    {
+      "path": "/api/tracking/aggiorna/3-di-4",
+      "schedule": "4,14,24,34,44,54 * * * *"
+    },
+    {
+      "path": "/api/tracking/aggiorna/4-di-4",
+      "schedule": "6,16,26,36,46,56 * * * *"
     },
     {
       "path": "/api/cron/costi-fornitore",

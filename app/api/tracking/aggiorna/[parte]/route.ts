@@ -5,83 +5,114 @@ import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, s
 import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
 import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
 import { notificaCambioStato } from '@/lib/tracking-notifica'
-import { risolviChiaveDispatch } from '@/lib/condivisione-catena'
+import { risolviChiaveDispatch, type ChiaveDispatch } from '@/lib/condivisione-catena'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-// CRON (ogni 4h): aggiorna lo stato delle spedizioni ancora "attive" leggendo il tracking
+// IL GIRO E' DIVISO IN PARTI, e ogni parte e' un cron a se' (vercel.json: /api/tracking/aggiorna/1-di-4 …).
+// Il 04/11/2026 le spedizioni attive erano 55.421 (17.049 il 02/10) e il giro unico ne controllava circa
+// 5.200 l'ora: ogni spedizione veniva riletta ogni 10 ore, alle 17:30 la piu' vecchia era ferma dalle 08:01.
+// Il collo di bottiglia non erano le 12.000 righe caricate ma il TEMPO: un giro solo, gruppi da 16 che
+// aspettavano il piu' lento, 270 secondi e poi stop. Le parti girano in parallelo, ognuna sulla sua fetta
+// di spedizioni (per id: la fetta si legge dall'indice, senza scorrere la tabella), quindi per tenerle
+// tutte fresche basta aggiungere parti in vercel.json — il codice non cambia.
+const FRESCHEZZA_MS = 30 * 60_000       // una spedizione controllata da meno di cosi' non si rilegge
+const CARICO_MAX = 8000                 // piu' di quanto una parte riesca a lavorare in un giro
+const CONCORRENZA = 16                  // chiamate in volo per parte, come i vecchi gruppi da 16
+const LIMITE_SPEDIZIONE_MS = 25_000     // oltre, la spedizione si lascia al giro dopo
+const STOP_NUOVE_MS = 240_000           // da qui non se ne prendono altre: chi e' in volo ha 25 s per finire
+
+// Fetta di id della parte k su n. Gli id sono UUID casuali: dividere lo spazio delle prime 8 cifre in n
+// intervalli uguali da' n fette di pari peso, stabili nel tempo (una spedizione resta sempre nella sua).
+function fettaDiId(k: number, n: number): { da: string; a: string | null } {
+  const passo = 0x100000000 / n
+  const uuid = (v: number) => Math.floor(v).toString(16).padStart(8, '0') + '-0000-0000-0000-000000000000'
+  return { da: uuid((k - 1) * passo), a: k === n ? null : uuid(k * passo) }
+}
+
+// CRON: aggiorna lo stato delle spedizioni ancora "attive" leggendo il tracking
 // dai corrieri. SpediamoPro: mappa lo status 0-13; lo status 11 (eccezione) → controlla gli
 // stock: se c'è uno stock attivo → in_giacenza, altrimenti non_consegnato.
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ parte: string }> }) {
   const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   // Il tempo si conta da QUI, dall'avvio della funzione: prima partiva dopo il caricamento delle
   // spedizioni attive, che non veniva contato, e il giro poteva arrivare ai 300 secondi senza accorgersene.
   const avvioMs = Date.now()
+  const { parte } = await params
+  const mParte = /^(\d+)-di-(\d+)$/.exec(parte || '')
+  const k = mParte ? Number(mParte[1]) : 0, n = mParte ? Number(mParte[2]) : 0
+  if (!mParte || n < 1 || k < 1 || k > n) return NextResponse.json({ error: 'Parte non valida: si scrive come 1-di-4' }, { status: 400 })
+  const fetta = fettaDiId(k, n)
   const admin = createAdminSupabase()
 
-  // Escludo anche gli stati di annullamento: il tracking NON deve sovrascrivere una spedizione
-  // in attesa di annullo (altrimenti perde 'annullamento_pending' e il cron annulli non la trova).
-  // Copro TUTTE le spedizioni attive per giro (ordinate dalle meno aggiornate): con limit basso
-  // (era 300) e molte spedizioni attive, quelle "in coda" — comprese le nuove GIACENZE — non
-  // venivano mai raggiunte e non comparivano nella sezione Giacenze. Un giro da 300 impiega ~12s,
-  // quindi c'è ampio margine sotto maxDuration. NB: a volumi molto alti va spezzato in batch
-  // con un campo "ultimo_check_tracking" (round-robin) — vedi TODO cron tracking scalabile.
-  // A PAGINE: PostgREST tronca ogni risposta a 1000 righe (il vecchio .limit(3000) era
-  // silenziosamente tagliato -> ogni giro copriva solo le prime 1000 attive). Carico tutte
-  // le pagine PRIMA di processare, con dedup per id (le pagine possono slittare se qualche
-  // riga cambia stato nel frattempo).
-  // IL TETTO DEVE GRIDARE, NON TRONCARE IN SILENZIO.
-  // Le pagine erano 8, cioe' 8.000 spedizioni per giro, e le attive sono arrivate a 7.971: a
-  // ventinove dal limite. Superarlo non da' errore — le eccedenti semplicemente non vengono
-  // guardate. La rotazione per tracking_check_at fa si' che al giro dopo tocchi a loro, quindi non
-  // si perdono; ma piu' si sfora, piu' cresce il ritardo, e nessuno se ne accorgerebbe.
-  // Le pagine salgono a 12 (non di piu': con 8.000 righe questa funzione e' gia' stata uccisa per
-  // memoria esaurita, ed e' il motivo per cui qui si leggono poche colonne e mai i PDF).
-  // E se anche 12 non bastassero, adesso resta scritto nei log.
-  const PAGINE_MAX = 12
+  // MAI 'raw_response' né 'etichetta_url' interi: l'etichetta è il PDF in base64 (156 KB in
+  // media) e la risposta del corriere ~43 KB. Su 8.000 righe superavano il gigabyte e la
+  // funzione veniva UCCISA per memoria esaurita (4 volte nelle ultime 24h): il giro moriva
+  // a metà e il tracking restava indietro per tutti. Qui servono solo tre valori, presi
+  // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
+  // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
+  // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
+  const COLONNE = 'id,numero,stato,stato_precedente,tracking_number,tracking_check_at,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_parcel:raw_response->parcelID'
+  const soglia = new Date(avvioMs - FRESCHEZZA_MS).toISOString()
+  const daControllare = (q: any) => {
+    q = q.or(`tracking_check_at.is.null,tracking_check_at.lt.${soglia}`).gte('id', fetta.da)
+    if (fetta.a) q = q.lt('id', fetta.a)
+    return q.order('tracking_check_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true })
+  }
+
+  // A PAGINE: PostgREST tronca ogni risposta a 1000 righe. Carico tutte le pagine PRIMA di processare,
+  // con dedup per id (le pagine possono slittare se qualche riga cambia stato nel frattempo).
+  // Gli stati esclusi sono esattamente quelli dell'indice idx_sped_tracking_attivo: con questo filtro la
+  // lettura scorre l'indice; con il vecchio `not in (consegnata,annullata)` il database leggeva l'INTERA
+  // tabella spedizioni e la riordinava, una volta per pagina, 24 volte l'ora.
   const vistiIds = new Set<string>()
   const spedizioni: any[] = []
-  let tettoRaggiunto = false
-  for (let pag = 0; pag < PAGINE_MAX; pag++) {
-    const { data: pagina } = await admin.from('spedizioni')
-      // MAI 'raw_response' né 'etichetta_url' interi: l'etichetta è il PDF in base64 (156 KB in
-      // media) e la risposta del corriere ~43 KB. Su 8.000 righe superavano il gigabyte e la
-      // funzione veniva UCCISA per memoria esaurita (4 volte nelle ultime 24h): il giro moriva
-      // a metà e il tracking restava indietro per tutti. Qui servono solo tre valori, presi
-      // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
-      // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
-      // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
-      .select('id,numero,stato,stato_precedente,tracking_number,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_parcel:raw_response->parcelID,fedex_test:raw_response->test')
-      // La coda d'annullo (annullamento_pending/manuale) ora VIENE tracciata, per accorgersi se un
-      // pacco e' PARTITO e riportarlo buono (vedi la guardia piu' sotto). Restano fuori solo i due
-      // stati davvero finali: consegnata e annullata.
-      .not('stato', 'in', '(consegnata,annullata)')
-      .order('tracking_check_at', { ascending: true, nullsFirst: true })
-      .order('id', { ascending: true })
+  let oltreIlCarico = false
+  for (let pag = 0; pag * 1000 < CARICO_MAX; pag++) {
+    const { data: pagina } = await daControllare(admin.from('spedizioni').select(COLONNE)
+      .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)'))
       .range(pag * 1000, pag * 1000 + 999)
     for (const r of pagina || []) { if (!vistiIds.has(r.id)) { vistiIds.add(r.id); spedizioni.push(r) } }
     if (!pagina || pagina.length < 1000) break
-    if (pag === PAGINE_MAX - 1) tettoRaggiunto = true
+    if ((pag + 1) * 1000 >= CARICO_MAX) oltreIlCarico = true
   }
-  if (tettoRaggiunto) {
-    console.error('[TRACKING][TETTO] lette', spedizioni.length, 'spedizioni: e\' il massimo per giro.',
-      'Le altre slittano al giro dopo. Se si ripete, il giro va spezzato in piu\' esecuzioni.')
+  // La coda d'annullo (annullamento_pending/manuale) VIENE tracciata, per accorgersi se un pacco e'
+  // PARTITO e riportarlo buono (vedi la guardia piu' sotto). Sta fuori dall'indice, quindi si legge a
+  // parte (sono poche) e si rimette in fila con le altre. Restano fuori solo consegnata e annullata.
+  {
+    const { data: coda } = await daControllare(admin.from('spedizioni').select(COLONNE)
+      .in('stato', ['annullamento_pending', 'annullamento_manuale']))
+      .range(0, 999)
+    for (const r of coda || []) { if (!vistiIds.has(r.id)) { vistiIds.add(r.id); spedizioni.push(r) } }
+    const t = (r: any) => (r.tracking_check_at ? Date.parse(r.tracking_check_at) : -Infinity)
+    spedizioni.sort((a, b) => t(a) - t(b) || String(a.id).localeCompare(String(b.id)))
   }
 
   // Chi non ha l'etichetta: SOLO gli id, così sappiamo per quali tentare il recupero senza
-  // portarci in memoria i PDF di tutte le altre.
+  // portarci in memoria i PDF di tutte le altre. Il recupero esiste solo per due provider, e si chiede
+  // solo per le spedizioni caricate qui: prima si scorrevano tutte le attive a ogni giro.
   const senzaEtichetta = new Set<string>()
-  for (let pag = 0; pag < PAGINE_MAX; pag++) {
-    const { data: pagina } = await admin.from('spedizioni')
-      .select('id').is('etichetta_url', null)
-      .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
-      .order('id', { ascending: true })
-      .range(pag * 1000, pag * 1000 + 999)
-    for (const r of pagina || []) senzaEtichetta.add((r as any).id)
-    if (!pagina || pagina.length < 1000) break
+  const conRecuperoEtichetta = spedizioni
+    .filter((s: any) => s.stato !== 'annullamento_pending' && s.stato !== 'annullamento_manuale')
+    .filter((s: any) => s.corrieri?.tipo === 'spediamopro' || s.corrieri?.tipo === 'easyparcel')
+    .map((s: any) => s.id)
+  for (let i = 0; i < conRecuperoEtichetta.length; i += 150) {
+    const { data } = await admin.from('spedizioni').select('id')
+      .in('id', conRecuperoEtichetta.slice(i, i + 150)).is('etichetta_url', null)
+    for (const r of data || []) senzaEtichetta.add((r as any).id)
   }
+
+  // CONTRATTI CONDIVISI: la chiave del venditore dipende solo da master e contratto, e prima si risaliva la
+  // catena a ogni spedizione (19.506 attive di questo tipo il 04/11). Una volta per giro basta.
+  const chiaviDispatch = new Map<string, Promise<ChiaveDispatch | null>>()
+  const chiaveDispatch = (masterId: string, nomeContratto: string) => {
+    const kk = masterId + '|' + nomeContratto
+    if (!chiaviDispatch.has(kk)) chiaviDispatch.set(kk, risolviChiaveDispatch(admin, masterId, nomeContratto))
+    return chiaviDispatch.get(kk)!
+  }
+  const memoVenditore = { accessi: new Map<string, Promise<any>>(), chiaveDi: chiaveDispatch }
 
   let aggiornate = 0, errori = 0
   let spedisciBloccato = false   // breaker: al primo 403 di policy niente altre chiamate Spedisci nel giro
@@ -194,7 +225,12 @@ export async function GET(req: NextRequest) {
         // (zero chiamate sprecate). Lo stato avanza SOLO in avanti come per SpediamoPro.
         if (spedisciBloccato) return
         if (!s.tracking_number || !cred?.master_domain || !cred?.password) return
-        const { stati, raw, ok } = await spedisciTrackingStati(cred, s.tracking_number)
+        // Anche un fornitore che NON RISPONDE ferma il resto del giro: il 04/11/2026 infinity.spedisci.online
+        // lasciava le connessioni appese, e senza questo ogni spedizione Spedisci del giro avrebbe aspettato
+        // la sua volta il tempo massimo.
+        let letto: Awaited<ReturnType<typeof spedisciTrackingStati>>
+        try { letto = await spedisciTrackingStati(cred, s.tracking_number) } catch { spedisciBloccato = true; return }
+        const { stati, raw, ok } = letto
         if (!ok) { if (JSON.stringify(raw || {}).includes('Webhooks events')) spedisciBloccato = true; return }
         for (const str of stati) {
           const m = mapStatoSpedisci(str)
@@ -330,40 +366,6 @@ export async function GET(req: NextRequest) {
             }
           }
         } catch (e: any) { console.error('[TRACKING][BRT][EVENTI]', s.numero, e?.message) }
-
-      } else if (tipo === 'fedex') {
-        // FedEx DIRETTO: lo stato si legge da POST /track/v1/trackingnumbers col tracking_number (che
-        // per FedEx È il masterTrackingNumber). Le chiavi Track del contratto (o le Ship) arrivano dalla
-        // join credenziali. Best-effort: nessuna risposta = nessun aggiornamento (mai declassa).
-        const fedexTn = (s as any).tracking_number
-        if (!fedexTn || !(cred?.track_api_key || cred?.api_key)) return
-        const { trackingFedex, mapStatoFedex } = await import('@/lib/fedex')
-        const { stati, consegnata: fxConseg, eventi: fxEventi } = await trackingFedex(cred, String(fedexTn), (s as any).fedex_test === true)
-        for (const str of stati) {
-          const m = mapStatoFedex(str)
-          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
-        }
-        if (fxConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
-        if (stati.some((str) => mapStatoFedex(str) === 'in_giacenza')) vistaGiacenza = true
-        // ...ma se il pacco e' tornato al mittente, quella consegna e' il RITORNO: vince il reso.
-        if (stati.some((str) => mapStatoFedex(str) === 'reso_mittente')) nuovo = 'reso_mittente'
-
-        try {
-          const cambiatoFx = nuovo !== s.stato
-          if (cambiatoFx || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
-            const { eventi, chiaviIgnote } = normalizzaEventi(fxEventi, {
-              data: ['data', 'dataOra', 'datetime'],
-              descrizione: ['descrizione'],
-              luogo: ['luogo'],
-            })
-            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoFx) budgetCronologie--
-              await scriviCronologia(admin, s.id, eventi)
-            }
-          }
-        } catch (e: any) { console.error('[TRACKING][FEDEX][EVENTI]', s.numero, e?.message) }
 
       } else if (tipo === 'dielle') {
         // DIELLE (aggregatore TWS, dentro BRT/GLS/UPS…): lo stato si legge da /extracking/trackingStatus
@@ -528,10 +530,17 @@ export async function GET(req: NextRequest) {
         // CONDIVISIONE (fuga credenziale): la chiave NON si legge dal ponte locale (può essere una copia
         // colata o azzerata), ma si risale al PRIMO detentore-codice — lo stesso risolutore del dispatch in
         // creazione. Così il tracking di un sub propagato dopo la copy-guard non resta cieco.
-        const credMv = await risolviChiaveDispatch(admin, s.master_id, corr.nome_contratto)
+        const credMv = await chiaveDispatch(s.master_id, corr.nome_contratto)
         if (!s.tracking_number || !credMv?.api_key) return
-        const { trackingMoovexpress } = await import('@/lib/moovexpress')
-        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi } = await trackingMoovexpress(credMv as any, String(s.tracking_number))
+        const { trackingMoovexpress, venditoreSuQuestoPortale, trackingMoovexpressLocale } = await import('@/lib/moovexpress')
+        // Il venditore sta su questo stesso portale (nessun base_url: tutti i contratti condivisi al 04/11):
+        // la sua spedizione si legge dal database invece di richiamare la nostra API. La chiamata HTTP costava
+        // un'altra funzione Vercel e una dozzina di letture per pacco, consumava il limite di 600 richieste al
+        // minuto della chiave del cliente, e il 04/11 alle 15:03 due chiamate rimaste appese 300 s su Spedisci
+        // hanno fatto morire il giro intero.
+        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi } = venditoreSuQuestoPortale(credMv as any)
+          ? await trackingMoovexpressLocale(admin, credMv as any, String(s.tracking_number), memoVenditore)
+          : await trackingMoovexpress(credMv as any, String(s.tracking_number))
         if (mvStato && prioritaStato(mvStato) > prioritaStato(nuovo)) nuovo = mvStato
         if (mvStato === 'in_giacenza') vistaGiacenza = true
         // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
@@ -556,6 +565,8 @@ export async function GET(req: NextRequest) {
         } catch (e: any) { console.error('[TRACKING][MOOVEXPRESS][EVENTI]', s.numero, e?.message) }
 
       } else {
+        // Qui finiscono anche le FedEx: tolte dal giro il 04/11/2026 (Lorenzo: "levalo che tanto non serve").
+        // La chiave Track non ha mai funzionato (401 a ogni chiamata), e le 488 attive erano tutte vecchie.
         return
       }
 
@@ -721,23 +732,47 @@ export async function GET(req: NextRequest) {
       // trg_giacenza_da_addebitare) appena una spedizione entra in giacenza, da qualunque strada.
       // Qui sotto, fuori dal ciclo, si svuota quella coda. Prima l'addebito stava dietro a QUESTA
       // porta soltanto, e le giacenze scoperte dal webhook del corriere non le pagava nessuno.
-    } catch { errori++ }
+    } catch (e: any) {
+      // Prima si contava e basta: il numero nei log non diceva quale pacco, ne' quale fornitore.
+      errori++
+      console.error('[TRACKING][ERRORE]', tipo, s.numero, String(e?.message || e).slice(0, 200))
+    }
   }
 
-  // Batch PARALLELI (16 alla volta) + ROTAZIONE: dopo ogni batch marco tracking_check_at, così
-  // chi è stato controllato va in fondo alla coda e il giro dopo parte da chi aspetta da più
-  // tempo. Anche se il run viene ucciso dal timeout a metà, la rotazione resta EQUA: nessuna
-  // spedizione può restare indietro per sempre (era il bug "si aggiorna solo al click").
+  // LAVORO IN PARALLELO + ROTAZIONE: CONCORRENZA spedizioni in volo, e appena una finisce parte la
+  // successiva — prima si lavorava a gruppi da 16 e ogni gruppo aspettava il piu' lento (mediana 1,4 s a
+  // gruppo, il 04/11). Ogni spedizione finita si marca in tracking_check_at, cosi' va in fondo alla coda e
+  // il giro dopo parte da chi aspetta da piu' tempo. Anche se il run viene ucciso a meta', la rotazione
+  // resta EQUA: nessuna spedizione puo' restare indietro per sempre (era il bug "si aggiorna solo al click").
+  // TEMPO MASSIMO PER SPEDIZIONE: un fornitore che non risponde non deve fermare la fila. Chi lo supera
+  // si marca lo stesso (si riprova al giro dopo) e la chiamata appesa resta a finire per conto suo.
   const lista = spedizioni
-  const BATCH = 16
   const inizioMs = Date.now()
-  for (let i = 0; i < lista.length; i += BATCH) {
-    const gruppo = lista.slice(i, i + BATCH)
-    await Promise.all(gruppo.map(lavora))
-    try { await admin.from('spedizioni').update({ tracking_check_at: new Date().toISOString() }).in('id', gruppo.map((g: any) => g.id)) } catch {}
-    // margine di sicurezza sotto il maxDuration (300s): meglio fermarsi puliti che essere uccisi
-    if (Date.now() - avvioMs > 270000) break
+  let prossima = 0, lavorate = 0, scadute = 0
+  let daMarcare: string[] = []
+  const marca = async (forza: boolean) => {
+    if (!daMarcare.length || (!forza && daMarcare.length < 50)) return
+    const ids = daMarcare; daMarcare = []
+    try { await admin.from('spedizioni').update({ tracking_check_at: new Date().toISOString() }).in('id', ids) } catch {}
   }
+  const lavoratore = async () => {
+    // margine di sicurezza sotto il maxDuration (300s): meglio fermarsi puliti che essere uccisi
+    while (prossima < lista.length && Date.now() - avvioMs < STOP_NUOVE_MS) {
+      const s = lista[prossima++]
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const scaduta = await Promise.race([
+        lavora(s).then(() => false),
+        new Promise<boolean>((ok) => { timer = setTimeout(() => ok(true), LIMITE_SPEDIZIONE_MS) }),
+      ])
+      clearTimeout(timer)
+      if (scaduta) scadute++
+      lavorate++
+      daMarcare.push(s.id)
+      await marca(false)
+    }
+  }
+  await Promise.all(Array.from({ length: CONCORRENZA }, lavoratore))
+  await marca(true)
 
   // GLI ADDEBITI (aperture giacenza e resi) NON SI FANNO PIU' QUI: li fa /api/cron/addebiti-code, un giro
   // a parte ogni 10 minuti. Stavano in fondo a questo giro e vivevano dei suoi avanzi di tempo — il
@@ -745,7 +780,17 @@ export async function GET(req: NextRequest) {
   // riempie il database coi trigger; qui si aprono le giacenze, la' si addebitano. Un solo consumatore:
   // rimettere qui un blocco che le svuota vorrebbe dire rischiare di addebitare due volte.
 
-  console.log(`[TRACKING] esaminate=${lista.length} aggiornate=${aggiornate} errori=${errori} durata=${Math.round((Date.now() - avvioMs) / 1000)}s`)
+  console.log(`[TRACKING] parte=${k}/${n} da_controllare=${lista.length} lavorate=${lavorate} aggiornate=${aggiornate} errori=${errori} scadute=${scadute} durata=${Math.round((Date.now() - avvioMs) / 1000)}s`)
+  // IL RITARDO DEVE GRIDARE. Se una parte non arriva in fondo alla sua fila, le spedizioni rimaste
+  // aspettano il giro dopo e il ritardo cresce in silenzio: e' cosi' che si era arrivati a 10 ore.
+  // La cura e' una parte in piu' in vercel.json.
+  if (lavorate < lista.length || oltreIlCarico) {
+    const ferma = lista[lavorate]?.tracking_check_at
+    console.error(`[TRACKING][RITARDO] parte ${k}/${n}: ${lista.length - lavorate} spedizioni non controllate in questo giro`
+      + (oltreIlCarico ? `, e altre oltre le ${CARICO_MAX} caricate` : '')
+      + (lavorate < lista.length ? (ferma ? `, la piu' vecchia controllata l'ultima volta il ${ferma}` : ', alcune mai controllate') : '')
+      + '. Se si ripete, aggiungere una parte al giro in vercel.json.')
+  }
   // IL NOME DEL CAMPO DATA DEGLI EVENTI non e' documentato nella sezione tracking del provider: si
   // provano `data` (la forma usata da getorder e listorder nella stessa API) e le varianti note. Se
   // NESSUNA risponde, gli eventi vengono scartati invece di ricevere una data inventata — e qui si
@@ -754,5 +799,5 @@ export async function GET(req: NextRequest) {
     console.error('[TRACKING][EP][EVENTI] nessun campo data riconosciuto. Chiavi presenti nell\'evento:',
       chiaviEventoIgnote.join(', '))
   }
-  return NextResponse.json({ ok: true, esaminate: lista.length, aggiornate, errori, cronologieDaRecuperare: budgetCronologie <= 0, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
+  return NextResponse.json({ ok: true, parte: `${k}/${n}`, daControllare: lista.length, lavorate, aggiornate, errori, scadute, cronologieDaRecuperare: budgetCronologie <= 0, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
 }
