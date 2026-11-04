@@ -24,7 +24,12 @@ export type DatiRipesatura = {
   peso_fatturato?: number | null
   rilevata?: Misura | null
   controllata_il?: string | null
+  // Il peso su cui il corriere ha fatturato, dalla rettifica di chi guarda: la misura e' la bilancia, la rettifica
+  // arriva sul fatturato (puo' essere il volume). Senza, 1,82 kg qui e 2,2 kg nella rettifica sembravano un errore.
+  fatturato_corriere?: { peso: number; quando: string } | null
 }
+
+const giorno = (s?: string | null) => s ? new Date(s).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }) : ''
 
 const nf = (v: any, dec = 2) =>
   (v === null || v === undefined || v === '') ? null : Number(v).toLocaleString('it-IT', { maximumFractionDigits: dec })
@@ -42,6 +47,7 @@ const val: React.CSSProperties = { fontSize: '14px', color: '#1a1a1a', fontWeigh
 export default function SchedaRipesatura({ dati }: { dati?: DatiRipesatura | null }) {
   const ril = dati?.rilevata
   const dic = dati?.dichiarato
+  const fatt = dati?.fatturato_corriere
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -66,6 +72,18 @@ export default function SchedaRipesatura({ dati }: { dati?: DatiRipesatura | nul
               {ril.dove}{ril.dove && ril.quando ? ' · ' : ''}{ril.quando}
             </div>
           )}
+          {fatt && (
+            <div style={{ fontSize: '13px', color: '#9a3412', marginTop: '8px', fontWeight: 600 }}>
+              Fatturato dal corriere: {nf(fatt.peso)} kg <span style={{ fontWeight: 400 }}>· rettifica del {giorno(fatt.quando)}</span>
+            </div>
+          )}
+        </div>
+      ) : fatt ? (
+        <div style={{ ...box, background: '#fff7ed', borderColor: '#fdba74' }}>
+          <div style={{ ...eti, marginBottom: '6px', color: '#9a3412' }}>Fatturato dal corriere</div>
+          <div style={{ ...val, fontSize: '15px' }}>
+            {nf(fatt.peso)} kg <span style={{ fontWeight: 400, fontSize: '13px' }}>· rettifica del {giorno(fatt.quando)}</span>
+          </div>
         </div>
       ) : (
         <div style={{ ...box, textAlign: 'center', color: '#6b7280', fontSize: '13px', padding: '24px' }}>

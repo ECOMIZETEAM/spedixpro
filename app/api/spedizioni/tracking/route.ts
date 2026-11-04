@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   // Audit accesso PII (visualizzazione dati spedizione/destinatario) — best-effort
   try { const { registraAudit } = await import('@/lib/audit'); await registraAudit({ utenteId: user.id, ruolo: (utente as any)?.ruolo, azione: 'tracking_view', risorsa: spedizione.numero }) } catch {}
   const { data: cliente } = await admin.from('clienti').select('ragione_sociale').eq('id', spedizione.cliente_id).single()
-  const { data: corriere } = await admin.from('corrieri').select('credenziali,tipo,nome_contratto').eq('id', spedizione.corriere_id).single()
+  const { data: corriere } = await admin.from('corrieri').select('credenziali,tipo,nome_contratto,settings').eq('id', spedizione.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 404 })
 
   // RIPESATURA: la rimisura fatta dal corriere in impianto, quella PIU' ALTA fra le letture (il collo
@@ -69,6 +69,34 @@ export async function GET(req: NextRequest) {
   const { data: mis } = (consegnata && !multicollo) ? await admin.from('ripesature_misure')
     .select('peso,lunghezza,larghezza,altezza,volume,misurata_il,filiale,letto_il,esito')
     .eq('spedizione_id', spedizione.id).maybeSingle() : { data: null as any }
+  // IL PESO SU CUI IL CORRIERE HA FATTURATO, dalla rettifica di chi guarda. La misura qui sopra e' il peso
+  // della bilancia e i lati; la rettifica arriva sul peso fatturato, che puo' essere il volume. 3UW1UHA285521
+  // (Poste Express M, Il Riccio di C&V EXPRESS): Poste 32 × 26,5 × 13 cm e 1,82 kg, file del fornitore 2,2 kg,
+  // fascia fino a 5 kg. C&V leggeva 1,8 kg e il 04/11 ha cancellato la rettifica verso il cliente. Per le
+  // rettifiche conta il peso del fornitore (Lorenzo, 04/11): si mostra quello della riga, non lo si ricalcola.
+  // Il cliente vede la sua quando e' confermata; il master quella ricevuta da sopra (confermata) o la sua.
+  let fatturatoCorriere: { peso: number; quando: string } | null = null
+  if (!multicollo) {
+    const mio = utente.master_id
+    let qr = admin.from('rettifiche')
+      .select('peso_iniziale,peso_reale,peso_volume_reale,colli_ripesati,confermata,master_id,target_master_id,cliente_id,propagazione,created_at')
+      .eq('spedizione_id', spedizione.id)
+    qr = isCliente ? qr.eq('cliente_id', utente.cliente_id).eq('confermata', true) : qr.or(`target_master_id.eq.${mio},master_id.eq.${mio}`)
+    const { data: rr } = await qr.order('created_at', { ascending: false }).limit(20)
+    const riga = (rr || []).find((x: any) => x.propagazione !== 'annullata'
+      && (isCliente || (x.target_master_id === mio ? x.confermata : x.master_id === mio))
+      && Math.abs((Number(x.peso_reale) || 0) - (Number(x.peso_iniziale) || 0)) > 0.001)
+    if (riga) {
+      const reale = Number(riga.peso_reale) || 0
+      const colli = Array.isArray(riga.colli_ripesati) ? riga.colli_ripesati : []
+      const conMisure = colli.some((c: any) => (Number(c?.length) || 0) && (Number(c?.width) || 0) && (Number(c?.height) || 0))
+      // Senza misure (file dei soli pesi) il peso della riga E' il fatturato. Con le misure vere decide il contratto,
+      // come nella descrizione del movimento della Conferma (pesoSuReale).
+      const { pesoSuReale } = await import('@/lib/agevolazione-misure')
+      const peso = !conMisure || pesoSuReale((corriere as any).settings, colli, reale) ? reale : Math.max(reale, Number(riga.peso_volume_reale) || 0)
+      if (peso > 0) fatturatoCorriere = { peso: Math.round(peso * 100) / 100, quando: riga.created_at }
+    }
+  }
   const ripesatura = {
     consegnata,
     multicollo,
@@ -85,6 +113,7 @@ export async function GET(req: NextRequest) {
       volume: mis.volume, quando: mis.misurata_il, dove: mis.filiale,
     } : null,
     controllata_il: mis?.letto_il || null,
+    fatturato_corriere: fatturatoCorriere,
   }
 
   const cred = corriere.credenziali as Record<string,string>
