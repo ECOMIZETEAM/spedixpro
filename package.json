@@ -26,7 +26,7 @@
     "jspdf-autotable": "^5.0.8",
     "jszip": "^3.10.1",
     "lucide-react": "^1.21.0",
-    "next": "^16.3.8",
+    "next": "^16.4.5",
     "papaparse": "^5.5.4",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
@@ -50,12 +50,13 @@
     "@types/react-dom": "^19",
     "@types/topojson-client": "^3.1.5",
     "eslint": "^9",
-    "eslint-config-next": "^16.3.8",
+    "eslint-config-next": "^16.4.5",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
     "@mapbox/node-pre-gyp": "^2.0.3",
-    "tar": "^7.5.22"
+    "tar": "^7.5.22",
+    "zod": "^4.6.7"
   }
 }
