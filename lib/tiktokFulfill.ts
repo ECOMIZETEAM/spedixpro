@@ -43,55 +43,72 @@ export async function fulfillSpedizioniTiktok(db: any, spedizioneIds: string[]) 
       const shopCipher = cred.shop_cipher
       const token = await getValidTiktokToken(db, integr)
 
-      // L'ordine come lo vede TikTok adesso: chi lo spedisce, l'opzione di consegna (da cui dipendono i
-      // corrieri ammessi), le righe e i pacchi. Una lettura fallita va nell'errore e si ritenta al giro dopo.
-      const det = await tiktokRequest('GET', '/order/202309/orders', { token, shopCipher, query: { ids: String(ordine.ordine_esterno_id) } })
-      const o = det?.data?.orders?.[0]
-      if (!o) { await segna('errore', 'ordine non trovato su TikTok'); continue }
-      // La sync importa solo gli ordini del venditore (lib/tiktokSync), ma il tipo puo' cambiare sul negozio.
-      if (o.shipping_type && o.shipping_type !== 'SELLER') { await segna('errore', `spedizione ${o.shipping_type} gestita da TikTok: tracking non caricabile`); continue }
-      // Gia' segnato con questo tracking (un giro precedente arrivato a TikTok ma non registrato qui).
-      if (o.tracking_number && String(o.tracking_number) === String(tracking)) { await segna('ok', null); continue }
-
-      const opzione = String(o.delivery_option_id || '')
-      if (!opzione) { await segna('errore', 'opzione di consegna dell\'ordine mancante'); continue }
-      const chiaveCache = `${integr.id}|${opzione}`
-      let providers = providerCache.get(chiaveCache)
-      if (!providers) {
-        const p = await tiktokRequest('GET', `/logistics/202309/delivery_options/${encodeURIComponent(opzione)}/shipping_providers`, { token, shopCipher })
-        providers = (p?.data?.shipping_providers || []) as any[]
-        providerCache.set(chiaveCache, providers)
-      }
-      // Match sul brand. Se non c'è, NON si usa il primo provider a caso (darebbe al compratore l'URL di
-      // tracking di un corriere SBAGLIATO): si cerca un generico ("other/altro"), altrimenti l'ordine resta
-      // in errore e si ritenta al giro dopo — meglio ritentare che marcare un vettore errato.
-      const match = brand ? providers.find((p: any) => { const n = (p.name || '').toLowerCase(); return n && (n.includes(brand) || brand.includes(n)) }) : null
-      const generico = providers.find((p: any) => /\bother\b|general|altro/i.test(p.name || ''))
-      const providerId = match?.id || generico?.id
-      if (!providerId) { await segna('errore', `corriere ${brand || 'sconosciuto'} non fra quelli ammessi da TikTok per l'ordine`); continue }
-      const spedizione = { tracking_number: String(tracking), shipping_provider_id: String(providerId) }
-
-      const righeOrdine = (o.line_items || []).map((li: any) => li?.id).filter(Boolean)
-      try {
-        await tiktokRequest('POST', `/fulfillment/202610/orders/${encodeURIComponent(String(ordine.ordine_esterno_id))}/packages`, {
-          token, shopCipher,
-          body: { ...(righeOrdine.length ? { order_line_list: righeOrdine.map((id: any) => ({ order_line_id: String(id) })) } : {}), shipping_info_list: [spedizione] },
-        })
-      } catch (e1: any) {
-        const pacchi = (o.packages || []).map((p: any) => p?.id).filter(Boolean)
-        if (!pacchi.length) throw e1
-        try {
-          for (const pid of pacchi) {
-            await tiktokRequest('POST', `/fulfillment/202309/packages/${encodeURIComponent(String(pid))}/ship`, { token, shopCipher, body: { self_shipment: spedizione } })
-          }
-        } catch (e2: any) {
-          throw new Error(`${e1?.message || e1} | ship: ${e2?.message || e2}`)
-        }
-      }
+      const esito = await evadiOrdineTiktok({ token, shopCipher, ordineId: String(ordine.ordine_esterno_id), tracking: String(tracking), brand, providerCache, chiaveCache: integr.id })
+      if (!esito.ok) { await segna('errore', esito.errore); continue }
       await segna('ok', null)
     } catch (e: any) {
       await segna('errore', String(e?.message || e).slice(0, 150))
     }
   }
   return esiti
+}
+
+export type EsitoEvasioneTiktok = { ok: true; via: 'gia_segnato' | 'mark_as_shipped' | 'ship_package' } | { ok: false; errore: string }
+
+// UN ORDINE, UN TRACKING: quello che si fa su TikTok, senza leggere ne' scrivere il nostro database. Sta a
+// parte per poterlo provare su un negozio di sviluppo con un tracking finto, senza una spedizione vera (e
+// un'etichetta pagata) dietro. Un rifiuto di TikTok risale come eccezione; i casi che non si possono evadere
+// tornano come errore leggibile, e il recupero (fulfill-retry) li ritenta.
+export async function evadiOrdineTiktok(o: {
+  token: string; shopCipher: string; ordineId: string; tracking: string; brand: string
+  providerCache?: Map<string, any[]>; chiaveCache?: string
+}): Promise<EsitoEvasioneTiktok> {
+  const { token, shopCipher, ordineId, tracking, brand } = o
+  // L'ordine come lo vede TikTok adesso: chi lo spedisce, l'opzione di consegna (da cui dipendono i
+  // corrieri ammessi), le righe e i pacchi. Una lettura fallita va nell'errore e si ritenta al giro dopo.
+  const det = await tiktokRequest('GET', '/order/202309/orders', { token, shopCipher, query: { ids: ordineId } })
+  const ord = det?.data?.orders?.[0]
+  if (!ord) return { ok: false, errore: 'ordine non trovato su TikTok' }
+  // La sync importa solo gli ordini del venditore (lib/tiktokSync), ma il tipo puo' cambiare sul negozio.
+  if (ord.shipping_type && ord.shipping_type !== 'SELLER') return { ok: false, errore: `spedizione ${ord.shipping_type} gestita da TikTok: tracking non caricabile` }
+  // Gia' segnato con questo tracking (un giro precedente arrivato a TikTok ma non registrato qui).
+  if (ord.tracking_number && String(ord.tracking_number) === tracking) return { ok: true, via: 'gia_segnato' }
+
+  const opzione = String(ord.delivery_option_id || '')
+  if (!opzione) return { ok: false, errore: 'opzione di consegna dell\'ordine mancante' }
+  const chiave = `${o.chiaveCache || ''}|${opzione}`
+  let providers = o.providerCache?.get(chiave)
+  if (!providers) {
+    const p = await tiktokRequest('GET', `/logistics/202309/delivery_options/${encodeURIComponent(opzione)}/shipping_providers`, { token, shopCipher })
+    providers = (p?.data?.shipping_providers || []) as any[]
+    o.providerCache?.set(chiave, providers)
+  }
+  // Match sul brand. Se non c'è, NON si usa il primo provider a caso (darebbe al compratore l'URL di
+  // tracking di un corriere SBAGLIATO): si cerca un generico ("other/altro"), altrimenti l'ordine resta
+  // in errore e si ritenta al giro dopo — meglio ritentare che marcare un vettore errato.
+  const match = brand ? providers.find((p: any) => { const n = (p.name || '').toLowerCase(); return n && (n.includes(brand) || brand.includes(n)) }) : null
+  const generico = providers.find((p: any) => /\bother\b|general|altro/i.test(p.name || ''))
+  const providerId = match?.id || generico?.id
+  if (!providerId) return { ok: false, errore: `corriere ${brand || 'sconosciuto'} non fra quelli ammessi da TikTok per l'ordine` }
+  const spedizione = { tracking_number: tracking, shipping_provider_id: String(providerId) }
+
+  const righeOrdine = (ord.line_items || []).map((li: any) => li?.id).filter(Boolean)
+  try {
+    await tiktokRequest('POST', `/fulfillment/202610/orders/${encodeURIComponent(ordineId)}/packages`, {
+      token, shopCipher,
+      body: { ...(righeOrdine.length ? { order_line_list: righeOrdine.map((id: any) => ({ order_line_id: String(id) })) } : {}), shipping_info_list: [spedizione] },
+    })
+    return { ok: true, via: 'mark_as_shipped' }
+  } catch (e1: any) {
+    const pacchi = (ord.packages || []).map((p: any) => p?.id).filter(Boolean)
+    if (!pacchi.length) throw e1
+    try {
+      for (const pid of pacchi) {
+        await tiktokRequest('POST', `/fulfillment/202309/packages/${encodeURIComponent(String(pid))}/ship`, { token, shopCipher, body: { self_shipment: spedizione } })
+      }
+      return { ok: true, via: 'ship_package' }
+    } catch (e2: any) {
+      throw new Error(`${e1?.message || e1} | ship: ${e2?.message || e2}`)
+    }
+  }
 }

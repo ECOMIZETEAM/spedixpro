@@ -16,7 +16,7 @@ import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/clie
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
 const PREZZI_SELEZIONATI = 200
 
-const NOMI: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
+const NOMI: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce', ebay:'eBay', tiktok:'TikTok Shop', temu:'Temu' }
 const ACCENT = '#f97316'
 const BORDER = '#e8e8e8'
 
