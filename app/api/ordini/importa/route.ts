@@ -9,6 +9,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { eSpartoo, rimappaSpartoo } from '@/lib/import-spartoo'
 import { eMagento, rimappaMagento } from '@/lib/import-magento'
 import { eEcwid, rimappaEcwid, type OrdineEcwidSaltato } from '@/lib/import-ecwid'
+import { dataOrdineDaRiga } from '@/lib/data-ordine-import'
 
 export const runtime = 'nodejs'
 
@@ -296,7 +297,8 @@ export async function POST(req: NextRequest) {
   // Raggruppo gli ordini multi-riga (Shopify: 1 riga per prodotto, dati spedizione solo sulla 1a).
   // Attivo il raggruppamento solo quando c'è la colonna line item + un identificativo ordine.
   const lineMode = !!A.lineitem_name && !!M.order_id
-  type Gruppo = { oid: string; header: any; items: string[]; articoli: any[]; totaleSum: number | null }
+  // `riga`: posizione nel file della prima riga dell'ordine (0 = prima riga dopo l'intestazione).
+  type Gruppo = { oid: string; riga: number; header: any; items: string[]; articoli: any[]; totaleSum: number | null }
   const gruppi: Gruppo[] = []
   if (lineMode) {
     // Raggruppo per order_id usando una MAPPA, non solo il confronto con la riga precedente: cosi'
@@ -305,7 +307,8 @@ export async function POST(req: NextRequest) {
     // precedente" lo stesso ordine si spezzava in piu' gruppi (e in piu' spedizioni).
     const perOid = new Map<string, Gruppo>()
     let cur: Gruppo | null = null
-    for (const r of rows) {
+    for (let n = 0; n < rows.length; n++) {
+      const r = rows[n]
       const oid = g(r, 'order_id')
       const haDest = !!g(r, 'destinatario')
       if (oid) {
@@ -316,13 +319,13 @@ export async function POST(req: NextRequest) {
           cur = esistente
           if (haDest && !g(cur.header, 'destinatario')) cur.header = r
         } else {
-          cur = { oid, header: r, items: [], articoli: [], totaleSum: null }
+          cur = { oid, riga: n, header: r, items: [], articoli: [], totaleSum: null }
           perOid.set(oid, cur)
           gruppi.push(cur)
         }
       } else if (!cur) {
         // Riga senza id ordine e nessun gruppo aperto: ordine a se'.
-        cur = { oid: 'r' + gruppi.length, header: r, items: [], articoli: [], totaleSum: null }
+        cur = { oid: 'r' + gruppi.length, riga: n, header: r, items: [], articoli: [], totaleSum: null }
         gruppi.push(cur)
       } else if (haDest && !g(cur.header, 'destinatario')) {
         // Riga di continuazione (id ordine vuoto) che porta il destinatario: promuovila a header.
@@ -347,7 +350,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } else {
-    for (const r of rows) gruppi.push({ oid: g(r, 'order_id'), header: r, items: [], articoli: [], totaleSum: null })
+    rows.forEach((r, n) => gruppi.push({ oid: g(r, 'order_id'), riga: n, header: r, items: [], articoli: [], totaleSum: null }))
   }
 
   const records: any[] = []
@@ -360,8 +363,11 @@ export async function POST(req: NextRequest) {
   // Solo le righe MALFORMATE: `scartati` non deve gonfiarsi con i "gia' importati", che sono un'altra cosa.
   let malformati = 0
 
-  gruppi.forEach((grp, i) => {
+  gruppi.forEach(grp => {
     const r = grp.header
+    // Riga vera del file (1 = intestazione). Prima si contavano gli ORDINI: su un file Amazon con
+    // ordini da piu' articoli "riga 42" non era la riga 42.
+    const rigaFile = grp.riga + 2
     const dest = g(r, 'destinatario')
     const a1 = g(r, 'indirizzo')
     const a2 = M.indirizzo2 ? String(r[M.indirizzo2!] ?? '').trim() : ''
@@ -409,7 +415,7 @@ export async function POST(req: NextRequest) {
       !dest && 'nome destinatario', !ind && 'indirizzo', !cap && 'CAP', !loc && 'citta',
     ].filter(Boolean) as string[]
     if (mancanti.length) {
-      errori.push({ riga: i + 2, ordine: grp.oid ? String(grp.oid) : null, motivo: `Manca ${mancanti.join(', ')}` })
+      errori.push({ riga: rigaFile, ordine: grp.oid ? String(grp.oid) : null, motivo: `Manca ${mancanti.join(', ')}` })
       malformati++
       return
     }
@@ -434,7 +440,7 @@ export async function POST(req: NextRequest) {
       if (isCod(metodo) || inAttesa) contrassegno = totale
     }
 
-    if (grp.oid) rigaPerOrdine.set(String(grp.oid), i + 2)
+    if (grp.oid) rigaPerOrdine.set(String(grp.oid), rigaFile)
     records.push({
       master_id: masterId,
       cliente_id: clienteId,
@@ -458,6 +464,10 @@ export async function POST(req: NextRequest) {
       articoli: grp.articoli.length ? grp.articoli : null,   // righe prodotto strutturate per il riepilogo ordine
       sku: (A.sku ? String(r[A.sku] ?? '').trim() : '') || null,   // SKU per il match automatico col catalogo pacchi
       fonte: 'csv',
+      // ORDINE DELL'ELENCO. Le righe di un file entrano tutte nello stesso istante: per metterle in
+      // ordine di tempo serve la data dell'ordine scritta nel file, e a parita' la riga del file.
+      data_ordine: dataOrdineDaRiga(r),
+      riga_file: rigaFile,
       // La nazione non deducibile NON fa scartare la riga: l'ordine entra segnato in errore, con
       // scritto cosa manca, e dalla lista si corregge in due clic. Scartarlo costringerebbe a
       // rifare il file per un dato che noi non possiamo indovinare.

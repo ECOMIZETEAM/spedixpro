@@ -37,6 +37,16 @@ function scartoRomaMs(d: Date): number {
   return comeUtc - Math.floor(d.getTime() / 1000) * 1000
 }
 
+/**
+ * L'istante di un'ora "da orologio" di Roma, scritta senza fuso (un file d'ordini: "2026-09-09 13:54").
+ * Mese 1-12. Lo scarto si legge due volte: la prima stima puo' cadere dall'altra parte del cambio d'ora.
+ */
+export function istanteDaOraRoma(anno: number, mese: number, giorno: number, ora = 0, minuti = 0, secondi = 0): Date {
+  const comeUtc = Date.UTC(anno, mese - 1, giorno, ora, minuti, secondi)
+  const stima = comeUtc - scartoRomaMs(new Date(comeUtc))
+  return new Date(comeUtc - scartoRomaMs(new Date(stima)))
+}
+
 /** Mezzanotte di Roma del giorno 'YYYY-MM-DD', come istante UTC ISO. */
 export function inizioGiornoRomaISO(giorno: string): string {
   const [y, m, g] = giorno.split('-').map(Number)

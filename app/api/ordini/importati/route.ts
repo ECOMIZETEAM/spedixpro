@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest) {
   // Escludo 'raw' (JSON completo, pesante)
   const ordini = await fetchAll(() => supabase
     .from('ordini_importati')
-    .select('id,destinatario,indirizzo,cap,localita,provincia,country,telefono,email_destinatario,peso,colli,contrassegno,contenuto,articoli,sku,note,rif_mittente,rif_destinatario,order_id,totale_ordine,fonte,stato,errore,spedizione_id,created_at')
+    .select('id,destinatario,indirizzo,cap,localita,provincia,country,telefono,email_destinatario,peso,colli,contrassegno,contenuto,articoli,sku,note,rif_mittente,rif_destinatario,order_id,totale_ordine,fonte,stato,errore,spedizione_id,created_at,data_ordine,riga_file')
     .eq('cliente_id', utente.cliente_id)
     // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
     .order('created_at', { ascending: false }).order('id', { ascending: false }))

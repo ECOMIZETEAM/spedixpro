@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { chiaveDestinatario, destinatarioDaImportato, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
+import { confrontaPerData } from '@/lib/data-ordine-import'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo, type TariffaAnteprima } from '@/app/cliente/anteprima-prezzi'
 import { colliDellOrdine, descriviColli } from '@/lib/colli-ordine'
 import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
@@ -48,7 +49,15 @@ type Ordine = {
   errore: string | null
   spedizione_id: string | null
   created_at: string
+  // Quando e' stato fatto l'ordine, se il file lo scrive (Amazon, Shopify, Temu), e la riga del file:
+  // le righe di un file hanno tutte la stessa ora d'import, sono questi due a metterle in ordine.
+  data_ordine: string | null
+  riga_file: number | null
 }
+
+// Spedizione nata in un lotto, nell'ordine in cui e' stata creata. L'id manca quando la creazione e'
+// stata ritrovata dalla verifica: lo si prende dall'ordine, che a quel punto e' collegato.
+type SpeditaNelLotto = { ordineId: string; spedizioneId: string | null }
 
 type Corriere = { id: string; nome: string; tipo?: string; punto?: boolean }
 
@@ -94,7 +103,9 @@ export default function ImportaOrdiniPage() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   // completaDati: il messaggio offre di riaprire la schermata dei dati del negozio (solo conti Shopify).
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string; completaDati?: boolean } | null>(null)
+  // lotto: le spedizioni appena create, per stamparne le etichette nell'ordine in cui sono partite.
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string; completaDati?: boolean; lotto?: SpeditaNelLotto[] } | null>(null)
+  const [stampandoLotto, setStampandoLotto] = useState(false)
   // Righe che NON sono entrate: per correggere il file il cliente deve sapere QUALI e PERCHE'.
   const [nonImportate, setNonImportate] = useState<{ riga: number | null; ordine: string | null; motivo: string }[]>([])
   const thNI = { textAlign: 'left' as const, padding: '7px 10px', fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase' as const, letterSpacing: '.3px' }
@@ -405,8 +416,14 @@ export default function ImportaOrdiniPage() {
   async function spedisciSelezionati() {
     if (!sel.size || spedendo) return
 
-    // Ordini spedibili tra quelli selezionati
-    const targets = ordini.filter(o => sel.has(o.id) && (o.stato === 'da_spedire' || o.stato === 'errore'))
+    // Ordini spedibili tra quelli selezionati, NELL'ORDINE IN CUI SONO A SCHERMO: e' quello in cui
+    // nascono le spedizioni, e quindi escono le etichette. Prima si seguiva l'ordine interno della
+    // lista: chi metteva l'elenco per destinatario o per data vedeva partire i pacchi in un altro.
+    // I selezionati nascosti da un filtro vanno in coda.
+    const aSchermo = new Map(ordiniVisti.map((o, i) => [o.id, i]))
+    const targets = ordini
+      .filter(o => sel.has(o.id) && (o.stato === 'da_spedire' || o.stato === 'errore'))
+      .sort((a, b) => (aSchermo.get(a.id) ?? 1e9) - (aSchermo.get(b.id) ?? 1e9))
     if (!targets.length) { setMsg({ type: 'err', text: 'Nessun ordine spedibile selezionato' }); return }
 
     // SENZA NAZIONE NON SI SPEDISCE. Qui sotto il paese finiva a 'IT' per difetto: un ordine estero
@@ -620,6 +637,7 @@ export default function ImportaOrdiniPage() {
     // lotto invece di aspettare un minuto per ognuno degli ordini rimasti, senza poterli toccare.
     let senzaRetePiuVolte = 0
     let nonTentati = 0
+    const spedite: SpeditaNelLotto[] = []
 
     for (let i = 0; i < preparati.length; i++) {
       if (senzaRetePiuVolte >= 2) { nonTentati = preparati.length - i; break }
@@ -655,9 +673,11 @@ export default function ImportaOrdiniPage() {
         // esistente): lo segniamo 'spedito' collegandola, cosi' esce dalla lista e non si ritenta —
         // self-heal del disaccoppiamento crea↔segna-spedito che causava i doppioni. NON e' un errore.
         if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.gia_spedito, spedizione_id: cData.gia_spedito_id })) nonCollegate++
+        spedite.push({ ordineId: o.id, spedizioneId: cData.gia_spedito_id || null })
         ok++; senzaRetePiuVolte = 0
       } else if (cRes?.ok && cData && !cData.error) {
         if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.numero, spedizione_id: cData.spedizioneId })) nonCollegate++
+        spedite.push({ ordineId: o.id, spedizioneId: cData.spedizioneId || null })
         ok++; senzaRetePiuVolte = 0
       } else if (cData?.error) {
         // Rifiutata, col motivo del server (credito, telefono, corriere…): non e' nata.
@@ -666,7 +686,7 @@ export default function ImportaOrdiniPage() {
       } else {
         setProgress({ done: ko + ok, total: totale, fase: 'verifica' })
         const esito = await verificaCreazione(o.id, inviataAlle)
-        if (esito === 'collegata') { ok++; senzaRetePiuVolte = 0 }
+        if (esito === 'collegata') { spedite.push({ ordineId: o.id, spedizioneId: null }); ok++; senzaRetePiuVolte = 0 }
         else { ko++; senzaRetePiuVolte = esito === 'irraggiungibile' ? senzaRetePiuVolte + 1 : 0 }
       }
       setProgress({ done: ko + ok, total: totale, fase: 'crea' })
@@ -689,7 +709,48 @@ export default function ImportaOrdiniPage() {
       type: ko || avvisi.length ? 'err' : 'ok',
       text: `Spedizioni completate: ${ok} riuscite${ko ? `, ${ko} in errore — le trovi qui sotto, con il motivo accanto allo stato` : ''}`
         + (avvisi.length ? '. ' + avvisi.join('. ') + '.' : ''),
+      lotto: spedite.length ? spedite : undefined,
     })
+  }
+
+  // ETICHETTE DEL LOTTO, NELL'ORDINE IN CUI SONO STATE CREATE. In Lista Spedizioni le piu' recenti
+  // stanno in cima, e il PDF segue la lista: un lotto usciva al contrario rispetto ai pacchi preparati.
+  // Stessa stampa della Lista Spedizioni (Zebra se attiva, altrimenti un PDF unico), qui con l'ordine
+  // del lotto.
+  async function stampaEtichetteLotto(lotto: SpeditaNelLotto[]) {
+    if (stampandoLotto) return
+    const spedizionePer = new Map(ordini.map(o => [o.id, o.spedizione_id]))
+    const ids = [...new Set(lotto.map(l => l.spedizioneId || spedizionePer.get(l.ordineId) || '').filter(Boolean))]
+    if (!ids.length) { await dialog.alert({ title: 'Etichette non trovate', message: 'Le trovi in Lista Spedizioni.' }); return }
+    setStampandoLotto(true)
+    try {
+      let zebra = false, stampante = ''
+      try {
+        const d = await fetch('/api/cliente/dati').then(r => r.json())
+        zebra = d?.impostazioni?.zpl_abilita === 'si'; stampante = d?.impostazioni?.zpl_stampante || ''
+      } catch { /* senza impostazioni: PDF */ }
+      if (zebra) {
+        try {
+          const { stampaEtichetteZebra } = await import('@/lib/zebra-print')
+          const r = await stampaEtichetteZebra(ids.map(id => `/api/spedizioni/etichetta?id=${id}`), { stampante })
+          await dialog.alert({ title: 'Stampa Zebra', message: `${r.ok} etichette stampate${r.errori ? `, ${r.errori} non riuscite: le trovi in Lista Spedizioni` : ''}.` })
+          return
+        } catch { /* Zebra non raggiungibile: si scarica il PDF */ }
+      }
+      const res = await fetch('/api/spedizioni/etichette-bulk', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      if (!res.ok) { await dialog.alert({ title: 'Errore', message: 'Errore nella generazione del PDF delle etichette.' }); return }
+      const url = URL.createObjectURL(await res.blob())
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `etichette_${ids.length}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } finally { setStampandoLotto(false) }
   }
 
   // Filtri: ricerca libera + stato. La selezione/spedizione lavora comunque per id.
@@ -723,6 +784,11 @@ export default function ImportaOrdiniPage() {
   // (es. "nessuna tariffa verso PL") spariva dalla vista dopo un refresh e sembrava PERSO.
   const conteggiStato = ordini.reduce((m: Record<string, number>, o) => { m[o.stato] = (m[o.stato] || 0) + 1; return m }, {} as Record<string, number>)
 
+  // DATA = QUANDO E' STATO FATTO L'ORDINE (scritta nel file), altrimenti l'ora d'import; a parita',
+  // la riga del file. Prima si guardava solo l'ora d'import, che per tutte le righe di un file e' la
+  // stessa: dentro il file l'ordine era quello del database (a caso), e "Data ↑" e "Data ↓" davano lo
+  // stesso elenco. "Data ↓" e' esattamente il contrario di "Data ↑". Regola in lib/data-ordine-import.
+
   // I file Amazon arrivano in ordine di data: senza un alfabetico i due ordini della stessa persona
   // finiscono lontanissimi nell'elenco, e per trovarli bisogna leggere riga per riga.
   const ordiniVisti = [...ordiniFiltrati]
@@ -734,8 +800,8 @@ export default function ImportaOrdiniPage() {
         case 'dest_za': return testo(b.destinatario).localeCompare(testo(a.destinatario), 'it')
         case 'localita': return testo(a.localita).localeCompare(testo(b.localita), 'it')
           || testo(a.destinatario).localeCompare(testo(b.destinatario), 'it')
-        case 'data_asc': return testo((a as any).created_at).localeCompare(testo((b as any).created_at))
-        default: return testo((b as any).created_at).localeCompare(testo((a as any).created_at))
+        case 'data_asc': return confrontaPerData(a, b)
+        default: return confrontaPerData(b, a)
       }
     })
 
@@ -909,9 +975,16 @@ export default function ImportaOrdiniPage() {
           border: `1px solid ${msg.type === 'ok' ? '#bbf7d0' : '#fecaca'}`,
           background: msg.type === 'ok' ? '#f0fdf4' : '#fef2f2',
           color: msg.type === 'ok' ? '#15803d' : '#b91c1c',
-          ...(msg.completaDati ? { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' as const } : {}),
+          ...(msg.completaDati || msg.lotto ? { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' as const } : {}),
         }}>
-          {msg.completaDati ? <span style={{ flex: '1 1 240px' }}>{msg.text}</span> : msg.text}
+          {msg.completaDati || msg.lotto ? <span style={{ flex: '1 1 240px' }}>{msg.text}</span> : msg.text}
+          {msg.lotto && (
+            <button onClick={() => stampaEtichetteLotto(msg.lotto!)} disabled={stampandoLotto}
+              title="Le etichette di queste spedizioni, nell'ordine in cui sono state create"
+              style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 700, cursor: stampandoLotto ? 'wait' : 'pointer', opacity: stampandoLotto ? 0.6 : 1 }}>
+              {stampandoLotto ? 'Preparo le etichette…' : `Stampa le etichette di questo lotto (${msg.lotto.length})`}
+            </button>
+          )}
           {msg.completaDati && (
             <button onClick={completaDatiNegozio}
               style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
@@ -1248,6 +1321,16 @@ export default function ImportaOrdiniPage() {
                       {/* ORDINE — id e mittente insieme: sono due riferimenti, non due colonne. */}
                       <td style={td}>
                         <span style={{ fontFamily: 'monospace', fontSize: '12px', color: '#1a1a1a' }}>{o.order_id || '—'}</span>
+                        {(() => {
+                          // La data con cui l'elenco e' ordinato: senza vederla, l'ordine non si controlla.
+                          const d = o.data_ordine ? new Date(o.data_ordine) : null
+                          if (!d || Number.isNaN(d.getTime())) return null
+                          return (
+                            <div style={sub} title="Quando è stato fatto l'ordine">
+                              del {d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' })} {d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          )
+                        })()}
                         <div style={sub}>{o.rif_mittente || mittenteNome || '—'}</div>
                       </td>
                       <td style={{ ...td, whiteSpace: 'nowrap' as const, color: '#6b7280', fontSize: '12px' }}>
