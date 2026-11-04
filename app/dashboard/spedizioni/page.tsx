@@ -707,8 +707,10 @@ async function apriTracking(s: any) {
                             </button>}
                         {s.ticket && <div><a href={`/dashboard/assistenza?ticket=${s.ticket.id}`} title="Ticket aperto su questa spedizione — clicca per aprirlo"
                           style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fef3c7',color:'#b45309',border:'1px solid #fde68a',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' as const}}>🎫 ticket aperto</a></div>}
-                        {s.dogana_bloccata_at && !s.tracking_number && <div><span title="Bloccata in dogana: il corriere richiede EORI, contenuto dettagliato ed email del destinatario. È stato aperto un ticket al cliente."
-                          style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fee2e2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,whiteSpace:'nowrap' as const}}>⚠️ Ferma in dogana</span></div>}
+                        {/* "Ferma in dogana" faceva pensare a un pacco fermo alla frontiera: il pacco invece non e'
+                            partito, e' la LDV che non viene emessa finche' non arrivano i documenti (TMP-26814143, 4/11). */}
+                        {s.dogana_bloccata_at && !s.tracking_number && <div><span title="Lettera di vettura non ancora emessa: fuori UE il corriere la rilascia solo con EORI del mittente, contenuto dettagliato con il valore ed email del destinatario. Il pacco non è partito. È stato aperto un ticket al cliente."
+                          style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fee2e2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,whiteSpace:'nowrap' as const}}>⚠️ Servono documenti doganali</span></div>}
                       </td>
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{s.mitt_nome}</div>
