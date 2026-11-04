@@ -116,6 +116,11 @@ export async function GET(req: NextRequest) {
     return { prima, dopo, nota }
   }
   const bloccoDi = (r: any) => {
+    // IN CONTESTAZIONE: il fornitore ha fatto pagare un peso impossibile e la riga aspetta la sua risposta.
+    // 04/11/2026, sei Poste Delivery Business S di agosto a 84-156 kg senza misure, gia' misurati a ~20 kg
+    // (1UW07WF325226: 49,5x39x29 cm e 20,3 kg, per il fornitore 156,32 kg e 48,79 €). Non si seleziona e la
+    // Conferma la rifiuta (vedi sotto): qui si dice perche', altrimenti sembra una riga rotta.
+    if (r.stato === 'in_contestazione') return 'In contestazione col fornitore: non si conferma finché non risponde'
     const st = r.spedizione_id ? statoSped.get(r.spedizione_id) : null
     if (st === 'annullata') return 'Spedizione annullata: non si addebita'
     if (st === 'annullamento_pending' || st === 'annullamento_manuale') return 'Spedizione in annullo: si conferma solo se l\'annullo non va a buon fine'
@@ -229,9 +234,13 @@ export async function POST(req: NextRequest) {
       .in('id', rettificaIds.slice(i, i + 200))
       .eq('master_id', utente?.master_id)
       .eq('confermata', false)
+      // SOLO LE "DA RETTIFICARE". La pagina lascia selezionare solo quelle, ma una scheda aperta prima che
+      // una riga andasse in contestazione col fornitore la rimanderebbe ancora, e qui passava tutto cio'
+      // che non era confermato.
+      .eq('stato', 'da_rettificare')
     if (data?.length) rettifiche.push(...data)
   }
-  if (!rettifiche.length) return NextResponse.json({ error: 'Nessuna rettifica trovata (o gia\' confermata da un altro invio).' }, { status: 404 })
+  if (!rettifiche.length) return NextResponse.json({ error: 'Nessuna rettifica trovata (gia\' confermata da un altro invio, o in contestazione col fornitore).' }, { status: 404 })
 
   // Se qualcosa va storto su una riga, quella riga TORNA APERTA: non deve restare archiviata come
   // fatta senza che i soldi si siano mossi. Prima i due `catch` si limitavano a scrivere nel log e
