@@ -31,6 +31,33 @@ export async function tiktokExchangeCode(code: string): Promise<any> {
   return d.data // { access_token, refresh_token, access_token_expire_in, refresh_token_expire_in, open_id, seller_name }
 }
 
+// LE SCADENZE DI TIKTOK SONO DATE, NON DURATE. La guida (Authorization overview, risposta di token/get e
+// token/refresh) dice che access_token_expire_in e refresh_token_expire_in sono timestamp Unix in secondi:
+// «1660556783», non «604800». Fino al 4/11/2026 si sommavano a adesso come se fossero secondi di durata, e
+// il token risultava valido fino al 2079: non si sarebbe rinnovato mai, e dopo i 7 giorni di vita del token
+// vero ogni chiamata a TikTok sarebbe fallita. Un numero piccolo lo si legge ancora come durata, per non
+// fidarsi alla cieca di un formato che la guida potrebbe cambiare. Restituisce millisecondi, o null.
+export function scadenzaTiktok(v: unknown, ora = Date.now()): number | null {
+  const n = Number(v)
+  if (v == null || !Number.isFinite(n) || n <= 0) return null
+  if (n > 1e12) return n
+  if (n > 1e9) return n * 1000
+  return ora + n * 1000
+}
+
+// Le credenziali di un negozio come le salva il collegamento, da qualunque porta arrivi (dal portale o
+// dall'App Store di TikTok). I campi del negozio (shop_cipher, shop_id, shop_region) li aggiunge chi collega.
+export function credenzialiDaTokenTiktok(t: any, ora = Date.now()) {
+  return {
+    access_token: String(t.access_token),
+    refresh_token: String(t.refresh_token || ''),
+    expires_at: scadenzaTiktok(t.access_token_expire_in, ora) ?? ora + 2 * 3600 * 1000,
+    refresh_expires_at: scadenzaTiktok(t.refresh_token_expire_in, ora),
+    open_id: t.open_id || null,
+    seller_name: t.seller_name || null,
+  }
+}
+
 // Ritorna un access token valido, rinfrescandolo col refresh token se scaduto
 export async function getValidTiktokToken(db: any, integr: any): Promise<string> {
   const cred = (integr.credenziali || {}) as any
@@ -47,7 +74,8 @@ export async function getValidTiktokToken(db: any, integr: any): Promise<string>
     ...cred,
     access_token: data.access_token,
     refresh_token: data.refresh_token || cred.refresh_token,
-    expires_at: now + (Number(data.access_token_expire_in) || 7200) * 1000,
+    expires_at: scadenzaTiktok(data.access_token_expire_in, now) ?? now + 2 * 3600 * 1000,
+    refresh_expires_at: scadenzaTiktok(data.refresh_token_expire_in, now) ?? cred.refresh_expires_at ?? null,
   }
   await db.from('integrazioni').update({ credenziali: newCred }).eq('id', integr.id)
   return data.access_token

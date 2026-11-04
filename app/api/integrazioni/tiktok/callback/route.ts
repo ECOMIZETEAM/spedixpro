@@ -1,29 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { conErrore, conCollegato } from '@/lib/esiti-collegamento'
-import { createServerSupabase } from '@/lib/supabase'
+import { conErrore, conCollegato, type CodiceErrore } from '@/lib/esiti-collegamento'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { tiktokExchangeCode, tiktokGetShops } from '@/lib/tiktok'
+import { credenzialiDaTokenTiktok, tiktokExchangeCode, tiktokGetShops } from '@/lib/tiktok'
+import {
+  PAGINA_COLLEGA_TIKTOK, collegaNegozioTiktok, conCookieSospesoTiktok, negoziDaShops, rinnovaNegoziGiaCollegati,
+  sigillaSospesoTiktok, type NegozioTiktok,
+} from '@/lib/tiktokCollega'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// Callback OAuth TikTok Shop: scambia il code coi token, recupera il negozio e salva l'integrazione.
+// Callback OAuth TikTok Shop: scambia il code coi token, recupera i negozi autorizzati e li collega.
+//
+// Ci arrivano due giri diversi (lib/tiktokCollega.ts):
+// - dal portale: lo state l'ha scritto /install col cliente che ha cliccato, e il negozio va a lui;
+// - dall'App Store del Seller Center: TikTok manda il SOLO codice. I negozi che hanno gia' un conto si
+//   rinnovano; gli altri aspettano nel cookie cifrato che il venditore confermi il suo conto MoovExpress.
+// Il codice si scambia subito in tutti e due i casi: e' di breve durata, e un codice scaduto mentre il
+// venditore cerca la password lo costringerebbe a rifare l'installazione da TikTok.
+// Le scritture passano dal client di servizio: al ritorno dall'OAuth il cookie di sessione puo' mancare.
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const code = url.searchParams.get('code') || url.searchParams.get('auth_code') || ''
   const state = url.searchParams.get('state') || ''
   const appUrl = process.env.SHOPIFY_APP_URL || url.origin
+  const errore = (codice: CodiceErrore) => NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', codice)}`)
 
-  if (!code || !state) return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_annullato')}`)
+  if (!code) return errore('tiktok_annullato')
 
-  const supabase = await createServerSupabase()
-  // shopify_oauth_state è chiusa (RLS + no grant) e il cookie può mancare al ritorno OAuth: uso admin.
-  const adminState = createAdminSupabase()
-  const { data: st } = await adminState.from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
-  if (!st || st.shop !== 'tiktok') {
-    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_scaduto')}`)
+  const admin = createAdminSupabase()
+  let clienteDelloState: string | null = null
+  if (state) {
+    // shopify_oauth_state è chiusa (RLS + no grant): si legge e si cancella col client di servizio.
+    const { data: st } = await admin.from('shopify_oauth_state').select('*').eq('state', state).maybeSingle()
+    if (!st || st.shop !== 'tiktok' || !st.cliente_id) return errore('tiktok_scaduto')
+    await admin.from('shopify_oauth_state').delete().eq('state', state)
+    clienteDelloState = String(st.cliente_id)
   }
-  await adminState.from('shopify_oauth_state').delete().eq('state', state)
 
   let tokens: any
   try {
@@ -32,53 +45,37 @@ export async function GET(req: NextRequest) {
     // Il motivo tecnico va nel log, non nell'indirizzo: al cliente non serve, e nell'URL finiva in
     // chiaro qualunque testo restituito da TikTok.
     console.error('[TIKTOK][CALLBACK] scambio token', e?.message || e)
-    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_token')}`)
+    return errore('tiktok_token')
   }
+  const credenziali = credenzialiDaTokenTiktok(tokens)
 
-  const now = Date.now()
-  const cred: any = {
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_at: now + (Number(tokens.access_token_expire_in) || 7200) * 1000,
-    refresh_expires_at: tokens.refresh_token_expire_in ? now + Number(tokens.refresh_token_expire_in) * 1000 : null,
-    open_id: tokens.open_id || null,
-    seller_name: tokens.seller_name || null,
-  }
-
-  // Recupero il negozio autorizzato (shop_cipher + shop_id servono per tutte le chiamate business)
-  let nomeNegozio = tokens.seller_name || 'TikTok Shop'
+  // Tutti i negozi autorizzati, non il primo: chi ne autorizza due insieme perdeva il secondo.
+  let negozi: NegozioTiktok[] = []
   try {
-    const shops = await tiktokGetShops(tokens.access_token)
-    if (shops.length) {
-      cred.shop_cipher = shops[0].cipher
-      cred.shop_id = shops[0].id
-      cred.shop_region = shops[0].region
-      nomeNegozio = shops[0].name || nomeNegozio
-    }
+    negozi = negoziDaShops(await tiktokGetShops(tokens.access_token))
   } catch (e: any) {
     console.error('[TIKTOK][CALLBACK] recupero negozio', e?.message || e)
-    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_negozio')}`)
+    return errore('tiktok_negozio')
+  }
+  if (!negozi.length) {
+    console.error('[TIKTOK][CALLBACK] nessun negozio autorizzato con id e cipher')
+    return errore('tiktok_negozio')
   }
 
-  const payload: any = {
-    master_id: st.master_id, cliente_id: st.cliente_id, piattaforma: 'tiktok',
-    nome_negozio: nomeNegozio, identificativo: cred.shop_id || 'tiktok',
-    credenziali: cred, stato: 'attivo', errore: null,
-  }
-  // Multi-shop: la lookup deve includere l'identificativo (shop_id), come eBay. Senza, collegare un
-  // SECONDO negozio TikTok faceva UPDATE sulla riga del primo, perdendone credenziali/shop_cipher.
-  const { data: existing } = await supabase.from('integrazioni').select('id')
-    .eq('cliente_id', st.cliente_id).eq('piattaforma', 'tiktok').eq('identificativo', cred.shop_id || 'tiktok').maybeSingle()
-  // L'esito si guarda: questa scrittura passa dalla sessione, che al ritorno dall'OAuth puo' mancare,
-  // e senza il controllo si tornava lo stesso su «?connected=tiktok» — che ora il portale mostra come
-  // «collegato» anche per un negozio mai salvato.
-  const esito = existing?.id
-    ? await supabase.from('integrazioni').update(payload).eq('id', existing.id)
-    : await supabase.from('integrazioni').insert(payload)
-  if (esito.error) {
-    console.error('[TIKTOK][CALLBACK] integrazione non salvata', esito.error.message)
-    return NextResponse.redirect(`${appUrl}${conErrore('/cliente/integrazioni', 'tiktok_non_salvato')}`)
+  if (clienteDelloState) {
+    const esiti = await Promise.all(negozi.map(negozio => collegaNegozioTiktok(admin, { clienteId: clienteDelloState!, negozio, credenziali })))
+    // «Collegato» solo se almeno un negozio e' davvero di questo cliente: il portale lo mostra come fatto.
+    if (esiti.some(e => e.ok)) return NextResponse.redirect(`${appUrl}${conCollegato('/cliente/integrazioni', 'tiktok')}`)
+    return errore(esiti.some(e => !e.ok && e.codice === 'tiktok_non_salvato') ? 'tiktok_non_salvato' : 'tiktok_altro_account')
   }
 
-  return NextResponse.redirect(`${appUrl}${conCollegato('/cliente/integrazioni', 'tiktok')}`)
+  const daChiedere = await rinnovaNegoziGiaCollegati(admin, negozi, credenziali)
+  if (!daChiedere.length) return NextResponse.redirect(`${appUrl}${conCollegato('/cliente/integrazioni', 'tiktok')}`)
+  const sigillo = sigillaSospesoTiktok(credenziali, daChiedere)
+  if (!sigillo) {
+    console.error('[TIKTOK][CALLBACK] TIKTOK_APP_SECRET assente: installazione dall\'App Store non conservabile')
+    return errore('tiktok_non_configurato')
+  }
+  // Stesso host della richiesta: il cookie vale per il dominio da cui risponde questa rotta.
+  return conCookieSospesoTiktok(NextResponse.redirect(new URL(PAGINA_COLLEGA_TIKTOK, req.url)), sigillo)
 }

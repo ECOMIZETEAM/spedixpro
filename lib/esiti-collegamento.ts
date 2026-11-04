@@ -70,6 +70,8 @@ const MOTIVI = {
   token: (p: string) => `${p} non ha confermato l'autorizzazione. Riprova tra qualche minuto da «+ Collega negozio».`,
   negozio: (p: string) => `Non siamo riusciti a leggere i dati del negozio ${p}. Riprova da «+ Collega negozio»; se si ripete, apri un ticket in Assistenza.`,
   non_salvato: (p: string) => `Il collegamento con ${p} non è stato salvato per un problema temporaneo. Riprova da «+ Collega negozio»; se si ripete, apri un ticket in Assistenza.`,
+  // Un negozio va a un cliente solo (lib/tiktokCollega.ts): chi lo collega da un secondo conto non se lo porta via.
+  altro_account: (p: string) => `Questo negozio ${p} è già collegato a un altro account MoovExpress, quindi non l'abbiamo collegato a questo. Se è il tuo, esci (voce «Esci» del menu) ed entra con l'account a cui è collegato.`,
 } as const
 
 // Il messaggio per un codice che questa mappa non conosce. Deve dire cosa fare a tutti e due quelli

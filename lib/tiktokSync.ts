@@ -45,6 +45,18 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
     if (acc.length) dettagli = acc
   } catch { /* uso i dati della search */ }
 
+  // SOLO GLI ORDINI CHE SPEDISCE IL VENDITORE. shipping_type (Get Order Detail) dice chi porta il pacco:
+  // 'SELLER' il venditore col suo corriere, 'TIKTOK' il servizio di TikTok, con l'etichetta da prendere su
+  // TikTok, 'TIKTOK_DIGITAL' niente da spedire. Fino al 4/11/2026 si importavano tutti gli ordini da spedire:
+  // un ordine con la spedizione di TikTok sarebbe partito anche col nostro corriere, pagato due volte, e il
+  // tracking non lo si potrebbe nemmeno rimandare (Mark Package As Shipped vale solo per i propri corrieri).
+  // Un ordine senza il campo si tiene: e' il formato vecchio, in cui c'era solo la spedizione del venditore.
+  const spedisceIlVenditore = (o: any) =>
+    (!o.shipping_type || o.shipping_type === 'SELLER') && (!o.fulfillment_type || o.fulfillment_type === 'FULFILLMENT_BY_SELLER')
+  const primaDelFiltro = dettagli.length
+  dettagli = dettagli.filter(spedisceIlVenditore)
+  if (dettagli.length < primaDelFiltro) console.warn('[TIKTOK][SYNC] ordini spediti da TikTok, non importati:', primaDelFiltro - dettagli.length, integr.identificativo)
+
   let importati = 0
   for (const o of dettagli) {
     const addr = o.recipient_address || {}
@@ -90,7 +102,11 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
       totale,
       valuta: o.payment?.currency || 'EUR',
       stato_pagamento: o.status || '',
-      raw: o,
+      // CONTRASSEGNO = SOLDI. TikTok lo dice con is_cod, che lib/ordini-uniti non legge: guarda il metodo di
+      // pagamento in raw.payment_method (COLONNE_PAGAMENTO), e un ordine in contrassegno senza quel campo
+      // risulterebbe prepagato, con niente da incassare alla consegna. Lo si scrive li', col nome del metodo
+      // che TikTok mostra quando non e' contrassegno.
+      raw: { ...o, payment_method: o.is_cod === true ? 'cod' : (o.payment_method_name || undefined) },
     }
     const { error } = await db.from('ordini_ecommerce').upsert(payload, {
       onConflict: 'integrazione_id,ordine_esterno_id', ignoreDuplicates: false,
@@ -99,9 +115,9 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
   }
 
   await db.from('integrazioni')
-    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: lista.length, errore: null, stato: 'attivo' })
+    .update({ ultimo_sync: new Date().toISOString(), ordini_totali: dettagli.length, errore: null, stato: 'attivo' })
     .eq('id', integr.id)
 
-  const { spediti, daSpedire } = await contaStatiSincronizzati(db, integr.id, lista.map((o: any) => String(o.id)))
-  return { letti: lista.length, importati, spediti, daSpedire }
+  const { spediti, daSpedire } = await contaStatiSincronizzati(db, integr.id, dettagli.map((o: any) => String(o.id)))
+  return { letti: dettagli.length, importati, spediti, daSpedire }
 }
