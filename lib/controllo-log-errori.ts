@@ -26,8 +26,11 @@ export async function trovaLogErrori(giorni = 14): Promise<ControlloRisultato> {
   await scan('integrazioni', 'errore', 'piattaforma', 'integrazione negozio', 'updated_at')
   await scan('ordini_importati', 'errore', 'order_id', 'import CSV')
   await scan('webhooks', 'ultimo_errore', 'url', 'webhook cliente', 'ultimo_invio_at')
-  await scan('giacenze_da_addebitare', 'ultimo_errore', 'spedizione_id', 'addebito giacenza')
-  await scan('resi_da_addebitare', 'ultimo_errore', 'spedizione_id', 'addebito reso')
+  // Le code hanno `creato_il`, non `created_at`: col default la lettura falliva e il catch la taceva,
+  // quindi le righe ferme a cinque tentativi non arrivavano mai qui.
+  await scan('giacenze_da_addebitare', 'ultimo_errore', 'spedizione_id', 'addebito giacenza', 'creato_il')
+  await scan('resi_da_addebitare', 'ultimo_errore', 'spedizione_id', 'addebito reso', 'creato_il')
+  await scan('annulli_da_rimborsare', 'ultimo_errore', 'spedizione_id', 'rimborso annullo', 'creato_il')
 
   // LDV rimaste su numero PROVVISORIO da oltre 6 ore (LDV vera mai arrivata): il cliente vede un numero finto
   try {

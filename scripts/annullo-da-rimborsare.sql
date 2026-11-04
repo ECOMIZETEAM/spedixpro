@@ -15,8 +15,13 @@
 -- apposta: le porte scrivono lo stato PRIMA del rimborso, quindi qui non sarebbe ancora visibile.
 -- Il trigger fa solo un insert, e solo sul passaggio: se fallisse, fallirebbe l'annullo stesso.
 --
--- `avviato_il`: il giro lo scrive subito prima di rimborsare. Distingue i rimborsi di un suo tentativo
+-- `avviato_il`: il giro lo scrive quando prende la riga. Distingue i rimborsi di un suo tentativo
 -- rimasto a meta' (da completare) da quelli della porta (da non toccare).
+--
+-- La foreign key e il trigger chiedono un blocco su `spedizioni`: se una transazione lunga la tiene, il
+-- DDL aspetterebbe e ogni scrittura su spedizioni (creazioni, annulli, tracking) si accoderebbe dietro.
+-- Meglio fallire dopo 5 secondi e rilanciare.
+set local lock_timeout = '5s';
 
 create table if not exists public.annulli_da_rimborsare (
   spedizione_id uuid primary key references public.spedizioni(id) on delete cascade,
@@ -38,9 +43,13 @@ security definer
 set search_path = public
 as $f$
 begin
+  -- Torna 'annullata' una seconda volta (annullata, riaddebitata perche' partita, di nuovo annullata):
+  -- e' un fatto nuovo, si riparte da zero. Tenere la riga vecchia lascerebbe fuori una riga ferma a
+  -- cinque tentativi, o farebbe passare per "nostri" i rimborsi della porta di adesso.
   insert into public.annulli_da_rimborsare (spedizione_id)
   values (new.id)
-  on conflict (spedizione_id) do nothing;
+  on conflict (spedizione_id) do update
+    set creato_il = now(), avviato_il = null, tentativi = 0, ultimo_errore = null;
   return new;
 end;
 $f$;

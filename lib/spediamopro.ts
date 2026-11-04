@@ -698,6 +698,10 @@ export async function chiudiBordereauSpediamopro(supabase: any, distintaId: stri
 // Mappa lo status SpediamoPro (0-13) allo stato interno. Lo status 11 (eccezione)
 // è gestito a parte dal chiamante (controlla gli stock → giacenza / non_consegnato).
 export function mapStatoSpediamopro(status: number | null): string | null {
+  // Status assente = nessuna notizia, NON annullata: Number(null) vale 0, e una risposta senza status
+  // diventava 'annullata' — che il giro del tracking (e dal 4/11/2026 la coda dei rimborsi) rimborsa
+  // anche se il pacco sta viaggiando.
+  if (status === null || status === undefined || String(status).trim() === '') return null
   switch (Number(status)) {
     case 0: return 'annullata'
     case 4: case 5: case 6: case 13: return 'in_lavorazione'
