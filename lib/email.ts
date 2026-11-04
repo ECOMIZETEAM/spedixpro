@@ -1,5 +1,6 @@
 import { Resend } from 'resend'
 import { eIndirizzoInterno } from '@/lib/indirizzi-interni'
+import { eSpedizioneDaAmazon } from '@/lib/compratore-amazon'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 // Mittente con NOME VISIBILE: se la env contiene solo l'indirizzo (noreply@...), Gmail mostrava
@@ -354,6 +355,13 @@ export async function inviaEmailSpedizioneCreata(p: {
   if (p.masterId) {
     try { const { masterEDemo } = await import('@/lib/demo'); if (await masterEDemo(p.masterId)) return } catch { /* best-effort */ }
   }
+  // Ordine del collegamento diretto Amazon: ne' email ne' SMS (lib/compratore-amazon).
+  if (p.spedizioneId) {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      if (await eSpedizioneDaAmazon(createAdminSupabase(), p.spedizioneId)) return
+    } catch { return }
+  }
   // NOTIFICA SMS al destinatario (best-effort, indipendente dall'email): stesso evento "spedizione
   // creata". Gatea da sola sulla preferenza notifica_sms e sul credito SMS; non parte se non c'è il
   // gateway configurato. Sta qui perché ogni porta che manda l'email passa già da questa funzione.
@@ -448,6 +456,7 @@ export async function inviaEmailGiacenza(p: {
   trackingToken?: string | null
   masterId?: string | null
   notificaDest?: boolean
+  spedizioneId?: string | null
 }): Promise<{ ok: boolean; error?: string }> {
   const dest = String(p.destEmail || '').trim().toLowerCase()
   if (!(p.notificaDest ?? true)) return { ok: false, error: 'notifiche disattivate dal cliente' }
@@ -455,6 +464,13 @@ export async function inviaEmailGiacenza(p: {
   // Master in prova: non si scrive a nessuno di vero.
   if (p.masterId) {
     try { const { masterEDemo } = await import('@/lib/demo'); if (await masterEDemo(p.masterId)) return { ok: false, error: 'master demo' } } catch { /* best-effort */ }
+  }
+  // Ordine del collegamento diretto Amazon: al compratore scrive solo Amazon (lib/compratore-amazon).
+  if (p.spedizioneId) {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      if (await eSpedizioneDaAmazon(createAdminSupabase(), p.spedizioneId)) return { ok: false, error: 'ordine Amazon dal collegamento' }
+    } catch { return { ok: false, error: 'controllo ordine Amazon non riuscito' } }
   }
 
   // Marchio del master, come per la spedizione creata: il destinatario non ha mai sentito nominare

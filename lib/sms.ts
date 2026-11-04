@@ -21,6 +21,8 @@
 // non blocca la creazione; il credito SMS si consuma SOLO via RPC atomica (sms_consuma), con rimborso
 // automatico se l'invio poi fallisce.
 
+import { eSpedizioneDaAmazon } from '@/lib/compratore-amazon'
+
 const BASE = 'https://app.esendex.it/API/v1.0/REST'
 
 // Prezzo di vendita per SMS: 1.000 SMS = 100 € → 0,10 €/SMS (senza IVA — società UK, reverse charge).
@@ -206,6 +208,7 @@ export async function inviaSmsCreazione(spedizioneId: string | null | undefined)
       .select('id,cliente_id,master_id,dest_telefono,tracking_token,numero')
       .eq('id', spedizioneId).maybeSingle()
     if (!sp || !sp.tracking_token) return
+    if (await eSpedizioneDaAmazon(admin, sp.id)) return   // collegamento Amazon: scrive solo Amazon (lib/compratore-amazon)
 
     // Account demo: nessun SMS reale parte (non si consuma credito, non si tocca il gateway).
     const { masterEDemo } = await import('@/lib/demo')
@@ -280,6 +283,7 @@ export async function inviaSmsGiacenza(spedizioneId: string | null | undefined):
       .select('id,cliente_id,master_id,dest_telefono,tracking_token,numero')
       .eq('id', spedizioneId).maybeSingle()
     if (!sp || !sp.tracking_token) return false
+    if (await eSpedizioneDaAmazon(admin, sp.id)) return false   // collegamento Amazon: scrive solo Amazon
 
     const { masterEDemo } = await import('@/lib/demo')
     if (await masterEDemo(sp.master_id, admin)) return false
