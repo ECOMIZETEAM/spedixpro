@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   {
     const { sembraRipesature, sembraRipesatureSP, leggiRipesature } = await import('@/lib/ripesature')
     if (sembraRipesature(righe || [])) {
-      const { calcolaRipesature, qualcunoSottoDeve } = await import('@/lib/ripesature-calcolo')
+      const { calcolaRipesature, qualcunoSottoDeve, volumiDelLivello } = await import('@/lib/ripesature-calcolo')
       const lette = leggiRipesature(righe || [])
       if (!lette.righe.length) return NextResponse.json({ error: 'Il file non contiene ripesature leggibili' }, { status: 400 })
 
@@ -296,13 +296,13 @@ export async function POST(req: NextRequest) {
           soloATuoCarico++
           // Quanto aveva gia' pagato chi carica: dal suo listino (costoDetentore) o, nei file con
           // l'importo, dal suo livello nella catena.
-          const pagatoMio = e.costoDetentore?.pagato ?? (e.livelli || []).find((l: any) => l.masterId === myMaster)?.pagato ?? 0
+          const livMio = (e.livelli || []).find((l: any) => l.masterId === myMaster)
+          const pagatoMio = e.costoDetentore?.pagato ?? livMio?.pagato ?? 0
           daScrivere.push({
             master_id: myMaster, file_id: creaturaFile,
             spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
             cliente_id: null, target_master_id: myMaster,
-            peso_iniziale: e.pesoRealePrima, peso_volume_iniziale: e.pesoVolumePrima,
-            peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
+            peso_iniziale: e.pesoRealePrima, peso_reale: e.pesoDopo, ...volumiDelLivello(e, livMio),
             costo_iniziale: pagatoMio, costo_finale: Math.round((pagatoMio + costo) * 100) / 100,
             differenza: 0, fuori_sagoma: 0,
             supplementi_nomi: ((rip as any)?.supplementiNomi || []).join(' + ') || null,
@@ -396,10 +396,10 @@ export async function POST(req: NextRequest) {
             // "iniziale" = collo DICHIARATO: reale nella colonna Peso, volumetrico in Peso/Volume
             // (prima: peso_iniziale=fatturato e peso_volume_iniziale=0, cioè peso che mostrava il
             //  volume e peso/volume vuoto). Il costo resta calcolato sul fatturato, qui è solo display.
-            peso_iniziale: e.pesoRealePrima, peso_volume_iniziale: e.pesoVolumePrima,
             // Il volume vero (quello che fa salire il costo): prima era 0 anche sul primo livello,
             // così la sua Rettifica Costi mostrava "0,00" mentre il livello sotto vedeva il volume.
-            peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
+            // Col divisore del figlio, che e' chi paga questa riga (vedi volumiDelLivello).
+            peso_iniziale: e.pesoRealePrima, peso_reale: e.pesoDopo, ...volumiDelLivello(e, liv),
             // A zero il costo resta quello pagato: col listino del figlio potrebbe uscire anche piu' basso,
             // e mostrarlo sembrerebbe un rimborso che non c'e'.
             costo_iniziale: liv.pagato, costo_finale: (isPenaleBrt || aZero) ? liv.pagato : liv.dovuto,

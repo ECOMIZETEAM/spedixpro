@@ -376,7 +376,10 @@ export async function POST(req: NextRequest) {
       if (!sp || !dopoColli.length) continue
       const lc = r.cliente_id ? listinoDelCliente.get(r.cliente_id) : undefined
       const delCliente = lc ? await fattoreDelCliente(lc, sp.corriere_id) : null
-      const f = delCliente?.f || await fattoreDi(sp)
+      // Il divisore scritto sulla riga e' quello con cui il motore ha prezzato CHI PAGA: sulle righe dei
+      // master e' l'unico giusto (il contratto del master in fondo puo' avere un altro fattore). Le righe
+      // nate prima del 04/11/2026 non ce l'hanno: cliente col suo listino, master col contratto in fondo.
+      const f = Number(r.fattore_volume) > 0 ? Number(r.fattore_volume) : (delCliente?.f || await fattoreDi(sp))
       const dett = Array.isArray(sp.colli_dettaglio) && sp.colli_dettaglio.length
         ? sp.colli_dettaglio
         : (colliDalFornitore.get(r.spedizione_id) || [])
@@ -677,8 +680,13 @@ export async function POST(req: NextRequest) {
     // peso_fatturato = il MAGGIORE fra reale e volumetrico ripesato (non il solo peso reale): è quello
     // che è stato davvero fatturato col ricalcolo. Prima ci scriveva peso_reale e, quando vinceva il
     // volume, la spedizione restava con un peso fatturato più basso del costo che le era stato messo.
+    // E' il peso del CLIENTE, col divisore del suo listino, lo stesso della descrizione: il volume della
+    // riga poteva essere quello del contratto, e 282343J028496 e' rimasta a 25,2 kg (a 6000) con i 16,20
+    // della fascia 50, pagata su 30,23 kg (a 5000). Senza le misure si resta al peso della riga.
+    const fatturatoCliente = pesiDi.get(r.id)?.dopo || 0
     await supabase.from('spedizioni').update({
-      costo_totale: r.costo_finale, peso_fatturato: pesoFatt(r),
+      costo_totale: r.costo_finale,
+      peso_fatturato: fatturatoCliente > 0 ? Math.round(fatturatoCliente * 100) / 100 : pesoFatt(r),
     }).eq('id', r.spedizione_id)
   }
 

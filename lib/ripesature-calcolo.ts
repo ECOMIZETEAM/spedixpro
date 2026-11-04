@@ -37,6 +37,26 @@ export type LivelloRettifica = {
   ruolo?: 'albero' | 'codice' | 'owner'
   fornitore?: string | null
   ledgerClienteId?: string | null
+  // I CHILI DI VOLUME DI CHI PAGA, col divisore del SUO listino: quelli con cui e' stato prezzato questo
+  // livello, ripesato e dichiarato. Sulla stessa spedizione non sono gli stessi per tutti: 282343J028496
+  // (SDA EXPRESS L, 64,5x62,5x37,5) fa 25,2 kg al contratto a 6000 e 30,23 kg al cliente di Ecomize a
+  // 5000, che ha pagato la fascia 50 — ma la sua riga mostrava 19,2 → 25,2, il dichiarato a 5000 dalla
+  // scheda accanto al ripesato a 6000 del contratto, e la scheda e' rimasta a 25,2 kg con 16,20 €.
+  // undefined = non noto (nessun listino, o dichiarato non riprezzato): si ripiega sull'esito.
+  // Il divisore viaggia con la riga perche' la Conferma scriva i chili di chi paga anche sulle righe dei
+  // master: in fondo a una catena SDA EXPRESS L QUICK paga a 5000, MULTI e Wave sopra di lei a 6000.
+  pesoVolumeDopo?: number | null
+  pesoVolumePrima?: number | null
+  fattoreVolume?: number | null
+}
+
+// I volumi e il divisore da scrivere sulla riga di rettifica di CHI PAGA (il livello `liv`).
+export function volumiDelLivello(esito: EsitoRipesatura, liv: LivelloRettifica | null | undefined) {
+  return {
+    peso_volume_iniziale: liv?.pesoVolumePrima ?? esito.pesoVolumePrima,
+    peso_volume_reale: liv?.pesoVolumeDopo ?? (esito.pesoVolumeDopo || 0),
+    fattore_volume: liv?.fattoreVolume ?? null,
+  }
 }
 
 export type EsitoRipesatura = {
@@ -292,6 +312,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         const { data: cl } = await admin.from('clienti')
           .select('ragione_sociale,listino_cliente_id').eq('id', s.cliente_id).maybeSingle()
         let dovuto: number | null = null
+        let volumeCliente: number | null = null
+        let fattoreCliente: number | null = null
         if (cl?.listino_cliente_id) {
           const ris = await calcolaPrezzoListino(admin, {
             listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest, zonaForzata,
@@ -300,6 +322,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
             zone.push(ris.zona)
             // Per il CLIENTE il volume lo dice il SUO listino (fattore suo): e' quello esatto.
             if (Number(ris.peso_volume) > 0) pesoVolumeDopo = arrotonda(Number(ris.peso_volume))
+            volumeCliente = arrotonda(Number(ris.peso_volume) || 0)
+            fattoreCliente = Number(ris.fattore_volume) || null
             // LE DUE CIFRE DEVONO ESSERE FATTE CON LA STESSA RICETTA.
             // `pagato` viene dai movimenti, e alla creazione il cliente e' addebitato di
             // nolo + fee contrassegno + fee assicurazione. Riprezzando il solo nolo si sottraeva una
@@ -341,6 +365,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           chi: cl?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null,
           pagato: arrotonda(pagatoCliente), dovuto,
           differenza: dovuto == null ? null : arrotonda(dovuto - pagatoCliente),
+          pesoVolumeDopo: volumeCliente, fattoreVolume: fattoreCliente,
         })
       }
 
@@ -375,6 +400,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           livelli.push({
             chi: liv.nome, clienteId: null, masterId: liv.masterId,
             pagato, dovuto, differenza: arrotonda(dovuto - pagato),
+            pesoVolumeDopo: liv.pesoVolume != null ? arrotonda(Number(liv.pesoVolume) || 0) : null,
+            fattoreVolume: Number(liv.fattoreVolume) || null,
           })
         }
       }
@@ -400,9 +427,13 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       if (s.cliente_id) {
         const { data: cl } = await admin.from('clienti').select('ragione_sociale,listino_cliente_id').eq('id', s.cliente_id).maybeSingle()
         let dovuto: number | null = null
+        let volumeCliente: number | null = null
+        let fattoreCliente: number | null = null
         if ((cl as any)?.listino_cliente_id) {
           const ris = await calcolaPrezzoListino(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest })
           if (ris) {
+            volumeCliente = arrotonda(Number(ris.peso_volume) || 0)
+            fattoreCliente = Number(ris.fattore_volume) || null
             const sup = await calcolaSupplementiCliente(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
             if (sup.disponibile) {
               const acc = Array.isArray(s.servizi_accessori) ? s.servizi_accessori.reduce((a: number, x: any) => a + (Number(x?.importo) || 0), 0) : 0
@@ -411,10 +442,12 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           } else catenaCompleta = false
         }
         const pag = arrotonda(pagatoPerCliente.get(s.cliente_id) || 0)
-        livelli.push({ chi: (cl as any)?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag) })
+        livelli.push({ chi: (cl as any)?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag), pesoVolumeDopo: volumeCliente, fattoreVolume: fattoreCliente })
       }
       for (const liv of catena) {
         let dovuto: number | null = null
+        let volume: number | null = null
+        let fattore: number | null = null
         let pag = 0
         if (liv.ruolo === 'codice' && liv.ledgerClienteId && liv.fornitore) {
           // Livello-CODICE: prezzato col listino del cliente-ledger contro il corriere del VENDITORE;
@@ -426,6 +459,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           if ((lc as any)?.listino_cliente_id && corrVend) {
             const ris = await calcolaPrezzoListino(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, packages: pk, ...dest })
             if (ris) {
+              volume = arrotonda(Number(ris.peso_volume) || 0)
+              fattore = Number(ris.fattore_volume) || null
               const sup = await calcolaSupplementiCliente(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
               dovuto = sup.disponibile ? arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione) : arrotonda(ris.prezzo)
             } else catenaCompleta = false
@@ -434,13 +469,16 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           // ALBERO / OWNER: dal listino del livello per il suo corriere (reale per l'owner).
           pag = arrotonda(pagatoMaster.get(liv.master) || 0)
           const d = await calcolaPrezzoCorriereDettaglio(admin, { corriereId: liv.corriereId, masterId: liv.master, provincia: dest.provincia, cap: dest.cap, citta: dest.citta, paese: dest.paese, pesoReale: pesoRip, packages: pk, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), mittCap: dest.mittCap, mittProvincia: dest.mittProvincia, mittPaese: dest.mittPaese })
-          if (d && (d as any).totale != null && isFinite((d as any).totale)) dovuto = arrotonda((d as any).totale)
-          else catenaCompleta = false
+          if (d && (d as any).totale != null && isFinite((d as any).totale)) {
+            dovuto = arrotonda((d as any).totale)
+            volume = arrotonda(Number((d as any).peso_volume) || 0)
+            fattore = Number((d as any).fattore_volume) || null
+          } else catenaCompleta = false
         }
         // masterId = il master del livello (così l'upload/propagazione lo trova per figlio); per i codice
         // il DENARO va sul ledger ma la rettifica è indirizzata al master, e la conferma risolve il ledger.
         livelli.push({ chi: String(nomeM.get(liv.master) || liv.master), clienteId: null, masterId: liv.master, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag),
-          ruolo: liv.ruolo, fornitore: liv.fornitore, ledgerClienteId: liv.ledgerClienteId })
+          ruolo: liv.ruolo, fornitore: liv.fornitore, ledgerClienteId: liv.ledgerClienteId, pesoVolumeDopo: volume, fattoreVolume: fattore })
       }
       // Il detentore e' l'ultimo della fila: il suo livello e' gia' prezzato sul suo contratto reale.
       const top = livelli.find(l => l.masterId === catena[catena.length - 1]?.master)
@@ -487,12 +525,16 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
       if (resDich) {
         const chiave = (l: LivelloRettifica) => `${l.clienteId || ''}|${l.masterId || ''}|${l.ledgerClienteId || ''}`
         const dovutoDich = new Map(resDich.livelli.filter(l => l.dovuto != null).map(l => [chiave(l), l.dovuto as number]))
+        // Il volume del dichiarato, livello per livello col suo divisore: il giro sul dichiarato lo ha gia'.
+        const volumeDich = new Map(resDich.livelli.filter(l => l.pesoVolumeDopo != null).map(l => [chiave(l), l.pesoVolumeDopo as number]))
+        const conDichiarato = (l: LivelloRettifica): LivelloRettifica =>
+          volumeDich.has(chiave(l)) ? { ...l, pesoVolumePrima: volumeDich.get(chiave(l)) } : l
         // Il detentore col contratto proprio non ha un listino qui: il suo dovuto e' pagato + addebito del
         // fornitore, uguale nei due giri, e il salto verrebbe zero.
         const detentori = new Set(res.detentori)
         res = {
           ...res,
-          livelli: res.livelli.map(l => (l.masterId && detentori.has(l.masterId)) ? l : soloIlSalto(l, dovutoDich.get(chiave(l)))),
+          livelli: res.livelli.map(l => conDichiarato((l.masterId && detentori.has(l.masterId)) ? l : soloIlSalto(l, dovutoDich.get(chiave(l))))),
           costoDetentore: res.costoDetentore ? soloIlSalto(res.costoDetentore, resDich.costoDetentore?.dovuto) : res.costoDetentore,
         }
       }

@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, assorbite: righe.length, inAttesaSopra: attesaLdv.length })
   }
 
-  const { calcolaRipesature, qualcunoSottoDeve } = await import('@/lib/ripesature-calcolo')
+  const { calcolaRipesature, qualcunoSottoDeve, volumiDelLivello } = await import('@/lib/ripesature-calcolo')
   let create = 0, aZero = 0
   const saltate: { ldv: string; perche: string }[] = []
   // SCARTO PULITO ≠ problema. Quando il collo ripesato cade nello STESSO scaglione/blocco del
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
         // un collo da 5,34 kg usciva come «non copre 5 kg» su un listino che la fascia 0–5 ce l'ha
         // eccome — sembrava un guasto nostro, ed era solo il collo che la supera di tre etti
         // (visto il 12/09/2026 su BRILLITALIA, Epos Caffè, FEDEL FARMA).
-        const pesoFatt = Math.max(Number(esito.pesoDopo) || 0, Number(esito.pesoVolumeDopo) || 0)
+        const pesoFatt = Math.max(Number(esito.pesoDopo) || 0, Number(volumiDelLivello(esito, liv).peso_volume_reale) || 0)
         const quanto = pesoFatt ? pesoFatt.toFixed(1).replace('.', ',') + ' kg' : 'questo peso'
         saltate.push({ ldv: r.numero_spedizione, perche: `il listino di ${liv.chi || 'questo cliente'} si ferma prima di ${quanto}: il collo ripesato lo supera (o la sua zona non è prevista) → alza l'ultima fascia sul suo listino e ripremi Accetta, passerà.` })
         continue
@@ -216,8 +216,9 @@ export async function POST(req: NextRequest) {
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
       cliente_id: figlio ? null : liv.clienteId,
       target_master_id: figlio,
-      peso_iniziale: esito.pesoRealePrima, peso_volume_iniziale: esito.pesoVolumePrima,   // dichiarato: reale + volumetrico
-      peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo,   // il volume, cosi' si vede perche' il costo sale
+      // dichiarato e ripesato: reale + volumetrico, il volume col divisore del figlio (e' lui che paga),
+      // cosi' si vede perche' il costo sale
+      peso_iniziale: esito.pesoRealePrima, peso_reale: esito.pesoDopo, ...volumiDelLivello(esito, liv),
       // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0. A zero per
       // passaggio: resta quello pagato, un dovuto piu' basso sembrerebbe un rimborso che non c'e'.
       costo_iniziale: liv.pagato, costo_finale: (soloPassaggio || penale) ? liv.pagato : (liv.dovuto ?? liv.pagato),

@@ -377,6 +377,7 @@ export type RisultatoPrezzo = {
   peso_fatturato: number
   corriere_id: string | null
   fascia_peso_max: number | null
+  fattore_volume?: number   // il divisore con cui si e' fatto peso_volume (lo legge la rettifica)
 } | null
 
 // Dettaglio prezzo scorporato (per i report): nolo + sponda + fee contrassegno/assicurazione.
@@ -400,6 +401,7 @@ export type DettaglioCorriere = {
   peso_reale: number       // somma pesi reali dei colli
   peso_volume: number      // somma volumetrici dei colli col fattore del corriere
   peso_fatturato: number   // peso EFFETTIVO su cui è tassato (reale se agevolazione, altrimenti volumetrico)
+  fattore_volume?: number  // quel fattore (lo legge la rettifica)
   contrassegnoOltreMax?: boolean   // COD richiesto oltre il max (o senza tariffa) -> corriere da escludere
   assicurazioneOltreMax?: boolean  // assicurazione richiesta oltre il max -> corriere da escludere
   // QUALE ZONA HA VINTO. Serve a confrontare la zona che risolve il COSTO di un master con quella
@@ -653,6 +655,7 @@ export async function calcolaPrezzoListino(
     peso_fatturato: Math.round(pesoFatturato * 100) / 100,
     corriere_id: miglior.corriereId,
     fascia_peso_max: miglior.pesoMax,
+    fattore_volume: fattore,
   }
 }
 
@@ -899,6 +902,7 @@ export async function calcolaPrezzoCorriereDettaglio(
     peso_reale: r2(pesoReale),
     peso_volume: r2(pesoVolume),
     peso_fatturato: r2(pesoFatturato),
+    fattore_volume: fattore,
     contrassegnoOltreMax,
     assicurazioneOltreMax,
     // La zona che ha vinto davvero: quella delle fasce scelte, non quella dedotta dalla provincia.

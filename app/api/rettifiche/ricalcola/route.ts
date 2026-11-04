@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!sp) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   if (sp.stato === 'annullata') return NextResponse.json({ error: 'Spedizione annullata: non si rettifica' }, { status: 400 })
 
-  const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
+  const { calcolaRipesature, volumiDelLivello } = await import('@/lib/ripesature-calcolo')
   // I colli ripesati salvati sulla riga; se mancano, un collo unico col peso reale (niente volume).
   const colli = Array.isArray(r.colli_ripesati) && r.colli_ripesati.length
     ? r.colli_ripesati.map((c: any) => ({
@@ -74,6 +74,9 @@ export async function POST(req: NextRequest) {
     costo_iniziale: costoIniziale,
     costo_finale: costoFinale,
     differenza: -diffRett,
+    // I chili con cui si e' appena riprezzato, col divisore di chi paga questa riga: un listino puo'
+    // essere cambiato anche nel fattore.
+    ...volumiDelLivello(e, liv),
     // costo_fornitore e fuori_sagoma restano com'erano: la fattura del corriere non cambia col listino.
   }).eq('id', r.id).eq('confermata', false)
   if (errUpd) return NextResponse.json({ error: 'Salvataggio non riuscito: ' + errUpd.message }, { status: 500 })

@@ -1,4 +1,4 @@
-import type { EsitoRipesatura } from '@/lib/ripesature-calcolo'
+import { volumiDelLivello, type EsitoRipesatura } from '@/lib/ripesature-calcolo'
 
 // CREA UNA RETTIFICA da una ripesatura gia' calcolata, per il master indicato: chi apre la rettifica
 // verso il suo figlio diretto (il detentore del contratto; per SDA EXPRESS L Wave, dal 24/10/2026).
@@ -95,8 +95,8 @@ export async function creaRettificaDaEsito(
     spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
     cliente_id: figlio ? null : liv.clienteId,
     target_master_id: figlio,
-    peso_iniziale: esito.pesoRealePrima, peso_volume_iniziale: esito.pesoVolumePrima,
-    peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo || 0,
+    // il volume col divisore del figlio, che e' chi paga (vedi volumiDelLivello)
+    peso_iniziale: esito.pesoRealePrima, peso_reale: esito.pesoDopo, ...volumiDelLivello(esito, liv),
     costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
     differenza: -liv.differenza,          // colonna "quanto restituisco": un addebito e' negativo
     stato: 'da_rettificare',
