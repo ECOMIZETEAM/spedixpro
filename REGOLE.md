@@ -31,6 +31,7 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | Una giacenza aperta va addebitata, sempre | trigger `trg_giacenza_da_addebitare` → coda `giacenze_da_addebitare` |
 | Pacco consegnato o reso: la giacenza si chiude e le richieste in sospeso si annullano | trigger `trg_chiudi_giacenza_terminale` (non tocca `svincolata` né le richieste confermate) |
 | Un reso va addebitato, anche se arriva dal corriere | trigger `trg_reso_da_addebitare` → coda `resi_da_addebitare` |
+| Una spedizione annullata va rimborsata, da qualunque strada diventi 'annullata' | trigger `trg_annullo_da_rimborsare` → coda `annulli_da_rimborsare`, svuotata da `addebiti-code` con `rimborsaAnnulloSpedizione` mezz'ora dopo, e solo se non c'è nessun rimborso (la porta che ha annullato l'ha già fatto). Nato il 4/11/2026: il dettaglio del tracking e `/api/v1/tracking` scrivevano 'annullata' dal fornitore senza rimborsare (5 spedizioni, 143,85 €). Script: `scripts/annullo-da-rimborsare.sql` |
 | A quale conto appartiene un movimento | trigger `trg_conto_movimento` → `fn_conto_di` |
 | I soldi finiscono sul conto giusto | `registra_movimento_master` chiama `fn_conto_di` |
 | Cancellare un contratto porta via la sua configurazione | vincoli `on delete cascade` (zone, fasce, supplementi, listini) |
@@ -50,8 +51,8 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | Un cliente nasce **senza** pagare le API | default `clienti.api_esente = true` |
 | Se le API sono ferme, e perché | `fn_stato_api_cliente` — unica fonte, usata sia dal blocco sia dai pannelli |
 
-**Le due code funzionano così**: il database registra il *fatto* (c'è da addebitare), il lavoro
-pianificato calcola il *prezzo* e addebita. La regola sta nel database, la tariffa nell'applicazione
+**Le code funzionano così**: il database registra il *fatto* (c'è da addebitare, o da rimborsare), il
+lavoro pianificato calcola il *prezzo* e addebita. La regola sta nel database, la tariffa nell'applicazione
 — che è dove vive il motore dei listini. Se un addebito fallisce la riga resta in coda e si riprova,
 contando i tentativi: dopo cinque smette e resta a vista, invece di sparire.
 

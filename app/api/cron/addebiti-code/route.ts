@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-// CODE DEGLI ADDEBITI: aperture giacenza e resi.
+// CODE DEGLI ADDEBITI: aperture giacenza e resi, piu' i rimborsi delle spedizioni annullate.
 //
 // Stavano in fondo al cron del tracking, che ha 300 secondi e se li prende quasi tutti: gli addebiti
 // vivevano degli avanzi. Misurato il 18/09/2026, dopo l'apertura in blocco di 110 giacenze: il giro
@@ -103,7 +103,68 @@ export async function GET(req: NextRequest) {
     }
   } catch (e: any) { console.error('[RESO][ADDEBITO] coda non svuotata:', e?.message) }
 
+  // ── ANNULLI DA RIMBORSARE ──
+  // La coda la riempie il database (trg_annullo_da_rimborsare) appena una spedizione passa ad
+  // 'annullata', da qualunque strada. Il dettaglio del tracking e l'API /v1/tracking la scrivevano
+  // quando il fornitore la dava annullata, senza rimborsare: 5 spedizioni da giugno, 143,85 EUR
+  // (050228152996379 del 4/11/2026: 22,70 al cliente, e la catena addebitata).
+  // Si rimborsa SOLO chi non ha nessun rimborso. Le altre porte rimborsano da sole subito dopo lo stato,
+  // e ripassarle di qui farebbe danni: sulle gambe LOGIXIA del 3-5/10 il rimborso e' stato fatto a un
+  // importo diverso e poi corretto, e l'abbinamento per importo, non trovando la coppia, rimborserebbe
+  // una seconda volta. Si aspetta mezz'ora perche' la porta che ha appena annullato finisca di scrivere.
+  let annulliRimborsati = 0
+  try {
+    const soglia = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    const { data: coda } = await admin.from('annulli_da_rimborsare')
+      .select('spedizione_id, tentativi, avviato_il, spedizioni(id,numero,dest_nome,stato)')
+      .lt('tentativi', 5).lte('creato_il', soglia).limit(100)
+    if (coda?.length) {
+      const { rimborsaAnnulloSpedizione } = await import('@/lib/annullaSpedizione')
+      for (const riga of coda) {
+        if (oltre(285)) break
+        const spId = (riga as any).spedizione_id
+        const sp: any = (riga as any).spedizioni
+        const togli = () => admin.from('annulli_da_rimborsare').delete().eq('spedizione_id', spId)
+        // Ripristinata, o riportata al suo stato vero perche' partita: niente da rimborsare.
+        if (!sp || sp.stato !== 'annullata') { await togli(); continue }
+        try {
+          const { data: mv, error: errMv } = await admin.from('movimenti')
+            .select('tipo,importo,cliente_id,master_target_id').eq('spedizione_id', spId)
+          if (errMv) throw new Error(errMv.message)
+          // Gli stessi addebiti che rimborsaAnnulloSpedizione sa stornare (le altre righe le salta).
+          const addebiti = (mv || []).filter((m: any) => (m.tipo === 'spedizione' || m.tipo === 'rettifica')
+            && Math.abs(Number(m.importo || 0)) > 0.0001 && (m.cliente_id || m.master_target_id)).length
+          const rimborsi = (mv || []).filter((m: any) => m.tipo === 'rimborso').length
+          // Rimborsi gia' presenti e nessun nostro tentativo: li ha scritti la porta che ha annullato.
+          if (!addebiti || (rimborsi > 0 && !(riga as any).avviato_il)) { await togli(); continue }
+          // Senza il segno scritto, un tentativo a meta' sembrerebbe al giro dopo il lavoro della porta.
+          const { error: errAvvio } = await admin.from('annulli_da_rimborsare')
+            .update({ avviato_il: new Date().toISOString() }).eq('spedizione_id', spId)
+          if (errAvvio) throw new Error(errAvvio.message)
+          await rimborsaAnnulloSpedizione(admin, sp, null)
+          // rimborsaAnnulloSpedizione INGOIA gli errori dei singoli movimenti: il successo si conta.
+          const { count } = await admin.from('movimenti').select('id', { count: 'exact', head: true })
+            .eq('spedizione_id', spId).eq('tipo', 'rimborso')
+          if ((count || 0) >= addebiti) {
+            await togli()
+            annulliRimborsati++
+            console.warn('[ANNULLO][RIMBORSO DA CODA] annullata senza rimborso, rimborsata:', sp.numero)
+          } else {
+            await admin.from('annulli_da_rimborsare')
+              .update({ tentativi: ((riga as any).tentativi || 0) + 1, ultimo_errore: `rimborso incompleto: ${count || 0} rimborsi su ${addebiti} addebiti` })
+              .eq('spedizione_id', spId)
+          }
+        } catch (e: any) {
+          console.error('[ANNULLO][RIMBORSO DA CODA] non riuscito', sp.numero, e?.message)
+          await admin.from('annulli_da_rimborsare')
+            .update({ tentativi: ((riga as any).tentativi || 0) + 1, ultimo_errore: String(e?.message || e).slice(0, 300) })
+            .eq('spedizione_id', spId)
+        }
+      }
+    }
+  } catch (e: any) { console.error('[ANNULLO][RIMBORSO DA CODA] coda non svuotata:', e?.message) }
+
   const durataSec = Math.round((Date.now() - avvioMs) / 1000)
-  console.log(`[ADDEBITI][CODE] giacenze=${giacenzeAddebitate} resi=${resiAddebitati} durata=${durataSec}s`)
-  return NextResponse.json({ ok: true, giacenzeAddebitate, resiAddebitati, durataSec })
+  console.log(`[ADDEBITI][CODE] giacenze=${giacenzeAddebitate} resi=${resiAddebitati} annulli=${annulliRimborsati} durata=${durataSec}s`)
+  return NextResponse.json({ ok: true, giacenzeAddebitate, resiAddebitati, annulliRimborsati, durataSec })
 }

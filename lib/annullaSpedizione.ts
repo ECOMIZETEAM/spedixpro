@@ -1,5 +1,5 @@
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
-import { spediamoproCancelShipment } from '@/lib/spediamopro'
+import { spediamoproCancelShipment, spediamoproGetTracking } from '@/lib/spediamopro'
 
 // Il corriere considera la spedizione GIÀ eliminata/inesistente → possiamo cancellarla anche da Moove.
 export function giaEliminataSulCorriere(text: string, status?: number): boolean {
@@ -40,6 +40,15 @@ export async function annullaSpedizioneSulCorriere(
     if (spid && cred.authcode) {
       const r = await spediamoproCancelShipment(cred.authcode, Number(spid))
       if (!r.ok && !giaEliminataSulCorriere(r.error || '')) {
+        // GIA' ANNULLATA DAL FORNITORE: il rifiuto ha la stessa frase di un pacco partito ("Shipment
+        // status is not valid for cancellation"), quindi decide lo stato. Caso vero 050228152996379
+        // (4/11/2026): annullata sul pannello del fornitore alle 9:25, il nostro annullo delle 9:30
+        // respinto con quella frase, e la spedizione rimessa "in lavorazione" col cliente addebitato.
+        // Status 0 = annullata, la stessa lettura del giro del tracking (mapStatoSpediamopro).
+        try {
+          const tr = await spediamoproGetTracking(cred.authcode, Number(spid))
+          if (tr.status === 0) return { ok: true }
+        } catch {}
         return { ok: false, reason: (r.error || '').slice(0, 160) }
       }
     }
