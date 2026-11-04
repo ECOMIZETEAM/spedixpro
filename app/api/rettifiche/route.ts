@@ -6,7 +6,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { fetchAll } from '@/lib/fetch-all'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
-import { pacchiConCostoGia } from '@/lib/ripesature-crea'
+import { pacchiConCostoGia, stimeDaSostituire } from '@/lib/ripesature-crea'
 
 // Confermare cento rettifiche vuol dire cento chiamate di credito in fila. Col limite di durata
 // breve la funzione veniva uccisa a meta' — ed e' proprio meta' lavoro fatto il caso peggiore.
@@ -488,6 +488,7 @@ export async function POST(req: NextRequest) {
   let mosse = 0
   let costiMiei = 0   // costo di chi conferma (detentore / chi ha caricato il file del fornitore)
   let costiGiaPresenti = 0   // costi calcolati non registrati perche' su quel pacco il costo del fornitore c'era gia'
+  let stimeStornate = 0      // stime del portale stornate perche' e' arrivata la fattura del fornitore sullo stesso pacco
   // LA CHIAVE ANTI-DOPPIONE, TENENDO CONTO DEGLI STORNI. Se la chiave non c'e' si usa; se c'e' ed e'
   // stata STORNATA (movimento STORNO-<chiave>, es. il file LOGIXIA 12-16/10 annullato il 22/10) si passa
   // alla successiva (-2, -3…), perche' quell'addebito non esiste piu'; se c'e' e NON e' stornata torna
@@ -569,9 +570,11 @@ export async function POST(req: NextRequest) {
       && (await pacchiConCostoGia(adminDb, utente!.master_id, [r.spedizione_id], { escludiRiga: r.id, soloRigheFattura: true })).has(r.spedizione_id)) {
       costoMio = 0; costiGiaPresenti++
     }
+    let costoRegistrato = false   // il costo di questa riga ora c'e' sul conto: scritto qui, o la sua chiave c'era gia'
     if (costoMio > 0.005 && r.rif_fornitore && r.spedizione_id) {
       if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); return }
       const rifCosto = await chiaveLibera(`RIPFORN-${r.rif_fornitore}`)
+      costoRegistrato = !rifCosto
       if (rifCosto) {
         try {
           await registraMovimentoMaster(adminDb, {
@@ -580,13 +583,34 @@ export async function POST(req: NextRequest) {
             importo: -costoMio, riferimento: rifCosto, spedizioneId: r.spedizione_id, createdBy: user.id,
           })
           costiMiei += costoMio
+          costoRegistrato = true
         } catch (e: any) {
           // gia' registrato da un invio parallelo: il costo c'e', si prosegue col livello sotto
           if (!/23505|duplicate key|unique/i.test(String(e?.message || ''))) {
             console.error('[RETTIFICHE] costo di chi conferma non registrato', r.numero_spedizione, e?.message)
             await riapriRiga(r, 'il tuo costo non e\' stato registrato'); return
           }
+          costoRegistrato = true
         }
+      }
+    }
+    // LA STIMA CEDE ALLA FATTURA (l'ordine inverso della guardia qui sopra, vedi stimeDaSostituire). Confermata la riga col
+    // codice del fornitore, la stima che il portale aveva registrato sullo stesso pacco da un file di soli pesi si storna:
+    // sul pacco resta un costo solo, quello della fattura. Il supplemento arrivato dopo e' un addebito in piu', non lo
+    // stesso, e non tocca la stima dei chili.
+    if (costoRegistrato && r.rif_fornitore !== r.numero_spedizione && !eSupplementoTardivo(r)) {
+      try {
+        for (const s of await stimeDaSostituire(adminDb, utente!.master_id, r.spedizione_id, r.rif_fornitore)) {
+          await registraMovimentoMaster(adminDb, {
+            masterOwnerId: utente!.master_id, masterTargetId: utente!.master_id, tipo: 'rettifica',
+            descrizione: `Ripesatura ${r.numero_spedizione} - stima del portale sostituita dalla fattura del fornitore`,
+            importo: -s.importo, riferimento: `STORNO-${s.riferimento}`, spedizioneId: r.spedizione_id, createdBy: user.id,
+          })
+          stimeStornate++
+        }
+      } catch (e: any) {
+        // la riga resta confermata col costo vero: la stima in piu' si vede nei movimenti, si storna a mano
+        console.error('[RETTIFICHE] stima del portale non stornata', r.numero_spedizione, e?.message)
       }
     }
     // SOLO A TUO CARICO: niente da addebitare a nessuno sotto, la riga e' chiusa col suo costo.
@@ -718,7 +742,7 @@ export async function POST(req: NextRequest) {
     }).eq('id', r.spedizione_id)
   }
 
-  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, costiGiaPresenti, nonEseguite: saltate.length, dettaglio: saltate })
+  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, costiGiaPresenti, stimeStornate, nonEseguite: saltate.length, dettaglio: saltate })
 }
 
 export async function DELETE(req: NextRequest) {

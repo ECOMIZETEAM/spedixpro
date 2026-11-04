@@ -88,6 +88,35 @@ export async function pacchiConCostoGia(admin: any, masterId: string, spedizioni
   return con
 }
 
+// LA STIMA DEL PORTALE CEDE ALLA FATTURA. E' l'ordine inverso di pacchiConCostoGia: prima si conferma la riga di un file
+// di soli pesi (costo calcolato dal portale, chiave RIPFORN-<LDV>), poi quella col codice del fornitore sullo stesso pacco.
+// Il 04/11/2026 alle 21:03 MULTI ha confermato verso sotto le righe "SPEDIAMOPRO TUTTE 0411 PARTE 3" (incassi giusti) e il
+// portale ha registrato 117 stime, mentre le righe del file sovrapprezzi del 30/10 sugli stessi pacchi erano ancora in
+// attesa: confermandole il costo sarebbe entrato due volte (1UW07WF391215: stima 0,95 + fattura 1,98, e il fornitore ha
+// addebitato 1,98 una volta sola). Torna le stime ancora vive del pacco, da stornare quando la fattura e' registrata
+// (lo sa chi chiama: l'ha appena scritta, o la sua chiave c'era gia'): decide l'importo del fornitore, non il portale.
+export async function stimeDaSostituire(admin: any, masterId: string, spedizioneId: string, rifFattura: string):
+  Promise<{ riferimento: string; importo: number }[]> {
+  const { data: sp, error: es } = await admin.from('spedizioni').select('numero,tracking_number').eq('id', spedizioneId).maybeSingle()
+  if (es) throw new Error('stime del portale: ' + es.message)
+  const basi = [sp?.numero, sp?.tracking_number].filter(Boolean).map((x: string) => `RIPFORN-${x}`)
+  // un riferimento uguale alla LDV non e' una fattura: e' la stima stessa
+  if (!basi.length || basi.includes(`RIPFORN-${rifFattura}`)) return []
+  const { data: mm, error: em } = await admin.from('movimenti').select('riferimento,importo')
+    .eq('spedizione_id', spedizioneId).eq('tipo', 'rettifica').eq('master_target_id', masterId).is('cliente_id', null).like('riferimento', '%RIPFORN-%')
+  if (em) throw new Error('stime del portale: ' + em.message)
+  const vive = new Map<string, number>()
+  const stornate = new Set<string>()
+  for (const m of (mm || []) as any[]) {
+    const k = String(m.riferimento)
+    if (k.startsWith('STORNO-')) stornate.add(k.slice(7)); else vive.set(k, Number(m.importo))
+  }
+  for (const k of stornate) vive.delete(k)
+  // stessa chiave o le sue successive -2…-9 (vedi chiaveLibera nella Conferma)
+  const diBase = (k: string, b: string) => k === b || (k.startsWith(b + '-') && /^\d$/.test(k.slice(b.length + 1)))
+  return [...vive].filter(([k]) => basi.some(b => diBase(k, b))).map(([riferimento, importo]) => ({ riferimento, importo }))
+}
+
 export async function creaRettificaDaEsito(
   admin: any, masterId: string, esito: EsitoRipesatura
 ): Promise<EsitoCrea> {
