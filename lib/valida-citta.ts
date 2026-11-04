@@ -27,18 +27,48 @@ const PER_CAP = new Map<string, { norm: Set<string>; nomi: Set<string> }>()
 // CAP -> comuni (SOLO comuni, non frazioni): per la normalizzazione automatica all'import serve
 // sapere se quel CAP appartiene a UN SOLO comune (allora una scrittura diversa è quello, senza dubbio).
 const COMUNI_PER_CAP = new Map<string, Set<string>>()
-function aggiungi(cap: string, nome: string) {
+// "CAP|nome normalizzato" -> "Nome (SIGLA)": per dire a chi spedisce DOVE sta l'indirizzo che ha scritto.
+const LOCALITA_ITALIANA = new Map<string, string>()
+function aggiungi(cap: string, nome: string, sigla: string) {
   if (!cap || !nome) return
   let e = PER_CAP.get(cap)
   if (!e) { e = { norm: new Set(), nomi: new Set() }; PER_CAP.set(cap, e) }
   e.norm.add(normCitta(nome)); e.nomi.add(nome)
+  const k = `${cap}|${normCitta(nome)}`
+  if (!LOCALITA_ITALIANA.has(k)) LOCALITA_ITALIANA.set(k, sigla ? `${nome} (${sigla})` : nome)
 }
 for (const c of comuni as Comune[]) for (const cap of (c.cap || [])) {
-  aggiungi(cap, c.nome)
+  aggiungi(cap, c.nome, c.sigla)
   let s = COMUNI_PER_CAP.get(cap); if (!s) { s = new Set(); COMUNI_PER_CAP.set(cap, s) }
   s.add(c.nome)
 }
-for (const f of frazioni as Loc[]) aggiungi(f.cap, f.nome)
+for (const f of frazioni as Loc[]) aggiungi(f.cap, f.nome, f.sigla)
+
+// UN INDIRIZZO ITALIANO NON PARTE COL PAESE DI UN ALTRO. Il paese decide contratto, prezzo e strada
+// del pacco, e nessuno lo confrontava con l'indirizzo. Caso vero NI665485843 (24/10/2026): "Via
+// Astronauti 16, 51034 Serravalle Pistoiese" col paese su Romania → GLS Europa, 15,20 € invece di 5,
+// e GLS l'ha portato in Austria verso la Romania.
+// Ferma solo quando citta' E CAP insieme sono un comune o una frazione italiana: il CAP da solo non
+// basta (le cinque cifre sono di mezza Europa). Sulle 4.291 spedizioni estere dal 15/09 al 4/11/2026
+// fermava 3 indirizzi, tutti sbagliati: questo, una prova poi annullata, e 050195152947284 — Saint-Marcel
+// 11020 (AO) col paese Francia: il destinatario stava davvero in Francia ma il CAP era quello
+// italiano, e il corriere francese l'ha dato "indirizzo inesistente", consegna 9 giorni dopo.
+// Contare le cifre del CAP per paese NON si fa: sugli stessi dati fermava pacchi consegnati, scritti
+// senza lo zero davanti (Bucarest "50471" per 050471, Dresda "1097", Almeria "4006").
+// San Marino e Vaticano hanno CAP del sistema italiano: per loro non vale.
+// Ritorna "Nome (SIGLA)" della localita' italiana, oppure null.
+export function localitaItalianaFuoriPaese(
+  cap: string | null | undefined,
+  citta: string | null | undefined,
+  paese: string | null | undefined,
+): string | null {
+  const p = (paese || 'IT').toUpperCase().trim()
+  if (p === 'IT' || p === 'SM' || p === 'VA') return null
+  const c = (cap || '').trim()
+  const town = (citta || '').trim()
+  if (!/^\d{5}$/.test(c) || !town) return null
+  return LOCALITA_ITALIANA.get(`${c}|${normCitta(town)}`) || null
+}
 
 export function capNotoInArchivio(cap: string): boolean {
   return PER_CAP.has((cap || '').trim())

@@ -23,8 +23,21 @@
  * INCOMPLETO (misurato il 13/10/2026: 1.223 CAP su 1.868; vedi REGOLE.md). Vale identico per
  * creazione e anteprima — la funzione e' una — ma su un CAP rimasto fuori dall'elenco la citta'
  * non viene ne' corretta ne' bloccata, e due istanze possono avere in memoria elenchi diversi. */
-import { validaCittaCap, normalizzaCittaUfficiale } from '@/lib/valida-citta'
+import { validaCittaCap, normalizzaCittaUfficiale, localitaItalianaFuoriPaese } from '@/lib/valida-citta'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
+import { PAESI_MONDO } from '@/lib/paesi-elenco'
+import { normalizzaPaese } from '@/lib/paesi'
+
+// Indirizzo italiano col paese di un altro (regola e caso vero in lib/valida-citta.ts). Esportata
+// perche' la usano anche chi non passa da cittaPerLaSpedizione: il preventivo del portale, cosi' il
+// prezzo per la Romania non compare nemmeno, e l'API pubblica, che ha la sua creazione.
+export function erroreIndirizzoItaliano(p: { cap: unknown; citta: unknown; paese?: unknown }): string | null {
+  const paese = normalizzaPaese(p.paese)
+  const loc = localitaItalianaFuoriPaese(String(p.cap ?? ''), String(p.citta ?? ''), paese)
+  if (!loc) return null
+  const nome = PAESI_MONDO.find(x => x.code === paese)?.nome || paese
+  return `${String(p.cap).trim()} ${loc} è in Italia, ma come paese è scelto ${nome}: se il pacco va in Italia scegli Italia come paese, altrimenti correggi città e CAP.`
+}
 
 export type EsitoCitta =
   // `normalizzata` = la citta' e' stata SOSTITUITA col nome ufficiale; altrimenti e' quella ricevuta,
@@ -41,6 +54,9 @@ export async function cittaPerLaSpedizione(p: {
   // Inserimento manuale: non si corregge mai, si chiede a chi scrive di sistemarla.
   daImport: boolean
 }): Promise<EsitoCitta> {
+  // Prima di tutto il paese: un indirizzo italiano non si prezza ne' si spedisce come estero.
+  const fuoriPaese = erroreIndirizzoItaliano(p)
+  if (fuoriPaese) return { ok: false, errore: fuoriPaese }
   const vc = validaCittaCap(p.cap, p.citta, p.paese)
   // Blocco MIRATO: solo se la citta' NON e' un nome noto per quel CAP (archivio comuni+frazioni) E
   // quel CAP ha davvero una zona speciale — cosi' una frazione valida o una citta' su CAP normale

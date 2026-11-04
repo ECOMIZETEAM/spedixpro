@@ -9,6 +9,7 @@ import { inviaWebhook } from '@/lib/webhooks'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { validaCittaCap } from '@/lib/valida-citta'
+import { erroreIndirizzoItaliano } from '@/lib/citta-spedizione'
 import { capHaZonaSpeciale } from '@/lib/cap-speciali'
 import { spedizioneDoppioneAttiva, messaggioDoppione } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
@@ -72,6 +73,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Provincia destinatario obbligatoria (shipTo.state)' }, { status: 400 })
   if (!body.shipTo?.postalCode) return NextResponse.json({ error: 'CAP destinatario obbligatorio (shipTo.postalCode)' }, { status: 400 })
   if (!body.shipFrom?.name || !body.shipFrom?.postalCode) return NextResponse.json({ error: 'Mittente incompleto (shipFrom)' }, { status: 400 })
+
+  // Indirizzo italiano col paese di un altro: stessa regola del portale (lib/valida-citta.ts).
+  {
+    const fuoriPaese = erroreIndirizzoItaliano({ cap: body.shipTo?.postalCode, citta: body.shipTo?.city, paese: body.shipTo?.country })
+    if (fuoriPaese) return NextResponse.json({ error: `${fuoriPaese} (shipTo.country)` }, { status: 400 })
+  }
 
   // Città ↔ CAP su zona speciale: un nome errato farebbe cadere la disagiata/isola su "Italia"
   // (venduto pianura, pagato disagiata). Stessa guardia del portale (vedi lib/valida-citta e

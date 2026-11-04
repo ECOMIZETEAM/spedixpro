@@ -9,6 +9,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // due porte, una regola sola.
 import { annotaPuntoPoste, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
 import { motivoGlsNonServe } from '@/lib/gls'
+import { erroreIndirizzoItaliano } from '@/lib/citta-spedizione'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -16,6 +17,11 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
   const body = await req.json()
+  // Indirizzo italiano col paese di un altro: nessun prezzo per l'estero, chi spedisce lo vede subito
+  // invece di scegliere un contratto Europa senza accorgersene (caso vero in lib/valida-citta.ts).
+  // La creazione lo ferma comunque: qui serve solo a non mostrarlo.
+  const fuoriPaese = erroreIndirizzoItaliano({ cap: body?.shipTo?.postalCode, citta: body?.shipTo?.city, paese: body?.shipTo?.country })
+  if (fuoriPaese) return NextResponse.json({ error: fuoriPaese }, { status: 400 })
   // CONTRATTI "A UN PUNTO" (PuntoPoste/Ufficio Postale/Fermopoint/Locker): richiedono di SCEGLIERE un
   // punto (o un deposito) che esiste solo nella creazione manuale. Vanno quindi ESCLUSI di default dalle
   // tariffe, così una porta che sceglie in automatico "il prezzo più basso" non li assegna mai per
