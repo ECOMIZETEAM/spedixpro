@@ -6,6 +6,7 @@ import BannerNovitaTiktok from '../components/BannerNovitaTiktok'
 import AvvisoApi from './AvvisoApi'
 import EsitoCollegamento from './EsitoCollegamento'
 import { DialogProvider } from '../components/DialogProvider'
+import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { pagaSoloEtichette, masterDeiNegoziShopify } from '@/lib/conti-shopify'
 import { recapitoEmail } from '@/lib/indirizzi-interni'
@@ -94,7 +95,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   return (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}
       completaDati={completaDati} versioneDati={versioneDati} contattoAiuto={contattoAiuto} soloEtichette={soloEtichette}>
-      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano />{!masterDemo && <BannerNovitaTiktok per="cliente" />}<EsitoCollegamento />{children}</DialogProvider>
+      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano /><AvvisoVerifica />{!masterDemo && <BannerNovitaTiktok per="cliente" />}<EsitoCollegamento />{children}</DialogProvider>
     </ClienteShell>
   )
 }

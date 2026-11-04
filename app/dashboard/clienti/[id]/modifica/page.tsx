@@ -21,6 +21,20 @@ export default function ModificaClientePage() {
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [resetPassword, setResetPassword] = useState(false)
+  // Azzeramento della verifica in due passaggi: due clic, perche' toglie una protezione all'account.
+  const [azzera, setAzzera] = useState<'pronto' | 'conferma' | 'invio'>('pronto')
+  const [azzeraMsg, setAzzeraMsg] = useState('')
+  async function azzeraVerifica() {
+    setAzzera('invio'); setAzzeraMsg('')
+    try {
+      const r = await fetch(`/api/clienti/${id}/azzera-verifica`, { method: 'POST' })
+      const d = await r.json().catch(() => ({}))
+      setAzzeraMsg(r.ok
+        ? (d.tolti ? '✓ Verifica azzerata: al prossimo accesso il cliente la riattiva inquadrando un codice nuovo.' : 'Il cliente non aveva la verifica attiva: non c\'era niente da azzerare.')
+        : (d.error || 'Azzeramento non riuscito, riprova'))
+    } catch { setAzzeraMsg('Azzeramento non riuscito, riprova') }
+    setAzzera('pronto')
+  }
   const [form, setForm] = useState<any>({})
   // L'impronta dei dati del negozio che questo modulo ha davanti. La GET la da' solo ai conti nati da
   // Shopify, che intanto possono completare la schermata del primo accesso: torna al PUT col salvataggio,
@@ -214,6 +228,28 @@ export default function ModificaClientePage() {
                   Cambierai l&apos;email di accesso: il cliente dovrà usare <b>{form.email}</b> per entrare.
                 </div>
               )}
+            </div>
+          </div>
+
+          <div style={sec}>
+            <div style={sech}>Verifica in due passaggi</div>
+            <div style={{padding:'16px',display:'flex',flexDirection:'column',gap:'10px'}}>
+              <div style={{fontSize:'12.5px',color:'#555',lineHeight:1.5}}>
+                Se il cliente ha cambiato o perso il telefono e non riesce più a entrare, azzera la verifica: al prossimo accesso la riattiva inquadrando un codice nuovo.
+              </div>
+              <div style={{display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+                {azzera === 'conferma' ? (
+                  <>
+                    <button type="button" onClick={azzeraVerifica} style={{background:'#dc2626',color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'13px',fontWeight:600,cursor:'pointer'}}>Sì, azzera</button>
+                    <button type="button" onClick={()=>setAzzera('pronto')} style={{background:'#fff',color:'#555',border:'1px solid #ddd',borderRadius:'6px',padding:'7px 14px',fontSize:'13px',cursor:'pointer'}}>Annulla</button>
+                  </>
+                ) : (
+                  <button type="button" disabled={azzera==='invio'} onClick={()=>{setAzzeraMsg('');setAzzera('conferma')}} style={{background:'#fff',color:'#1a1a1a',border:'1px solid #ddd',borderRadius:'6px',padding:'7px 14px',fontSize:'13px',fontWeight:600,cursor:'pointer',opacity:azzera==='invio'?0.6:1}}>
+                    {azzera==='invio' ? 'Azzero…' : 'Azzera la verifica'}
+                  </button>
+                )}
+              </div>
+              {azzeraMsg && <div style={{fontSize:'12.5px',color:azzeraMsg.startsWith('✓')?'#16a34a':'#555'}}>{azzeraMsg}</div>}
             </div>
           </div>
 

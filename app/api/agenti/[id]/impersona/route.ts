@@ -75,5 +75,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { registraAudit } = await import('@/lib/audit')
   await registraAudit({ utenteId: user.id, azione: 'impersona_agente', risorsa: id })
+  // Chi entra al posto dell'agente non ha il suo codice: sessione registrata come "entra come".
+  const { registraEntraCome } = await import('@/lib/verifica-due-passaggi')
+  await registraEntraCome(admin, sessionData.session.access_token, user.id)
   return okRedirect
 }

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { MESSAGGIO_FERMATO, accessoFermato, azzeraAccessiFalliti, segnaAccessoFallito } from '@/lib/verifica-due-passaggi'
 
 // ACCESSO portale cliente.
 // Come per l'area master: i cookie della sessione vanno scritti SULLA RESPONSE che torniamo,
@@ -25,16 +27,25 @@ export async function POST(req: NextRequest) {
     }
   )
 
+  const admin = createAdminSupabase()
+  if (await accessoFermato(admin, email)) {
+    console.warn('[LOGIN][CLIENTE][FERMATO]', { email, motivo: 'troppi tentativi' })
+    return NextResponse.json({ error: MESSAGGIO_FERMATO }, { status: 429 })
+  }
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
     console.warn('[LOGIN][CLIENTE][FALLITO]', { email, motivo: error.message })
+    await segnaAccessoFallito(admin, email)
     return NextResponse.json({ error: 'Email o password non corretti' }, { status: 401 })
   }
-  const { data: utente } = await supabase.from('utenti').select('ruolo,cliente_id,attivo').eq('id', data.user.id).single()
+  await azzeraAccessiFalliti(admin, email)
+  // Con la chiave di servizio, come nell'accesso master: con la sola password, chi ha attivato la
+  // verifica in due passaggi non legge niente dal database finche' non mette il codice.
+  const { data: utente } = await admin.from('utenti').select('ruolo,cliente_id,attivo').eq('id', data.user.id).single()
   // "Account Attivo" della scheda cliente non veniva letto da nessuna parte: un cliente messo
   // su OFF dal master (moroso, cessato) entrava lo stesso e continuava a spedire a credito.
   const { data: cliente } = utente?.cliente_id
-    ? await supabase.from('clienti').select('attivo').eq('id', utente.cliente_id).maybeSingle()
+    ? await admin.from('clienti').select('attivo').eq('id', utente.cliente_id).maybeSingle()
     : { data: null }
   if (utente?.attivo === false || cliente?.attivo === false) {
     console.warn('[LOGIN][CLIENTE][BLOCCATO]', { email, motivo: 'account disattivato' })

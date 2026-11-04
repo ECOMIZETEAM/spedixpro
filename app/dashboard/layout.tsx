@@ -11,6 +11,7 @@ import BannerDemo from '../components/BannerDemo'
 import { DialogProvider } from '../components/DialogProvider'
 import { contabilitaAttiva } from '@/lib/contabilita-banca'
 import { eTitolareOAdmin } from '@/lib/ruoli'
+import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
 // SENZA utente -> sidebar assente al primo accesso (il portale cliente aveva gia' lo stesso
@@ -80,6 +81,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
         {/* L'annuncio TikTok Shop (prima quello Shopify) e' per chi gestisce il portale e i clienti: non per agenti
             e autisti, ne' per le prove demo, i cui clienti un negozio non lo possono collegare. */}
         {!demo && ['master', 'admin', 'operatore'].includes(String(utente?.ruolo || '').toLowerCase()) && <BannerNovitaTiktok per="master" />}
+        <AvvisoVerifica />
         {children}
       </DialogProvider>
     </DashboardLayout>
