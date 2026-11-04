@@ -28,7 +28,7 @@
  * la catena, telefono richiesto dal corriere, risposta del corriere). In quel caso non si addebita
  * niente e l'ordine riporta il motivo. */
 import { calcolaTariffeCliente } from '@/lib/tariffe-motore'
-import { cittaPerLaSpedizione } from '@/lib/citta-spedizione'
+import { cittaPerLaSpedizione, erroreIndirizzoItaliano } from '@/lib/citta-spedizione'
 import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 import { annotaPuntoPoste, contrattiConFasceATaglia, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
 import { internoEsclusivoViola } from '@/lib/interno-esclusivo'
@@ -101,14 +101,16 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
     return senza('Spedizione estera con più colli: aprila con la matita e indica il peso di ogni collo.')
   }
 
-  // 1) LA CITTA': la stessa decisione della creazione, PRIMA di qualunque prezzo.
-  const cd = await cittaPerLaSpedizione({ cap: riga.cap, citta: riga.citta, paese: riga.paese, daImport: true })
-  if (!cd.ok) return senza(cd.errore)
+  // 1) IL PAESE: un indirizzo italiano col paese di un altro non si prezza con nessun contratto.
+  const fuoriPaese = erroreIndirizzoItaliano({ cap: riga.cap, citta: riga.citta, paese: riga.paese })
+  if (fuoriPaese) return senza(fuoriPaese)
+  // LA CITTA' si decide piu' sotto, CONTRATTO PER CONTRATTO, come fa la creazione: se un nome storto
+  // cambia il prezzo dipende dalle zone del contratto con cui si spedisce (lib/citta-spedizione.ts).
 
-  const shipTo = { state: riga.provincia, postalCode: riga.cap, city: cd.citta, country: riga.paese }
+  const shipTo = { state: riga.provincia, postalCode: riga.cap, city: riga.citta, country: riga.paese }
   const shipFrom = { postalCode: ctx.mittente.cap, state: ctx.mittente.provincia }
 
-  // 2) QUALI CONTRATTI: i cancelli del motore, con la citta' gia' corretta.
+  // 2) QUALI CONTRATTI: i cancelli del motore.
   const esito = await calcolaTariffeCliente(
     ctx.dbUtente,
     { cliente: ctx.cliente, clienteId: ctx.clienteId, subMatch: null, admin: ctx.dbAdmin },
@@ -147,10 +149,19 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
 
   // 3) QUANTO: per ogni contratto offribile, il calcolo dell'addebito.
   const tariffe: TariffaAnteprima[] = []
+  // Se nessun contratto resta, e almeno uno e' caduto per la citta', e' quello il motivo da dire:
+  // "nessun corriere" non direbbe a chi importa che basta correggere il nome.
+  let erroreCitta: string | null = null
   for (const r of offerte) {
     const corriereId: string | undefined = r._corriere_id
     if (!corriereId) continue
     const nome = String(r.corriere_nome || 'Corriere')
+    // La citta' con cui la creazione prezzerebbe QUESTO contratto (corretta, se dall'import si puo').
+    const cd = await cittaPerLaSpedizione({
+      admin: ctx.dbAdmin, corriereId,
+      cap: riga.cap, citta: riga.citta, paese: riga.paese, daImport: true,
+    })
+    if (!cd.ok) { erroreCitta = cd.errore; continue }
     // Stessi rifiuti della creazione, per cio' che si puo' sapere prima:
     if (senzaMulticollo.has(String(corriereId))) continue                     // piu' colli su un contratto che non li prevede
     if (/international/i.test(nome) && !riga.haContenuto) continue           // serve la descrizione della merce
@@ -172,7 +183,7 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
     if (!pz.ok || !pz.supplementiDisponibili || !(pz.prezzo > 0)) continue
     tariffe.push({ corriere_id: corriereId, nome, prezzo: pz.prezzo })
   }
-  if (!tariffe.length) return senza(NESSUN_CORRIERE)
+  if (!tariffe.length) return senza(erroreCitta || NESSUN_CORRIERE)
 
   // Dal piu' economico SUL PREZZO DELL'ADDEBITO (l'ordine del motore e' fatto sul suo totale, che
   // puo' differire). L'ordinamento e' stabile: a parita' resta l'ordine del motore.

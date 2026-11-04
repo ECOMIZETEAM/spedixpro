@@ -80,11 +80,11 @@ Vivono nel codice, ma in **un punto solo** che tutti chiamano. Modificarle lì v
 | Quali tariffe si possono offrire a un cliente: contratto in catena, contratti "a un punto", locker a taglia | `lib/tariffe-offerte.ts` → `soloCorrieriInCatena`, `annotaPuntoPoste` + `eTariffaAUnPunto`, `contrattiConFasceATaglia` |
 | "Prezzo minore" o "contratto scelto" nelle porte di massa del cliente (import da file, ordini dei negozi) | `app/cliente/anteprima-prezzi.ts` → `scegliTariffa` (la stessa per mostrare e per spedire) |
 | Il prezzo mostrato PRIMA di spedire nelle porte di massa | `lib/anteprima-prezzi.ts` → `prezziPerRighe`: elenco dei contratti dal motore del preventivo, cifra dalla funzione dell'addebito |
+| Con quale città si prezza (città storta su un CAP dove il contratto nomina comuni: si ferma, dall'import si corregge se il CAP è di un solo comune) | `lib/citta-spedizione.ts` → `cittaPerLaSpedizione`, chiamata dalla creazione del portale, dall'API pubblica e dall'anteprima, sul contratto con cui si spedisce e su quelli a monte |
 | Cosa puo' fare un contratto GLS diretto: il nazionale solo l'Italia; il Parcel (`settings.tipo_spedizione = 'P'`, "GLS Europa") solo i paesi UE, fuori dai territori extra-doganali (Canarie, oltremare…) e senza contrassegno | `lib/gls.ts` → `motivoGlsNonServe`, chiamata dai due preventivi (cliente e spedizione propria del master) e dalla creazione, prima del credito. Servizi accessori e telefono del Parcel si controllano solo in creazione (si scelgono dopo il prezzo). L'API pubblica non crea GLS diretto per niente |
 
-Due funzioni nate il 13 ottobre **non** stanno in questa tabella, perché hanno ancora un doppione
-(vedi sotto, «Ancora scritte in più posti»): `lib/citta-spedizione.ts` → `cittaPerLaSpedizione` e
-`lib/prezzo-cliente.ts` → `prezzoClienteDaListino`.
+Una funzione nata il 13 ottobre **non** sta in questa tabella, perché ha ancora un doppione
+(vedi sotto, «Ancora scritte in più posti»): `lib/prezzo-cliente.ts` → `prezzoClienteDaListino`.
 
 ---
 
@@ -183,8 +183,8 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   **La cura vera esiste e ce l'abbiamo in casa**: `lib/data/comuni.json` (7.904 comuni con CAP e
   provincia) e `lib/data/frazioni.json` (9.878). Con quelli si distingue una frazione da un comune
   omonimo di CAP, invece di indovinare. Fatto per la creazione: `lib/valida-citta.ts` li usa, e
-  `lib/citta-spedizione.ts` decide — se la città non è un nome noto per un CAP con zona speciale, la
-  spedizione si ferma; per import e negozi, quando il CAP è di un solo comune, la città viene
+  `lib/citta-spedizione.ts` decide — se la città non è un nome noto per quel CAP e il contratto con
+  cui si spedisce (o uno a monte) ha su quel CAP righe che nominano comuni, la spedizione si ferma; per import e negozi, quando il CAP è di un solo comune, la città viene
   corretta da sola. Resta aperto il CAP condiviso fra più comuni con una città che non combacia con
   nessuno: lì ci si ferma, non si decide.
 - **Preventivo e addebito sono due calcoli diversi.** Il prezzo che il cliente PAGA lo decide la
@@ -208,13 +208,12 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   (città + listino) non prezza; gli altri rifiuti della creazione — credito lungo la catena,
   telefono richiesto dal corriere, risposta del corriere — la prova non li copre.
   **Restano sul totale del motore**: i due moduli "Nuova spedizione" e il sito pubblico.
-- **La città della spedizione e la somma del prezzo: l'API pubblica ha le sue copie.**
-  `cittaPerLaSpedizione` e `prezzoClienteDaListino` le chiamano la creazione del portale e
-  l'anteprima. `app/api/v1/shipments` ha ancora in linea sia il blocco città↔CAP (blocca sempre,
-  non normalizza mai; il suo messaggio nomina `shipTo.city`) sia la somma trasporto + contrassegno
-  + assicurazione; `app/api/v1/rates` la stessa somma. Oggi danno lo stesso numero (stesse due
-  funzioni di `lib/pricing.ts`, l'API non ha servizi accessori): chi cambia la formula o la regola
-  della città in un posto deve allineare l'altro.
+- **La somma del prezzo: l'API pubblica ha la sua copia.** `prezzoClienteDaListino` la chiamano
+  la creazione del portale e l'anteprima. `app/api/v1/shipments` ha ancora in linea la somma
+  trasporto + contrassegno + assicurazione; `app/api/v1/rates` la stessa somma. Oggi danno lo
+  stesso numero (stesse due funzioni di `lib/pricing.ts`, l'API non ha servizi accessori): chi
+  cambia la formula in un posto deve allineare l'altro. (La regola della città non è più doppia:
+  dal 4 novembre anche l'API chiama `cittaPerLaSpedizione`, e scrive solo il suo messaggio.)
 - **«È un locker» ha due definizioni.** Quella dichiarata (`corrieri.settings.consegna = 'locker'`)
   c'è solo sul contratto del detentore: sulle copie dei sotto-master è vuota (13 ottobre: vuota su
   17 dei 19 contratti di tipo InPost, tutte le copie; una, "InPost Locker", è nel listino di 264
@@ -224,15 +223,6 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   `app/api/cliente/corrieri`); il modulo della spedizione singola, la creazione
   (`contrattoLocker = settings.consegna === 'locker'`) e l'API pubblica leggono **solo** la prima:
   per loro una copia è una consegna a domicilio, senza scelta del locker.
-- **L'elenco dei CAP con zona speciale è caricato a metà.** `lib/cap-speciali.ts` decide se una
-  città scritta male va fermata o corretta. Legge zone e righe senza paginazione, e il database ne
-  restituisce al massimo mille per lettura: misurato il 13 ottobre, 1.000 zone lette su 2.701 e
-  **1.223 CAP caricati su 1.868** (645 fuori). Quali restano fuori dipende dall'ordine in cui
-  arrivano le righe, e l'elenco è tenuto in memoria per istanza: lo stesso CAP può essere
-  riconosciuto da un server e non da un altro. Su un CAP rimasto fuori, una città scritta male non
-  viene né corretta né fermata e la zona speciale può perdersi (è il guasto del primo punto di
-  questo elenco). Non toccato: allargare l'elenco ferma spedizioni che oggi passano, quindi va fatto
-  rieseguendo prima e dopo sulle spedizioni vere, comprese quelle che passano.
 - **Il messaggio dell'autista** dice "non è fra le tue consegne" senza sapere il perché: la ricerca
   è solo sulle consegne già caricate.
 - **`master_id` non è un permesso, ma viene usato come tale.** È l'appartenenza al tenant, e ce

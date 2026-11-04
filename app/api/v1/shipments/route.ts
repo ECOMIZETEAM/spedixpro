@@ -8,9 +8,7 @@ import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDis
 import { inviaWebhook } from '@/lib/webhooks'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
-import { validaCittaCap } from '@/lib/valida-citta'
-import { erroreIndirizzoItaliano } from '@/lib/citta-spedizione'
-import { capHaZonaSpeciale } from '@/lib/cap-speciali'
+import { erroreIndirizzoItaliano, cittaPerLaSpedizione } from '@/lib/citta-spedizione'
 import { spedizioneDoppioneAttiva, messaggioDoppione } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { ritiroInRisposta } from '@/lib/ritiro-api'
@@ -81,12 +79,18 @@ export async function POST(req: NextRequest) {
   }
 
   // Città ↔ CAP su zona speciale: un nome errato farebbe cadere la disagiata/isola su "Italia"
-  // (venduto pianura, pagato disagiata). Stessa guardia del portale (vedi lib/valida-citta e
-  // app/api/spedizioni/crea). Solo Italia + CAP con zona speciale; frazioni valide e CAP normali passano.
+  // (venduto pianura, pagato disagiata). La decisione è quella del portale (lib/citta-spedizione.ts),
+  // sulle zone del contratto della chiave: qui si scrive solo il messaggio, che nomina il campo
+  // shipTo.city perché chi integra sappia cosa correggere. Dall'API non si corregge mai da soli.
+  // Il paese è già controllato sopra, col messaggio che nomina shipTo.country.
   {
-    const vc = validaCittaCap(body.shipTo?.postalCode, body.shipTo?.city, body.shipTo?.country)
-    if (vc.validabile && !vc.ok && await capHaZonaSpeciale(body.shipTo?.postalCode)) {
-      const suggeriti = vc.noti.slice(0, 6).join(', ')
+    const cd = await cittaPerLaSpedizione({
+      admin, corriereId: ctx.corriereId,
+      cap: body.shipTo?.postalCode, citta: body.shipTo?.city, paese: body.shipTo?.country,
+      daImport: false,
+    })
+    if (!cd.ok) {
+      const suggeriti = cd.suggeriti.slice(0, 6).join(', ')
       return NextResponse.json({ error: `Città "${String(body.shipTo?.city).trim()}" non valida per il CAP ${String(body.shipTo?.postalCode).trim()} (shipTo.city): correggila${suggeriti ? ` (per questo CAP: ${suggeriti})` : ''}. Zona a tariffa speciale: un nome errato la prezzerebbe come destinazione normale.` }, { status: 400 })
     }
   }

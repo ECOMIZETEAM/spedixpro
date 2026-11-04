@@ -287,9 +287,10 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
   // città-condiviso scarta la riga speciale e la destinazione cade sul jolly "Italia": venduta a
   // prezzo pianura, pagata a prezzo disagiata (caso vero 3UW1UHA272704, −7,61 a MULTIEXPRESS).
   // Blocco MIRATO: solo se la città NON è un nome noto per quel CAP (archivio comuni+frazioni) E
-  // quel CAP ha davvero una zona speciale — così una frazione valida o una città su CAP normale
-  // (che comunque prezza Italia, senza perdita) NON viene fermata. Chi spedisce corregge o seleziona
-  // dall'elenco (l'autocomplete /api/comuni è già nel form). Solo Italia; l'estero non si valida.
+  // sulle zone del CONTRATTO SCELTO (e di quelli a monte) quel nome storto cambierebbe il prezzo —
+  // così una frazione valida o una città su CAP normale (che comunque prezza Italia, senza perdita)
+  // NON viene fermata. Chi spedisce corregge o seleziona dall'elenco (l'autocomplete /api/comuni è
+  // già nel form). Solo Italia; l'estero non si valida.
   //
   // LA DECISIONE STA IN lib/citta-spedizione.ts, non piu' qui: la prende anche l'anteprima dei
   // prezzi di import e ordini dei negozi. Finche' stava solo qui, il prezzo calcolato PRIMA di
@@ -301,6 +302,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
   //   singolo ordine, mostrato nella pagina ordini). Manuale: si blocca sempre (deve correggere/selezionare).
   {
     const cd = await cittaPerLaSpedizione({
+      admin: adminCrea, corriereId: corriereRecord.id,
       cap: body.shipTo?.postalCode, citta: body.shipTo?.city, paese: body.shipTo?.country,
       daImport: !!body._daImport,
     })
