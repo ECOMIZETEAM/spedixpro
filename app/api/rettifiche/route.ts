@@ -6,6 +6,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { fetchAll } from '@/lib/fetch-all'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
+import { pacchiConCostoGia } from '@/lib/ripesature-crea'
 
 // Confermare cento rettifiche vuol dire cento chiamate di credito in fila. Col limite di durata
 // breve la funzione veniva uccisa a meta' — ed e' proprio meta' lavoro fatto il caso peggiore.
@@ -486,6 +487,7 @@ export async function POST(req: NextRequest) {
   const { registraMovimentoMaster } = await import('@/lib/movimenti')
   let mosse = 0
   let costiMiei = 0   // costo di chi conferma (detentore / chi ha caricato il file del fornitore)
+  let costiGiaPresenti = 0   // costi calcolati non registrati perche' su quel pacco il costo del fornitore c'era gia'
   // LA CHIAVE ANTI-DOPPIONE, TENENDO CONTO DEGLI STORNI. Se la chiave non c'e' si usa; se c'e' ed e'
   // stata STORNATA (movimento STORNO-<chiave>, es. il file LOGIXIA 12-16/10 annullato il 22/10) si passa
   // alla successiva (-2, -3…), perche' quell'addebito non esiste piu'; se c'e' e NON e' stornata torna
@@ -556,8 +558,17 @@ export async function POST(req: NextRequest) {
     // della riga, vedi il caricamento) gli si registra QUI, prima di addebitare il livello sotto. Stesso
     // riferimento che il caricamento usava per la fattura del fornitore (RIPFORN-<riga del file>): un file
     // caricato prima di questa regola l'ha gia' pagato al caricamento, e qui non si ripaga.
-    const costoMio = Math.round(Number(r.costo_fornitore || 0) * 100) / 100
+    let costoMio = Math.round(Number(r.costo_fornitore || 0) * 100) / 100
     const soloMio = !!r.target_master_id && r.target_master_id === utente!.master_id
+    // UN COSTO CALCOLATO DAL PORTALE NON SI SCRIVE DUE VOLTE SULLO STESSO PACCO. Le righe dei file di soli pesi hanno
+    // la LDV come riferimento (quelle con l'importo del fornitore il suo codice): il loro costo e' un conto del portale,
+    // non una riga di fattura, e la chiave RIPFORN-<LDV> non riconosce lo stesso addebito entrato col codice 6A...
+    // Se sul pacco il costo del fornitore c'e' gia' (registrato, o portato da una riga di fattura viva) questa non ne
+    // aggiunge un secondo: la riga si chiude e, se va sotto, addebita sotto come sempre (vedi pacchiConCostoGia).
+    if (costoMio > 0.005 && r.spedizione_id && r.rif_fornitore && r.rif_fornitore === r.numero_spedizione
+      && (await pacchiConCostoGia(adminDb, utente!.master_id, [r.spedizione_id], { escludiRiga: r.id, soloRigheFattura: true })).has(r.spedizione_id)) {
+      costoMio = 0; costiGiaPresenti++
+    }
     if (costoMio > 0.005 && r.rif_fornitore && r.spedizione_id) {
       if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); return }
       const rifCosto = await chiaveLibera(`RIPFORN-${r.rif_fornitore}`)
@@ -707,7 +718,7 @@ export async function POST(req: NextRequest) {
     }).eq('id', r.spedizione_id)
   }
 
-  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, nonEseguite: saltate.length, dettaglio: saltate })
+  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, costiGiaPresenti, nonEseguite: saltate.length, dettaglio: saltate })
 }
 
 export async function DELETE(req: NextRequest) {

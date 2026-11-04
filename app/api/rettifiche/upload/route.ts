@@ -6,7 +6,7 @@ import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
 import { controllaColliXL } from '@/lib/ripesature-xl'
 import { colliDalPesoTotale } from '@/lib/ripesature-pesi'
-import { inserisciRettifica, fattureGiaPagate } from '@/lib/ripesature-crea'
+import { inserisciRettifica, fattureGiaPagate, pacchiConCostoGia } from '@/lib/ripesature-crea'
 import { nomeTardivo } from '@/lib/supplemento-tardivo'
 
 
@@ -226,6 +226,9 @@ export async function POST(req: NextRequest) {
         }
       }
       let giaRettificateCount = 0
+      // Pacchi su cui il costo del fornitore c'e' gia' (registrato a chi carica, o portato da una sua riga viva): un file
+      // di soli pesi non ne scrive un secondo (vedi pacchiConCostoGia e costoProprio qui sotto).
+      const costoGia = await pacchiConCostoGia(adminRip, myMaster, spedEsiti)
 
       // PENALE BRT EXPRESS: mappa spedizione → soglia peso-reale, SOLO per i contratti 'BRT Express' con
       // soglia attiva. Serve alla regola penale piu' sotto (un collo del servizio ≤5kg che sfora). Per
@@ -284,6 +287,9 @@ export async function POST(req: NextRequest) {
         const giaPagate = await fattureGiaPagate(adminRip, esiti.filter((e: any) => e.trovata && e.spedizioneId).map((e: any) => e.idOrdine))
         const costoProprio = (e: any): number => {
           if (Number(e.addebitoFornitore) > 0) return Math.round(Number(e.addebitoFornitore) * 100) / 100
+          // File di soli pesi: il costo e' un conto del portale. Se sul pacco quello del fornitore c'e' gia', niente
+          // secondo costo, e quindi niente riga "solo a carico" (la riga verso sotto, se c'e' da chiedere, nasce lo stesso).
+          if (costoGia.has(e.spedizioneId)) return 0
           const cat = e.catenaDalBasso || []
           const detentore = cat.length > 0 && cat[cat.length - 1] === myMaster
           const cd = e.costoDetentore

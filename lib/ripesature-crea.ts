@@ -57,6 +57,37 @@ export async function fattureGiaPagate(admin: any, rif: string[]): Promise<Set<s
   return pagate
 }
 
+// IL COSTO DEL FORNITORE SU QUEL PACCO C'E' GIA'? fattureGiaPagate riconosce una riga di fattura solo se torna con lo
+// STESSO riferimento (codice 6A..., numero di riga DVA). Un file di SOLI PESI porta gli stessi addebiti con la LDV come
+// riferimento e il costo lo calcola il portale: il 04/11/2026 i file "RETTIFICHE SPEDIAMOPRO/DVA TUTTE 0411" di MULTI
+// hanno creato 4.259 righe "solo a carico" su pacchi gia' pagati (4.788 € scritti due volte se confermate). Qui si guarda
+// il PACCO: un costo gia' registrato a chi carica (RIPFORN-, al netto degli storni) o una sua riga viva che lo porta.
+// soloRigheFattura: conta solo le righe con l'importo del fornitore (riferimento diverso dalla LDV); le righe di soli
+// pesi in attesa si escluderebbero a vicenda alla conferma, e nessuna registrerebbe il costo.
+export async function pacchiConCostoGia(admin: any, masterId: string, spedizioni: string[],
+  opz: { escludiRiga?: string; soloRigheFattura?: boolean } = {}): Promise<Set<string>> {
+  const con = new Set<string>()
+  const ids = Array.from(new Set(spedizioni.filter(Boolean)))
+  for (let i = 0; i < ids.length; i += 150) {
+    const fetta = ids.slice(i, i + 150)
+    const { data: mm, error: em } = await admin.from('movimenti').select('spedizione_id,riferimento')
+      .in('spedizione_id', fetta).eq('tipo', 'rettifica').eq('master_target_id', masterId).is('cliente_id', null).like('riferimento', '%RIPFORN-%')
+    if (em) throw new Error('costo gia registrato: ' + em.message)
+    const netto = new Map<string, number>()
+    for (const m of (mm || []) as any[]) netto.set(m.spedizione_id, (netto.get(m.spedizione_id) || 0) + (String(m.riferimento).startsWith('STORNO-') ? -1 : 1))
+    for (const [s, n] of netto) if (n > 0) con.add(s)
+    const { data: rr, error: er } = await admin.from('rettifiche').select('id,spedizione_id,numero_spedizione,rif_fornitore,propagazione')
+      .in('spedizione_id', fetta).eq('master_id', masterId).gt('costo_fornitore', 0)
+    if (er) throw new Error('costo gia portato da una riga: ' + er.message)
+    for (const r of (rr || []) as any[]) {
+      if (r.id === opz.escludiRiga || r.propagazione === 'annullata') continue
+      if (opz.soloRigheFattura && (!r.rif_fornitore || r.rif_fornitore === r.numero_spedizione)) continue
+      con.add(r.spedizione_id)
+    }
+  }
+  return con
+}
+
 export async function creaRettificaDaEsito(
   admin: any, masterId: string, esito: EsitoRipesatura
 ): Promise<EsitoCrea> {
