@@ -32,6 +32,8 @@ export default function RettificaCostiPage() {
   const [elimPerPage, setElimPerPage] = useState(10)
   const [elimPagina, setElimPagina] = useState(1)
   const [elimCarico, setElimCarico] = useState(false)
+  // Di serie le DAVVERO PERSE: le altre sono pacchi gia' fatti pagare sotto con un'altra rettifica (lib/rettifiche-perche).
+  const [elimFiltro, setElimFiltro] = useState<'perse' | 'recuperate' | ''>('perse')
   // GIA' CONFERMATE CHE POSTE SMENTISCE: le righe mie confermate prima che il controllo Poste fosse acceso, che la
   // misura di Poste smentisce (/api/rettifiche/smentite). Solo per chi ha il controllo; si leggono all'apertura.
   const [smen, setSmen] = useState<any>(null)
@@ -134,7 +136,9 @@ export default function RettificaCostiPage() {
     const { utils, writeFile } = await import('xlsx')
     const righe = elimFiltrate.map((r: any) => ({
       'LDV': r.ldv, 'Data': new Date(r.quando).toLocaleDateString('it-IT'), 'Da': r.da,
-      'Pagato da te (€)': r.importo, 'Perché non è stata recuperata': r.motivo,
+      'Pagato da te (€)': r.importo, 'Perché': r.motivo,
+      'Già fatta pagare a': r.recuperata?.a || '', 'Il': r.recuperata ? new Date(r.recuperata.il).toLocaleDateString('it-IT') : '',
+      'Incassato da lui (€)': r.recuperata ? Number(r.recuperata.euro) : '',
       ...(elimFiltrate.some((x: any) => x.poste) ? { 'Controllo Poste': r.poste ? `Poste la smentisce — ${r.poste}` : '' } : {}),
     }))
     const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Rettifiche eliminate')
@@ -581,6 +585,64 @@ export default function RettificaCostiPage() {
   const gruppiCtrl  = raggruppa(rettCtrl)
   const gruppiSoloMie = raggruppa(rettSoloMie)
   const costoSoloMie = Math.round(rettSoloMie.filter((r: any) => !r.costo_gia_pagato).reduce((t: number, r: any) => t + (Number(r.costo_fornitore) || 0), 0) * 100) / 100
+  // SOLO A TUO CARICO, DIVISE PER MOTIVO (lib/rettifiche-perche, lo calcola la rotta): stavano tutte in un mucchio e non
+  // si capiva perche'. Il pacco gia' fatto pagare sotto con un'altra rettifica (qui arriva solo il costo), l'importo del
+  // fornitore senza una voce che il portale conosca, il reso, lo stesso prezzo per chi sta sotto.
+  const tipoMio = (r: any) => r.perche_mio?.tipo || 'stesso_prezzo'
+  const r2 = (n: number) => Math.round(n * 100) / 100
+  const costoDi = (rr: any[]) => r2(rr.filter((r: any) => !r.costo_gia_pagato).reduce((t: number, r: any) => t + (Number(r.costo_fornitore) || 0), 0))
+  // Quanto manca sul PACCO: il costo di questa riga piu' quello che il fornitore aveva addebitato con la riga di prima,
+  // meno quello che hai incassato sotto. (2UW07WF021213: 2,82 € di fattura il 30/10 fatti pagare 4,19 € a Ecomize, poi una
+  // stima di 1,09 € il 04/11: non manca niente.)
+  // Come alla Conferma: la stima del portale cede alla fattura del fornitore (non si registra se la fattura c'era gia', si
+  // storna se la fattura arriva dopo), quindi sul pacco ne conta una sola.
+  const eStimaR = (r: any) => !!r.rif_fornitore && r.rif_fornitore === r.numero_spedizione
+  const costiPacco = (r: any) => {
+    const g = r.perche_mio?.gia
+    const questa = g && eStimaR(r) && !g.stima && Number(g.costo) > 0.005 ? 0 : Number(r.costo_fornitore || 0)
+    const prima = g && g.stima && !eStimaR(r) ? 0 : Number(g?.costo || 0)
+    return { questa, prima }
+  }
+  const mancaDi = (r: any) => { if (!r.perche_mio?.gia) return 0; const c = costiPacco(r); return r2(c.questa + c.prima - Number(r.perche_mio.gia.euro || 0)) }
+  const rettSoloGia = rettSoloMie.filter((r: any) => tipoMio(r) === 'gia_fatta_pagare')
+  const rettSoloSenzaVoce = rettSoloMie.filter((r: any) => tipoMio(r) === 'senza_voce')
+  const rettSoloStesso = rettSoloMie.filter((r: any) => tipoMio(r) === 'stesso_prezzo')
+  const rettSoloReso = rettSoloMie.filter((r: any) => tipoMio(r) === 'reso')
+  const soloGiaIncassato = r2(rettSoloGia.reduce((t: number, r: any) => t + Number(r.perche_mio?.gia?.euro || 0), 0))
+  const soloGiaSotto = rettSoloGia.filter((r: any) => mancaDi(r) > 0.005)
+  const soloGiaManca = r2(soloGiaSotto.reduce((t: number, r: any) => t + mancaDi(r), 0))
+  const raggruppaPer = (righe: any[], chiaveDi: (r: any) => string, etichetta: string) => {
+    const map = new Map<string, any>()
+    for (const r of righe) {
+      const k = chiaveDi(r)
+      if (!map.has(k)) map.set(k, { nome: k, tipo: 'proprio', etichetta, righe: [], totale: 0, costo: 0, incassato: 0 })
+      const g = map.get(k); g.righe.push(r)
+      if (!r.costo_gia_pagato) g.costo += Number(r.costo_fornitore || 0)
+      g.incassato += Number(r.perche_mio?.gia?.euro || 0)
+    }
+    return [...map.entries()].map(([k, g]) => [`solo|${etichetta}|${k}`, g]).sort((a: any, b: any) => b[1].righe.length - a[1].righe.length)
+  }
+  const gruppiSoloGia = raggruppaPer(rettSoloGia, (r: any) => r.perche_mio.gia.a, 'fatte pagare a lui')
+  const gruppiSoloSenzaVoce = raggruppaPer(rettSoloSenzaVoce, () => 'Importi del fornitore senza voce', 'il tuo costo')
+  const gruppiSoloStesso = raggruppaPer(rettSoloStesso, () => 'Stesso prezzo per chi sta sotto', 'il tuo costo')
+  const gruppiSoloReso = raggruppaPer(rettSoloReso, () => 'Resi', 'il tuo costo')
+  const giornoIt = (s: string) => new Date(s).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' })
+  const vaiA = (id: string) => { try { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } catch {} }
+
+  // IL FILE DA MANDARE AL FORNITORE: i pacchi gia' fatti pagare sotto su cui il fornitore chiede piu' di quanto hai
+  // incassato. Dentro solo quello che ha scritto lui (riferimento, pesi, importo): niente di quello che hai fatto pagare.
+  async function scaricaSoloDaContestare() {
+    if (!soloGiaSotto.length) return
+    const { utils, writeFile } = await import('xlsx')
+    const wb = utils.book_new()
+    utils.book_append_sheet(wb, utils.json_to_sheet(soloGiaSotto.map((r: any) => ({
+      'LDV': r.numero_spedizione, 'Riferimento del fornitore': r.rif_fornitore || '',
+      'Data addebito': giornoIt(r.created_at), 'Peso dichiarato (kg)': Number(r.peso_iniziale) || 0,
+      'Peso fatturato dal fornitore (kg)': Math.max(Number(r.peso_reale) || 0, Number(r.peso_volume_reale) || 0),
+      'Importo addebitato dal fornitore (€)': Number(r.costo_fornitore) || 0, 'File del fornitore': nomeFileDi(r.file_id),
+    }))), 'Da contestare')
+    writeFile(wb, `da-contestare-addebiti-fornitore-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
   const totaleCtrl  = Math.round(rettCtrl.reduce((s: number, r: any) => s + (Number(r.manca) || 0), 0) * 100) / 100
 
   // Un gruppo (intestazione + righe) → array di <tr>. Stessa resa per entrambe le sezioni.
@@ -607,7 +669,7 @@ export default function RettificaCostiPage() {
         <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{aperti[chiave]?'▾':'▸'}</span>
         {g.nome}
         <span style={{fontWeight:400,color:'#6b7280',marginLeft:'8px'}}>
-          {g.tipo==='master'?'sotto-master':g.tipo==='proprio'?'il tuo costo':'cliente diretto'} · {g.righe.length} {g.righe.length===1?'rettifica':'rettifiche'}
+          {g.etichetta || (g.tipo==='master'?'sotto-master':g.tipo==='proprio'?'il tuo costo':'cliente diretto')} · {g.righe.length} {g.righe.length===1?'rettifica':'rettifiche'}
         </span>
         {sel.length > 0 && (
           <span style={{marginLeft:'10px',fontWeight:700,color:'#ea580c',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'999px',padding:'2px 10px'}}>
@@ -615,7 +677,7 @@ export default function RettificaCostiPage() {
           </span>
         )}
         <span style={{float:'right',fontWeight:700,color:g.totale<0?'#dc2626':'#15803d'}}>
-          {g.tipo==='proprio' ? <span style={{color:'#475569'}}>tuo costo € {g.costo.toFixed(2)}</span> : <>€ {Math.abs(g.totale).toFixed(2)}{g.costo > 0.005 && <span style={{fontWeight:500,color:'#475569',marginLeft:'8px'}}>· tuo costo € {g.costo.toFixed(2)}</span>}</>}
+          {g.tipo==='proprio' ? <span style={{color:'#475569'}}>tuo costo € {g.costo.toFixed(2)}{g.incassato > 0.005 && <span style={{fontWeight:500,marginLeft:'8px'}}>· già incassato da lui € {g.incassato.toFixed(2)}</span>}</span> : <>€ {Math.abs(g.totale).toFixed(2)}{g.costo > 0.005 && <span style={{fontWeight:500,color:'#475569',marginLeft:'8px'}}>· tuo costo € {g.costo.toFixed(2)}</span>}</>}
         </span>
       </td>
     </tr>
@@ -670,6 +732,30 @@ export default function RettificaCostiPage() {
               Sbloccata a mano il {new Date(r.controllo.sbloccata_il).toLocaleDateString('it-IT')}: Poste diceva altro ({r.controllo.motivo})
             </div>
           )}
+          {r.perche_mio?.tipo === 'gia_fatta_pagare' && (() => {
+            const g = r.perche_mio.gia, c = costiPacco(r), m = mancaDi(r)
+            return (
+              <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#334155',whiteSpace:'normal',maxWidth:'380px',lineHeight:1.4}}>
+                ↩ {g.confermata ? `Già fatta pagare a ${g.a} il ${giornoIt(g.il)}: € ${Number(g.euro).toFixed(2)}` : `Già in elenco verso ${g.a} dal ${giornoIt(g.il)}: € ${Number(g.euro).toFixed(2)}, da confermare`}
+                {m > 0.005 && <div style={{color:'#b91c1c',fontWeight:700}}>
+                  {c.questa < 0.005 ? `Costo vero sul pacco € ${c.prima.toFixed(2)} (la fattura del ${giornoIt(g.il)}): mancano € ${m.toFixed(2)}`
+                    : c.prima > 0.005 ? `Il fornitore chiede in tutto € ${(c.questa + c.prima).toFixed(2)} sul pacco: mancano € ${m.toFixed(2)}`
+                    : `Il fornitore chiede € ${c.questa.toFixed(2)}: mancano € ${m.toFixed(2)}`}
+                </div>}
+              </div>
+            )
+          })()}
+          {r.perche_mio?.tipo === 'senza_voce' && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#7c2d12',whiteSpace:'normal',maxWidth:'380px'}}>
+              Il fornitore ha addebitato € {Number(r.costo_fornitore || 0).toFixed(2)} senza dire per cosa (né chili né un supplemento conosciuto): il portale non sa a chi girarlo
+            </div>
+          )}
+          {r.perche_mio?.tipo === 'reso' && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#475569'}}>Reso: il ritorno si paga col nolo del reso, non con la ripesatura</div>
+          )}
+          {r.perche_mio?.tipo === 'stesso_prezzo' && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#475569'}}>Per chi sta sotto il peso nuovo costa uguale: non c'è niente da chiedergli</div>
+          )}
           {r.nota_peso && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#1e40af',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'2px 6px',whiteSpace:'normal',maxWidth:'300px'}}>
               ⓘ {r.nota_peso}
@@ -718,7 +804,8 @@ export default function RettificaCostiPage() {
         {/* A TUO CARICO: quanto costa a chi ha il contratto (fattura del fornitore, o il suo listino di costo
             sul peso nuovo meno quanto aveva gia' pagato). Si registra alla Conferma, prima dell'addebito sotto. */}
         <td style={{padding:'8px 10px',color:'#475569',fontWeight:600}}>{Number(r.costo_fornitore) > 0.005
-          ? (r.costo_gia_pagato ? <span title="La fattura del fornitore per questa riga è già registrata sul tuo credito: alla conferma non si ripaga." style={{fontWeight:500,fontSize:'11px'}}>{Number(r.costo_fornitore).toFixed(2)} · già pagato</span> : Number(r.costo_fornitore).toFixed(2))
+          ? (r.stima_cede ? <span title="Stima del portale su un pacco che ha già la fattura del fornitore: alla conferma non si registra, vale la fattura." style={{fontWeight:500,fontSize:'11px',color:'#64748b'}}>{Number(r.costo_fornitore).toFixed(2)} · vale la fattura</span>
+            : r.costo_gia_pagato ? <span title="La fattura del fornitore per questa riga è già registrata sul tuo credito: alla conferma non si ripaga." style={{fontWeight:500,fontSize:'11px'}}>{Number(r.costo_fornitore).toFixed(2)} · già pagato</span> : Number(r.costo_fornitore).toFixed(2))
           : '—'}</td>
       </tr>
     )
@@ -727,9 +814,10 @@ export default function RettificaCostiPage() {
 
   // RETTIFICHE ELIMINATE: filtro "cerca" (LDV, da chi, motivo), totali sul filtrato, pagine.
   const elimQ = elimCerca.trim().toLowerCase()
-  const elimFiltrate: any[] = (elim?.righe || []).filter((r: any) => !elimQ
+  const elimFiltrate: any[] = (elim?.righe || []).filter((r: any) =>
+    (elimFiltro === 'perse' ? !r.recuperata : elimFiltro === 'recuperate' ? !!r.recuperata : true) && (!elimQ
     || String(r.ldv || '').toLowerCase().includes(elimQ) || String(r.da || '').toLowerCase().includes(elimQ)
-    || String(r.motivo || '').toLowerCase().includes(elimQ))
+    || String(r.motivo || '').toLowerCase().includes(elimQ) || String(r.recuperata?.a || '').toLowerCase().includes(elimQ)))
   const elimTotale = Math.round(elimFiltrate.reduce((t: number, r: any) => t + Number(r.importo || 0), 0) * 100) / 100
   const elimPerMotivo = Array.from(elimFiltrate.reduce((m: Map<string, { n: number; euro: number }>, r: any) => {
     const v = m.get(r.motivo) || { n: 0, euro: 0 }; v.n++; v.euro += Number(r.importo || 0); return m.set(r.motivo, v)
@@ -902,6 +990,38 @@ export default function RettificaCostiPage() {
             )}
           </div>
         )}
+        {/* IL QUADRO DELLE RIGHE IN ATTESA, A BLOCCHI (Lorenzo, 05/11/2026: «per capirlo ci vuole un po.. disorganizzato»):
+            per ogni blocco quante sono, quanto vale e cosa fare. Un clic porta al blocco nella tabella. */}
+        {!loading && rettVisibili.length > 0 && (() => {
+          const blocchi = [
+            { id: 'sez-buone', n: rettBuone.length, colore: '#15803d', sfondo: '#f0fdf4', titolo: 'Da girare sotto',
+              euro: `€ ${r2(rettBuone.reduce((t: number, r: any) => t + addebitoDi(r), 0)).toFixed(2)} da far pagare`, fare: 'Pronte: selezionale e premi Conferma.' },
+            { id: 'sez-ctrl', n: rettCtrl.length, colore: '#b45309', sfondo: '#fffbeb', titolo: 'Da controllare',
+              euro: totaleCtrl > 0.005 ? `recuperi meno del costo: mancano € ${totaleCtrl.toFixed(2)}` : '', fare: 'Sulla riga c\'è il motivo: listino, misure o penale.' },
+            { id: 'sez-ferme', n: ferme.length, colore: '#b91c1c', sfondo: '#fef2f2', titolo: 'Ferme: Poste le smentisce',
+              euro: `costo del fornitore € ${costoDi(ferme).toFixed(2)} · € ${euroFerme.toFixed(2)} da far pagare sotto`, fare: 'Da contestare al fornitore col file. Si possono caricare lo stesso.' },
+            { id: 'sez-solo-gia', n: rettSoloGia.length, colore: '#334155', sfondo: '#f8fafc', titolo: 'Tuo costo: già fatte pagare sotto',
+              euro: `costo € ${costoDi(rettSoloGia).toFixed(2)} · incassato € ${soloGiaIncassato.toFixed(2)}`,
+              fare: soloGiaSotto.length ? `Su ${soloGiaSotto.length} il fornitore chiede di più: mancano € ${soloGiaManca.toFixed(2)}, da contestare.` : 'Confermale per registrare il costo.' },
+            { id: 'sez-solo-senza', n: rettSoloSenzaVoce.length, colore: '#9a3412', sfondo: '#fff7ed', titolo: 'Tuo costo: importi senza voce',
+              euro: `€ ${costoDi(rettSoloSenzaVoce).toFixed(2)}`, fare: 'Il portale non sa a chi girarli: da decidere caso per caso.' },
+            { id: 'sez-solo-stesso', n: rettSoloStesso.length + rettSoloReso.length, colore: '#475569', sfondo: '#f8fafc', titolo: 'Tuo costo: niente da chiedere sotto',
+              euro: `€ ${costoDi([...rettSoloStesso, ...rettSoloReso]).toFixed(2)}`, fare: 'Stesso prezzo per chi sta sotto, o reso.' },
+          ].filter(b => b.n > 0)
+          return (
+            <div style={{padding:'12px 16px',borderBottom:'1px solid #e5e7eb',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))',gap:'10px'}}>
+              {blocchi.map(b => (
+                <button key={b.id} onClick={() => vaiA(b.id === 'sez-solo-stesso' && !rettSoloStesso.length ? 'sez-solo-reso' : b.id)}
+                  style={{textAlign:'left' as const,background:b.sfondo,border:'1px solid #e5e7eb',borderLeft:`4px solid ${b.colore}`,borderRadius:'8px',padding:'10px 12px',cursor:'pointer'}}>
+                  <div style={{fontSize:'11px',fontWeight:700,color:b.colore,textTransform:'uppercase' as const,letterSpacing:'0.3px'}}>{b.titolo}</div>
+                  <div style={{fontSize:'22px',fontWeight:800,color:'#1a1a1a',lineHeight:1.2,marginTop:'2px'}}>{b.n.toLocaleString('it-IT')}</div>
+                  {b.euro && <div style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a'}}>{b.euro}</div>}
+                  <div style={{fontSize:'11.5px',color:'#475569',marginTop:'3px',lineHeight:1.35}}>{b.fare}</div>
+                </button>
+              ))}
+            </div>
+          )
+        })()}
         <div style={{padding:'7px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'11px',color:'#8a8a8a',lineHeight:1.5}}>
           In grassetto <strong style={{color:'#1a1a1a'}}>il peso su cui si paga davvero</strong>: di norma il maggiore fra reale e volume, ma sul <strong style={{color:'#1a1a1a'}}>peso reale</strong> quando il collo sta nella scatola agevolata del contratto. In <strong style={{color:'#dc2626'}}>rosso</strong> il peso dopo la ripesatura. Se il collo misurato esce dalla scatola si passa al volume: lo trovi scritto sulla riga. La colonna <strong style={{color:'#1a1a1a'}}>Differenza</strong> è quanto recuperi.
         </div>
@@ -931,7 +1051,7 @@ export default function RettificaCostiPage() {
               <tbody>
                 {/* FERME DAL CONTROLLO ONETRACKING, in cima e divise per motivo: non si confermano, si contestano. */}
                 {gruppiFermeAgev.length > 0 && (
-                  <tr key="sez-ferme-agev" style={{background:'#fee2e2'}}>
+                  <tr key="sez-ferme-agev" id="sez-ferme" style={{background:'#fee2e2'}}>
                     <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#991b1b'}}>
                       ⛔ Ferme — agevolazione peso reale non applicata: per Poste il pacco stava nella scatola, il file fa pagare il volume <span style={{fontWeight:600}}>({rettFermeAgev.length})</span>
                       <span style={{float:'right'}}>€ {(Math.round(rettFermeAgev.reduce((t: number, r: any) => t + addebitoDi(r), 0) * 100) / 100).toFixed(2)} fermi</span>
@@ -940,7 +1060,7 @@ export default function RettificaCostiPage() {
                 )}
                 {gruppiFermeAgev.flatMap(renderGruppo)}
                 {gruppiFermePeso.length > 0 && (
-                  <tr key="sez-ferme-peso" style={{background:'#fee2e2'}}>
+                  <tr key="sez-ferme-peso" id={gruppiFermeAgev.length ? undefined : 'sez-ferme'} style={{background:'#fee2e2'}}>
                     <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#991b1b'}}>
                       ⛔ Ferme — peso diverso dalla misura di Poste: il file fa pagare più di quanto Poste ha misurato <span style={{fontWeight:600}}>({rettFermePeso.length})</span>
                       <span style={{float:'right'}}>€ {(Math.round(rettFermePeso.reduce((t: number, r: any) => t + addebitoDi(r), 0) * 100) / 100).toFixed(2)} fermi</span>
@@ -950,7 +1070,7 @@ export default function RettificaCostiPage() {
                 {gruppiFermePeso.flatMap(renderGruppo)}
                 {/* BUONE in alto (il da-girare copre il costo del corriere) — poi DA CONTROLLARE. */}
                 {gruppiBuone.length > 0 && (
-                  <tr key="sez-buone" style={{background:'#dcfce7'}}>
+                  <tr key="sez-buone" id="sez-buone" style={{background:'#dcfce7'}}>
                     <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#166534'}}>
                       ✅ Buone — il da-girare copre il costo del corriere, pronte da confermare <span style={{fontWeight:600}}>({rettBuone.length})</span>
                     </td>
@@ -958,7 +1078,7 @@ export default function RettificaCostiPage() {
                 )}
                 {gruppiBuone.flatMap(renderGruppo)}
                 {gruppiCtrl.length > 0 && (
-                  <tr key="sez-ctrl" style={{background:'#fef3c7'}}>
+                  <tr key="sez-ctrl" id="sez-ctrl" style={{background:'#fef3c7'}}>
                     <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#92400e'}}>
                       ⚠️ Da controllare — qui recuperi MENO del costo del corriere <span style={{fontWeight:600}}>({rettCtrl.length})</span>
                       {totaleCtrl > 0.01 && <span style={{float:'right'}}>mancano € {totaleCtrl.toFixed(2)}</span>}
@@ -967,14 +1087,58 @@ export default function RettificaCostiPage() {
                 )}
                 {gruppiCtrl.flatMap(renderGruppo)}
                 {gruppiSoloMie.length > 0 && (
-                  <tr key="sez-solo-mie" style={{background:'#f1f5f9'}}>
-                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#334155'}}>
-                      Solo a tuo carico — sotto non c'è niente da rettificare: confermandole registri il tuo costo <span style={{fontWeight:600}}>({rettSoloMie.length})</span>
+                  <tr key="sez-solo-mie" id="sez-solo" style={{background:'#e2e8f0'}}>
+                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#1e293b'}}>
+                      Solo a tuo carico — confermandole registri il tuo costo, a chi sta sotto non si chiede niente <span style={{fontWeight:600}}>({rettSoloMie.length})</span>
                       {costoSoloMie > 0.005 && <span style={{float:'right'}}>€ {costoSoloMie.toFixed(2)}</span>}
+                      <div style={{fontWeight:500,fontSize:'11.5px',color:'#475569',marginTop:'2px'}}>Divise per motivo, qui sotto.</div>
                     </td>
                   </tr>
                 )}
-                {gruppiSoloMie.flatMap(renderGruppo)}
+                {rettSoloGia.length > 0 && (
+                  <tr key="sez-solo-gia" id="sez-solo-gia">
+                    <td colSpan={11} style={{padding:'8px 12px 8px 26px',fontWeight:700,fontSize:'12px',color:'#334155',background:'#f8fafc',borderTop:'1px solid #e2e8f0'}}>
+                      ↩ Già fatte pagare sotto con un'altra rettifica: qui arriva solo il costo del fornitore <span style={{fontWeight:600}}>({rettSoloGia.length})</span>
+                      <span style={{float:'right'}}>costo € {costoDi(rettSoloGia).toFixed(2)} · già incassato € {soloGiaIncassato.toFixed(2)}</span>
+                      <div style={{fontWeight:500,fontSize:'11.5px',color:'#475569',marginTop:'2px'}}>Su ognuna c'è scritto quando e a chi l'hai già fatta pagare. Non è una perdita: sotto non si chiede due volte.</div>
+                      {soloGiaSotto.length > 0 && (
+                        <div style={{fontWeight:600,fontSize:'11.5px',color:'#b91c1c',marginTop:'4px'}}>
+                          Su {soloGiaSotto.length} il fornitore chiede più di quanto hai incassato: mancano € {soloGiaManca.toFixed(2)}. Sono da contestare.
+                          <button onClick={scaricaSoloDaContestare} style={{marginLeft:'10px',padding:'3px 10px',background:'#b91c1c',color:'#fff',border:'none',borderRadius:'5px',fontSize:'11px',fontWeight:700,cursor:'pointer'}}>⬇ File da mandare al fornitore</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                {gruppiSoloGia.flatMap(renderGruppo)}
+                {rettSoloSenzaVoce.length > 0 && (
+                  <tr key="sez-solo-senza" id="sez-solo-senza">
+                    <td colSpan={11} style={{padding:'8px 12px 8px 26px',fontWeight:700,fontSize:'12px',color:'#334155',background:'#f8fafc',borderTop:'1px solid #e2e8f0'}}>
+                      ? Importi del fornitore senza voce: né chili né un supplemento che il portale conosca <span style={{fontWeight:600}}>({rettSoloSenzaVoce.length})</span>
+                      <span style={{float:'right'}}>€ {costoDi(rettSoloSenzaVoce).toFixed(2)}</span>
+                      <div style={{fontWeight:500,fontSize:'11.5px',color:'#475569',marginTop:'2px'}}>Il portale non sa a chi girarli, quindi restano a te. Se vanno fatti pagare sotto, va deciso caso per caso.</div>
+                    </td>
+                  </tr>
+                )}
+                {gruppiSoloSenzaVoce.flatMap(renderGruppo)}
+                {rettSoloStesso.length > 0 && (
+                  <tr key="sez-solo-stesso" id="sez-solo-stesso">
+                    <td colSpan={11} style={{padding:'8px 12px 8px 26px',fontWeight:700,fontSize:'12px',color:'#334155',background:'#f8fafc',borderTop:'1px solid #e2e8f0'}}>
+                      = Stesso prezzo per chi sta sotto: col suo listino il peso nuovo costa uguale <span style={{fontWeight:600}}>({rettSoloStesso.length})</span>
+                      <span style={{float:'right'}}>€ {costoDi(rettSoloStesso).toFixed(2)}</span>
+                    </td>
+                  </tr>
+                )}
+                {gruppiSoloStesso.flatMap(renderGruppo)}
+                {rettSoloReso.length > 0 && (
+                  <tr key="sez-solo-reso" id="sez-solo-reso">
+                    <td colSpan={11} style={{padding:'8px 12px 8px 26px',fontWeight:700,fontSize:'12px',color:'#334155',background:'#f8fafc',borderTop:'1px solid #e2e8f0'}}>
+                      ↺ Resi: il ritorno si paga col nolo del reso, non con la ripesatura <span style={{fontWeight:600}}>({rettSoloReso.length})</span>
+                      <span style={{float:'right'}}>€ {costoDi(rettSoloReso).toFixed(2)}</span>
+                    </td>
+                  </tr>
+                )}
+                {gruppiSoloReso.flatMap(renderGruppo)}
               </tbody>
             </table>
           </div>
@@ -1106,9 +1270,9 @@ export default function RettificaCostiPage() {
           <span style={{fontSize:'14px',fontWeight:'700',color:'#1a1a1a'}}>
             <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{elimAperta?'▾':'▸'}</span>
             Rettifiche eliminate
-            <span style={{fontSize:'12px',color:'#6b7280',fontWeight:400,marginLeft:'8px'}}>pagate da te e non recuperate da clienti o sotto-master</span>
+            <span style={{fontSize:'12px',color:'#6b7280',fontWeight:400,marginLeft:'8px'}}>pagate da te e non girate sotto: quali sono davvero perse e quali avevi già fatto pagare prima</span>
           </span>
-          {elim?.righe && <span style={{fontSize:'13px',fontWeight:700,color:'#dc2626'}}>{elimFiltrate.length} · € {elimTotale.toFixed(2)}</span>}
+          {elim?.perse && <span style={{fontSize:'13px',fontWeight:700,color:'#dc2626'}}>{elim.perse.n} davvero perse · € {Number(elim.perse.euro).toFixed(2)}</span>}
         </div>
         {elimAperta && (
           <div>
@@ -1135,6 +1299,29 @@ export default function RettificaCostiPage() {
               <div style={{padding:'24px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>{elimQ ? 'Nessuna rettifica corrisponde alla ricerca.' : 'Nessuna rettifica pagata e non recuperata in questo periodo.'}</div>
             ) : (
               <>
+                {elim?.recuperate && (
+                  <div style={{padding:'10px 16px',borderBottom:'1px solid #f0f0f0'}}>
+                    {elim.recuperate.n > 0 && (
+                      <div style={{fontSize:'12px',color:'#334155',lineHeight:1.5,marginBottom:'8px'}}>
+                        Su <strong>{Number(elim.recuperate.n).toLocaleString('it-IT')}</strong> di questi pacchi (€ {Number(elim.recuperate.euro).toFixed(2)}) non hai perso niente:
+                        li avevi già fatti pagare sotto con un'altra rettifica, incassando <strong>€ {Number(elim.recuperate.incassato).toFixed(2)}</strong>.
+                        Qui c'è solo il costo arrivato dopo, che sotto non si chiede una seconda volta.
+                      </div>
+                    )}
+                    <div style={{display:'flex',gap:'6px',flexWrap:'wrap' as const}}>
+                      {([
+                        ['perse', 'Davvero non recuperate', elim.perse.n, elim.perse.euro, '#b91c1c', '#fef2f2'],
+                        ['recuperate', 'Già fatte pagare sotto', elim.recuperate.n, elim.recuperate.euro, '#166534', '#f0fdf4'],
+                        ['', 'Tutte', (elim.righe || []).length, elim.totale, '#334155', '#fff'],
+                      ] as [string, string, number, number, string, string][]).map(([v, et, n, e, colore, sfondo]) => (
+                        <button key={v || 'tutte'} onClick={() => { setElimFiltro(v as any); setElimPagina(1) }}
+                          style={{padding:'5px 12px',borderRadius:'999px',fontSize:'12px',fontWeight:600,cursor:'pointer',color:colore,background:sfondo,border:`1px solid ${elimFiltro === v ? colore : '#e5e7eb'}`,boxShadow:elimFiltro === v ? `0 0 0 1px ${colore}` : 'none'}}>
+                          {et} <strong>{Number(n).toLocaleString('it-IT')}</strong> · € {Number(e).toFixed(2)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div style={{padding:'8px 16px',fontSize:'12px',color:'#475569',lineHeight:1.6,display:'flex',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
                   <div>
                     {elimPerMotivo.map(([m, v]: any) => (
@@ -1164,7 +1351,9 @@ export default function RettificaCostiPage() {
                           <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{r.da}</td>
                           <td style={{padding:'7px 10px',color:'#dc2626',fontWeight:700}}>€ {Number(r.importo).toFixed(2)}</td>
                           <td style={{padding:'7px 10px',color:'#475569'}}>
-                            {r.motivo}
+                            {r.recuperata
+                              ? <span style={{color:'#166534',fontWeight:600}}>↩ Già fatta pagare a {r.recuperata.a} il {new Date(r.recuperata.il).toLocaleDateString('it-IT')}: € {Number(r.recuperata.euro).toFixed(2)}{r.recuperata.confermata ? '' : ' (ancora da confermare)'} — qui c'è solo il costo arrivato dopo, non è una perdita</span>
+                              : r.motivo}
                             {r.poste && <div style={{color:'#b91c1c',fontWeight:600,marginTop:'2px'}}>⛔ Poste la smentisce — {r.poste}</div>}
                           </td>
                         </tr>

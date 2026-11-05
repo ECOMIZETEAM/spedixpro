@@ -196,12 +196,27 @@ export async function GET(req: NextRequest) {
       for (const e of esiti) for (const x of e) giaPagate.add(x)
     }
   }
+  // PERCHE' E' SOLO A TUO CARICO (lib/rettifiche-perche): il pacco l'avevi gia' fatto pagare sotto (a chi, quando,
+  // quanto), e' un reso, il fornitore ha addebitato un importo senza voce, o sotto il peso nuovo costa uguale. Le righe
+  // sono tutte di chi guarda (master_id = lui) e anche quello che si legge per spiegarle: le sue rettifiche verso sotto.
+  const { stimaCedeAllaFattura } = await import('@/lib/rettifiche-perche')
+  let percheMio = new Map<string, any>()
+  const soloMie = righeGrezze.filter((r: any) => r.target_master_id && r.target_master_id === r.master_id)
+  if (!agente && soloMie.length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { perchePropri } = await import('@/lib/rettifiche-perche')
+    try { percheMio = await perchePropri(createAdminSupabase(), utente!.master_id, soloMie) }
+    catch (e: any) { console.error('[RETTIFICHE] perche\' solo a tuo carico:', e?.message) }
+  }
   const righe = righeGrezze.map((r0: any) => {
     const r = agente ? { ...r0, costo_fornitore: null } : r0
     const b = baseDi(r)
     return {
       ...r,
-      costo_gia_pagato: !!(r.rif_fornitore && giaPagate.has(r.rif_fornitore)),
+      ...(percheMio.has(r.id) ? { perche_mio: percheMio.get(r.id) } : {}),
+      // Gia' pagato, o non si paghera': la stima del portale su un pacco con la fattura del fornitore alla Conferma cede.
+      costo_gia_pagato: !!(r.rif_fornitore && giaPagate.has(r.rif_fornitore)) || stimaCedeAllaFattura(r, percheMio.get(r.id)),
+      stima_cede: stimaCedeAllaFattura(r, percheMio.get(r.id)),
       destinatario_nome: (r.target_master_id && r.target_master_id === r.master_id) ? 'Solo a tuo carico (niente da rettificare sotto)'
         : (nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null),
       destinatario_tipo: (r.target_master_id && r.target_master_id === r.master_id) ? 'proprio' : (r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null)),
