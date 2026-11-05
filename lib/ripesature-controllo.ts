@@ -189,6 +189,26 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
   return out
 }
 
+// LA LETTURA DI POSTE SU CUI SI PUO' FAR PAGARE (motore automatico, app/api/tracking/ripesature-auto). Lorenzo, 05/11/2026.
+// Il motore prendeva la lettura che il Mac salva in cima, anche quando e' finta: 3UW1UHA322721 ha «11,65 kg, 1,5×1×0,5 cm»
+// a Napoli 1 alle 18:20 e «0,24 kg, 23,5×10×10 cm» all'Hub Napoli alle 20:11; il 01/11 al cliente sono stati chiesti 3,91 €
+// come per 11,65 kg. Dal 07/08 cosi' circa 260 rettifiche di MULTI e 61 di Wave (Lorenzo: si lasciano come sono).
+// CORREZIONE MINIMA, decisa con Lorenzo: la lettura in cima resta quella di sempre quando e' buona; se ha un lato di un
+// centimetro e mezzo o meno (stessa regola del controllo qui sopra) si usa, fra le altre letture complete e buone, quella
+// su cui Poste tassa di piu'; se non ce n'e' nessuna, non si fa pagare niente (null).
+export function letturaPerIlMotore(m: any): { peso: number; lunghezza: number; larghezza: number; altezza: number; dove?: string; quando?: string } | null {
+  if (!m) return null
+  const leggi = (x: any, dove?: string, quando?: string) => ({ peso: Number(x?.peso) || 0, lunghezza: Number(x?.lunghezza) || 0, larghezza: Number(x?.larghezza) || 0, altezza: Number(x?.altezza) || 0, dove, quando })
+  const finta = (l: any) => [l.lunghezza, l.larghezza, l.altezza].some((x: number) => x > 0 && x <= 1.5)
+  const cima = leggi(m, m.filiale, m.misurata_il)
+  if (!finta(cima)) return cima
+  const buone = (Array.isArray(m.righe) ? m.righe : []).map((x: any) => leggi(x, x?.dove, x?.quando))
+    .filter((l: any) => l.peso > 0 && l.lunghezza > 0 && l.larghezza > 0 && l.altezza > 0 && !finta(l))
+  if (!buone.length) return null
+  const tassato = (l: any) => Math.max(l.peso, Math.ceil(l.lunghezza - 1e-9) * Math.ceil(l.larghezza - 1e-9) * Math.ceil(l.altezza - 1e-9) / 5000)
+  return buone.reduce((a: any, b: any) => (tassato(b) > tassato(a) ? b : a))
+}
+
 // LO STESSO CONTROLLO SULLE RIGHE GIA' SCRITTE: le rettifiche nate prima che il controllo fosse acceso (alla Conferma e
 // per lo storico). I colli sono quelli della riga, cioe' quello che diceva il file del fornitore.
 export async function controllaRighe(admin: any, masterId: string, righe: any[]): Promise<Map<string, Controllo>> {

@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { calcolaRipesature } from '@/lib/ripesature-calcolo'
 import { creaRettificaDaEsito } from '@/lib/ripesature-crea'
+import { letturaPerIlMotore } from '@/lib/ripesature-controllo'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -100,6 +101,13 @@ export async function GET(req: NextRequest) {
     if (erroreCoda) { console.error('[RIPESATURE-AUTO] coda non leggibile', giro.nome, erroreCoda.message); esitiGiri.push({ giro: giro.nome, errore: 'coda non leggibile' }); continue }
 
     let controllate = 0, rettificate = 0, nessunRecupero = 0, gia = 0, nonCalcolabili = 0, errori = 0, recuperoTot = 0
+    // TUTTE LE LETTURE DI POSTE dei pacchi in coda, non solo quella in cima (lib/ripesature-controllo, letturaPerIlMotore).
+    const misureDi = new Map<string, any>()
+    const idsCoda = ((coda || []) as any[]).map(r => r.spedizione_id).filter(Boolean)
+    for (let i = 0; i < idsCoda.length; i += 200) {
+      const { data: mm } = await admin.from('ripesature_misure').select('spedizione_id,peso,lunghezza,larghezza,altezza,filiale,misurata_il,righe').in('spedizione_id', idsCoda.slice(i, i + 200))
+      for (const m of (mm || []) as any[]) misureDi.set(m.spedizione_id, m)
+    }
     for (const r of (coda || []) as any[]) {
       if (Date.now() - inizio > BUDGET_MS) break
       controllate++
@@ -110,11 +118,18 @@ export async function GET(req: NextRequest) {
       try {
         // Il collo COME L'HA MISURATO IL CORRIERE. Si passano le MISURE, non il solo peso: il
         // supplemento lo fa il volume, e col solo peso meta' delle righe uscirebbe negativa.
+        // LA LETTURA BUONA: quella in cima se non e' finta, altrimenti la migliore fra le altre; nessuna buona, niente.
+        const lettura = letturaPerIlMotore(misureDi.get(r.spedizione_id) || r)
+        if (!lettura) {
+          nonCalcolabili++
+          await segna('no-misure', { dettaglio: 'lettura di Poste finta (un lato di 1,5 cm o meno) e nessun\'altra lettura completa' })
+          continue
+        }
         const rip = {
           idOrdine: r.ldv, idVerifiche: [], ldv: r.ldv, addebitoFornitore: 0,
           colli: [{
-            peso: Number(r.peso) || 0,
-            lunghezza: Number(r.lunghezza), larghezza: Number(r.larghezza), altezza: Number(r.altezza),
+            peso: lettura.peso,
+            lunghezza: lettura.lunghezza, larghezza: lettura.larghezza, altezza: lettura.altezza,
           }],
           dataChiusura: '', mittente: '', destinatario: '',
         }
