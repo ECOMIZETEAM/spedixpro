@@ -229,9 +229,9 @@ export default function RettificaCostiPage() {
           title: 'Rettifiche create',
           message: (ot.attivo
             ? `Controllo OneTracking: ${ot.buone} buone, ${ot.senzaAgevolazione} senza l'agevolazione, ${ot.pesoSbagliato} col peso sbagliato`
-              + `${ot.senzaMisura ? `, ${ot.senzaMisura} senza misura OneTracking` : ''}${ot.nonVerificabili ? `, ${ot.nonVerificabili} con più colli (non verificabili)` : ''}.`
-              + (ot.ferme ? ` ${ot.ferme} rettifiche sono ferme in contestazione (€ ${ot.nonGirato.toFixed(2)} non girati sotto): Poste le ha misurate diversamente dal file — per esempio ${ot.esempi[0]?.ldv}: ${ot.esempi[0]?.motivo} Vanno contestate al fornitore.` : '')
-              + (ot.senzaMisura ? ' Quelle senza misura OneTracking passano come prima: non si possono verificare.' : '')
+              + `${ot.senzaMisura ? `, ${ot.senzaMisura} spedizioni non misurate da Poste` : ''}${ot.nonVerificabili ? `, ${ot.nonVerificabili} con più colli (non verificabili)` : ''}.`
+              + (ot.ferme ? ` ${ot.ferme} rettifiche sono ferme in contestazione (€ ${ot.nonGirato.toFixed(2)} non girati sotto): Poste le ha misurate diversamente dal file — per esempio ${ot.esempi[0]?.ldv}: ${ot.esempi[0]?.motivo} Vanno contestate al fornitore; se decidi di caricarne una lo stesso, nella tabella c'è «Carica lo stesso».` : '')
+              + (ot.senzaMisura ? ' Le spedizioni non misurate da Poste si caricano come prima.' : '')
               + '\n\n'
             : '')
             + `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
@@ -312,6 +312,14 @@ export default function RettificaCostiPage() {
         ? 'Ora il da-girare copre il costo fornitore: la riga e\' passata tra le buone.'
         : `Riprezzata: recuperi € ${Number(d.da_girare).toFixed(2)}, ancora sotto il costo fornitore (mancano € ${Number(d.manca).toFixed(2)}). Aggiorna ancora il listino o decidi di assorbire.` })
     } finally { setRicalcolando('') }
+  }
+  // Una riga fermata dal controllo OneTracking si puo' caricare lo stesso: lo decide chi carica, sapendo perche' era ferma.
+  async function caricaLoStesso(r: any) {
+    if (!await dialog.confirm({ title: 'Caricare lo stesso?', message: `${r.numero_spedizione}: ${r.controllo?.motivo || ''} Se la carichi, torna fra quelle da confermare e alla Conferma si addebita come le altre. Resta scritto che l'hai sbloccata tu.`, confirmText: 'Carica lo stesso' })) return
+    const res = await fetch('/api/rettifiche', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'sblocca', rettificaIds: [r.id] }) })
+    const d = await res.json()
+    if (!res.ok || !d.sbloccate) { await dialog.alert({ title: 'Non sbloccata', message: d.error || 'La riga non è più in contestazione.' }); return }
+    await caricaRettifiche(fileSelezionato || undefined)
   }
   async function confermaRettifiche() {
     if (!selectedIds.length) { await dialog.alert({ title: 'Nessuna selezione', message: 'Seleziona almeno una rettifica.' }); return }
@@ -484,6 +492,17 @@ export default function RettificaCostiPage() {
           {r.blocco && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#b45309',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'4px',padding:'2px 6px',display:'inline-block',whiteSpace:'normal',maxWidth:'260px'}}>
               ⏸ {r.blocco}
+              {r.stato === 'in_contestazione' && r.controllo?.motivo && (
+                <button onClick={()=>caricaLoStesso(r)}
+                  style={{marginLeft:'8px',padding:'2px 9px',background:'#fff',color:'#b45309',border:'1px solid #f59e0b',borderRadius:'4px',fontSize:'10.5px',fontWeight:700,cursor:'pointer'}}>
+                  Carica lo stesso
+                </button>
+              )}
+            </div>
+          )}
+          {r.stato === 'da_rettificare' && r.controllo?.sbloccata_il && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#92400e',whiteSpace:'normal',maxWidth:'300px'}}>
+              Sbloccata a mano il {new Date(r.controllo.sbloccata_il).toLocaleDateString('it-IT')}: OneTracking diceva altro ({r.controllo.motivo})
             </div>
           )}
           {r.nota_peso && (

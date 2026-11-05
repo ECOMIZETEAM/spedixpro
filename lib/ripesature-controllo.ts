@@ -104,14 +104,14 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
     }
     const m = misure.get(e.spedizioneId)
     if (!m) {
-      out.set(e.idOrdine, { esito: 'senza_misura', motivo: 'OneTracking non ha ancora una misura di questo pacco', peso_file: pesoFile })
+      out.set(e.idOrdine, { esito: 'senza_misura', motivo: 'Spedizione non misurata da Poste', peso_file: pesoFile })
       continue
     }
     const letture = [m, ...(Array.isArray(m.righe) ? m.righe : [])]
       .map((l: any) => ({ peso: Number(l.peso) || 0, lunghezza: Number(l.lunghezza) || 0, larghezza: Number(l.larghezza) || 0, altezza: Number(l.altezza) || 0, dove: l.dove ?? l.filiale ?? null, quando: l.quando ?? l.misurata_il ?? null }))
       .filter(l => l.peso > 0)
     if (!letture.length) {
-      out.set(e.idOrdine, { esito: 'senza_misura', motivo: 'OneTracking non ha ancora una misura di questo pacco', peso_file: pesoFile })
+      out.set(e.idOrdine, { esito: 'senza_misura', motivo: 'Spedizione non misurata da Poste', peso_file: pesoFile })
       continue
     }
     const fascia = (x: number) => {

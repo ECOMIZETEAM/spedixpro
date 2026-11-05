@@ -747,6 +747,36 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, costiGiaPresenti, stimeStornate, nonEseguite: saltate.length, dettaglio: saltate })
 }
 
+// CARICA LO STESSO UNA RIGA FERMATA DAL CONTROLLO ONETRACKING (Lorenzo, 05/11/2026: «tutte anche le sbagliate devono
+// potersi caricare.. ma lo fa manualmente multi in caso.. pero lo deve sapere»). La riga torna 'da_rettificare' e si
+// conferma come le altre; il motivo del controllo resta scritto sulla riga, con chi l'ha sbloccata e quando. Solo le
+// righe fermate DAL CONTROLLO (controllo presente): una contestazione aperta a mano col fornitore non si sblocca da qui.
+export async function PATCH(req: NextRequest) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg
+  if (!gestisceLaRete(utente) || !utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  const body = await req.json()
+  const ids: string[] = Array.isArray(body?.rettificaIds) ? body.rettificaIds.filter(Boolean) : []
+  if (body?.azione !== 'sblocca' || !ids.length) return NextResponse.json({ error: 'Nessuna rettifica da sbloccare' }, { status: 400 })
+  let sbloccate = 0
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: righe, error } = await supabase.from('rettifiche').select('id,controllo')
+      .in('id', ids.slice(i, i + 200)).eq('master_id', utente.master_id).eq('stato', 'in_contestazione').eq('confermata', false)
+      .not('controllo', 'is', null)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    for (const r of (righe || []) as any[]) {
+      const { data: fatta } = await supabase.from('rettifiche')
+        .update({ stato: 'da_rettificare', controllo: { ...r.controllo, sbloccata_da: user.id, sbloccata_il: new Date().toISOString() } })
+        .eq('id', r.id).eq('stato', 'in_contestazione').select('id')
+      if (fatta?.length) sbloccate++
+    }
+  }
+  return NextResponse.json({ success: true, sbloccate })
+}
+
 export async function DELETE(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
