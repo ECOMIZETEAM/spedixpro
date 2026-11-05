@@ -398,64 +398,158 @@ export async function archiviaLotto(admin: any, quante = 100): Promise<{
 // LIBERA il base64 GIÀ ARCHIVIATO. archiviaLotto scrive `etichetta_path` ma TIENE il base64 in
 // `etichetta_url` come rete di sicurezza "finché non c'è la prova sul campo". Questa è la prova: per
 // ogni riga già archiviata rilegge il file da Storage e lo confronta byte-per-byte col base64; solo
-// se combacia, azzera `etichetta_url`. Fa lo stesso con le etichette PER-COLLO dei multicollo dentro
-// `colli_dettaglio` (le archivia su Storage con percorso per-collo, poi toglie il base64). MAI
-// cancellare una copia inline senza aver verificato che quella su Storage è integra: se il file manca
-// o è diverso, il base64 resta. È il grosso dello spazio del TOAST (etichette duplicate).
-export async function liberaEtichetteArchiviate(admin: any, quante = 80): Promise<{
-  esaminate: number; url_liberati: number; colli_archiviati: number; saltate: number
+// se il file con quei byte c'è, azzera `etichetta_url`. Fa lo stesso con le etichette PER-COLLO dei
+// multicollo dentro `colli_dettaglio`. MAI cancellare una copia inline senza aver verificato che
+// quella su Storage è integra. È il grosso dello spazio del database (etichette duplicate).
+//
+// NESSUN BYTE SI PERDE E NESSUN FILE SI SOVRASCRIVE CON BYTE DIVERSI. Il 05/11/2026 su 150 righe
+// prese da questo giro 133 venivano saltate a ogni passata, per sempre: il base64 nella riga non era
+// piu' quello archiviato. Le riscriveva il giro del tracking, che vedendo `etichetta_url` vuoto
+// credeva l'etichetta mancante e la riscaricava dal fornitore (su DVA solo il PRIMO collo: es.
+// 3UW1WLJ015159, archiviata a 2 pagine, nella riga ne era tornata 1). Quelle righe restavano in testa
+// alla scelta e il giro liberava 0-27 etichette su 150: a fine ottobre ~450.000 spedizioni avevano
+// ancora il PDF dentro, e il database cresceva di 8 GB al giorno. Ora ogni caso si chiude:
+//  - file uguale al base64          → si toglie il base64;
+//  - file presente ma diverso       → il base64 si salva ACCANTO (…-riga-<impronta>.pdf) e si toglie
+//                                     dalla riga; il percorso resta quello che le stampe leggono oggi;
+//  - file assente (lo dice l'elenco della cartella, non un download fallito) → il base64 si carica
+//                                     proprio li', e chi legge trova gli stessi byte di prima.
+// Se l'elenco della cartella non risponde, la riga resta com'e' e si riprova al giro dopo.
+//
+// La scelta parte da un punto a caso delle prime 1.500: se restasse qualche riga che non si puo'
+// chiudere (un etichetta_url che non e' un PDF), non tornerebbe a bloccare la testa della coda.
+// Le colonne pesanti si leggono a gruppi di pochi: 150 righe con colli_dettaglio insieme (le SDA
+// EXPRESS L hanno ~1,7 MB per collo) erano centinaia di MB in un colpo solo nella memoria del database.
+export async function liberaEtichetteArchiviate(admin: any, quante = 80, opz: {
+  entroMs?: number        // tempo massimo del giro: si chiude il gruppo in corso e ci si ferma
+  inParallelo?: number    // righe lavorate insieme (e lette insieme con le colonne pesanti)
+  provaAVuoto?: boolean   // nessuna scrittura: dice solo cosa farebbe, riga per riga
+  soloIds?: string[]      // solo queste spedizioni (prove, o un caso da chiudere a mano)
+} = {}): Promise<{
+  esaminate: number; url_liberati: number; colli_archiviati: number; copie_accanto: number
+  riparati: number; saltate: number; righe?: Array<{ numero: string; esito: string }>
 }> {
+  const scadenza = Date.now() + (opz.entroMs ?? 60_000)
+  const insieme = Math.max(1, Math.min(10, opz.inParallelo ?? 1))
+  const vuoto = !!opz.provaAVuoto
   const impronta = (b: Buffer) => createHash('sha1').update(b).digest('hex')
+  const esito = { esaminate: 0, url_liberati: 0, colli_archiviati: 0, copie_accanto: 0, riparati: 0, saltate: 0,
+    ...(vuoto ? { righe: [] as Array<{ numero: string; esito: string }> } : {}) }
+
   // L'indice parziale idx_sped_libera_base64 (etichetta_path not null AND etichetta_url not null)
   // rende questa ricerca istantanea e si RESTRINGE man mano che si liberano le righe.
-  const { data: righe } = await admin.from('spedizioni')
-    .select('id,numero,created_at,etichetta_url,etichetta_path,colli_dettaglio')
+  const scegli = (da: number) => admin.from('spedizioni')
+    .select('id,numero,created_at,etichetta_path')
     .not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
-    .limit(quante)
+    .range(da, da + quante - 1)
+  const partenza = Math.floor(Math.random() * 1500)
+  let { data: righe } = opz.soloIds?.length
+    ? await admin.from('spedizioni').select('id,numero,created_at,etichetta_path')
+      .in('id', opz.soloIds).not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
+    : await scegli(partenza)
+  if (!righe?.length && partenza && !opz.soloIds?.length) ({ data: righe } = await scegli(0))
 
-  let url_liberati = 0, colli_archiviati = 0, saltate = 0
-  for (const r of righe || []) {
-    const upd: any = {}
-
-    // (1) etichetta_url: azzera SOLO se la copia su Storage esiste e combacia.
-    const inline = scomponiDataUrl(r.etichetta_url)
-    if (inline?.buffer?.length) {
-      const suStorage = await scaricaEtichetta(admin, r.etichetta_path)
-      if (suStorage?.buffer?.length && impronta(suStorage.buffer) === impronta(inline.buffer)) {
-        upd.etichetta_url = null
-      }
+  // Elenco della cartella, cercando per nome: e' l'unico modo di sapere che un file NON c'e' (un
+  // download fallito puo' essere un intoppo di rete). null = non lo so.
+  const esiste = async (path: string): Promise<boolean | null> => {
+    const i = path.lastIndexOf('/')
+    const nome = path.slice(i + 1)
+    const { data, error } = await admin.storage.from(BUCKET).list(i > 0 ? path.slice(0, i) : '', { limit: 100, search: nome })
+    return error || !data ? null : (data as any[]).some(f => f.name === nome)
+  }
+  // Carica e RILEGGE: torna il percorso solo se il file riletto ha esattamente quei byte.
+  const caricaVerificato = async (path: string, d: { buffer: Buffer; mime: string }): Promise<string | null> => {
+    if (vuoto) return path
+    const { error } = await admin.storage.from(BUCKET).upload(path, d.buffer, { contentType: d.mime, upsert: true })
+    if (error) { console.error('[LIBERA-ETICHETTE] caricamento fallito', path, error.message); return null }
+    const r = await scaricaEtichetta(admin, path)
+    return r?.buffer?.length && impronta(r.buffer) === impronta(d.buffer) ? path : null
+  }
+  // Dove stanno, su Storage, ESATTAMENTE i byte `d`, a partire dal percorso `atteso`:
+  //  - 'uguale'  : il file in `atteso` ha gia' quei byte;
+  //  - 'accanto' : in `atteso` c'e' un file DIVERSO → i byte vanno in `accanto` (mai sopra l'altro);
+  //  - 'riparato': in `atteso` non c'e' niente → i byte vanno li';
+  //  - null      : non si sa (download o elenco non riusciti) → non si tocca niente.
+  const sistema = async (atteso: string, accanto: string, d: { buffer: Buffer; mime: string }):
+    Promise<{ path: string; come: 'uguale' | 'accanto' | 'riparato' } | null> => {
+    const su = await scaricaEtichetta(admin, atteso)
+    if (su?.buffer?.length) {
+      if (impronta(su.buffer) === impronta(d.buffer)) return { path: atteso, come: 'uguale' }
+      const p = await caricaVerificato(accanto, d)
+      return p ? { path: p, come: 'accanto' } : null
     }
-    // Se etichetta_url NON è un data-url (http, o già svuotato in questa passata) non si tocca.
+    if ((await esiste(atteso)) !== false) return null
+    const p = await caricaVerificato(atteso, d)
+    return p ? { path: p, come: 'riparato' } : null
+  }
 
-    // (2) colli_dettaglio: archivia le etichette per-collo base64 e toglie il base64 (solo se ok).
-    const colli = Array.isArray(r.colli_dettaglio) ? (r.colli_dettaglio as any[]) : null
+  const lavora = async (r: any, pesante: any) => {
+    const upd: any = {}
+    const note: string[] = []
+    const quando = r.created_at ? new Date(r.created_at) : new Date()
+    const cartella = percorsoEtichetta(r.id, quando, 'x').replace(/\/[^/]+$/, '')
+
+    // (1) etichetta della spedizione. Le stampe leggono PRIMA `etichetta_path`: resta quello.
+    const inline = scomponiDataUrl(pesante?.etichetta_url)
+    if (inline?.buffer?.length) {
+      const ext = estensioneDa(inline.mime)
+      const s = await sistema(String(r.etichetta_path), `${cartella}/sped-riga-${impronta(inline.buffer).slice(0, 8)}.${ext}`, inline)
+      if (s) {
+        upd.etichetta_url = null
+        note.push('sped:' + s.come)
+        if (s.come === 'accanto') esito.copie_accanto++
+        if (s.come === 'riparato') esito.riparati++
+      } else note.push('sped:non-so')
+    } else note.push('sped:non-pdf')
+    // Se etichetta_url NON è un data-url (http, o testo) non si tocca.
+
+    // (2) etichette per collo. Chi stampa il collo legge il SUO percorso se c'e', altrimenti il base64:
+    // dopo, deve trovare gli stessi byte di prima.
+    const colli = Array.isArray(pesante?.colli_dettaglio) ? (pesante.colli_dettaglio as any[]) : null
     if (colli && colli.some((c: any) => typeof c?.etichetta_url === 'string' && c.etichetta_url.startsWith('data:'))) {
-      const quando = r.created_at ? new Date(r.created_at) : new Date()
+      const nuovi = colli.map((c: any) => c)
       let cambiato = false
-      const nuovi = colli.map((c: any) => c)   // copia, la riempio sotto
       for (let i = 0; i < colli.length; i++) {
         const d = scomponiDataUrl(colli[i]?.etichetta_url)
         if (!d?.buffer?.length) continue
+        const ext = estensioneDa(d.mime)
+        const giaPath = colli[i]?.etichetta_path ? String(colli[i].etichetta_path) : null
         // numero collo per il percorso: l'indice i+1 è sempre affidabile (il campo `numero` a volte è la LDV).
-        const path = await caricaEtichetta(admin, r.id, d.buffer, d.mime, quando, i + 1)
-        if (!path) continue
-        const riletto = await scaricaEtichetta(admin, path)
-        if (riletto?.buffer?.length && impronta(riletto.buffer) === impronta(d.buffer)) {
-          nuovi[i] = { ...colli[i], etichetta_url: null, etichetta_path: path }
-          cambiato = true; colli_archiviati++
-        }
+        const atteso = giaPath || percorsoEtichetta(r.id, quando, ext, i + 1)
+        const s = await sistema(atteso, `${cartella}/collo-${i + 1}-riga-${impronta(d.buffer).slice(0, 8)}.${ext}`, d)
+        if (!s) { note.push(`collo${i + 1}:non-so`); continue }
+        // Col percorso gia' presente e il file al suo posto, il collo si leggeva GIA' da li': resta li'.
+        // Senza percorso si leggeva il base64: il percorso nuovo e' quello che ne contiene i byte.
+        const path = giaPath && s.come === 'accanto' ? giaPath : s.path
+        nuovi[i] = { ...colli[i], etichetta_url: null, etichetta_path: path }
+        cambiato = true; esito.colli_archiviati++
+        if (s.come === 'accanto') esito.copie_accanto++
+        if (s.come === 'riparato') esito.riparati++
+        note.push(`collo${i + 1}:${s.come}`)
       }
       if (cambiato) upd.colli_dettaglio = nuovi
     }
 
-    if (Object.keys(upd).length) {
-      const { error } = await admin.from('spedizioni').update(upd).eq('id', r.id)
-      if (error) { console.error('[LIBERA-ETICHETTE]', r.numero, error.message); saltate++; continue }
-      if ('etichetta_url' in upd) url_liberati++
-    } else saltate++
+    if (esito.righe) esito.righe.push({ numero: r.numero, esito: note.join(' ') })
+    if (!Object.keys(upd).length) { esito.saltate++; return }
+    if (vuoto) { if ('etichetta_url' in upd) esito.url_liberati++; return }
+    const { error } = await admin.from('spedizioni').update(upd).eq('id', r.id)
+    if (error) { console.error('[LIBERA-ETICHETTE]', r.numero, error.message); esito.saltate++; return }
+    if ('etichetta_url' in upd) esito.url_liberati++
   }
-  const esito = { esaminate: (righe || []).length, url_liberati, colli_archiviati, saltate }
-  if (esito.esaminate) console.log('[LIBERA-ETICHETTE]', JSON.stringify(esito))
+
+  for (let i = 0; i < (righe || []).length && Date.now() < scadenza; i += insieme) {
+    const gruppo = (righe as any[]).slice(i, i + insieme)
+    const { data: pesanti, error } = await admin.from('spedizioni')
+      .select('id,etichetta_url,colli_dettaglio').in('id', gruppo.map(r => r.id))
+    if (error) { console.error('[LIBERA-ETICHETTE] lettura fallita', error.message); break }
+    const per = new Map((pesanti || []).map((p: any) => [p.id, p]))
+    esito.esaminate += gruppo.length
+    await Promise.all(gruppo.map(r => lavora(r, per.get(r.id)).catch((e: any) => {
+      console.error('[LIBERA-ETICHETTE]', r.numero, e?.message); esito.saltate++
+    })))
+  }
+  if (esito.esaminate) console.log('[LIBERA-ETICHETTE]', JSON.stringify({ ...esito, righe: undefined }))
   return esito
 }
 

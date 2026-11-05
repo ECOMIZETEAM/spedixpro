@@ -81,7 +81,9 @@ export async function GET(req: NextRequest) {
     etichetteArchiviate = (await archiviaLotto(admin, 60)).archiviate
     // 2) LIBERA il base64 di quelle GIÀ archiviate (verifica del file su Storage prima di azzerare) +
     //    archivia le etichette per-collo dei multicollo. È il recupero grosso dello spazio del TOAST.
-    etichetteLiberate = await liberaEtichetteArchiviate(admin, 150)
+    //    Con un tetto di tempo: ora ogni riga scelta si chiude davvero (prima quasi tutte si saltavano
+    //    in un attimo), e questo giro ha gia' il suo lavoro dentro i 120 secondi.
+    etichetteLiberate = await liberaEtichetteArchiviate(admin, 150, { entroMs: 30_000, inParallelo: 3 })
   } catch (e: any) { console.error('[TMP-RECUPERO] archiviazione/liberazione etichette fallita:', e?.message) }
 
   return NextResponse.json({
@@ -120,7 +122,7 @@ async function recuperaSpediamoproSospese(admin: any): Promise<number> {
   // esiste. E' successo il 31/08: ~17 spedizioni ferme sul 6A con la LDV gia' pronta su SpediamoPro.
   // Il confronto in memoria `numero === sp_code` resta come conferma (belt & suspenders).
   const { data: righe } = await admin.from('spedizioni')
-    .select('id,numero,etichetta_url,corriere_id,sp_id:raw_response->id,sp_id2:raw_response->raw->data->id,sp_code:raw_response->code')
+    .select('id,numero,etichetta_url,etichetta_path,corriere_id,sp_id:raw_response->id,sp_id2:raw_response->raw->data->id,sp_code:raw_response->code')
     .in('corriere_id', [...authDi.keys()])
     .ilike('numero', '6A%')
     .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)')
@@ -147,8 +149,9 @@ async function recuperaSpediamoproSospese(admin: any): Promise<number> {
       if (gia) console.error('[SP] LDV già in uso da un altra spedizione, non riassegnata', ldv, s.numero)
       else { patch.numero = ldv; patch.tracking_number = ldv }
     }
-    // Etichetta di sicurezza: di norma c'è già, ma se manca la si scarica (una volta).
-    if (!s.etichetta_url) {
+    // Etichetta di sicurezza: di norma c'è già, ma se manca la si scarica (una volta). Archiviata su
+    // Storage ha `etichetta_url` vuoto ma c'e': non si riscarica (vedi lib/etichette).
+    if (!s.etichetta_url && !s.etichetta_path) {
       try {
         const lb = await spediamoproGetLabel(authcode, Number(spid), 1, 0)
         const n = await normalizzaEtichetta(lb)
@@ -248,7 +251,9 @@ async function recuperaMulticollo(admin: any): Promise<number> {
 
   let sistemate = 0
   for (const s of (multi || [])) {
-    const gia = (Array.isArray(s.colli_dettaglio) ? s.colli_dettaglio : []).filter((x: any) => x?.etichetta_url).length
+    // Un collo archiviato su Storage ha il percorso e non piu' il base64: conta come etichetta presente.
+    // Contando solo il base64, ogni collo appena archiviato veniva riscaricato e rimesso nella riga.
+    const gia = (Array.isArray(s.colli_dettaglio) ? s.colli_dettaglio : []).filter((x: any) => x?.etichetta_url || x?.etichetta_path).length
     if (gia >= s.colli) continue                       // completa: non si tocca
     const ordine = s.ordine ? String(s.ordine) : null
     if (!ordine) continue

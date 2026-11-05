@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { archiviaLotto } from '@/lib/etichette'
+import { archiviaLotto, liberaEtichetteArchiviate } from '@/lib/etichette'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,7 +32,23 @@ export const maxDuration = 120
 
 // Il lavoro vero sta in lib/etichette.ts: lo chiama anche tmp-recupero, che e' un cron gia' vivo.
 // Questa rotta resta come innesco dedicato e per poterla lanciare a mano quando serve.
+//
+// Da quando questo innesco gira davvero (ogni 10 minuti) fa anche la seconda meta': toglie dalla
+// riga il base64 gia' archiviato (liberaEtichetteArchiviate). A inizio novembre 2026 erano ~450.000
+// le spedizioni archiviate col PDF ancora dentro, e il giro di tmp-recupero da solo ne chiude al
+// massimo 150 ogni quarto d'ora. Il grosso si fa di NOTTE, quando il database e' quasi fermo; di
+// giorno un lotto piccolo, per non pesare su chi sta spedendo.
 export async function GET(req: NextRequest) {
   const _b = bloccaCronNonAutorizzato(req); if (_b) return _b
-  return NextResponse.json(await archiviaLotto(createAdminSupabase(), 100))
+  const inizio = Date.now()
+  const admin = createAdminSupabase()
+  const archiviate = await archiviaLotto(admin, 100)
+  const ora = Number(new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: 'numeric', hourCycle: 'h23' }).format(new Date()))
+  const notte = ora >= 21 || ora < 7
+  // Dentro i 120 secondi della funzione, con margine: quello che resta dopo l'archiviazione.
+  const resta = 100_000 - (Date.now() - inizio)
+  const liberate = resta > 10_000
+    ? await liberaEtichetteArchiviate(admin, notte ? 1000 : 200, { entroMs: Math.min(notte ? 80_000 : 25_000, resta), inParallelo: notte ? 4 : 2 })
+    : null
+  return NextResponse.json({ ...archiviate, liberate })
 }

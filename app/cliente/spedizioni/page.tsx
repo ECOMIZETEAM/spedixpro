@@ -751,9 +751,9 @@ async function apriTracking(s: any) {
                             <span style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>📦 Collo {c.numero} di {trackingData.colli_dettaglio.length}</span>
                             {c.lunghezza&&<span style={{fontSize:'12px',color:'#1a1a1a'}}>{c.lunghezza}×{c.larghezza}×{c.altezza} cm · {c.peso}kg</span>}
                           </div>
-                          {c.etichetta_url&&(
+                          {(c.etichetta_url||c.etichetta_path)&&(
                             <div style={{fontSize:'12px',color:'#1a1a1a'}}>
-                              <strong>Tracking collo:</strong> {c.etichetta_url.includes('base64')?'PDF disponibile':c.etichetta_url}
+                              <strong>Tracking collo:</strong> {(c.etichetta_path||String(c.etichetta_url).includes('base64'))?'PDF disponibile':c.etichetta_url}
                             </div>
                           )}
                         </div>

@@ -93,6 +93,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
   // Chi non ha l'etichetta: SOLO gli id, così sappiamo per quali tentare il recupero senza
   // portarci in memoria i PDF di tutte le altre. Il recupero esiste solo per due provider, e si chiede
   // solo per le spedizioni caricate qui: prima si scorrevano tutte le attive a ogni giro.
+  // "Senza etichetta" vuol dire senza NESSUNA delle due forme: un'etichetta archiviata su Storage ha
+  // `etichetta_url` vuoto apposta. Guardando solo quello, questo giro la riscaricava dal fornitore (su
+  // DVA il solo primo collo) e la rimetteva nella riga: il base64 non usciva mai dal database, e la
+  // riga riscritta non combaciava piu' col file, per cui nessuno la liberava (vedi lib/etichette).
   const senzaEtichetta = new Set<string>()
   const conRecuperoEtichetta = spedizioni
     .filter((s: any) => s.stato !== 'annullamento_pending' && s.stato !== 'annullamento_manuale')
@@ -100,7 +104,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
     .map((s: any) => s.id)
   for (let i = 0; i < conRecuperoEtichetta.length; i += 150) {
     const { data } = await admin.from('spedizioni').select('id')
-      .in('id', conRecuperoEtichetta.slice(i, i + 150)).is('etichetta_url', null)
+      .in('id', conRecuperoEtichetta.slice(i, i + 150)).is('etichetta_url', null).is('etichetta_path', null)
     for (const r of data || []) senzaEtichetta.add((r as any).id)
   }
 
