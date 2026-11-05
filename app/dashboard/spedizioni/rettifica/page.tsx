@@ -21,6 +21,10 @@ export default function RettificaCostiPage() {
   const [ricalcolando, setRicalcolando] = useState<string>('')
   // Filtro sull'esito del controllo OneTracking ('' = tutte; 'ferme', 'buona', 'senza_agevolazione', …).
   const [filtroOt, setFiltroOt] = useState<string>('')
+  // «Non da addebitare» chiuso di serie; il conto «dove sono finite le righe» di un file (GET /api/rettifiche/files/esito).
+  const [altreAperte, setAltreAperte] = useState(false)
+  const [esito, setEsito] = useState<any>(null)
+  const [esitoCarico, setEsitoCarico] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   // RETTIFICHE ELIMINATE: pagate da me e non recuperate da nessuno (assorbite, caricate e poi cancellate,
   // o solo a mio carico). Si leggono solo quando si apre la sezione: per chi riceve tanto sono migliaia.
@@ -144,6 +148,18 @@ export default function RettificaCostiPage() {
     }))
     const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Rettifiche eliminate')
     writeFile(wb, `rettifiche-eliminate-${elimDal}_${elimAl}.xlsx`)
+  }
+
+  async function apriEsito(fileId: string) {
+    if (!fileId) return
+    setEsitoCarico(true); setEsito({})
+    try {
+      const res = await fetch('/api/rettifiche/files/esito?fileId=' + encodeURIComponent(fileId))
+      const d = await res.json()
+      setEsito(res.ok ? d : { errore: d.error || 'Lettura non riuscita' })
+    } catch { setEsito({ errore: 'Errore di connessione' }) }
+    setEsitoCarico(false)
+    try { setTimeout(() => document.getElementById('esito-file')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50) } catch {}
   }
 
   async function caricaFiles() {
@@ -313,32 +329,16 @@ export default function RettificaCostiPage() {
         // Come per i contrassegni, dopo l'upload si mostrano TUTTE le pendenti insieme; il singolo
         // file resta rivedibile cliccandolo in "File processati".
         await caricaRettifiche(); setFileSelezionato('')
-        await dialog.alert({
-          title: 'Rettifiche create',
-          message: (ot.attivo
-            ? `Controllo Poste: ${ot.buone} buone, ${ot.senzaAgevolazione} senza l'agevolazione, ${ot.pesoSbagliato} col peso sbagliato`
-              + `${ot.senzaMisura ? `, ${ot.senzaMisura} spedizioni non misurate da Poste` : ''}${ot.nonVerificabili ? `, ${ot.nonVerificabili} con più colli (non verificabili)` : ''}.`
-              + (ot.ferme ? ` ${ot.ferme} rettifiche sono ferme in contestazione (€ ${ot.nonGirato.toFixed(2)} non girati sotto): Poste le ha misurate diversamente dal file — per esempio ${ot.esempi[0]?.ldv}: ${ot.esempi[0]?.motivo} Vanno contestate al fornitore; se decidi di caricarne una lo stesso, nella tabella c'è «Carica lo stesso».` : '')
-              + (ot.senzaMisura ? ' Le spedizioni non misurate da Poste si caricano come prima.' : '')
-              + '\n\n'
-            : '')
-            + `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
-            + (aZero ? ` Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma sotto di lui qualcuno deve ancora pagare la differenza — confermale insieme alle altre, servono a farla arrivare fin lì.` : '')
-            + (gia ? ` ${gia} erano già state caricate da un file precedente e sono state saltate.` : '')
-            + (nonTrovate ? ` ${nonTrovate} righe del file non corrispondono a spedizioni del portale (fatte altrove, o annullate) e sono state saltate.` : '')
-            + (tuoCosto > 0.005 ? ` Il tuo costo su queste rettifiche è € ${tuoCosto.toFixed(2)}: si registra sul tuo credito quando le confermi, insieme all'addebito a chi sta sotto.` : '')
-            + (soloTue ? ` ${soloTue} sono solo a tuo carico: sotto non c'è niente da rettificare (chi sta sotto paga già abbastanza), confermandole registri il tuo costo.` : '')
-            + (fornitore ? ` € ${fornitore.toFixed(2)} del conto del fornitore, su spedizioni che non diventano rettifiche, sono stati scalati subito dal tuo credito: è la fattura che hai già ricevuto.` : '')
-            + (attesa ? ` ${attesa} spedizioni con più colli sono in attesa delle misure collo per collo e NON sono state addebitate: le misure si leggono stanotte, ricarica lo stesso file domani e si caricheranno per intero.` : '')
-            + (incomplete ? ` ${incomplete} spedizioni hanno misure solo per una parte dei colli e NON sono state addebitate: entreranno col prossimo file del fornitore, quando avrà misurato tutti i colli.` : '')
-            + (inPiu ? ` ${inPiu} spedizioni hanno nel file più righe dei colli spediti: NON sono state addebitate, vanno controllate.` : '')
-            + (senzaMisure ? ` ${senzaMisure} spedizioni del file non hanno nessuna misura rilevata e sono state saltate.` : '')
-            + (sopra.length ? ` Attenzione: ${sopra.length} rettifiche chiedono più del triplo di quanto ha addebitato il corriere (il collo dichiarato era molto più piccolo del vero) — per esempio ${sopra[0].ldv}, € ${Number(sopra[0].costoFornitore).toFixed(2)} di costo contro € ${Number(sopra[0].differenza).toFixed(2)} da girare. Controllale prima di confermare.` : '')
-            + (sopraPagato.length ? ` Attenzione: ${sopraPagato.length} rettifiche chiedono più del triplo di quanto era stato pagato — ${sopraPagato.slice(0, 5).map((x: any) => `${x.ldv} (pagata € ${Number(x.pagato).toFixed(2)}, ora € ${Number(x.differenza).toFixed(2)} in più)`).join(', ')}${sopraPagato.length > 5 ? ' e altre' : ''}. Possono essere vere o un errore del corriere: controllale prima di confermare.` : '')
-            + (supEuro ? ` Compresi € ${supEuro.toFixed(2)} di supplementi fissi (fuori sagoma, non sovrapponibile, consegna su appuntamento), che scendono invariati.` : '')
-            + (supIgnoti.length ? ` Il corriere ha addebitato anche ${Array.from(new Set(supIgnoti)).join(' e ')}: di questi non conosciamo la tariffa, il costo resta a noi e NON è stato girato — vanno chiesti al corriere.` : '')
-            + ' Scegli quali confermare e premi Conferma: fino a quel momento non viene scalato nulla, né a te né a chi sta sotto.',
-        })
+        // DOVE SONO FINITE LE RIGHE: il conto del file, gruppo per gruppo (GET /api/rettifiche/files/esito). Prima qui c'era
+        // un messaggio di quindici frasi in fila; restano a parte solo gli avvisi da guardare prima di confermare.
+        await apriEsito(fileId)
+        const avvisi: string[] = []
+        if (sopra.length) avvisi.push(`${sopra.length} rettifiche chiedono più del triplo di quanto ha addebitato il corriere — per esempio ${sopra[0].ldv}, € ${Number(sopra[0].costoFornitore).toFixed(2)} di costo contro € ${Number(sopra[0].differenza).toFixed(2)} da girare.`)
+        if (sopraPagato.length) avvisi.push(`${sopraPagato.length} rettifiche chiedono più del triplo di quanto era stato pagato — ${sopraPagato.slice(0, 5).map((x: any) => `${x.ldv} (pagata € ${Number(x.pagato).toFixed(2)}, ora € ${Number(x.differenza).toFixed(2)} in più)`).join(', ')}${sopraPagato.length > 5 ? ' e altre' : ''}.`)
+        if (incomplete) avvisi.push(`${incomplete} spedizioni hanno misure solo per una parte dei colli: entreranno col prossimo file del fornitore.`)
+        if (inPiu) avvisi.push(`${inPiu} spedizioni hanno nel file più righe dei colli spediti: vanno controllate a mano.`)
+        if (supIgnoti.length) avvisi.push(`Il corriere ha addebitato anche ${Array.from(new Set(supIgnoti)).join(' e ')}: tariffa non nota, non girato sotto.`)
+        if (avvisi.length) await dialog.alert({ title: 'Da guardare prima di confermare', message: avvisi.join('\n\n') })
         return
       }
       setAvanz(null)
@@ -476,10 +476,11 @@ export default function RettificaCostiPage() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
+  // Seleziona tutte quelle DA ADDEBITARE (l'elenco principale): le altre si scelgono dal loro gruppo, in «Non da addebitare».
   function toggleAll() {
-    const visibili = rettificheFiltrate.filter(r => r.stato === 'da_rettificare')
-    if (selectedIds.length === visibili.length) setSelectedIds([])
-    else setSelectedIds(visibili.map(r => r.id))
+    const visibili = daAddebitare.filter((r: any) => r.stato === 'da_rettificare').map((r: any) => r.id)
+    const tutte = visibili.length > 0 && visibili.every((id: string) => selectedIds.includes(id))
+    setSelectedIds(prev => tutte ? prev.filter(id => !visibili.includes(id)) : [...new Set([...prev, ...visibili])])
   }
 
   const rettificheFiltrate = cerca
@@ -580,6 +581,7 @@ export default function RettificaCostiPage() {
   // Si confermano per registrare il costo; non addebitano nessuno.
   const rettSoloMie = nonFerme.filter((r: any) => r.classe === 'solo_mio')
   const rettCtrl  = nonFerme.filter((r: any) => r.classe === 'da_controllare')
+  const daAddebitare = [...rettBuone, ...rettCtrl]
   const gruppiFermeAgev = raggruppa(rettFermeAgev)
   const gruppiFermePeso = raggruppa(rettFermePeso)
   const gruppiBuone = raggruppa(rettBuone)
@@ -886,7 +888,7 @@ export default function RettificaCostiPage() {
             <div style={{overflowX:'auto' as const, maxHeight:'340px', overflowY:'auto' as const}}>
               <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
                 <thead><tr style={{background:'#f9fafb'}}>
-                  {['#','File','Data caricamento','N. Tot Spedizioni','N. processate','N. trovate','N. scartati','N. da rettificare','Controllo Poste'].map(h=>(
+                  {['#','File','Data caricamento','Spedizioni','Rettifiche create',''].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'7px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr></thead>
@@ -898,20 +900,13 @@ export default function RettificaCostiPage() {
                       <td style={{padding:'7px 10px',color:'#f97316',fontWeight:'500',maxWidth:'200px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{f.nome_file}</td>
                       <td style={{padding:'7px 10px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{new Date(f.created_at).toLocaleString('it-IT')}</td>
                       <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{f.n_tot_spedizioni}</td>
-                      <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{f.n_processate}</td>
-                      <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{f.n_trovate}</td>
-                      <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{f.n_scartati}</td>
                       <td style={{padding:'7px 10px',fontWeight:'700',color:'#f97316'}}>{f.n_da_rettificare}</td>
-                      {/* Esito del confronto con Poste per questo file: confermate · ferme · non misurate. */}
-                      <td style={{padding:'7px 10px',whiteSpace:'nowrap' as const,fontSize:'11px'}}
-                        title={f.onetracking ? `Confermate da Poste ${f.onetracking.buona || 0} · senza agevolazione ${f.onetracking.senza_agevolazione || 0} · peso diverso ${f.onetracking.peso_sbagliato || 0} · non misurate da Poste ${f.onetracking.senza_misura || 0} · più colli ${f.onetracking.non_verificabile || 0} · caricate lo stesso ${f.onetracking.caricate_lo_stesso || 0}` : 'File caricato prima del controllo Poste'}>
-                        {f.onetracking ? (
-                          <>
-                            <span style={{color:'#166534',fontWeight:700}}>✓ {f.onetracking.buona || 0}</span>
-                            <span style={{color:'#b91c1c',fontWeight:700,marginLeft:'6px'}}>⛔ {(f.onetracking.senza_agevolazione || 0) + (f.onetracking.peso_sbagliato || 0)}</span>
-                            <span style={{color:'#6b7280',marginLeft:'6px'}}>○ {(f.onetracking.senza_misura || 0) + (f.onetracking.non_verificabile || 0)}</span>
-                          </>
-                        ) : <span style={{color:'#9ca3af'}}>—</span>}
+                      {/* Dove sono finite le spedizioni del file: ognuna in un gruppo, e i gruppi fanno il totale. */}
+                      <td style={{padding:'5px 10px',whiteSpace:'nowrap' as const}} onClick={e=>e.stopPropagation()}>
+                        <button onClick={()=>apriEsito(f.id)}
+                          style={{padding:'4px 10px',background:esito?.file?.id===f.id?'#1e293b':'#fff',color:esito?.file?.id===f.id?'#fff':'#1e293b',border:'1px solid #cbd5e1',borderRadius:'5px',fontSize:'11px',fontWeight:700,cursor:'pointer'}}>
+                          Dove sono finite ▸
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -922,12 +917,63 @@ export default function RettificaCostiPage() {
         </div>
       </div>
 
+      {/* DOVE SONO FINITE LE RIGHE DEL FILE — si apre dal bottone del file, e da solo dopo un caricamento. */}
+      {esito && (
+        <div id="esito-file" style={{background:'#fff',borderRadius:'8px',border:'1px solid #cbd5e1',overflow:'hidden',marginBottom:'16px'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'10px'}}>
+            <span style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
+              Dove sono finite le spedizioni del file
+              {esito.file && <span style={{fontWeight:500,color:'#475569',marginLeft:'6px'}}>«{esito.file.nome}» · {new Date(esito.file.quando).toLocaleString('it-IT')}</span>}
+            </span>
+            <button onClick={()=>setEsito(null)} style={{padding:'4px 10px',background:'#fff',color:'#475569',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'11px',fontWeight:600,cursor:'pointer'}}>Chiudi</button>
+          </div>
+          {esitoCarico ? (
+            <div style={{padding:'20px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>Caricamento...</div>
+          ) : esito.errore ? (
+            <div style={{padding:'20px',textAlign:'center' as const,color:'#dc2626',fontSize:'13px'}}>{esito.errore}</div>
+          ) : esito.blocchi ? (() => {
+            const somma = esito.blocchi.reduce((t: number, b: any) => t + Number(b.n || 0), 0)
+            const colore: Record<string, string> = { verde: '#16a34a', rosso: '#dc2626', giallo: '#d97706', grigio: '#94a3b8' }
+            const euroDi = (b: any) => b.euro == null || b.euro < 0.005 ? '' : b.chiave === 'da_addebitare' ? `€ ${Number(b.euro).toFixed(2)} da far pagare`
+              : b.chiave === 'addebitate' ? `€ ${Number(b.euro).toFixed(2)} pagati` : `tuo costo € ${Number(b.euro).toFixed(2)}`
+            return (
+              <div style={{padding:'12px 16px'}}>
+                <div style={{fontSize:'13px',color:'#1a1a1a',marginBottom:'10px'}}>
+                  <strong>{Number(esito.totale).toLocaleString('it-IT')}</strong> spedizioni nel file. Ognuna è finita in uno di questi gruppi:
+                  {esito.righeNonSpedizione > 0 && <span style={{color:'#64748b'}}> (più {esito.righeNonSpedizione} righe del file che non sono spedizioni: ricariche, rimesse e simili)</span>}
+                </div>
+                <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12.5px'}}>
+                  <tbody>
+                    {esito.blocchi.map((b: any) => (
+                      <tr key={b.chiave} style={{borderBottom:'1px solid #f1f5f9'}}>
+                        <td style={{padding:'7px 8px',width:'12px'}}><span style={{display:'inline-block',width:'10px',height:'10px',borderRadius:'50%',background:colore[b.tono] || '#94a3b8'}}/></td>
+                        <td style={{padding:'7px 8px',fontWeight:700,color:'#1a1a1a',textAlign:'right' as const,width:'60px'}}>{Number(b.n).toLocaleString('it-IT')}</td>
+                        <td style={{padding:'7px 8px',fontWeight:700,color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{b.titolo}</td>
+                        <td style={{padding:'7px 8px',color:'#475569'}}>{b.fare}</td>
+                        <td style={{padding:'7px 8px',color:'#1a1a1a',fontWeight:600,whiteSpace:'nowrap' as const,textAlign:'right' as const}}>{euroDi(b)}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td/>
+                      <td style={{padding:'8px',fontWeight:800,color:'#1a1a1a',textAlign:'right' as const,borderTop:'2px solid #e2e8f0'}}>{somma.toLocaleString('it-IT')}</td>
+                      <td colSpan={3} style={{padding:'8px',fontWeight:700,color:somma === Number(esito.totale) ? '#166534' : '#b45309',borderTop:'2px solid #e2e8f0'}}>
+                        {somma === Number(esito.totale) ? 'Totale: tornano tutte.' : `Totale: ${somma} su ${esito.totale}.`}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )
+          })() : null}
+        </div>
+      )}
+
       {/* Tabella rettifiche */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <span style={{fontSize:'14px',fontWeight:'700',color:'#1a1a1a'}}>
-            {fileSelezionato ? 'Spedizioni del file' : 'Rettifiche in attesa'}
-            <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'400',marginLeft:'8px'}}>({rettificheFiltrate.length} righe)</span>
+            {fileSelezionato ? 'Spedizioni del file da addebitare' : 'Rettifiche da addebitare'}
+            <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'400',marginLeft:'8px'}}>({daAddebitare.length})</span>
             {fileSelezionato && <button onClick={()=>{setFileSelezionato('');caricaRettifiche()}}
               style={{marginLeft:'10px',fontSize:'11px',color:'#f97316',background:'none',border:'none',cursor:'pointer',textDecoration:'underline',padding:0,fontWeight:600}}>mostra tutte</button>}
           </span>
@@ -954,9 +1000,77 @@ export default function RettificaCostiPage() {
               style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',width:'180px',color:'#1a1a1a'}}/>
           </div>
         </div>
+        <div style={{padding:'7px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'11px',color:'#8a8a8a',lineHeight:1.5}}>
+          In grassetto <strong style={{color:'#1a1a1a'}}>il peso su cui si paga davvero</strong>: di norma il maggiore fra reale e volume, ma sul <strong style={{color:'#1a1a1a'}}>peso reale</strong> quando il collo sta nella scatola agevolata del contratto. In <strong style={{color:'#dc2626'}}>rosso</strong> il peso dopo la ripesatura. Se il collo misurato esce dalla scatola si passa al volume: lo trovi scritto sulla riga. La colonna <strong style={{color:'#1a1a1a'}}>Differenza</strong> è quanto recuperi.
+        </div>
+
+        {loading ? (
+          <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
+        ) : !daAddebitare.length ? (
+          <div style={{padding:'28px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>
+            {rettificheFiltrate.length ? 'Nessuna rettifica da addebitare: le altre righe sono qui sotto, in «Non da addebitare».' : null}
+            {/* Le rettifiche non arrivano solo da un file: quelle accettate in "Dal mio network"
+                non ne hanno uno, e "Carica un file per vedere le spedizioni" faceva pensare che
+                fossero sparite. */}
+            {!rettificheFiltrate.length && (fileSelezionato ? 'Nessuna rettifica trovata' : 'Nessuna rettifica in attesa. Ne arrivano caricando un file del corriere, oppure caricandole da "Dal mio network".')}
+          </div>
+        ) : (
+          <div style={{overflowX:'auto' as const}}>
+            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+              <thead><tr style={{background:'#f9fafb'}}>
+                <th style={{padding:'8px 10px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
+                  <input type="checkbox"
+                    checked={daAddebitare.filter((r:any)=>r.stato==='da_rettificare').length>0 && daAddebitare.filter((r:any)=>r.stato==='da_rettificare').every((r:any)=>selectedIds.includes(r.id))}
+                    onChange={toggleAll}/>
+                </th>
+                {['Cliente','N. Spedizione','Peso iniziale','Peso/volume iniziale','Peso reale','Peso/volume reale','Costo iniziale','Costo finale','Differenza','A tuo carico'].map(h=>(
+                  <th key={h} style={{textAlign:'left' as const,padding:'8px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {/* BUONE in alto (il da-girare copre il costo del corriere) — poi DA CONTROLLARE. */}
+                {gruppiBuone.length > 0 && (
+                  <tr key="sez-buone" id="sez-buone" style={{background:'#dcfce7'}}>
+                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#166534'}}>
+                      ✅ Buone — il da-girare copre il costo del corriere, pronte da confermare <span style={{fontWeight:600}}>({rettBuone.length})</span>
+                    </td>
+                  </tr>
+                )}
+                {gruppiBuone.flatMap(renderGruppo)}
+                {gruppiCtrl.length > 0 && (
+                  <tr key="sez-ctrl" id="sez-ctrl" style={{background:'#fef3c7'}}>
+                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#92400e'}}>
+                      ⚠️ Da controllare — qui recuperi MENO del costo del corriere <span style={{fontWeight:600}}>({rettCtrl.length})</span>
+                      {totaleCtrl > 0.01 && <span style={{float:'right'}}>mancano € {totaleCtrl.toFixed(2)}</span>}
+                    </td>
+                  </tr>
+                )}
+                {gruppiCtrl.flatMap(renderGruppo)}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {/* NON DA ADDEBITARE (Lorenzo, 05/11/2026: «quelle sbagliate, senza agevolazione e già addebitate.. non devono stare in
+            primo piano»): le ferme da contestare, le già fatte pagare prima e quelle a tuo carico. Chiuse di serie: una riga dice
+            quante sono e perché; si aprono solo se servono (contestare, caricare lo stesso, registrare il tuo costo). */}
+        {!loading && (ferme.length + rettSoloMie.length) > 0 && (
+          <div style={{borderTop:'1px solid #e5e7eb'}}>
+            <div onClick={()=>setAltreAperte(!altreAperte)} style={{padding:'11px 16px',cursor:'pointer',background:'#f8fafc',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'10px',flexWrap:'wrap' as const}}>
+              <span style={{fontSize:'12.5px',fontWeight:700,color:'#334155'}}>
+                <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{altreAperte?'▾':'▸'}</span>
+                Non da addebitare: {ferme.length + rettSoloMie.length} righe
+                <span style={{fontWeight:500,color:'#64748b',marginLeft:'8px'}}>
+                  {[ferme.length ? `${ferme.length} ferme da contestare` : '', rettSoloGia.length ? `${rettSoloGia.length} già fatte pagare prima` : '',
+                    (rettSoloMie.length - rettSoloGia.length) ? `${rettSoloMie.length - rettSoloGia.length} a tuo carico` : ''].filter(Boolean).join(' · ')}
+                </span>
+              </span>
+              <span style={{fontSize:'12px',color:'#475569',fontWeight:600}}>tuo costo € {(costoSoloMie + costoDi(ferme)).toFixed(2)}</span>
+            </div>
+            {altreAperte && (
+              <>
         {/* IL CONTROLLO ONETRACKING: quante righe la misura ufficiale di Poste conferma, quante ferma e perche', quante
             Poste non ha misurato. Ogni voce filtra la tabella; il file da contestare si scarica da qui. */}
-        {conControlloOt && (
+                {conControlloOt && (
           <div style={{padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f8fafc'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
               <div style={{fontSize:'12.5px',fontWeight:800,color:'#1a1a1a'}}>
@@ -991,65 +1105,14 @@ export default function RettificaCostiPage() {
             )}
           </div>
         )}
-        {/* IL QUADRO DELLE RIGHE IN ATTESA, A BLOCCHI (Lorenzo, 05/11/2026: «per capirlo ci vuole un po.. disorganizzato»):
-            per ogni blocco quante sono, quanto vale e cosa fare. Un clic porta al blocco nella tabella. */}
-        {!loading && rettVisibili.length > 0 && (() => {
-          const blocchi = [
-            { id: 'sez-buone', n: rettBuone.length, colore: '#15803d', sfondo: '#f0fdf4', titolo: 'Da girare sotto',
-              euro: `€ ${r2(rettBuone.reduce((t: number, r: any) => t + addebitoDi(r), 0)).toFixed(2)} da far pagare`, fare: 'Pronte: selezionale e premi Conferma.' },
-            { id: 'sez-ctrl', n: rettCtrl.length, colore: '#b45309', sfondo: '#fffbeb', titolo: 'Da controllare',
-              euro: totaleCtrl > 0.005 ? `recuperi meno del costo: mancano € ${totaleCtrl.toFixed(2)}` : '', fare: 'Sulla riga c\'è il motivo: listino, misure o penale.' },
-            { id: 'sez-ferme', n: ferme.length, colore: '#b91c1c', sfondo: '#fef2f2', titolo: 'Ferme: Poste le smentisce',
-              euro: `costo del fornitore € ${costoDi(ferme).toFixed(2)} · € ${euroFerme.toFixed(2)} da far pagare sotto`, fare: 'Da contestare al fornitore col file. Si possono caricare lo stesso.' },
-            { id: 'sez-solo-gia', n: rettSoloGia.length, colore: '#334155', sfondo: '#f8fafc', titolo: 'Tuo costo: già fatte pagare sotto',
-              euro: `costo € ${costoDi(rettSoloGia).toFixed(2)} · incassato € ${soloGiaIncassato.toFixed(2)}`,
-              fare: soloGiaSotto.length ? `Su ${soloGiaSotto.length} il fornitore chiede di più: mancano € ${soloGiaManca.toFixed(2)}, da contestare.` : 'Confermale per registrare il costo.' },
-            { id: 'sez-solo-senza', n: rettSoloSenzaVoce.length, colore: '#9a3412', sfondo: '#fff7ed', titolo: 'Tuo costo: importi senza voce',
-              euro: `€ ${costoDi(rettSoloSenzaVoce).toFixed(2)}`, fare: 'Il portale non sa a chi girarli: da decidere caso per caso.' },
-            { id: 'sez-solo-stesso', n: rettSoloStesso.length + rettSoloReso.length, colore: '#475569', sfondo: '#f8fafc', titolo: 'Tuo costo: niente da chiedere sotto',
-              euro: `€ ${costoDi([...rettSoloStesso, ...rettSoloReso]).toFixed(2)}`, fare: 'Chi sta sotto ha già pagato quanto costa il peso nuovo (sulla riga i numeri), o è un reso.' },
-          ].filter(b => b.n > 0)
-          return (
-            <div style={{padding:'12px 16px',borderBottom:'1px solid #e5e7eb',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))',gap:'10px'}}>
-              {blocchi.map(b => (
-                <button key={b.id} onClick={() => vaiA(b.id === 'sez-solo-stesso' && !rettSoloStesso.length ? 'sez-solo-reso' : b.id)}
-                  style={{textAlign:'left' as const,background:b.sfondo,border:'1px solid #e5e7eb',borderLeft:`4px solid ${b.colore}`,borderRadius:'8px',padding:'10px 12px',cursor:'pointer'}}>
-                  <div style={{fontSize:'11px',fontWeight:700,color:b.colore,textTransform:'uppercase' as const,letterSpacing:'0.3px'}}>{b.titolo}</div>
-                  <div style={{fontSize:'22px',fontWeight:800,color:'#1a1a1a',lineHeight:1.2,marginTop:'2px'}}>{b.n.toLocaleString('it-IT')}</div>
-                  {b.euro && <div style={{fontSize:'12px',fontWeight:600,color:'#1a1a1a'}}>{b.euro}</div>}
-                  <div style={{fontSize:'11.5px',color:'#475569',marginTop:'3px',lineHeight:1.35}}>{b.fare}</div>
-                </button>
-              ))}
-            </div>
-          )
-        })()}
-        <div style={{padding:'7px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'11px',color:'#8a8a8a',lineHeight:1.5}}>
-          In grassetto <strong style={{color:'#1a1a1a'}}>il peso su cui si paga davvero</strong>: di norma il maggiore fra reale e volume, ma sul <strong style={{color:'#1a1a1a'}}>peso reale</strong> quando il collo sta nella scatola agevolata del contratto. In <strong style={{color:'#dc2626'}}>rosso</strong> il peso dopo la ripesatura. Se il collo misurato esce dalla scatola si passa al volume: lo trovi scritto sulla riga. La colonna <strong style={{color:'#1a1a1a'}}>Differenza</strong> è quanto recuperi.
-        </div>
-
-        {loading ? (
-          <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
-        ) : !rettificheFiltrate.length ? (
-          <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>
-            {/* Le rettifiche non arrivano solo da un file: quelle accettate in "Dal mio network"
-                non ne hanno uno, e "Carica un file per vedere le spedizioni" faceva pensare che
-                fossero sparite. */}
-            {fileSelezionato ? 'Nessuna rettifica trovata' : 'Nessuna rettifica in attesa. Ne arrivano caricando un file del corriere, oppure caricandole da "Dal mio network".'}
-          </div>
-        ) : (
-          <div style={{overflowX:'auto' as const}}>
-            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
-              <thead><tr style={{background:'#f9fafb'}}>
-                <th style={{padding:'8px 10px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
-                  <input type="checkbox"
-                    checked={selectedIds.length===rettificheFiltrate.filter(r=>r.stato==='da_rettificare').length&&rettificheFiltrate.filter(r=>r.stato==='da_rettificare').length>0}
-                    onChange={toggleAll}/>
-                </th>
-                {['Cliente','N. Spedizione','Peso iniziale','Peso/volume iniziale','Peso reale','Peso/volume reale','Costo iniziale','Costo finale','Differenza','A tuo carico'].map(h=>(
-                  <th key={h} style={{textAlign:'left' as const,padding:'8px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
+                <div style={{overflowX:'auto' as const}}>
+                  <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+                    <thead><tr style={{background:'#f9fafb'}}>
+                    {['','Cliente','N. Spedizione','Peso iniziale','Peso/volume iniziale','Peso reale','Peso/volume reale','Costo iniziale','Costo finale','Differenza','A tuo carico'].map((h,i)=>(
+                      <th key={h||'sel'+i} style={{textAlign:'left' as const,padding:'8px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const,width:h?undefined:'36px'}}>{h}</th>
+                    ))}
+                    </tr></thead>
+                    <tbody>
                 {/* FERME DAL CONTROLLO ONETRACKING, in cima e divise per motivo: non si confermano, si contestano. */}
                 {gruppiFermeAgev.length > 0 && (
                   <tr key="sez-ferme-agev" id="sez-ferme" style={{background:'#fee2e2'}}>
@@ -1069,24 +1132,6 @@ export default function RettificaCostiPage() {
                   </tr>
                 )}
                 {gruppiFermePeso.flatMap(renderGruppo)}
-                {/* BUONE in alto (il da-girare copre il costo del corriere) — poi DA CONTROLLARE. */}
-                {gruppiBuone.length > 0 && (
-                  <tr key="sez-buone" id="sez-buone" style={{background:'#dcfce7'}}>
-                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#166534'}}>
-                      ✅ Buone — il da-girare copre il costo del corriere, pronte da confermare <span style={{fontWeight:600}}>({rettBuone.length})</span>
-                    </td>
-                  </tr>
-                )}
-                {gruppiBuone.flatMap(renderGruppo)}
-                {gruppiCtrl.length > 0 && (
-                  <tr key="sez-ctrl" id="sez-ctrl" style={{background:'#fef3c7'}}>
-                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#92400e'}}>
-                      ⚠️ Da controllare — qui recuperi MENO del costo del corriere <span style={{fontWeight:600}}>({rettCtrl.length})</span>
-                      {totaleCtrl > 0.01 && <span style={{float:'right'}}>mancano € {totaleCtrl.toFixed(2)}</span>}
-                    </td>
-                  </tr>
-                )}
-                {gruppiCtrl.flatMap(renderGruppo)}
                 {gruppiSoloMie.length > 0 && (
                   <tr key="sez-solo-mie" id="sez-solo" style={{background:'#e2e8f0'}}>
                     <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#1e293b'}}>
@@ -1140,8 +1185,11 @@ export default function RettificaCostiPage() {
                   </tr>
                 )}
                 {gruppiSoloReso.flatMap(renderGruppo)}
-              </tbody>
-            </table>
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

@@ -285,6 +285,10 @@ export async function POST(req: NextRequest) {
         //    fila). Chi non e' detentore non ha un costo suo da registrare: per lui nulla cambia.
         // Sta in costo_fornitore, la colonna che la pagina usa gia' per dividere buone e da controllare.
         let aTuoCarico = 0, soloATuoCarico = 0
+        // DOVE FINISCONO LE RIGHE CHE NON DIVENTANO RETTIFICHE (rettifiche_files.esito, Lorenzo 05/11/2026: «da 1000 so
+        // rimaste 300 da addebitare e le 700 che fine hanno fatto? questo si domandava il master»). Prima queste uscivano
+        // dal conto senza lasciare traccia: ora ognuna e' contata col suo motivo, e la pagina fa tornare il totale del file.
+        const senzaRiga = { giaPagate: 0, giaRettificateSenzaCosto: 0, resoSenzaCosto: 0, nienteDaChiedere: 0, nonCalcolabili: 0 }
         // Una riga che OneTracking smentisce nasce IN CONTESTAZIONE, col motivo scritto sopra: resta nello storico,
         // la Conferma non la prende (prende solo 'da_rettificare') e quindi a nessuno sotto arriva niente.
         const statoDopoControllo = (idOrdine: string) => (controlli && FERMA.has(controlli.get(idOrdine)?.esito as any) ? 'in_contestazione' : 'da_rettificare')
@@ -314,7 +318,7 @@ export async function POST(req: NextRequest) {
         // pagina scriveva «per chi sta sotto costa uguale» e il master non capiva: su 1ZF4328R6814924086 nascondeva un conto
         // fatto su «Italia» per un pacco in Calabria (10,50 € contro 14,18).
         const soloMio = (e: any, rip: any, costo: number, perche: any = null) => {
-          if (giaPagate.has(e.idOrdine)) return     // gia' pagata: come prima, nessuna riga
+          if (giaPagate.has(e.idOrdine)) { senzaRiga.giaPagate++; return }     // gia' pagata: come prima, nessuna riga
           soloATuoCarico++
           // Quanto aveva gia' pagato chi carica: dal suo listino (costoDetentore) o, nei file con
           // l'importo, dal suo livello nella catena.
@@ -378,13 +382,14 @@ export async function POST(req: NextRequest) {
             giaRettificateCount++
             if (supplementoTardivo(e, rip, costo)) continue
             if (costo > 0) soloMio(e, rip, costo, { tipo: 'gia_rettificata' })
+            else senzaRiga.giaRettificateSenzaCosto++
             continue
           }
           // RESO: il "peso reale" del file è il peso del RITORNO, non una ripesatura dell'andata:
           // darlo al motore riprezzerebbe l'andata su un peso che non è suo. Il reso ha il suo flusso
           // (prezzo = nolo di fascia), quindi qui NON si crea un addebito cliente. Il costo fornitore
           // (quello che E&A ha davvero pagato per il ritorno) resta scalato sotto, come per tutte.
-          if (rip?.reso) { resoSaltate++; if (costo > 0) soloMio(e, rip, costo, { tipo: 'reso' }); continue }
+          if (rip?.reso) { resoSaltate++; if (costo > 0) soloMio(e, rip, costo, { tipo: 'reso' }); else senzaRiga.resoSenzaCosto++; continue }
           // In attesa delle misure collo per collo: non si addebita adesso (sarebbe meno del
           // dovuto, e l'anti-doppione impedirebbe di correggerla dopo). Il costo del fornitore si
           // scala lo stesso, piu' sotto: quello e' uscito davvero.
@@ -413,7 +418,7 @@ export async function POST(req: NextRequest) {
           const liv = figlio
             ? e.livelli.find(l => l.masterId === figlio)
             : e.livelli.find(l => l.clienteId)
-          if (!liv || liv.differenza == null) continue
+          if (!liv || liv.differenza == null) { senzaRiga.nonCalcolabili++; continue }
           // SOLO RECUPERI, MAI RIMBORSI. La ripesatura del fornitore serve a incassare quello che
           // abbiamo fatturato in MENO; se riprezzata sul listino del livello esce piu' bassa (o
           // uguale) di quanto pagato — liv.differenza = dovuto - pagato <= 0 — non si crea una nota
@@ -443,6 +448,7 @@ export async function POST(req: NextRequest) {
           if (aZero && !qualcunoSottoDeve(e, figlio)) {
             if (costo > 0) soloMio(e, rip, costo, { tipo: 'stesso_prezzo', chi: liv.chi, pagato: liv.pagato, dovuto: liv.dovuto,
               zona: (liv as any).zona ?? null, peso_prima: e.pesoRealePrima ?? null, peso_dopo: e.pesoDopo ?? null })
+            else senzaRiga.nienteDaChiedere++
             continue
           }
           if (aZero) passateAZero++
@@ -593,12 +599,25 @@ export async function POST(req: NextRequest) {
         // I conteggi si SOMMANO a quelli gia' scritti dalle fette precedenti.
         if (creaturaFile) {
           const { data: pre } = await supabase.from('rettifiche_files')
-            .select('n_processate,n_trovate,n_scartati,n_da_rettificare').eq('id', creaturaFile).maybeSingle()
+            .select('n_processate,n_trovate,n_scartati,n_da_rettificare,esito').eq('id', creaturaFile).maybeSingle()
+          const prima: any = (pre as any)?.esito || {}
+          const piu = (k: string, n: number) => (Number(prima[k]) || 0) + n
           await supabase.from('rettifiche_files').update({
             n_processate: (pre?.n_processate || 0) + fetta.length,
             n_trovate: (pre?.n_trovate || 0) + esiti.filter(e => e.trovata).length,
             n_scartati: (pre?.n_scartati || 0) + esiti.filter(e => !e.trovata).length,
             n_da_rettificare: (pre?.n_da_rettificare || 0) + scritte,
+            // Per motivo, solo le righe che NON sono diventate rettifiche: quelle diventate rettifiche si contano dalle righe.
+            esito: {
+              spedizioni: totaleFile, righeNonSpedizione: Number((lette as any).scartate) || 0,
+              nonTrovate: piu('nonTrovate', esiti.filter(e => !e.trovata).length),
+              giaCaricate: piu('giaCaricate', fetta.length - nuove.length),
+              xlInAttesa: piu('xlInAttesa', nuove.length - daCalcolare.length),
+              fuoriCatena: piu('fuoriCatena', fuoriCatena), attesaMisure: piu('attesaMisure', attesaMisure), doppioni: piu('doppioni', doppioni),
+              giaPagate: piu('giaPagate', senzaRiga.giaPagate), giaRettificateSenzaCosto: piu('giaRettificateSenzaCosto', senzaRiga.giaRettificateSenzaCosto),
+              resoSenzaCosto: piu('resoSenzaCosto', senzaRiga.resoSenzaCosto), nienteDaChiedere: piu('nienteDaChiedere', senzaRiga.nienteDaChiedere),
+              nonCalcolabili: piu('nonCalcolabili', senzaRiga.nonCalcolabili),
+            },
           }).eq('id', creaturaFile)
         }
 
@@ -668,6 +687,8 @@ export async function POST(req: NextRequest) {
   }
 
   let nProcessate = 0, nTrovate = 0, nScartati = 0, nDaRettificare = 0
+  // Dove finiscono le righe che non diventano rettifiche (rettifiche_files.esito), come nel ramo delle ripesature.
+  const motivi = { nonTrovate: 0, annullate: 0, fuoriCatena: 0, giaRettificateSenzaCosto: 0, nonCalcolabili: 0, nienteDaChiedere: 0 }
   const { data: fileRec } = await supabase.from('rettifiche_files').insert({
     master_id: myMaster, nome_file: nomeFile, n_tot_spedizioni: (righe || []).length,
   }).select().single()
@@ -680,20 +701,20 @@ export async function POST(req: NextRequest) {
       .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,stato,contrassegno,assicurazione,valore_merce,servizi_accessori')
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
-    if (!spedizione) { nScartati++; continue }
+    if (!spedizione) { nScartati++; motivi.nonTrovate++; continue }
     // Niente rettifiche su spedizioni ANNULLATE: sono già stornate, aggiungere una rettifica
     // lascerebbe un residuo non rimborsato a ogni livello della catena.
-    if ((spedizione as any).stato === 'annullata') { nScartati++; continue }
+    if ((spedizione as any).stato === 'annullata') { nScartati++; motivi.annullate++; continue }
 
     // Chi carica deve essere il master della spedizione o un suo ANTENATO
     const catena = await risaliCatena(adminDb, spedizione.master_id)
     const idx = catena.indexOf(myMaster)
-    if (idx === -1) { nScartati++; continue }
+    if (idx === -1) { nScartati++; motivi.fuoriCatena++; continue }
 
     // Anti-duplicato: salta se esiste già una rettifica CONFERMATA o IN ATTESA per la spedizione
     // (prima bloccava solo le confermate → si potevano creare doppioni "da_rettificare")
     const { data: giaEsiste } = await supabase.from('rettifiche').select('id').eq('spedizione_id', spedizione.id).or('confermata.eq.true,stato.eq.da_rettificare').limit(1)
-    if (giaEsiste && giaEsiste.length > 0) { nScartati++; continue }
+    if (giaEsiste && giaEsiste.length > 0) { nScartati++; motivi.giaRettificateSenzaCosto++; continue }
     nTrovate++
 
     const pesoIniziale = Number(spedizione.peso_fatturato || spedizione.peso_reale || 0)
@@ -753,7 +774,7 @@ export async function POST(req: NextRequest) {
       }
       const differenza = costoIniziale - costoFinale
       // SOLO RECUPERI (differenza negativa = addebito), mai rimborsi: vedi il ramo ripesature sopra.
-      if (differenza > -0.01) { continue }
+      if (differenza > -0.01) { motivi.nienteDaChiedere++; continue }
       nDaRettificare++
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,
@@ -768,7 +789,7 @@ export async function POST(req: NextRequest) {
       // ── CATENA: la rettifica si ferma al primo master sotto di me ──
       const targetMasterId = catena[idx - 1]
       const { data: tm } = await adminDb.from('masters').select('parent_listino_id').eq('id', targetMasterId).maybeSingle()
-      if (!tm?.parent_listino_id) { nScartati++; continue }
+      if (!tm?.parent_listino_id) { nScartati++; motivi.nonCalcolabili++; continue }
       const pesoRicalcolo = pesoReale || pesoIniziale
       const prezzoIni = await calcolaPrezzoListino(adminDb, {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
@@ -780,12 +801,12 @@ export async function POST(req: NextRequest) {
         cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
         packages: [{ weight: pesoRicalcolo }], corriereId: spedizione.corriere_id,
       })
-      if (!prezzoIni || !prezzoFin) { nScartati++; continue }
+      if (!prezzoIni || !prezzoFin) { nScartati++; motivi.nonCalcolabili++; continue }
       const costoIniziale = prezzoIni.prezzo
       const costoFinale = prezzoFin.prezzo
       const differenza = costoIniziale - costoFinale
       // SOLO RECUPERI (differenza negativa = addebito), mai rimborsi: vedi il ramo ripesature sopra.
-      if (differenza > -0.01) { continue }
+      if (differenza > -0.01) { motivi.nienteDaChiedere++; continue }
       nDaRettificare++
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,
@@ -802,6 +823,7 @@ export async function POST(req: NextRequest) {
   if (rettificheToInsert.length > 0) await supabase.from('rettifiche').insert(rettificheToInsert)
   await supabase.from('rettifiche_files').update({
     n_processate: nProcessate, n_trovate: nTrovate, n_scartati: nScartati, n_da_rettificare: nDaRettificare,
+    esito: { spedizioni: daProcessare.length, anomalie: anomalie.length, ...motivi, nonTrovate: motivi.nonTrovate + motivi.annullate },
   }).eq('id', fileRec?.id)
   return NextResponse.json({ success: true, fileId: fileRec?.id, nProcessate, nTrovate, nScartati, nDaRettificare, anomalie })
 }
