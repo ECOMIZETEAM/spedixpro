@@ -5,6 +5,7 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 import { giorniFaRoma, giornoRoma } from '@/lib/date-roma'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 import { FERMA } from '@/lib/ripesature-controllo'
+import { descriviStessoPrezzo } from '@/lib/rettifiche-perche'
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function RettificaCostiPage() {
@@ -624,7 +625,7 @@ export default function RettificaCostiPage() {
   }
   const gruppiSoloGia = raggruppaPer(rettSoloGia, (r: any) => r.perche_mio.gia.a, 'fatte pagare a lui')
   const gruppiSoloSenzaVoce = raggruppaPer(rettSoloSenzaVoce, () => 'Importi del fornitore senza voce', 'il tuo costo')
-  const gruppiSoloStesso = raggruppaPer(rettSoloStesso, () => 'Stesso prezzo per chi sta sotto', 'il tuo costo')
+  const gruppiSoloStesso = raggruppaPer(rettSoloStesso, () => 'Niente da chiedere sotto', 'il tuo costo')
   const gruppiSoloReso = raggruppaPer(rettSoloReso, () => 'Resi', 'il tuo costo')
   const giornoIt = (s: string) => new Date(s).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' })
   const vaiA = (id: string) => { try { document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } catch {} }
@@ -754,7 +755,7 @@ export default function RettificaCostiPage() {
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#475569'}}>Reso: il ritorno si paga col nolo del reso, non con la ripesatura</div>
           )}
           {r.perche_mio?.tipo === 'stesso_prezzo' && (
-            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#475569'}}>Per chi sta sotto il peso nuovo costa uguale: non c'è niente da chiedergli</div>
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#475569',whiteSpace:'normal',maxWidth:'380px',lineHeight:1.4}}>= {descriviStessoPrezzo(r.perche_mio.conto)}</div>
           )}
           {r.nota_peso && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#1e40af',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'2px 6px',whiteSpace:'normal',maxWidth:'300px'}}>
@@ -1006,7 +1007,7 @@ export default function RettificaCostiPage() {
             { id: 'sez-solo-senza', n: rettSoloSenzaVoce.length, colore: '#9a3412', sfondo: '#fff7ed', titolo: 'Tuo costo: importi senza voce',
               euro: `€ ${costoDi(rettSoloSenzaVoce).toFixed(2)}`, fare: 'Il portale non sa a chi girarli: da decidere caso per caso.' },
             { id: 'sez-solo-stesso', n: rettSoloStesso.length + rettSoloReso.length, colore: '#475569', sfondo: '#f8fafc', titolo: 'Tuo costo: niente da chiedere sotto',
-              euro: `€ ${costoDi([...rettSoloStesso, ...rettSoloReso]).toFixed(2)}`, fare: 'Stesso prezzo per chi sta sotto, o reso.' },
+              euro: `€ ${costoDi([...rettSoloStesso, ...rettSoloReso]).toFixed(2)}`, fare: 'Chi sta sotto ha già pagato quanto costa il peso nuovo (sulla riga i numeri), o è un reso.' },
           ].filter(b => b.n > 0)
           return (
             <div style={{padding:'12px 16px',borderBottom:'1px solid #e5e7eb',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))',gap:'10px'}}>
@@ -1124,7 +1125,7 @@ export default function RettificaCostiPage() {
                 {rettSoloStesso.length > 0 && (
                   <tr key="sez-solo-stesso" id="sez-solo-stesso">
                     <td colSpan={11} style={{padding:'8px 12px 8px 26px',fontWeight:700,fontSize:'12px',color:'#334155',background:'#f8fafc',borderTop:'1px solid #e2e8f0'}}>
-                      = Stesso prezzo per chi sta sotto: col suo listino il peso nuovo costa uguale <span style={{fontWeight:600}}>({rettSoloStesso.length})</span>
+                      = Niente da chiedere sotto: chi sta sotto ha già pagato quanto costa il pacco col peso nuovo <span style={{fontWeight:600}}>({rettSoloStesso.length})</span>
                       <span style={{float:'right'}}>€ {costoDi(rettSoloStesso).toFixed(2)}</span>
                     </td>
                   </tr>

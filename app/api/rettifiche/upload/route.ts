@@ -309,7 +309,11 @@ export async function POST(req: NextRequest) {
         // SOLO A TUO CARICO: sotto non c'e' niente da chiedere (gia' rettificata da un'altra fonte, reso,
         // stesso scaglione per tutti), ma il fornitore ha fatto pagare chi carica. La riga e' intestata a
         // lui stesso: confermandola paga lui, e a nessuno sotto arriva niente.
-        const soloMio = (e: any, rip: any, costo: number) => {
+        // PERCHE' (colonna perche, 05/11/2026): il motivo e, quando sotto «non c'e' niente da chiedere», i numeri del conto —
+        // chi sta sotto, quanto ha pagato, quanto pagherebbe col peso del fornitore e in che zona del suo listino. Prima la
+        // pagina scriveva «per chi sta sotto costa uguale» e il master non capiva: su 1ZF4328R6814924086 nascondeva un conto
+        // fatto su «Italia» per un pacco in Calabria (10,50 € contro 14,18).
+        const soloMio = (e: any, rip: any, costo: number, perche: any = null) => {
           if (giaPagate.has(e.idOrdine)) return     // gia' pagata: come prima, nessuna riga
           soloATuoCarico++
           // Quanto aveva gia' pagato chi carica: dal suo listino (costoDetentore) o, nei file con
@@ -329,6 +333,7 @@ export async function POST(req: NextRequest) {
             rif_fornitore: e.idOrdine,
             colli_ripesati: e.colli_ripesati || null,
             ...colonnaControllo(e.idOrdine),
+            perche,
           })
         }
         // SUPPLEMENTO ARRIVATO DOPO I CHILI (lib/supplemento-tardivo): il pacco e' gia' rettificato, ma il fornitore
@@ -372,14 +377,14 @@ export async function POST(req: NextRequest) {
           if (giaRettificateSet.has(e.spedizioneId)) {
             giaRettificateCount++
             if (supplementoTardivo(e, rip, costo)) continue
-            if (costo > 0) soloMio(e, rip, costo)
+            if (costo > 0) soloMio(e, rip, costo, { tipo: 'gia_rettificata' })
             continue
           }
           // RESO: il "peso reale" del file è il peso del RITORNO, non una ripesatura dell'andata:
           // darlo al motore riprezzerebbe l'andata su un peso che non è suo. Il reso ha il suo flusso
           // (prezzo = nolo di fascia), quindi qui NON si crea un addebito cliente. Il costo fornitore
           // (quello che E&A ha davvero pagato per il ritorno) resta scalato sotto, come per tutte.
-          if (rip?.reso) { resoSaltate++; if (costo > 0) soloMio(e, rip, costo); continue }
+          if (rip?.reso) { resoSaltate++; if (costo > 0) soloMio(e, rip, costo, { tipo: 'reso' }); continue }
           // In attesa delle misure collo per collo: non si addebita adesso (sarebbe meno del
           // dovuto, e l'anti-doppione impedirebbe di correggerla dopo). Il costo del fornitore si
           // scala lo stesso, piu' sotto: quello e' uscito davvero.
@@ -435,7 +440,11 @@ export async function POST(req: NextRequest) {
           // A ZERO MA NON FERMA: il figlio non deve niente, ma qualcuno sotto di lui si' (vedi
           // qualcunoSottoDeve). La riga nasce a zero cosi' la catena prosegue e chi sta sotto la gira ai suoi.
           const aZero = liv.differenza < 0.01 && fsEff === 0
-          if (aZero && !qualcunoSottoDeve(e, figlio)) { if (costo > 0) soloMio(e, rip, costo); continue }
+          if (aZero && !qualcunoSottoDeve(e, figlio)) {
+            if (costo > 0) soloMio(e, rip, costo, { tipo: 'stesso_prezzo', chi: liv.chi, pagato: liv.pagato, dovuto: liv.dovuto,
+              zona: (liv as any).zona ?? null, peso_prima: e.pesoRealePrima ?? null, peso_dopo: e.pesoDopo ?? null })
+            continue
+          }
           if (aZero) passateAZero++
           const diffRett = (!isPenaleBrt && liv.differenza >= 0.01) ? liv.differenza : 0
           if (!isPenaleBrt && e.addebitoFornitore > 0 && diffRett > e.addebitoFornitore * 3) {

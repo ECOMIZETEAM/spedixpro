@@ -69,13 +69,13 @@ export async function GET(req: NextRequest) {
     // Sulle ricevute da sopra no: l'esito e' di chi ha caricato il file, e sotto non deve sapere che era sbagliata.
     const conPoste = await controlloAttivo(admin, mio)
     const mie = await leggi(q => q.eq('master_id', mio).eq('target_master_id', mio).eq('confermata', true),
-      ',peso_reale,peso_volume_reale,supplementi_nomi' + (conPoste ? ',controllo' : ''))
+      ',peso_reale,peso_volume_reale,supplementi_nomi,perche' + (conPoste ? ',controllo' : ''))
 
     // GIA' FATTE PAGARE SOTTO NON SONO SOLDI PERSI (lib/rettifiche-perche). Sulla maggior parte di questi pacchi avevo
     // gia' fatto pagare la ripesatura a qualcuno sotto con un'altra rettifica (dalle misure del portale, da un file di
     // prima): il costo arrivato dopo resta a me perche' sotto non si chiede due volte, ma l'ho gia' incassato. Sulle
     // righe di MULTI del 05/11/2026 erano 2.635 su 2.675. Si dice riga per riga: a chi, quando, quanto.
-    const { giaFattePagareSotto, perchePropri } = await import('@/lib/rettifiche-perche')
+    const { giaFattePagareSotto, perchePropri, descriviStessoPrezzo } = await import('@/lib/rettifiche-perche')
     const ricevuteNonGirate = ricevute.filter(r => !(r.propagazione === 'propagata' && conFiglia.has(r.id)))
     const giaRicevute = await giaFattePagareSotto(admin, mio, ricevuteNonGirate.map(r => r.spedizione_id))
     const percheMie = await perchePropri(admin, mio, mie)
@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
         motivo: p?.tipo === 'gia_fatta_pagare' ? MOTIVO_GIA
           : p?.tipo === 'reso' ? 'Reso: il ritorno si paga col nolo del reso, non con la ripesatura'
           : p?.tipo === 'senza_voce' ? 'Il fornitore ha addebitato un importo senza dire per cosa (né chili né un supplemento conosciuto): il portale non sa a chi girarlo'
-          : 'Solo a tuo carico: per chi sta sotto il peso nuovo costa uguale, non c\'era niente da chiedergli',
+          : 'Solo a tuo carico: ' + descriviStessoPrezzo(p?.conto),
         ...(conPoste && FERMA.has(r.controllo?.esito) ? { poste: r.controllo.motivo } : {}),
       })
     }

@@ -18,7 +18,29 @@ export type PercheMio =
   | { tipo: 'gia_fatta_pagare'; gia: GiaFattaPagare }
   | { tipo: 'reso' }
   | { tipo: 'senza_voce' }
-  | { tipo: 'stesso_prezzo' }
+  | { tipo: 'stesso_prezzo'; conto?: ContoStessoPrezzo }
+
+// I numeri con cui il caricamento ha deciso «niente da chiedere sotto» (colonna rettifiche.perche).
+export type ContoStessoPrezzo = { chi?: string; pagato?: number; dovuto?: number | null; zona?: string | null; peso_prima?: number | null; peso_dopo?: number | null }
+
+const eur = (n: any) => `€ ${(Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace('.', ',')}`
+const kg = (n: any) => `${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString('it-IT')} kg`
+
+// LA FRASE, CON I NUMERI (Lorenzo, 05/11/2026: «che significa costa uguale.. non si capisce.. modifichiamo la voce»).
+// «GENIUS DELIVERY ha pagato € 12,60 per 5 kg. Col peso del fornitore, 9,5 kg, il suo listino (zona Calabria) fa
+// € 14,18…»: chi legge vede subito se il conto torna — come non tornava su 1ZF4328R6814924086, fatto su «Italia».
+// Senza i numeri (righe nate prima del 05/11) resta la spiegazione, detta per intero.
+export function descriviStessoPrezzo(c?: ContoStessoPrezzo | null): string {
+  if (!c || c.pagato == null || c.dovuto == null) {
+    return 'Chi sta sotto ha già pagato quanto costa il pacco col peso nuovo: col suo listino il peso del fornitore sta nella stessa fascia di prezzo di quello dichiarato, quindi non gli si chiede niente'
+  }
+  const chi = c.chi || 'Chi sta sotto'
+  const prima = c.peso_prima ? ` per ${kg(c.peso_prima)}` : ''
+  const dopo = c.peso_dopo ? `, ${kg(c.peso_dopo)}` : ''
+  const zona = c.zona ? ` (zona ${c.zona})` : ''
+  const esito = Number(c.dovuto) < Number(c.pagato) - 0.005 ? 'ha già pagato di più' : 'è la stessa cifra'
+  return `${chi} ha pagato ${eur(c.pagato)}${prima}. Col peso del fornitore${dopo}, il suo listino${zona} fa ${eur(c.dovuto)}: ${esito}, quindi non gli si chiede niente`
+}
 
 const importo = (x: any) => Math.round((-Number(x.differenza || 0) + Number(x.fuori_sagoma || 0)) * 100) / 100
 
@@ -84,7 +106,8 @@ export async function perchePropri(admin: any, masterId: string, righe: any[]): 
     if (g) { out.set(r.id, { tipo: 'gia_fatta_pagare', gia: g }); continue }
     if (r.spedizione_id && resi.has(r.spedizione_id)) { out.set(r.id, { tipo: 'reso' }); continue }
     const senzaPeso = !(Number(r.peso_reale) > 0) && !(Number(r.peso_volume_reale) > 0)
-    out.set(r.id, senzaPeso && !String(r.supplementi_nomi || '').trim() ? { tipo: 'senza_voce' } : { tipo: 'stesso_prezzo' })
+    out.set(r.id, senzaPeso && !String(r.supplementi_nomi || '').trim() ? { tipo: 'senza_voce' }
+      : { tipo: 'stesso_prezzo', ...(r.perche?.tipo === 'stesso_prezzo' ? { conto: r.perche } : {}) })
   }
   return out
 }
