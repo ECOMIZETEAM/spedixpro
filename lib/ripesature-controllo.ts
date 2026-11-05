@@ -98,8 +98,11 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
     // Il peso che il file fa pagare: quello che il motore usera' per la fascia (il reale se il collo del file
     // sta nell'agevolazione, altrimenti il maggiore col volume; senza misure nel file e' il peso scritto).
     const pesoFile = pesoSuReale(c.settings, colliFile, reale) ? reale : Math.max(reale, volFile)
+    // PIU' COLLI: OneTracking misura il pacco, non i colli. Sui 157 multicollo Poste Express M rettificati fino al 05/11
+    // ha una lettura sola su 15 (esito 'multicollo') e il portale filiali nessuna: non c'e' una misura collo per collo da
+    // mettere accanto al file, quindi non si decide niente.
     if ((Number(s?.colli) || 1) > 1 || colliFile.length > 1) {
-      out.set(e.idOrdine, { esito: 'non_verificabile', motivo: 'Più colli: OneTracking misura il pacco, non i singoli colli', peso_file: pesoFile })
+      out.set(e.idOrdine, { esito: 'non_verificabile', motivo: 'Più colli: Poste misura il pacco, non i singoli colli', peso_file: pesoFile })
       continue
     }
     const m = misure.get(e.spedizioneId)
@@ -107,28 +110,63 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
       out.set(e.idOrdine, { esito: 'senza_misura', motivo: 'Spedizione non misurata da Poste', peso_file: pesoFile })
       continue
     }
-    const letture = [m, ...(Array.isArray(m.righe) ? m.righe : [])]
-      .map((l: any) => ({ peso: Number(l.peso) || 0, lunghezza: Number(l.lunghezza) || 0, larghezza: Number(l.larghezza) || 0, altezza: Number(l.altezza) || 0, dove: l.dove ?? l.filiale ?? null, quando: l.quando ?? l.misurata_il ?? null }))
-      .filter(l => l.peso > 0)
-    if (!letture.length) {
-      out.set(e.idOrdine, { esito: 'senza_misura', motivo: 'Spedizione non misurata da Poste', peso_file: pesoFile })
-      continue
-    }
     const fascia = (x: number) => {
       const f = c.soglie.find(t => x <= t + 1e-9)
       return f ?? (c.soglie.length ? Infinity : x)
     }
+    const tutte = [m, ...(Array.isArray(m.righe) ? m.righe : [])]
+      .map((l: any) => ({ peso: Number(l.peso) || 0, lunghezza: Number(l.lunghezza) || 0, larghezza: Number(l.larghezza) || 0, altezza: Number(l.altezza) || 0, dove: l.dove ?? l.filiale ?? null, quando: l.quando ?? l.misurata_il ?? null }))
+      // LETTURE CHE NON SONO MISURE: "43×33×1 cm" e' la lettura principale di 14.117 pacchi in 68 filiali, con 0,08 kg di
+      // media — un valore di comodo, non una misura; e ci sono 1×1×1 cm a 99 kg, 15×1,5×0,5 cm a 14 kg. Un lato di un
+      // centimetro e mezzo o meno vuol dire che la lettura non e' buona: non si usa ne' per il peso ne' per il volume.
+      // Le letture senza lati (0×0×0) restano, per il solo peso.
+      .filter(l => !([l.lunghezza, l.larghezza, l.altezza].some(x => x > 0) && Math.min(l.lunghezza, l.larghezza, l.altezza) <= 1.5))
+    // UNA LETTURA SERVE SOLO SE HA PESO E TUTTI E TRE I LATI. Col solo peso il volume non si conosce, e un pacco grande e
+    // leggero lo si fermerebbe come "peso sbagliato" senza prova: fino al 05/11 sono 80 rettifiche Poste Express M con la
+    // lettura principale senza lati (e 253 senza peso). Col solo peso si puo' dire una cosa sola: se il file non supera la
+    // fascia del peso pesato da Poste, il fornitore non ha chiesto troppo.
+    const letture = tutte.filter(l => l.peso > 0 && l.lunghezza > 0 && l.larghezza > 0 && l.altezza > 0)
+    if (!letture.length) {
+      const pesate = tutte.filter(l => l.peso > 0)
+      if (!pesate.length) {
+        out.set(e.idOrdine, { esito: 'senza_misura', motivo: 'Spedizione non misurata da Poste', peso_file: pesoFile })
+        continue
+      }
+      const piuPesante = pesate.reduce((a, b) => (b.peso > a.peso ? b : a))
+      const nonSupera = c.soglie.length ? fascia(pesoFile) <= fascia(piuPesante.peso + 0.2) : pesoFile <= piuPesante.peso * 1.1 + 0.2
+      out.set(e.idOrdine, nonSupera
+        ? { esito: 'buona', motivo: 'Il peso del file non supera quello pesato da Poste', peso_file: Math.round(pesoFile * 100) / 100, peso_onetracking: piuPesante.peso, misura: { ...piuPesante } }
+        : { esito: 'non_verificabile', motivo: 'Poste ha pesato il pacco ma non ne ha misurato i lati: il volume non si può verificare', peso_file: Math.round(pesoFile * 100) / 100, peso_onetracking: piuPesante.peso, misura: { ...piuPesante } })
+      continue
+    }
+    // I LATI SI ARROTONDANO AL CENTIMETRO SOPRA, come fa il fornitore: 3UW1UHA267901 misurato 61,5×41,5×19,5 cm fa 9,95 kg
+    // di volume (fascia fino a 10), il file dice 10,21 — e con 62×42×20 sono 10,42. Senza arrotondare lo si fermava a torto.
+    // Anche la scatola dell'agevolazione si guarda sui lati arrotondati: in dubbio, si da' ragione al fornitore.
     const conti = letture.map(l => {
-      const volume = l.lunghezza * l.larghezza * l.altezza / c.divisore
-      const agevolata = pesoSuReale(c.settings, [{ length: l.lunghezza, width: l.larghezza, height: l.altezza }], l.peso)
+      const L = Math.ceil(l.lunghezza - 1e-9), W = Math.ceil(l.larghezza - 1e-9), H = Math.ceil(l.altezza - 1e-9)
+      const volume = L * W * H / c.divisore
+      const agevolata = pesoSuReale(c.settings, [{ length: L, width: W, height: H }], l.peso)
       return { l, volume, agevolata, giusto: agevolata ? l.peso : Math.max(l.peso, volume) }
     })
+    // IL PESO PESATO DA POSTE CONTA SEMPRE, anche in una lettura senza lati: 3UW1UHA259494 ha la lettura principale a
+    // 4,05 kg senza lati — il peso del file — e in un altro hub una "0,05 kg 43×33×1 cm". Senza questa riga si fermava
+    // sulla seconda. Poste non tassa mai sotto il peso che ha pesato, quindi una lettura col solo peso alza il minimo.
+    for (const l of tutte.filter(x => x.peso > 0 && !(x.lunghezza > 0 && x.larghezza > 0 && x.altezza > 0))) {
+      conti.push({ l, volume: 0, agevolata: false, giusto: l.peso })
+    }
     const migliore = conti.reduce((a, b) => (b.giusto > a.giusto ? b : a))
+    // MARGINE SULLA BILANCIA: lo stesso pacco pesa 0,9 kg a Civitanova e 1 kg a Bologna. Il file si ferma solo se supera
+    // la fascia anche con 0,2 kg in piu' sul peso di Poste (3UW1UHA249134: 1,95 kg a Trapani, file 2,11: non si ferma).
     // Senza fasce nel listino si confrontano i chili, con un margine per gli arrotondamenti del fornitore.
-    const sopra = c.soglie.length ? fascia(pesoFile) > fascia(migliore.giusto) : pesoFile > migliore.giusto * 1.1 + 0.2
-    const misura = { peso: migliore.l.peso, lunghezza: migliore.l.lunghezza, larghezza: migliore.l.larghezza, altezza: migliore.l.altezza, dove: migliore.l.dove, quando: migliore.l.quando }
+    const MARGINE_KG = 0.2
+    const sopra = c.soglie.length ? fascia(pesoFile) > fascia(migliore.giusto + MARGINE_KG) : pesoFile > migliore.giusto * 1.1 + MARGINE_KG
+    // Se il peso piu' alto viene da una lettura senza lati, i lati da mostrare sono quelli della lettura completa piu'
+    // grande: "1,15 kg, 0×0×0 cm" non dice niente a chi deve contestare.
+    const conLati = conti.filter(k => k.l.lunghezza > 0).reduce((a: any, b: any) => (!a || b.volume > a.volume ? b : a), null)
+    const latiDa = migliore.l.lunghezza > 0 ? migliore.l : (conLati?.l || migliore.l)
+    const misura = { peso: migliore.l.peso, lunghezza: latiDa.lunghezza, larghezza: latiDa.larghezza, altezza: latiDa.altezza, dove: migliore.l.dove, quando: migliore.l.quando }
     const base = { peso_file: Math.round(pesoFile * 100) / 100, peso_onetracking: Math.round(migliore.giusto * 100) / 100, misura }
-    if (!sopra) { out.set(e.idOrdine, { esito: 'buona', motivo: 'Il peso del file è quello di OneTracking', ...base }); continue }
+    if (!sopra) { out.set(e.idOrdine, { esito: 'buona', motivo: 'Il peso del file è quello misurato da Poste', ...base }); continue }
     const fasciaTxt = (x: number) => (Number.isFinite(fascia(x)) ? `fascia fino a ${fascia(x)} kg` : 'oltre l\'ultima fascia')
     // Il file si spiega col volume di una delle letture, ma OneTracking dice che il pacco sta nell'agevolazione: si
     // doveva pagare il reale. Il volume si cerca su TUTTE le letture: 3UW1UHA256121 (0,5 kg) fa 1,99 kg di volume
@@ -136,7 +174,7 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
     if (migliore.agevolata && conti.some(k => fascia(pesoFile) <= fascia(Math.max(k.l.peso, k.volume)))) {
       out.set(e.idOrdine, {
         esito: 'senza_agevolazione', ...base,
-        motivo: `OneTracking: ${kg(misura.peso)}, ${lati(misura)}${misura.dove ? ` (${misura.dove})` : ''} — collo singolo nella scatola ${descriviAgevolazione(c.settings)}`
+        motivo: `Misura di Poste: ${kg(misura.peso)}, ${lati(misura)}${misura.dove ? ` (${misura.dove})` : ''} — collo singolo nella scatola ${descriviAgevolazione(c.settings)}`
           + `${Number(c.settings?.agevolazione_peso_max) > 0 ? ` e fino a ${c.settings.agevolazione_peso_max} kg` : ''}: si paga il peso reale, ${fasciaTxt(misura.peso)}. `
           + `Il file fa pagare ${kg(pesoFile)}, cioè il volume: ${fasciaTxt(pesoFile)}.`,
       })
@@ -144,7 +182,7 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
     }
     out.set(e.idOrdine, {
       esito: 'peso_sbagliato', ...base,
-      motivo: `OneTracking: ${kg(misura.peso)}, ${lati(misura)}${misura.dove ? ` (${misura.dove})` : ''}, tassabile ${kg(migliore.giusto)} (${fasciaTxt(migliore.giusto)}). `
+      motivo: `Misura di Poste: ${kg(misura.peso)}, ${lati(misura)}${misura.dove ? ` (${misura.dove})` : ''}, tassabile ${kg(migliore.giusto)} (${fasciaTxt(migliore.giusto)}). `
         + `Il file fa pagare ${kg(pesoFile)}: ${fasciaTxt(pesoFile)}.`,
     })
   }

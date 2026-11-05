@@ -231,7 +231,7 @@ export default function RettificaCostiPage() {
         await dialog.alert({
           title: 'Rettifiche create',
           message: (ot.attivo
-            ? `Controllo OneTracking: ${ot.buone} buone, ${ot.senzaAgevolazione} senza l'agevolazione, ${ot.pesoSbagliato} col peso sbagliato`
+            ? `Controllo Poste: ${ot.buone} buone, ${ot.senzaAgevolazione} senza l'agevolazione, ${ot.pesoSbagliato} col peso sbagliato`
               + `${ot.senzaMisura ? `, ${ot.senzaMisura} spedizioni non misurate da Poste` : ''}${ot.nonVerificabili ? `, ${ot.nonVerificabili} con più colli (non verificabili)` : ''}.`
               + (ot.ferme ? ` ${ot.ferme} rettifiche sono ferme in contestazione (€ ${ot.nonGirato.toFixed(2)} non girati sotto): Poste le ha misurate diversamente dal file — per esempio ${ot.esempi[0]?.ldv}: ${ot.esempi[0]?.motivo} Vanno contestate al fornitore; se decidi di caricarne una lo stesso, nella tabella c'è «Carica lo stesso».` : '')
               + (ot.senzaMisura ? ' Le spedizioni non misurate da Poste si caricano come prima.' : '')
@@ -437,7 +437,7 @@ export default function RettificaCostiPage() {
   // peso fatturato. Dentro ci sono solo pesi e misure: nessun importo interno, nessun nome di chi sta sotto.
   async function scaricaDaContestare() {
     const righe = rettificheFiltrate.filter((r: any) => FERMA.has(esitoOt(r) as any))
-    if (!righe.length) { await dialog.alert({ title: 'Niente da contestare', message: 'In questa vista non ci sono righe fermate dal controllo OneTracking.' }); return }
+    if (!righe.length) { await dialog.alert({ title: 'Niente da contestare', message: 'In questa vista non ci sono righe fermate dal controllo Poste.' }); return }
     const { utils, writeFile } = await import('xlsx')
     const riga = (r: any) => {
       const m = r.controllo?.misura || {}
@@ -464,7 +464,7 @@ export default function RettificaCostiPage() {
       { 'Voce': 'Agevolazione peso reale non applicata (collo singolo nella scatola: si paga il peso reale)', 'Spedizioni': agev.length },
       { 'Voce': 'Peso fatturato diverso dalla misura di Poste', 'Spedizioni': peso.length },
       { 'Voce': 'Totale da contestare', 'Spedizioni': righe.length },
-      { 'Voce': 'Fonte delle misure: OneTracking, il portale ufficiale di Poste', 'Spedizioni': '' },
+      { 'Voce': 'Fonte delle misure: Poste, rilevate nei centri di smistamento', 'Spedizioni': '' },
     ]), 'Riepilogo')
     if (agev.length) utils.book_append_sheet(wb, utils.json_to_sheet(agev), 'Senza agevolazione')
     if (peso.length) utils.book_append_sheet(wb, utils.json_to_sheet(peso), 'Peso sbagliato')
@@ -575,18 +575,18 @@ export default function RettificaCostiPage() {
           )}
           {r.controllo?.esito === 'buona' && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#166534',whiteSpace:'normal',maxWidth:'320px'}}>
-              ✓ OneTracking: {misuraOt(r.controllo.misura)} — tassabile {kgOt(r.controllo.peso_onetracking)}, come il file ({kgOt(r.controllo.peso_file)})
+              ✓ Misura di Poste: {misuraOt(r.controllo.misura)} — tassabile {kgOt(r.controllo.peso_onetracking)}, come il file ({kgOt(r.controllo.peso_file)})
             </div>
           )}
           {r.controllo?.esito === 'senza_misura' && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#6b7280'}}>○ Non misurata da Poste: vale il peso del file ({kgOt(r.controllo.peso_file)})</div>
           )}
           {r.controllo?.esito === 'non_verificabile' && (
-            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#6b7280'}}>○ Più colli: OneTracking misura il pacco, non i singoli colli</div>
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#6b7280'}}>○ Più colli: Poste misura il pacco, non i singoli colli</div>
           )}
           {r.stato === 'da_rettificare' && r.controllo?.sbloccata_il && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#92400e',whiteSpace:'normal',maxWidth:'300px'}}>
-              Sbloccata a mano il {new Date(r.controllo.sbloccata_il).toLocaleDateString('it-IT')}: OneTracking diceva altro ({r.controllo.motivo})
+              Sbloccata a mano il {new Date(r.controllo.sbloccata_il).toLocaleDateString('it-IT')}: Poste diceva altro ({r.controllo.motivo})
             </div>
           )}
           {r.nota_peso && (
@@ -698,7 +698,7 @@ export default function RettificaCostiPage() {
             <div style={{overflowX:'auto' as const, maxHeight:'340px', overflowY:'auto' as const}}>
               <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
                 <thead><tr style={{background:'#f9fafb'}}>
-                  {['#','File','Data caricamento','N. Tot Spedizioni','N. processate','N. trovate','N. scartati','N. da rettificare','OneTracking'].map(h=>(
+                  {['#','File','Data caricamento','N. Tot Spedizioni','N. processate','N. trovate','N. scartati','N. da rettificare','Controllo Poste'].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'7px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr></thead>
@@ -716,7 +716,7 @@ export default function RettificaCostiPage() {
                       <td style={{padding:'7px 10px',fontWeight:'700',color:'#f97316'}}>{f.n_da_rettificare}</td>
                       {/* Esito del confronto con Poste per questo file: confermate · ferme · non misurate. */}
                       <td style={{padding:'7px 10px',whiteSpace:'nowrap' as const,fontSize:'11px'}}
-                        title={f.onetracking ? `Confermate da OneTracking ${f.onetracking.buona || 0} · senza agevolazione ${f.onetracking.senza_agevolazione || 0} · peso diverso ${f.onetracking.peso_sbagliato || 0} · non misurate da Poste ${f.onetracking.senza_misura || 0} · più colli ${f.onetracking.non_verificabile || 0} · caricate lo stesso ${f.onetracking.caricate_lo_stesso || 0}` : 'File caricato prima del controllo OneTracking'}>
+                        title={f.onetracking ? `Confermate da Poste ${f.onetracking.buona || 0} · senza agevolazione ${f.onetracking.senza_agevolazione || 0} · peso diverso ${f.onetracking.peso_sbagliato || 0} · non misurate da Poste ${f.onetracking.senza_misura || 0} · più colli ${f.onetracking.non_verificabile || 0} · caricate lo stesso ${f.onetracking.caricate_lo_stesso || 0}` : 'File caricato prima del controllo Poste'}>
                         {f.onetracking ? (
                           <>
                             <span style={{color:'#166534',fontWeight:700}}>✓ {f.onetracking.buona || 0}</span>
@@ -772,7 +772,7 @@ export default function RettificaCostiPage() {
           <div style={{padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f8fafc'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
               <div style={{fontSize:'12.5px',fontWeight:800,color:'#1a1a1a'}}>
-                Controllo OneTracking
+                Controllo Poste
                 <span style={{fontWeight:500,color:'#6b7280',marginLeft:'6px'}}>ogni riga confrontata con la misura ufficiale di Poste · {fileSelezionato ? 'questo file' : 'righe in attesa'}</span>
               </div>
               <button onClick={scaricaDaContestare} disabled={!(contaOt.senza_agevolazione + contaOt.peso_sbagliato + contaOt.caricate_lo_stesso)}
@@ -783,7 +783,7 @@ export default function RettificaCostiPage() {
             <div style={{display:'flex',gap:'6px',flexWrap:'wrap' as const,marginTop:'8px'}}>
               {([
                 ['', 'Tutte', rettificheFiltrate.length, '#334155', '#fff'],
-                ['buona', '✓ Confermate da OneTracking', contaOt.buona, '#166534', '#f0fdf4'],
+                ['buona', '✓ Confermate da Poste', contaOt.buona, '#166534', '#f0fdf4'],
                 ['senza_agevolazione', '⛔ Senza agevolazione peso reale', contaOt.senza_agevolazione, '#b91c1c', '#fef2f2'],
                 ['peso_sbagliato', '⛔ Peso diverso dalla misura di Poste', contaOt.peso_sbagliato, '#b91c1c', '#fef2f2'],
                 ['senza_misura', '○ Non misurate da Poste', contaOt.senza_misura, '#475569', '#f1f5f9'],

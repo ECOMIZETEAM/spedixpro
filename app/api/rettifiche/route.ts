@@ -123,7 +123,7 @@ export async function GET(req: NextRequest) {
     // (1UW07WF325226: 49,5x39x29 cm e 20,3 kg, per il fornitore 156,32 kg e 48,79 €). Non si seleziona e la
     // Conferma la rifiuta (vedi sotto): qui si dice perche', altrimenti sembra una riga rotta.
     // Fermata al caricamento dal confronto con OneTracking (lib/ripesature-controllo): si dice cosa ha misurato Poste.
-    if (r.stato === 'in_contestazione' && r.controllo?.motivo) return `Fermata dal controllo OneTracking: ${r.controllo.motivo} Da contestare al fornitore, non si conferma.`
+    if (r.stato === 'in_contestazione' && r.controllo?.motivo) return `Fermata dal controllo Poste: ${r.controllo.motivo} Da contestare al fornitore, non si conferma.`
     if (r.stato === 'in_contestazione') return 'In contestazione col fornitore: non si conferma finché non risponde'
     const st = r.spedizione_id ? statoSped.get(r.spedizione_id) : null
     if (st === 'annullata') return 'Spedizione annullata: non si addebita'
