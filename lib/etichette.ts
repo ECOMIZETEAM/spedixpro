@@ -442,12 +442,17 @@ export async function liberaEtichetteArchiviate(admin: any, quante = 80, opz: {
     .select('id,numero,created_at,etichetta_path')
     .not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
     .range(da, da + quante - 1)
-  const partenza = Math.floor(Math.random() * 1500)
-  let { data: righe } = opz.soloIds?.length
-    ? await admin.from('spedizioni').select('id,numero,created_at,etichetta_path')
-      .in('id', opz.soloIds).not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
-    : await scegli(partenza)
-  if (!righe?.length && partenza && !opz.soloIds?.length) ({ data: righe } = await scegli(0))
+  const scegliRighe = async (): Promise<any[]> => {
+    if (opz.soloIds?.length) {
+      const { data } = await admin.from('spedizioni').select('id,numero,created_at,etichetta_path')
+        .in('id', opz.soloIds).not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
+      return data || []
+    }
+    const partenza = Math.floor(Math.random() * 1500)
+    let { data } = await scegli(partenza)
+    if (!data?.length && partenza) ({ data } = await scegli(0))
+    return data || []
+  }
 
   // Elenco della cartella, cercando per nome: e' l'unico modo di sapere che un file NON c'e' (un
   // download fallito puo' essere un intoppo di rete). null = non lo so.
@@ -538,16 +543,26 @@ export async function liberaEtichetteArchiviate(admin: any, quante = 80, opz: {
     if ('etichetta_url' in upd) esito.url_liberati++
   }
 
-  for (let i = 0; i < (righe || []).length && Date.now() < scadenza; i += insieme) {
-    const gruppo = (righe as any[]).slice(i, i + insieme)
-    const { data: pesanti, error } = await admin.from('spedizioni')
-      .select('id,etichetta_url,colli_dettaglio').in('id', gruppo.map(r => r.id))
-    if (error) { console.error('[LIBERA-ETICHETTE] lettura fallita', error.message); break }
-    const per = new Map((pesanti || []).map((p: any) => [p.id, p]))
-    esito.esaminate += gruppo.length
-    await Promise.all(gruppo.map(r => lavora(r, per.get(r.id)).catch((e: any) => {
-      console.error('[LIBERA-ETICHETTE]', r.numero, e?.message); esito.saltate++
-    })))
+  // La scelta torna al massimo 1.000 righe (tetto delle risposte): finche' c'e' tempo se ne prende
+  // un'altra. Ci si ferma se un giro intero non ha liberato niente, per non rigirare a vuoto su righe
+  // che non si possono chiudere.
+  let fermo = false
+  while (!fermo && Date.now() < scadenza) {
+    const righe = await scegliRighe()
+    if (!righe.length) break
+    const primaDelGiro = esito.url_liberati + esito.colli_archiviati
+    for (let i = 0; i < righe.length && Date.now() < scadenza; i += insieme) {
+      const gruppo = righe.slice(i, i + insieme)
+      const { data: pesanti, error } = await admin.from('spedizioni')
+        .select('id,etichetta_url,colli_dettaglio').in('id', gruppo.map(r => r.id))
+      if (error) { console.error('[LIBERA-ETICHETTE] lettura fallita', error.message); fermo = true; break }
+      const per = new Map((pesanti || []).map((p: any) => [p.id, p]))
+      esito.esaminate += gruppo.length
+      await Promise.all(gruppo.map(r => lavora(r, per.get(r.id)).catch((e: any) => {
+        console.error('[LIBERA-ETICHETTE]', r.numero, e?.message); esito.saltate++
+      })))
+    }
+    if (vuoto || opz.soloIds?.length || righe.length < Math.min(quante, 1000) || esito.url_liberati + esito.colli_archiviati === primaDelGiro) fermo = true
   }
   if (esito.esaminate) console.log('[LIBERA-ETICHETTE]', JSON.stringify({ ...esito, righe: undefined }))
   return esito
