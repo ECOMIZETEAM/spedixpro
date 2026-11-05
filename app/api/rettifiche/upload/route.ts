@@ -7,6 +7,7 @@ import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supaba
 import { controllaColliXL } from '@/lib/ripesature-xl'
 import { colliDalPesoTotale } from '@/lib/ripesature-pesi'
 import { inserisciRettifica, fattureGiaPagate, pacchiConCostoGia } from '@/lib/ripesature-crea'
+import { controlloAttivo, controllaConOneTracking, riepilogoControllo, FERMA } from '@/lib/ripesature-controllo'
 import { nomeTardivo } from '@/lib/supplemento-tardivo'
 
 
@@ -197,6 +198,9 @@ export async function POST(req: NextRequest) {
       // Client CON MEMORIA, nuovo a ogni richiesta: zone, listini e contratti si leggono una volta
       // per pacchetto invece che una per spedizione (lib/supabase-admin). Spedizioni e movimenti freschi.
       const esiti = await calcolaRipesature(createAdminSupabaseConMemoria(), daCalcolare)
+      // IL CONTROLLO CON ONETRACKING (lib/ripesature-controllo): ogni riga dei contratti Poste/SDA si confronta con la
+      // misura ufficiale di Poste prima di diventare una rettifica. Acceso solo per chi lo ha nelle impostazioni.
+      const controlli = (await controlloAttivo(adminRip, myMaster)) ? await controllaConOneTracking(adminRip, myMaster, esiti) : null
 
       // ── ANTI-DOPPIO PER SPEDIZIONE ── salta le spedizioni che hanno GIÀ una rettifica viva
       // (confermata o da_rettificare), da OneTracking o da un import precedente. Il dedup su
@@ -281,6 +285,10 @@ export async function POST(req: NextRequest) {
         //    fila). Chi non e' detentore non ha un costo suo da registrare: per lui nulla cambia.
         // Sta in costo_fornitore, la colonna che la pagina usa gia' per dividere buone e da controllare.
         let aTuoCarico = 0, soloATuoCarico = 0
+        // Una riga che OneTracking smentisce nasce IN CONTESTAZIONE, col motivo scritto sopra: resta nello storico,
+        // la Conferma non la prende (prende solo 'da_rettificare') e quindi a nessuno sotto arriva niente.
+        const statoDopoControllo = (idOrdine: string) => (controlli && FERMA.has(controlli.get(idOrdine)?.esito as any) ? 'in_contestazione' : 'da_rettificare')
+        const colonnaControllo = (idOrdine: string) => (controlli?.has(idOrdine) ? { controllo: controlli.get(idOrdine) } : {})
         // Fatture gia' pagate da un caricamento precedente (export cumulativi): niente riga "solo tua" da
         // confermare, e fuori dal "tuo costo" annunciato. Sulle righe verso sotto il costo resta scritto
         // (serve a dividere buone e da controllare), ma alla conferma non si ripaga.
@@ -317,9 +325,10 @@ export async function POST(req: NextRequest) {
             differenza: 0, fuori_sagoma: 0,
             supplementi_nomi: ((rip as any)?.supplementiNomi || []).join(' + ') || null,
             costo_fornitore: costo,
-            stato: 'da_rettificare',
+            stato: statoDopoControllo(e.idOrdine),
             rif_fornitore: e.idOrdine,
             colli_ripesati: e.colli_ripesati || null,
+            ...colonnaControllo(e.idOrdine),
           })
         }
         // SUPPLEMENTO ARRIVATO DOPO I CHILI (lib/supplemento-tardivo): il pacco e' gia' rettificato, ma il fornitore
@@ -460,7 +469,8 @@ export async function POST(req: NextRequest) {
             // (es. Velox) non hanno costo fornitore → resta null.
             // e, dal 22/10/2026, quello che si registra a CHI CARICA alla conferma (vedi costoProprio).
             costo_fornitore: costo,
-            stato: 'da_rettificare',
+            stato: statoDopoControllo(e.idOrdine),
+            ...colonnaControllo(e.idOrdine),
             rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
             // Le misure viaggiano con la riga: servono a chi la ricevera' per riprezzare col
             // PROPRIO listino quando la gira al livello sotto. La cifra in euro non scende lungo
@@ -598,6 +608,8 @@ export async function POST(req: NextRequest) {
           soloATuoCarico,                    // righe col solo costo di chi carica (sotto non c'e' niente da chiedere)
           passateAZero,                      // create a zero: al figlio non costano, servono a chi sta sotto
           supplementiArrivatiDopo,           // gia' rettificate per i chili: sotto si gira solo il supplemento
+          // Il confronto con OneTracking di questa fetta (null se per chi carica non e' acceso).
+          controlloOneTracking: controlli ? riepilogoControllo(controlli, esiti, daScrivere) : null,
           // Formato XL di Poste: spedizioni con colli non misurati (in attesa del prossimo file), con
           // piu' righe che colli (da guardare a mano), e — per tutto il file — LDV senza nessuna misura.
           misureIncomplete, colliInPiu, senzaMisure: lette.senzaMisure || 0,

@@ -178,6 +178,15 @@ export default function RettificaCostiPage() {
         let sopra: any[] = data.sopraIlTriplo || []
         // Senza costo del fornitore: rettifiche oltre il triplo di quanto era stato pagato (e almeno 20 €).
         let sopraPagato: any[] = data.sopraIlTriploPagato || []
+        // Il confronto con OneTracking (acceso per pochi master): quante buone e quante ferme in contestazione, e perche'.
+        const ot = { attivo: !!data.controlloOneTracking, buone: 0, senzaAgevolazione: 0, pesoSbagliato: 0, senzaMisura: 0, nonVerificabili: 0, ferme: 0, nonGirato: 0, esempi: [] as any[] }
+        const sommaOt = (c: any) => {
+          if (!c) return
+          ot.attivo = true
+          for (const k of ['buone', 'senzaAgevolazione', 'pesoSbagliato', 'senzaMisura', 'nonVerificabili', 'ferme', 'nonGirato'] as const) (ot as any)[k] += Number(c[k] || 0)
+          if (ot.esempi.length < 3) ot.esempi = ot.esempi.concat((c.esempi || []).slice(0, 3 - ot.esempi.length))
+        }
+        sommaOt(data.controlloOneTracking)
         let supEuro = data.supplementiEuro || 0
         let supIgnoti: string[] = data.supplementiSenzaTariffa || []
         let da = (data.da || 0) + (data.quante || 0)
@@ -197,6 +206,7 @@ export default function RettificaCostiPage() {
           attesa += d2.attesaMisure || 0; sopra = sopra.concat(d2.sopraIlTriplo || []); sopraPagato = sopraPagato.concat(d2.sopraIlTriploPagato || [])
           incomplete += d2.misureIncomplete || 0; inPiu += d2.colliInPiu || 0; aZero += d2.passateAZero || 0; nonTrovate += d2.totali?.nonTrovate || 0
           supEuro += d2.supplementiEuro || 0; supIgnoti = supIgnoti.concat(d2.supplementiSenzaTariffa || [])
+          sommaOt(d2.controlloOneTracking)
           const avanti = (d2.da || 0) + (d2.quante || 0)
           // Se il segnaposto non si muove il file non finirebbe mai di essere chiesto: meglio
           // fermarsi e dire quante ne sono entrate che restare a girare a vuoto.
@@ -217,7 +227,14 @@ export default function RettificaCostiPage() {
         await caricaRettifiche(); setFileSelezionato('')
         await dialog.alert({
           title: 'Rettifiche create',
-          message: `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
+          message: (ot.attivo
+            ? `Controllo OneTracking: ${ot.buone} buone, ${ot.senzaAgevolazione} senza l'agevolazione, ${ot.pesoSbagliato} col peso sbagliato`
+              + `${ot.senzaMisura ? `, ${ot.senzaMisura} senza misura OneTracking` : ''}${ot.nonVerificabili ? `, ${ot.nonVerificabili} con più colli (non verificabili)` : ''}.`
+              + (ot.ferme ? ` ${ot.ferme} rettifiche sono ferme in contestazione (€ ${ot.nonGirato.toFixed(2)} non girati sotto): Poste le ha misurate diversamente dal file — per esempio ${ot.esempi[0]?.ldv}: ${ot.esempi[0]?.motivo} Vanno contestate al fornitore.` : '')
+              + (ot.senzaMisura ? ' Quelle senza misura OneTracking passano come prima: non si possono verificare.' : '')
+              + '\n\n'
+            : '')
+            + `Create ${creati} rettifiche su ${totale} spedizioni nel file.`
             + (aZero ? ` Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma sotto di lui qualcuno deve ancora pagare la differenza — confermale insieme alle altre, servono a farla arrivare fin lì.` : '')
             + (gia ? ` ${gia} erano già state caricate da un file precedente e sono state saltate.` : '')
             + (nonTrovate ? ` ${nonTrovate} righe del file non corrispondono a spedizioni del portale (fatte altrove, o annullate) e sono state saltate.` : '')
