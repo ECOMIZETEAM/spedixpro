@@ -203,11 +203,18 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     return init
   })
 
+  // I conteggi della barra si richiedono a intervalli, ma solo se la scheda e' davanti agli occhi.
+  // Una scheda del portale lasciata aperta dietro le altre continuava a chiedere tutto, giorno e notte:
+  // il 04/11/2026 il solo pallino della rete (/api/network/badge) era la lettura che pesava di piu' sul
+  // database (10.341 richieste in quattro ore di sera, il 27% del suo tempo). Il primo caricamento e
+  // quello a ogni cambio pagina restano; tornando sulla scheda il numero si aggiorna al giro successivo.
+  const sePagVisibile = (load: () => void) => () => { if (typeof document === 'undefined' || !document.hidden) load() }
+
   // Badge notifiche assistenza (ticket nuovi / aggiornamenti)
   const [ticketBadge, setTicketBadge] = useState<{ count: number; ticket: number; pod: number }>({ count: 0, ticket: 0, pod: 0 })
   useEffect(() => {
     const load = () => fetch('/api/assistenza/non-letti').then(r => r.json()).then(d => setTicketBadge({ count: d.count || 0, ticket: d.ticket || 0, pod: d.pod || 0 })).catch(() => {})
-    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 30000); return () => clearInterval(t)
   }, [path])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
 
@@ -217,7 +224,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/logistica/da-preparare?count=1').then(r => r.json()).then(d => setPreparaBadge(d.count || 0)).catch(() => {})
-    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 30000); return () => clearInterval(t)
   }, [path, ruolo])
 
   // Badge "Check Ricariche": alert bonifici (cliente non ha pagato / incasso non confermato). Stile ticket.
@@ -225,7 +232,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/statistiche/check-ricariche?count=1').then(r => r.json()).then(d => setRicariAlert(d.count || 0)).catch(() => {})
-    load(); const t = setInterval(load, 60000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 60000); return () => clearInterval(t)
   }, [path, ruolo])
 
   // Badge RETE: "Dal mio network" (rettifiche/COD/resi da accettare) e "Rettifica Costi" (rettifiche
@@ -235,7 +242,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/network/badge').then(r => r.json()).then(d => setReteBadge({ daAccettare: d.daAccettare || 0, daAccettareImporto: d.daAccettareImporto || 0, daConfermare: d.daConfermare || 0, daConfermareImporto: d.daConfermareImporto || 0 })).catch(() => {})
-    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 30000); return () => clearInterval(t)
   }, [path, ruolo])
   const eur = (n: number) => '€ ' + Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -246,7 +253,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/master/credito').then(r => r.json()).then(d => { if (d && d.mostra) setCreditoTop(d) }).catch(() => {})
-    load(); const t = setInterval(load, 120000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 120000); return () => clearInterval(t)
   }, [ruolo, path])
 
   // ── Responsive: sidebar a scomparsa (drawer) su mobile ──
