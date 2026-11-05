@@ -568,6 +568,19 @@ export async function liberaEtichetteArchiviate(admin: any, quante = 80, opz: {
   return esito
 }
 
+// IL BASE64 SI TOGLIE SOLO DI NOTTE (21-6, ora italiana). Ogni ~4 GB tolti dalle righe il database
+// fa partire da solo la pulizia della tabella delle etichette (autovacuum del TOAST di spedizioni,
+// soglia 2%), che per una decina di minuti porta il disco al suo massimo: la notte del 05/11/2026
+// dall'1:36 all'1:48 ~2 GB di WAL al minuto e ~130 MB/s. Di notte non se ne accorge nessuno; di
+// giorno, col ritmo dei giri, sarebbe capitata verso le 16 addosso a chi spedisce. Le etichette nuove
+// si archiviano anche di giorno: il base64 resta nella riga fino alla notte, e le stampe leggono uguale.
+// Si chiude alle 6 e non alle 7: l'ultima pulizia della notte (quella del 05/11 e' finita alle 7:48)
+// deve finire prima che si cominci a lavorare.
+export function oraDiNotteRoma(quando = new Date()): boolean {
+  const ora = Number(new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: 'numeric', hourCycle: 'h23' }).format(quando))
+  return ora >= 21 || ora < 6
+}
+
 // Vero se la spedizione ha un'etichetta, in QUALUNQUE forma. Da usare al posto dei controlli
 // `etichetta_url is null`, che dopo la migrazione direbbero "manca" su spedizioni che ce l'hanno
 // eccome — e farebbero riscaricare dal corriere migliaia di etichette gia' presenti.

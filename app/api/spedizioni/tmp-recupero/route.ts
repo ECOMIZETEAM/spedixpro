@@ -76,14 +76,15 @@ export async function GET(req: NextRequest) {
   let etichetteArchiviate = 0
   let etichetteLiberate: any = null
   try {
-    const { archiviaLotto, liberaEtichetteArchiviate } = await import('@/lib/etichette')
+    const { archiviaLotto, liberaEtichetteArchiviate, oraDiNotteRoma } = await import('@/lib/etichette')
     // 1) Archivia su Storage le etichette NUOVE ancora inline (scrive etichetta_path, tiene il base64).
     etichetteArchiviate = (await archiviaLotto(admin, 60)).archiviate
     // 2) LIBERA il base64 di quelle GIÀ archiviate (verifica del file su Storage prima di azzerare) +
     //    archivia le etichette per-collo dei multicollo. È il recupero grosso dello spazio del TOAST.
     //    Con un tetto di tempo: ora ogni riga scelta si chiude davvero (prima quasi tutte si saltavano
-    //    in un attimo), e questo giro ha gia' il suo lavoro dentro i 120 secondi.
-    etichetteLiberate = await liberaEtichetteArchiviate(admin, 150, { entroMs: 30_000, inParallelo: 3 })
+    //    in un attimo), e questo giro ha gia' il suo lavoro dentro i 120 secondi. Solo di notte: vedi
+    //    oraDiNotteRoma in lib/etichette.
+    if (oraDiNotteRoma()) etichetteLiberate = await liberaEtichetteArchiviate(admin, 150, { entroMs: 30_000, inParallelo: 3 })
   } catch (e: any) { console.error('[TMP-RECUPERO] archiviazione/liberazione etichette fallita:', e?.message) }
 
   return NextResponse.json({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { archiviaLotto, liberaEtichetteArchiviate } from '@/lib/etichette'
+import { archiviaLotto, liberaEtichetteArchiviate, oraDiNotteRoma } from '@/lib/etichette'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -36,8 +36,7 @@ export const maxDuration = 300
 // Da quando questo innesco gira davvero (ogni 10 minuti) fa anche la seconda meta': toglie dalla
 // riga il base64 gia' archiviato (liberaEtichetteArchiviate). A inizio novembre 2026 erano ~450.000
 // le spedizioni archiviate col PDF ancora dentro, e il giro di tmp-recupero da solo ne chiude al
-// massimo 150 ogni quarto d'ora. Il grosso si fa di NOTTE, quando il database e' quasi fermo; di
-// giorno un lotto piccolo, per non pesare su chi sta spedendo. Misurato la prima notte (05/11, 01:10):
+// massimo 150 ogni quarto d'ora. Si fa SOLO di notte (vedi oraDiNotteRoma). Misurato la prima notte (05/11, 01:10):
 // 244 righe in 49 secondi a 4 per volta, CPU del database all'11% e ~90 operazioni al secondo sul
 // disco. A quel passo il pregresso avrebbe chiesto piu' di un mese: di notte il giro e' piu' lungo.
 export async function GET(req: NextRequest) {
@@ -45,12 +44,10 @@ export async function GET(req: NextRequest) {
   const inizio = Date.now()
   const admin = createAdminSupabase()
   const archiviate = await archiviaLotto(admin, 100)
-  const ora = Number(new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: 'numeric', hourCycle: 'h23' }).format(new Date()))
-  const notte = ora >= 21 || ora < 7
   // Dentro i 300 secondi della funzione, con margine: quello che resta dopo l'archiviazione.
   const resta = 270_000 - (Date.now() - inizio)
-  const liberate = resta > 10_000
-    ? await liberaEtichetteArchiviate(admin, notte ? 3000 : 200, { entroMs: Math.min(notte ? 210_000 : 25_000, resta), inParallelo: notte ? 6 : 2 })
+  const liberate = oraDiNotteRoma() && resta > 10_000
+    ? await liberaEtichetteArchiviate(admin, 3000, { entroMs: Math.min(210_000, resta), inParallelo: 6 })
     : null
   return NextResponse.json({ ...archiviate, liberate })
 }
