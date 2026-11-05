@@ -4,6 +4,7 @@ import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { giorniFaRoma, giornoRoma } from '@/lib/date-roma'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
+import { FERMA } from '@/lib/ripesature-controllo'
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function RettificaCostiPage() {
@@ -17,6 +18,8 @@ export default function RettificaCostiPage() {
   const [cerca, setCerca] = useState('')
   const [fileSelezionato, setFileSelezionato] = useState<string>('')
   const [ricalcolando, setRicalcolando] = useState<string>('')
+  // Filtro sull'esito del controllo OneTracking ('' = tutte; 'ferme', 'buona', 'senza_agevolazione', …).
+  const [filtroOt, setFiltroOt] = useState<string>('')
   const fileRef = useRef<HTMLInputElement>(null)
   // RETTIFICHE ELIMINATE: pagate da me e non recuperate da nessuno (assorbite, caricate e poi cancellate,
   // o solo a mio carico). Si leggono solo quando si apre la sezione: per chi riceve tanto sono migliaia.
@@ -401,6 +404,74 @@ export default function RettificaCostiPage() {
       )
     : rettifiche
 
+  // ── IL CONTROLLO ONETRACKING SULLE RIGHE IN VISTA (lib/ripesature-controllo) ──
+  // Ogni riga di un file Poste/SDA porta l'esito del confronto con la misura ufficiale di Poste: qui si conta, si filtra
+  // e si separano le FERME (da contestare al fornitore) dalle altre, cosi' non si confondono con quelle da confermare.
+  const esitoOt = (r: any): string | undefined => r.controllo?.esito
+  const eFerma = (r: any) => r.stato === 'in_contestazione' && FERMA.has(esitoOt(r) as any)
+  const caricataLoStesso = (r: any) => FERMA.has(esitoOt(r) as any) && r.stato !== 'in_contestazione'
+  const contaOt: Record<string, number> = { buona: 0, senza_agevolazione: 0, peso_sbagliato: 0, senza_misura: 0, non_verificabile: 0, caricate_lo_stesso: 0 }
+  for (const r of rettificheFiltrate) {
+    const e = esitoOt(r)
+    if (!e) continue
+    if (caricataLoStesso(r)) contaOt.caricate_lo_stesso++
+    else contaOt[e] = (contaOt[e] || 0) + 1
+  }
+  const conControlloOt = Object.values(contaOt).some(n => n > 0)
+  const addebitoDi = (r: any) => Math.max(0, -Number(r.differenza || 0) + Number(r.fuori_sagoma || 0))
+  const ferme = rettificheFiltrate.filter(eFerma)
+  const euroFerme = Math.round(ferme.reduce((t: number, r: any) => t + addebitoDi(r), 0) * 100) / 100
+  const rettVisibili = !filtroOt ? rettificheFiltrate : rettificheFiltrate.filter((r: any) =>
+    filtroOt === 'ferme' ? eFerma(r)
+      : filtroOt === 'caricate_lo_stesso' ? caricataLoStesso(r)
+      : esitoOt(r) === filtroOt && !caricataLoStesso(r))
+  const nonFerme = rettVisibili.filter((r: any) => !eFerma(r))
+  const rettFermeAgev = rettVisibili.filter((r: any) => eFerma(r) && esitoOt(r) === 'senza_agevolazione')
+  const rettFermePeso = rettVisibili.filter((r: any) => eFerma(r) && esitoOt(r) === 'peso_sbagliato')
+  const nomeFileDi = (id: string) => (files.find((f: any) => f.id === id)?.nome_file) || ''
+  const kgOt = (x: any) => `${(Math.round((Number(x) || 0) * 100) / 100).toLocaleString('it-IT')} kg`
+  const misuraOt = (m: any) => m ? `${kgOt(m.peso)} · ${[m.lunghezza, m.larghezza, m.altezza].map((x: any) => (Number(x) || 0).toLocaleString('it-IT')).join('×')} cm${m.dove ? ` · ${m.dove}` : ''}${m.quando ? ` ${m.quando}` : ''}` : ''
+
+  // IL FILE DA MANDARE AL FORNITORE PER CONTESTARE (Lorenzo, 05/11/2026): le righe che OneTracking smentisce, divise
+  // fra agevolazione peso reale non applicata e peso diverso dalla misura di Poste, con la misura vera accanto al
+  // peso fatturato. Dentro ci sono solo pesi e misure: nessun importo interno, nessun nome di chi sta sotto.
+  async function scaricaDaContestare() {
+    const righe = rettificheFiltrate.filter((r: any) => FERMA.has(esitoOt(r) as any))
+    if (!righe.length) { await dialog.alert({ title: 'Niente da contestare', message: 'In questa vista non ci sono righe fermate dal controllo OneTracking.' }); return }
+    const { utils, writeFile } = await import('xlsx')
+    const riga = (r: any) => {
+      const m = r.controllo?.misura || {}
+      return {
+        'LDV': r.numero_spedizione,
+        'Peso dichiarato (kg)': Number(r.peso_iniziale) || 0,
+        'Peso fatturato dal fornitore (kg)': Number(r.controllo?.peso_file) || 0,
+        'Peso misurato da Poste (kg)': Number(m.peso) || 0,
+        'Lunghezza Poste (cm)': Number(m.lunghezza) || 0,
+        'Larghezza Poste (cm)': Number(m.larghezza) || 0,
+        'Altezza Poste (cm)': Number(m.altezza) || 0,
+        'Dove misurata': m.dove || '',
+        'Quando misurata': m.quando || '',
+        'Peso tassabile secondo Poste (kg)': Number(r.controllo?.peso_onetracking) || 0,
+        'Perché è da contestare': r.controllo?.motivo || '',
+        'Nel portale': r.stato === 'in_contestazione' ? 'ferma' : 'caricata lo stesso',
+        'File del fornitore': nomeFileDi(r.file_id),
+      }
+    }
+    const agev = righe.filter((r: any) => esitoOt(r) === 'senza_agevolazione').map(riga)
+    const peso = righe.filter((r: any) => esitoOt(r) === 'peso_sbagliato').map(riga)
+    const wb = utils.book_new()
+    utils.book_append_sheet(wb, utils.json_to_sheet([
+      { 'Voce': 'Agevolazione peso reale non applicata (collo singolo nella scatola: si paga il peso reale)', 'Spedizioni': agev.length },
+      { 'Voce': 'Peso fatturato diverso dalla misura di Poste', 'Spedizioni': peso.length },
+      { 'Voce': 'Totale da contestare', 'Spedizioni': righe.length },
+      { 'Voce': 'Fonte delle misure: OneTracking, il portale ufficiale di Poste', 'Spedizioni': '' },
+    ]), 'Riepilogo')
+    if (agev.length) utils.book_append_sheet(wb, utils.json_to_sheet(agev), 'Senza agevolazione')
+    if (peso.length) utils.book_append_sheet(wb, utils.json_to_sheet(peso), 'Peso sbagliato')
+    const nome = fileSelezionato ? nomeFileDi(fileSelezionato).replace(/\.[^.]+$/, '') : 'rettifiche-in-attesa'
+    writeFile(wb, `da-contestare-${nome}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
   // Raggruppa per destinatario (master o cliente), ordinato per addebito. Usato per BUONE e DA CONTROLLARE.
   const raggruppa = (righe: any[]) => {
     const map = new Map<string, { nome: string; tipo: 'master' | 'cliente' | 'proprio'; righe: any[]; totale: number; costo: number }>()
@@ -418,11 +489,13 @@ export default function RettificaCostiPage() {
   }
   // BUONE (il da-girare copre il costo fornitore) in alto, DA CONTROLLARE (sotto-recupero) sotto, col
   // MOTIVO su ogni riga. classe/motivo/manca li calcola la rotta GET (costo_fornitore vs da-girare).
-  const rettBuone = rettificheFiltrate.filter((r: any) => r.classe !== 'da_controllare' && r.classe !== 'solo_mio')
+  const rettBuone = nonFerme.filter((r: any) => r.classe !== 'da_controllare' && r.classe !== 'solo_mio')
   // SOLO A TUO CARICO: chi ha il contratto paga il fornitore, ma sotto di lui nessuno deve niente.
   // Si confermano per registrare il costo; non addebitano nessuno.
-  const rettSoloMie = rettificheFiltrate.filter((r: any) => r.classe === 'solo_mio')
-  const rettCtrl  = rettificheFiltrate.filter((r: any) => r.classe === 'da_controllare')
+  const rettSoloMie = nonFerme.filter((r: any) => r.classe === 'solo_mio')
+  const rettCtrl  = nonFerme.filter((r: any) => r.classe === 'da_controllare')
+  const gruppiFermeAgev = raggruppa(rettFermeAgev)
+  const gruppiFermePeso = raggruppa(rettFermePeso)
   const gruppiBuone = raggruppa(rettBuone)
   const gruppiCtrl  = raggruppa(rettCtrl)
   const gruppiSoloMie = raggruppa(rettSoloMie)
@@ -499,6 +572,17 @@ export default function RettificaCostiPage() {
                 </button>
               )}
             </div>
+          )}
+          {r.controllo?.esito === 'buona' && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#166534',whiteSpace:'normal',maxWidth:'320px'}}>
+              ✓ OneTracking: {misuraOt(r.controllo.misura)} — tassabile {kgOt(r.controllo.peso_onetracking)}, come il file ({kgOt(r.controllo.peso_file)})
+            </div>
+          )}
+          {r.controllo?.esito === 'senza_misura' && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#6b7280'}}>○ Non misurata da Poste: vale il peso del file ({kgOt(r.controllo.peso_file)})</div>
+          )}
+          {r.controllo?.esito === 'non_verificabile' && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#6b7280'}}>○ Più colli: OneTracking misura il pacco, non i singoli colli</div>
           )}
           {r.stato === 'da_rettificare' && r.controllo?.sbloccata_il && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#92400e',whiteSpace:'normal',maxWidth:'300px'}}>
@@ -614,7 +698,7 @@ export default function RettificaCostiPage() {
             <div style={{overflowX:'auto' as const, maxHeight:'340px', overflowY:'auto' as const}}>
               <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
                 <thead><tr style={{background:'#f9fafb'}}>
-                  {['#','File','Data caricamento','N. Tot Spedizioni','N. processate','N. trovate','N. scartati','N. da rettificare'].map(h=>(
+                  {['#','File','Data caricamento','N. Tot Spedizioni','N. processate','N. trovate','N. scartati','N. da rettificare','OneTracking'].map(h=>(
                     <th key={h} style={{textAlign:'left' as const,padding:'7px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                   ))}
                 </tr></thead>
@@ -630,6 +714,17 @@ export default function RettificaCostiPage() {
                       <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{f.n_trovate}</td>
                       <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{f.n_scartati}</td>
                       <td style={{padding:'7px 10px',fontWeight:'700',color:'#f97316'}}>{f.n_da_rettificare}</td>
+                      {/* Esito del confronto con Poste per questo file: confermate · ferme · non misurate. */}
+                      <td style={{padding:'7px 10px',whiteSpace:'nowrap' as const,fontSize:'11px'}}
+                        title={f.onetracking ? `Confermate da OneTracking ${f.onetracking.buona || 0} · senza agevolazione ${f.onetracking.senza_agevolazione || 0} · peso diverso ${f.onetracking.peso_sbagliato || 0} · non misurate da Poste ${f.onetracking.senza_misura || 0} · più colli ${f.onetracking.non_verificabile || 0} · caricate lo stesso ${f.onetracking.caricate_lo_stesso || 0}` : 'File caricato prima del controllo OneTracking'}>
+                        {f.onetracking ? (
+                          <>
+                            <span style={{color:'#166534',fontWeight:700}}>✓ {f.onetracking.buona || 0}</span>
+                            <span style={{color:'#b91c1c',fontWeight:700,marginLeft:'6px'}}>⛔ {(f.onetracking.senza_agevolazione || 0) + (f.onetracking.peso_sbagliato || 0)}</span>
+                            <span style={{color:'#6b7280',marginLeft:'6px'}}>○ {(f.onetracking.senza_misura || 0) + (f.onetracking.non_verificabile || 0)}</span>
+                          </>
+                        ) : <span style={{color:'#9ca3af'}}>—</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -671,6 +766,43 @@ export default function RettificaCostiPage() {
               style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',width:'180px',color:'#1a1a1a'}}/>
           </div>
         </div>
+        {/* IL CONTROLLO ONETRACKING: quante righe la misura ufficiale di Poste conferma, quante ferma e perche', quante
+            Poste non ha misurato. Ogni voce filtra la tabella; il file da contestare si scarica da qui. */}
+        {conControlloOt && (
+          <div style={{padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f8fafc'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
+              <div style={{fontSize:'12.5px',fontWeight:800,color:'#1a1a1a'}}>
+                Controllo OneTracking
+                <span style={{fontWeight:500,color:'#6b7280',marginLeft:'6px'}}>ogni riga confrontata con la misura ufficiale di Poste · {fileSelezionato ? 'questo file' : 'righe in attesa'}</span>
+              </div>
+              <button onClick={scaricaDaContestare} disabled={!(contaOt.senza_agevolazione + contaOt.peso_sbagliato + contaOt.caricate_lo_stesso)}
+                style={{padding:'6px 14px',background:(contaOt.senza_agevolazione + contaOt.peso_sbagliato + contaOt.caricate_lo_stesso)?'#b91c1c':'#e5e7eb',color:(contaOt.senza_agevolazione + contaOt.peso_sbagliato + contaOt.caricate_lo_stesso)?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:700,cursor:'pointer'}}>
+                ⬇ Scarica le spedizioni da contestare (Excel)
+              </button>
+            </div>
+            <div style={{display:'flex',gap:'6px',flexWrap:'wrap' as const,marginTop:'8px'}}>
+              {([
+                ['', 'Tutte', rettificheFiltrate.length, '#334155', '#fff'],
+                ['buona', '✓ Confermate da OneTracking', contaOt.buona, '#166534', '#f0fdf4'],
+                ['senza_agevolazione', '⛔ Senza agevolazione peso reale', contaOt.senza_agevolazione, '#b91c1c', '#fef2f2'],
+                ['peso_sbagliato', '⛔ Peso diverso dalla misura di Poste', contaOt.peso_sbagliato, '#b91c1c', '#fef2f2'],
+                ['senza_misura', '○ Non misurate da Poste', contaOt.senza_misura, '#475569', '#f1f5f9'],
+                ['non_verificabile', '○ Più colli (non verificabili)', contaOt.non_verificabile, '#475569', '#f1f5f9'],
+                ['caricate_lo_stesso', '↺ Caricate lo stesso', contaOt.caricate_lo_stesso, '#92400e', '#fffbeb'],
+              ] as [string, string, number, string, string][]).filter(([v, , n]) => v === '' || n > 0).map(([v, etichetta, n, colore, sfondo]) => (
+                <button key={v || 'tutte'} onClick={() => setFiltroOt(filtroOt === v ? '' : v)}
+                  style={{padding:'4px 10px',borderRadius:'999px',fontSize:'11.5px',fontWeight:600,cursor:'pointer',color:colore,background:sfondo,border:`1px solid ${filtroOt === v ? colore : '#e5e7eb'}`,boxShadow:filtroOt === v ? `0 0 0 1px ${colore}` : 'none'}}>
+                  {etichetta} <strong>{n}</strong>
+                </button>
+              ))}
+            </div>
+            {ferme.length > 0 && (
+              <div style={{fontSize:'11.5px',color:'#7f1d1d',marginTop:'7px'}}>
+                {ferme.length} {ferme.length === 1 ? 'riga ferma' : 'righe ferme'} in contestazione: € {euroFerme.toFixed(2)} che non scendono sotto finché non le contesti al fornitore o non le carichi lo stesso, una per una.
+              </div>
+            )}
+          </div>
+        )}
         <div style={{padding:'7px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'11px',color:'#8a8a8a',lineHeight:1.5}}>
           In grassetto <strong style={{color:'#1a1a1a'}}>il peso su cui si paga davvero</strong>: di norma il maggiore fra reale e volume, ma sul <strong style={{color:'#1a1a1a'}}>peso reale</strong> quando il collo sta nella scatola agevolata del contratto. In <strong style={{color:'#dc2626'}}>rosso</strong> il peso dopo la ripesatura. Se il collo misurato esce dalla scatola si passa al volume: lo trovi scritto sulla riga. La colonna <strong style={{color:'#1a1a1a'}}>Differenza</strong> è quanto recuperi.
         </div>
@@ -698,6 +830,25 @@ export default function RettificaCostiPage() {
                 ))}
               </tr></thead>
               <tbody>
+                {/* FERME DAL CONTROLLO ONETRACKING, in cima e divise per motivo: non si confermano, si contestano. */}
+                {gruppiFermeAgev.length > 0 && (
+                  <tr key="sez-ferme-agev" style={{background:'#fee2e2'}}>
+                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#991b1b'}}>
+                      ⛔ Ferme — agevolazione peso reale non applicata: per Poste il pacco stava nella scatola, il file fa pagare il volume <span style={{fontWeight:600}}>({rettFermeAgev.length})</span>
+                      <span style={{float:'right'}}>€ {(Math.round(rettFermeAgev.reduce((t: number, r: any) => t + addebitoDi(r), 0) * 100) / 100).toFixed(2)} fermi</span>
+                    </td>
+                  </tr>
+                )}
+                {gruppiFermeAgev.flatMap(renderGruppo)}
+                {gruppiFermePeso.length > 0 && (
+                  <tr key="sez-ferme-peso" style={{background:'#fee2e2'}}>
+                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#991b1b'}}>
+                      ⛔ Ferme — peso diverso dalla misura di Poste: il file fa pagare più di quanto Poste ha misurato <span style={{fontWeight:600}}>({rettFermePeso.length})</span>
+                      <span style={{float:'right'}}>€ {(Math.round(rettFermePeso.reduce((t: number, r: any) => t + addebitoDi(r), 0) * 100) / 100).toFixed(2)} fermi</span>
+                    </td>
+                  </tr>
+                )}
+                {gruppiFermePeso.flatMap(renderGruppo)}
                 {/* BUONE in alto (il da-girare copre il costo del corriere) — poi DA CONTROLLARE. */}
                 {gruppiBuone.length > 0 && (
                   <tr key="sez-buone" style={{background:'#dcfce7'}}>
