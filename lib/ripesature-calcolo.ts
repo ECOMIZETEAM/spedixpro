@@ -1,4 +1,4 @@
-import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, fattoreVolumeCorriere, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
+import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, fattoreVolumeCorriere, calcolaPrezzoCorriereDettaglio, zonaDaProvincia } from '@/lib/pricing'
 import { costruisciCatena } from '@/lib/cascata'
 import { catenaDaCorriere } from '@/lib/condivisione-catena'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
@@ -30,6 +30,7 @@ export type LivelloRettifica = {
   pagato: number               // quanto risulta addebitato nei movimenti
   dovuto: number | null        // quanto sarebbe col collo ripesato (null = non calcolabile)
   differenza: number | null
+  zona?: string | null         // la zona del listino con cui e' stato fatto il conto: si scrive sulla riga, per dire perche'
   // SOLO sui contratti condivisi: com'e' fatto il salto di questo master verso chi gli vende. Chi
   // scrive il movimento DEVE leggerlo: su un salto 'codice' i soldi stanno sul ledger presso il
   // fornitore, non sul conto verso il padre. La correzione peso/misure li indovinava dall'albero e il
@@ -316,12 +317,14 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         let dovuto: number | null = null
         let volumeCliente: number | null = null
         let fattoreCliente: number | null = null
+        let zonaCliente: string | null = null
         if (cl?.listino_cliente_id) {
           const ris = await calcolaPrezzoListino(admin, {
             listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest, zonaForzata,
           })
           if (ris) {
             zone.push(ris.zona)
+            zonaCliente = ris.zona ?? null
             // Per il CLIENTE il volume lo dice il SUO listino (fattore suo): e' quello esatto.
             if (Number(ris.peso_volume) > 0) pesoVolumeDopo = arrotonda(Number(ris.peso_volume))
             volumeCliente = arrotonda(Number(ris.peso_volume) || 0)
@@ -365,6 +368,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         }
         livelli.push({
           chi: cl?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null,
+          zona: zonaCliente,
           pagato: arrotonda(pagatoCliente), dovuto,
           differenza: dovuto == null ? null : arrotonda(dovuto - pagatoCliente),
           pesoVolumeDopo: volumeCliente, fattoreVolume: fattoreCliente,
@@ -400,7 +404,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           }
           if (liv.isProprietario) detentori.push(liv.masterId)
           livelli.push({
-            chi: liv.nome, clienteId: null, masterId: liv.masterId,
+            chi: liv.nome, clienteId: null, masterId: liv.masterId, zona: liv.zona ?? null,
             pagato, dovuto, differenza: arrotonda(dovuto - pagato),
             pesoVolumeDopo: liv.pesoVolume != null ? arrotonda(Number(liv.pesoVolume) || 0) : null,
             fattoreVolume: Number(liv.fattoreVolume) || null,
@@ -499,9 +503,23 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     let zonaUsata: string | undefined
     const zoneValide = res.zone.filter((z): z is string => !!z)
     const incoerente = new Set(zoneValide).size > 1
+    // LA ZONA UNICA E' PRIMA QUELLA DEL PACCO, POI «ITALIA». 1ZF4328R6814924086 (UPS Italia, Curinga CZ, 02/09/2026):
+    // GENIUS DELIVERY aveva pagato 12,60 €, il suo listino «Calabria fino a 5 kg». Ripesato a 9,5 kg, il listino del
+    // cliente oggi non trova piu' Curinga e il conto si rifaceva tutto su «Italia»: 10,50 € contro i 12,60 gia' pagati,
+    // «non c'e' niente da chiedere», e MULTI si teneva i 2,54 € del fornitore. Sulla Calabria sono 14,18: 1,58 € da
+    // chiedere. Rifatte le 335 righe in attesa di MULTI verso Calabria, Sicilia e Sardegna: cambia solo questa.
     if (res.bloccato || incoerente) {
-      const forzato = await costruisciLivelli('Italia')
-      if (!forzato.bloccato) { res = forzato; zonaUsata = 'Italia' }
+      const regionale = zonaDaProvincia(dest.provincia)
+      let forzato: Awaited<ReturnType<typeof costruisciLivelli>> | null = null
+      if (regionale !== 'Italia' && String(dest.paese || 'IT').toUpperCase().trim() === 'IT') {
+        const f = await costruisciLivelli(regionale)
+        if (!f.bloccato) { forzato = f; zonaUsata = regionale }
+      }
+      if (!forzato) {
+        const f = await costruisciLivelli('Italia')
+        if (!f.bloccato) { forzato = f; zonaUsata = 'Italia' }
+      }
+      if (forzato) res = forzato
     }
 
     // LA RETTIFICA CONTA I CHILI, NON I CAMBI DI PREZZO. `dovuto` e' il listino di OGGI sul collo
