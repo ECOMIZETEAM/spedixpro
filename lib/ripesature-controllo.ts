@@ -189,6 +189,16 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
   return out
 }
 
+// LO STESSO CONTROLLO SULLE RIGHE GIA' SCRITTE: le rettifiche nate prima che il controllo fosse acceso (alla Conferma e
+// per lo storico). I colli sono quelli della riga, cioe' quello che diceva il file del fornitore.
+export async function controllaRighe(admin: any, masterId: string, righe: any[]): Promise<Map<string, Controllo>> {
+  const esiti = righe.filter(r => r?.spedizione_id).map(r => ({
+    trovata: true, spedizioneId: r.spedizione_id, idOrdine: r.id, ldv: r.numero_spedizione,
+    colli_ripesati: Array.isArray(r.colli_ripesati) ? r.colli_ripesati : [], livelli: [],
+  })) as any[]
+  return controllaConOneTracking(admin, masterId, esiti)
+}
+
 // Il riepilogo per chi carica: quante buone, quante ferme e perche'. I conti sono sui PACCHI del file controllati;
 // "ferme" e "nonGirato" sulle righe che sono nate davvero in contestazione (le altre non avevano niente da chiedere).
 export function riepilogoControllo(controlli: Map<string, Controllo>, esiti: EsitoRipesatura[], righeScritte: any[]) {

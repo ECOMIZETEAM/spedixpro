@@ -22,12 +22,14 @@ export async function GET() {
     if (String(f.created_at || '') < CONTROLLO_DAL) continue
     const conta: Record<string, number> = {}
     for (let da = 0; ; da += 1000) {
-      const { data: rr, error } = await supabase.from('rettifiche').select('stato,esito:controllo->>esito')
+      const { data: rr, error } = await supabase.from('rettifiche').select('stato,esito:controllo->>esito,sbloccata:controllo->>sbloccata_il')
         .eq('file_id', f.id).not('controllo', 'is', null).order('id').range(da, da + 999)
       if (error) break
       for (const r of (rr || []) as any[]) {
         conta[r.esito] = (conta[r.esito] || 0) + 1
-        if ((r.esito === 'senza_agevolazione' || r.esito === 'peso_sbagliato') && r.stato !== 'in_contestazione') conta.caricate_lo_stesso = (conta.caricate_lo_stesso || 0) + 1
+        // «Caricata lo stesso» e' chi l'ha sbloccata a mano: una riga confermata prima che il controllo la guardasse ha
+        // l'esito scritto dopo (vedi /api/rettifiche/smentite) ma nessuno l'ha mai lasciata passare sapendolo.
+        if ((r.esito === 'senza_agevolazione' || r.esito === 'peso_sbagliato') && r.sbloccata) conta.caricate_lo_stesso = (conta.caricate_lo_stesso || 0) + 1
       }
       if (!rr || rr.length < 1000) break
     }

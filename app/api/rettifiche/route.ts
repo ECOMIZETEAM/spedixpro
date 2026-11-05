@@ -7,6 +7,7 @@ import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { fetchAll } from '@/lib/fetch-all'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 import { pacchiConCostoGia, stimeDaSostituire } from '@/lib/ripesature-crea'
+import { controlloAttivo, controllaRighe, FERMA } from '@/lib/ripesature-controllo'
 
 // Confermare cento rettifiche vuol dire cento chiamate di credito in fila. Col limite di durata
 // breve la funzione veniva uccisa a meta' — ed e' proprio meta' lavoro fatto il caso peggiore.
@@ -714,6 +715,32 @@ export async function POST(req: NextRequest) {
     }
     }
 
+  // IL CONTROLLO POSTE ANCHE ALLA CONFERMA (lib/ripesature-controllo). Una riga caricata prima che il controllo fosse
+  // acceso non e' mai stata confrontata con la misura di Poste: si confronta qui, l'ultima porta prima che l'addebito
+  // scenda. Se Poste la smentisce si ferma col suo motivo come al caricamento (si puo' sempre caricarla lo stesso).
+  // Una riga che ha gia' l'esito scritto non si riconfronta: passa se Poste la conferma o se e' stata sbloccata a mano
+  // («Carica lo stesso»), si ferma se Poste la smentisce e nessuno l'ha sbloccata. Il supplemento arrivato dopo non e'
+  // una questione di chili e non si guarda.
+  let fermateAllaConferma = 0
+  if (await controlloAttivo(adminDb, utente!.master_id)) {
+    const daGuardare = (rettifiche as any[]).filter(r => r.spedizione_id && !eSupplementoTardivo(r))
+    const daControllare = daGuardare.filter(r => !r.controllo)
+    if (daGuardare.length) {
+      const verdetti = daControllare.length ? await controllaRighe(adminDb, utente!.master_id, daControllare) : new Map()
+      const ferme = new Set<string>()
+      for (const r of daGuardare) {
+        const v = r.controllo || verdetti.get(r.id)
+        if (!v || !FERMA.has(v.esito) || v.sbloccata_il) continue
+        const { data: fatta } = await adminDb.from('rettifiche').update({ stato: 'in_contestazione', controllo: v })
+          .eq('id', r.id).eq('master_id', utente!.master_id).eq('confermata', false).eq('stato', 'da_rettificare').select('id')
+        if (fatta?.length) { ferme.add(r.id); fermateAllaConferma++; saltate.push({ id: r.id, perche: v.esito === 'senza_agevolazione'
+          ? 'fermata dal controllo Poste: agevolazione peso reale non applicata (il motivo è sulla riga, fra le ferme)'
+          : 'fermata dal controllo Poste: peso diverso dalla misura di Poste (il motivo è sulla riga, fra le ferme)' }) }
+      }
+      for (let i = rettifiche.length - 1; i >= 0; i--) if (ferme.has((rettifiche as any[])[i].id)) rettifiche.splice(i, 1)
+    }
+  }
+
   // TRE ALLA VOLTA. Un errore inatteso su una riga non ferma le altre: quella riga torna aperta e si
   // riprova (se il suo addebito fosse gia' passato, al nuovo invio la chiave RIP- lo riconosce e non lo ripete).
   let prossima = 0
@@ -744,7 +771,7 @@ export async function POST(req: NextRequest) {
     }).eq('id', r.spedizione_id)
   }
 
-  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, costiGiaPresenti, stimeStornate, nonEseguite: saltate.length, dettaglio: saltate })
+  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, costiGiaPresenti, stimeStornate, fermateAllaConferma, nonEseguite: saltate.length, dettaglio: saltate })
 }
 
 // CARICA LO STESSO UNA RIGA FERMATA DAL CONTROLLO ONETRACKING (Lorenzo, 05/11/2026: «tutte anche le sbagliate devono

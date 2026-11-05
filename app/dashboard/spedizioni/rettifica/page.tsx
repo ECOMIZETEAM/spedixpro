@@ -32,11 +32,90 @@ export default function RettificaCostiPage() {
   const [elimPerPage, setElimPerPage] = useState(10)
   const [elimPagina, setElimPagina] = useState(1)
   const [elimCarico, setElimCarico] = useState(false)
+  // GIA' CONFERMATE CHE POSTE SMENTISCE: le righe mie confermate prima che il controllo Poste fosse acceso, che la
+  // misura di Poste smentisce (/api/rettifiche/smentite). Solo per chi ha il controllo; si leggono all'apertura.
+  const [smen, setSmen] = useState<any>(null)
+  const [smenN, setSmenN] = useState(0)
+  const [smenAperta, setSmenAperta] = useState(false)
+  const [smenCarico, setSmenCarico] = useState(false)
+  const [smenFiltro, setSmenFiltro] = useState('')
+  const [smenCerca, setSmenCerca] = useState('')
+  const [smenPagina, setSmenPagina] = useState(1)
 
   useEffect(() => {
     caricaFiles()
     caricaRettifiche()
+    // Quante sono, per la testata: chi non ha il controllo (o e' un agente) non vede la sezione.
+    fetch('/api/rettifiche/smentite?conta=1').then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.attivo) setSmenN(Number(d.n) || 0) }).catch(() => {})
   }, [])
+
+  async function caricaSmentite() {
+    setSmenCarico(true); setSmenPagina(1)
+    try {
+      const res = await fetch('/api/rettifiche/smentite')
+      const d = await res.json()
+      setSmen(res.ok ? d : { errore: d.error || 'Lettura non riuscita' })
+      if (res.ok && Array.isArray(d.righe)) setSmenN(d.righe.length)
+    } catch { setSmen({ errore: 'Errore di connessione' }) }
+    setSmenCarico(false)
+  }
+
+  // IL FILE PER IL FORNITORE: solo pesi e misure, come quello delle righe ferme. Nessun importo, nessun nome di chi sta
+  // sotto: e' un file che esce.
+  async function scaricaSmentiteFornitore() {
+    if (!smenFiltrate.length) return
+    const { utils, writeFile } = await import('xlsx')
+    const riga = (r: any) => {
+      const m = r.misura || {}
+      return {
+        'LDV': r.ldv,
+        'Data rettifica': new Date(r.quando).toLocaleDateString('it-IT'),
+        'Peso dichiarato (kg)': r.peso_dichiarato,
+        'Peso fatturato dal fornitore (kg)': Number(r.peso_file) || 0,
+        'Peso misurato da Poste (kg)': Number(m.peso) || 0,
+        'Lunghezza Poste (cm)': Number(m.lunghezza) || 0,
+        'Larghezza Poste (cm)': Number(m.larghezza) || 0,
+        'Altezza Poste (cm)': Number(m.altezza) || 0,
+        'Dove misurata': m.dove || '',
+        'Quando misurata': m.quando || '',
+        'Peso tassabile secondo Poste (kg)': Number(r.peso_poste) || 0,
+        'Perché è da contestare': r.motivo || '',
+        'File del fornitore': r.file || '',
+      }
+    }
+    const agev = smenFiltrate.filter((r: any) => r.esito === 'senza_agevolazione').map(riga)
+    const peso = smenFiltrate.filter((r: any) => r.esito === 'peso_sbagliato').map(riga)
+    const wb = utils.book_new()
+    utils.book_append_sheet(wb, utils.json_to_sheet([
+      { 'Voce': 'Agevolazione peso reale non applicata (collo singolo nella scatola: si paga il peso reale)', 'Spedizioni': agev.length },
+      { 'Voce': 'Peso fatturato diverso dalla misura di Poste', 'Spedizioni': peso.length },
+      { 'Voce': 'Totale da contestare', 'Spedizioni': agev.length + peso.length },
+      { 'Voce': 'Fonte delle misure: Poste, rilevate nei centri di smistamento', 'Spedizioni': '' },
+    ]), 'Riepilogo')
+    if (agev.length) utils.book_append_sheet(wb, utils.json_to_sheet(agev), 'Senza agevolazione')
+    if (peso.length) utils.book_append_sheet(wb, utils.json_to_sheet(peso), 'Peso sbagliato')
+    writeFile(wb, `da-contestare-gia-confermate-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  // IL RIEPILOGO INTERNO: a chi e' stata addebitata ognuna e quanto, e quanto hai pagato tu. Resta a te.
+  async function scaricaSmentiteInterno() {
+    if (!smenFiltrate.length) return
+    const { utils, writeFile } = await import('xlsx')
+    const wb = utils.book_new()
+    utils.book_append_sheet(wb, utils.json_to_sheet(smenPerChi.map(g => ({
+      'Addebitata a': g.nome, 'Spedizioni': g.n, 'Senza agevolazione': g.agev, 'Peso sbagliato': g.peso,
+      'Addebitato sotto (€)': Math.round(g.addebitato * 100) / 100, 'Pagato da te al fornitore (€)': Math.round(g.costo * 100) / 100,
+    }))), 'Per destinatario')
+    utils.book_append_sheet(wb, utils.json_to_sheet(smenFiltrate.map((r: any) => ({
+      'LDV': r.ldv, 'Data rettifica': new Date(r.quando).toLocaleDateString('it-IT'),
+      'Esito Poste': r.esito === 'senza_agevolazione' ? 'Senza agevolazione peso reale' : 'Peso diverso dalla misura di Poste',
+      'Perché': r.motivo || '', 'Peso dichiarato (kg)': r.peso_dichiarato, 'Peso fatturato (kg)': Number(r.peso_file) || 0,
+      'Peso tassabile secondo Poste (kg)': Number(r.peso_poste) || 0, 'Addebitata a': r.a_chi,
+      'Addebitato sotto (€)': r.addebitato, 'Pagato da te al fornitore (€)': r.costo_tuo, 'File': r.file || '',
+    }))), 'Spedizioni')
+    writeFile(wb, `gia-confermate-smentite-da-poste-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
 
   async function caricaEliminate(dal: string, al: string) {
     setElimCarico(true); setElimPagina(1)
@@ -56,6 +135,7 @@ export default function RettificaCostiPage() {
     const righe = elimFiltrate.map((r: any) => ({
       'LDV': r.ldv, 'Data': new Date(r.quando).toLocaleDateString('it-IT'), 'Da': r.da,
       'Pagato da te (€)': r.importo, 'Perché non è stata recuperata': r.motivo,
+      ...(elimFiltrate.some((x: any) => x.poste) ? { 'Controllo Poste': r.poste ? `Poste la smentisce — ${r.poste}` : '' } : {}),
     }))
     const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Rettifiche eliminate')
     writeFile(wb, `rettifiche-eliminate-${elimDal}_${elimAl}.xlsx`)
@@ -409,7 +489,8 @@ export default function RettificaCostiPage() {
   // e si separano le FERME (da contestare al fornitore) dalle altre, cosi' non si confondono con quelle da confermare.
   const esitoOt = (r: any): string | undefined => r.controllo?.esito
   const eFerma = (r: any) => r.stato === 'in_contestazione' && FERMA.has(esitoOt(r) as any)
-  const caricataLoStesso = (r: any) => FERMA.has(esitoOt(r) as any) && r.stato !== 'in_contestazione'
+  // Caricata lo stesso = sbloccata a mano con «Carica lo stesso» (l'esito resta scritto, col nome di chi e quando).
+  const caricataLoStesso = (r: any) => FERMA.has(esitoOt(r) as any) && !!r.controllo?.sbloccata_il
   const contaOt: Record<string, number> = { buona: 0, senza_agevolazione: 0, peso_sbagliato: 0, senza_misura: 0, non_verificabile: 0, caricate_lo_stesso: 0 }
   for (const r of rettificheFiltrate) {
     const e = esitoOt(r)
@@ -657,6 +738,24 @@ export default function RettificaCostiPage() {
   const elimPagCorr = Math.min(elimPagina, elimTotPagine)
   const elimVisibili = elimFiltrate.slice((elimPagCorr - 1) * elimPerPage, elimPagCorr * elimPerPage)
 
+  // GIA' CONFERMATE CHE POSTE SMENTISCE: filtro per esito e cerca (LDV, a chi), gruppi per destinatario, pagine.
+  const smenQ = smenCerca.trim().toLowerCase()
+  const smenTutte: any[] = smen?.righe || []
+  const smenFiltrate: any[] = smenTutte.filter((r: any) => (!smenFiltro || r.esito === smenFiltro) && (!smenQ
+    || String(r.ldv || '').toLowerCase().includes(smenQ) || String(r.a_chi || '').toLowerCase().includes(smenQ)))
+  const smenPerChi = Array.from(smenFiltrate.reduce((m: Map<string, any>, r: any) => {
+    const g = m.get(r.a_chi) || { nome: r.a_chi, n: 0, agev: 0, peso: 0, addebitato: 0, costo: 0 }
+    g.n++; if (r.esito === 'senza_agevolazione') g.agev++; else g.peso++
+    g.addebitato += Number(r.addebitato || 0); g.costo += Number(r.costo_tuo || 0)
+    return m.set(r.a_chi, g)
+  }, new Map<string, any>()).values()).sort((a: any, b: any) => b.addebitato - a.addebitato || b.n - a.n) as any[]
+  const smenEuroSotto = Math.round(smenFiltrate.reduce((t: number, r: any) => t + Number(r.addebitato || 0), 0) * 100) / 100
+  const smenEuroMio = Math.round(smenFiltrate.reduce((t: number, r: any) => t + Number(r.costo_tuo || 0), 0) * 100) / 100
+  const smenPerPage = 20
+  const smenTotPagine = Math.max(1, Math.ceil(smenFiltrate.length / smenPerPage))
+  const smenPagCorr = Math.min(smenPagina, smenTotPagine)
+  const smenVisibili = smenFiltrate.slice((smenPagCorr - 1) * smenPerPage, smenPagCorr * smenPerPage)
+
   return (
     <div>
       <div style={{marginBottom:'16px'}}>
@@ -882,6 +981,123 @@ export default function RettificaCostiPage() {
         )}
       </div>
 
+      {/* GIA' CONFERMATE CHE POSTE SMENTISCE — solo per chi ha il controllo Poste, solo le sue righe. Sotto non si vede. */}
+      {(smenN > 0 || smen?.righe?.length > 0) && (
+      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fecaca',overflow:'hidden',marginTop:'16px'}}>
+        <div onClick={()=>{ const apri = !smenAperta; setSmenAperta(apri); if (apri && !smen) caricaSmentite() }}
+          style={{padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',cursor:'pointer',borderBottom:smenAperta?'1px solid #fecaca':'none',background:'#fef2f2'}}>
+          <span style={{fontSize:'14px',fontWeight:'700',color:'#1a1a1a'}}>
+            <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{smenAperta?'▾':'▸'}</span>
+            Già confermate che Poste smentisce
+            <span style={{fontSize:'12px',color:'#6b7280',fontWeight:400,marginLeft:'8px'}}>confermate prima del controllo Poste: pagate al fornitore e girate sotto</span>
+          </span>
+          <span style={{fontSize:'13px',fontWeight:700,color:'#b91c1c'}}>{smen?.righe ? `${smenFiltrate.length} · € ${smenEuroMio.toFixed(2)} pagati da te` : smenN}</span>
+        </div>
+        {smenAperta && (
+          <div>
+            {smenCarico ? (
+              <div style={{padding:'24px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>Caricamento...</div>
+            ) : smen?.errore ? (
+              <div style={{padding:'24px',textAlign:'center' as const,color:'#dc2626',fontSize:'13px'}}>{smen.errore}</div>
+            ) : (
+              <>
+                <div style={{padding:'10px 16px',fontSize:'12px',color:'#475569',lineHeight:1.6,borderBottom:'1px solid #f0f0f0'}}>
+                  Queste rettifiche sono state confermate prima che il controllo Poste fosse acceso. La misura di Poste le smentisce:
+                  il collo stava nell'agevolazione peso reale, o pesava meno di quanto fatturato. Il costo l'hai pagato al fornitore
+                  (<strong>€ {smenEuroMio.toFixed(2)}</strong>) e, dove sotto c'era qualcuno, è stato addebitato
+                  (<strong>€ {smenEuroSotto.toFixed(2)}</strong>). Il <strong>file per il fornitore</strong> contiene solo pesi e misure, per
+                  contestarle; il <strong>riepilogo interno</strong> dice a chi sono state addebitate e quanto. Chi sta sotto non vede niente di questo.
+                </div>
+                <div style={{padding:'10px 16px',display:'flex',gap:'8px',flexWrap:'wrap' as const,alignItems:'center',borderBottom:'1px solid #f0f0f0'}}>
+                  {([
+                    ['', 'Tutte', smenTutte.length],
+                    ['senza_agevolazione', '⛔ Senza agevolazione peso reale', smenTutte.filter((r: any) => r.esito === 'senza_agevolazione').length],
+                    ['peso_sbagliato', '⛔ Peso diverso dalla misura di Poste', smenTutte.filter((r: any) => r.esito === 'peso_sbagliato').length],
+                  ] as [string, string, number][]).map(([v, etichetta, n]) => (
+                    <button key={v || 'tutte'} onClick={() => { setSmenFiltro(smenFiltro === v ? '' : v); setSmenPagina(1) }}
+                      style={{padding:'4px 10px',borderRadius:'999px',fontSize:'11.5px',fontWeight:600,cursor:'pointer',color:v ? '#b91c1c' : '#334155',background:v ? '#fef2f2' : '#fff',border:`1px solid ${smenFiltro === v ? (v ? '#b91c1c' : '#334155') : '#e5e7eb'}`}}>
+                      {etichetta} <strong>{n}</strong>
+                    </button>
+                  ))}
+                  <input value={smenCerca} onChange={e=>{ setSmenCerca(e.target.value); setSmenPagina(1) }} placeholder="N. spedizione, a chi..."
+                    style={{padding:'6px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'12px',minWidth:'180px',flex:'1 1 180px',color:'#1a1a1a',background:'#fff'}}/>
+                  <button onClick={scaricaSmentiteFornitore} disabled={!smenFiltrate.length}
+                    style={{padding:'7px 12px',background:smenFiltrate.length?'#b91c1c':'#e5e7eb',color:smenFiltrate.length?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:700,cursor:smenFiltrate.length?'pointer':'not-allowed'}}>
+                    ⬇ File per il fornitore (Excel)
+                  </button>
+                  <button onClick={scaricaSmentiteInterno} disabled={!smenFiltrate.length}
+                    style={{padding:'7px 12px',background:'#fff',color:'#1a1a1a',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',fontWeight:600,cursor:smenFiltrate.length?'pointer':'not-allowed'}}>
+                    ⬇ Riepilogo interno
+                  </button>
+                </div>
+                {smenPerChi.length > 0 && (
+                  <div style={{overflowX:'auto' as const,borderBottom:'1px solid #f0f0f0'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+                      <thead><tr style={{background:'#f9fafb'}}>
+                        {['Addebitata a','Spedizioni','Senza agevolazione','Peso sbagliato','Addebitato sotto','Pagato da te'].map(h=>(
+                          <th key={h} style={{textAlign:'left' as const,padding:'7px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {smenPerChi.map((g: any) => (
+                          <tr key={g.nome} style={{borderBottom:'1px solid #e5e7eb'}}>
+                            <td style={{padding:'7px 10px',color:'#1a1a1a',fontWeight:600}}>{g.nome}</td>
+                            <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{g.n}</td>
+                            <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{g.agev}</td>
+                            <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{g.peso}</td>
+                            <td style={{padding:'7px 10px',color:'#1a1a1a'}}>€ {g.addebitato.toFixed(2)}</td>
+                            <td style={{padding:'7px 10px',color:'#dc2626',fontWeight:700}}>€ {g.costo.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {!smenFiltrate.length ? (
+                  <div style={{padding:'24px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>{smenQ || smenFiltro ? 'Nessuna riga corrisponde al filtro.' : 'Nessuna rettifica confermata che Poste smentisce.'}</div>
+                ) : (
+                  <>
+                    <div style={{overflowX:'auto' as const}}>
+                      <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+                        <thead><tr style={{background:'#f9fafb'}}>
+                          {['LDV','Data','Perché Poste la smentisce','Addebitata a','Addebitato','Pagato da te'].map(h=>(
+                            <th key={h} style={{textAlign:'left' as const,padding:'7px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
+                          ))}
+                        </tr></thead>
+                        <tbody>
+                          {smenVisibili.map((r: any) => (
+                            <tr key={r.id} style={{borderBottom:'1px solid #e5e7eb'}}>
+                              <td style={{padding:'7px 10px',color:'#f97316',fontWeight:600,whiteSpace:'nowrap' as const}}>{r.ldv}</td>
+                              <td style={{padding:'7px 10px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{new Date(r.quando).toLocaleDateString('it-IT')}</td>
+                              <td style={{padding:'7px 10px',color:'#7f1d1d'}}>
+                                <div style={{fontWeight:600}}>{r.esito === 'senza_agevolazione' ? '⛔ Senza agevolazione peso reale' : '⛔ Peso diverso dalla misura di Poste'}</div>
+                                <div style={{color:'#475569'}}>{r.motivo}</div>
+                              </td>
+                              <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{r.a_chi}</td>
+                              <td style={{padding:'7px 10px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>€ {Number(r.addebitato).toFixed(2)}</td>
+                              <td style={{padding:'7px 10px',color:'#dc2626',fontWeight:700,whiteSpace:'nowrap' as const}}>€ {Number(r.costo_tuo).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
+                      <span style={{fontSize:'12px',color:'#666'}}>{(smenPagCorr - 1) * smenPerPage + 1}-{Math.min(smenPagCorr * smenPerPage, smenFiltrate.length)} di {smenFiltrate.length}</span>
+                      <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+                        <button onClick={()=>setSmenPagina(p=>Math.max(1,p-1))} disabled={smenPagCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:smenPagCorr<=1?'default':'pointer',color:smenPagCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
+                        <span style={{fontSize:'12px',color:'#1a1a1a',padding:'0 6px'}}>{smenPagCorr} / {smenTotPagine}</span>
+                        <button onClick={()=>setSmenPagina(p=>Math.min(smenTotPagine,p+1))} disabled={smenPagCorr>=smenTotPagine} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:smenPagCorr>=smenTotPagine?'default':'pointer',color:smenPagCorr>=smenTotPagine?'#ccc':'#1a1a1a'}}>Successivo</button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      )}
+
       {/* RETTIFICHE ELIMINATE — quello che ti e' stato scalato e che non hai girato a nessuno. */}
       {!elim?.vietato && (
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginTop:'16px'}}>
@@ -947,7 +1163,10 @@ export default function RettificaCostiPage() {
                           <td style={{padding:'7px 10px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{new Date(r.quando).toLocaleDateString('it-IT')}</td>
                           <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{r.da}</td>
                           <td style={{padding:'7px 10px',color:'#dc2626',fontWeight:700}}>€ {Number(r.importo).toFixed(2)}</td>
-                          <td style={{padding:'7px 10px',color:'#475569'}}>{r.motivo}</td>
+                          <td style={{padding:'7px 10px',color:'#475569'}}>
+                            {r.motivo}
+                            {r.poste && <div style={{color:'#b91c1c',fontWeight:600,marginTop:'2px'}}>⛔ Poste la smentisce — {r.poste}</div>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

@@ -4,6 +4,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { confineGiornoRoma, giorniFaRoma, giornoRoma } from '@/lib/date-roma'
+import { controlloAttivo, FERMA } from '@/lib/ripesature-controllo'
 
 // ── RETTIFICHE ELIMINATE: PAGATE DA ME, NON RECUPERATE DA NESSUNO ──
 //
@@ -35,10 +36,10 @@ export async function GET(req: NextRequest) {
   const dal = confineGiornoRoma(dalG, 'dal')!, al = confineGiornoRoma(alG, 'al')!
 
   const campi = 'id,master_id,spedizione_id,numero_spedizione,differenza,fuori_sagoma,costo_fornitore,propagazione,created_at,masters:master_id(nome)'
-  const leggi = async (filtra: (q: any) => any) => {
+  const leggi = async (filtra: (q: any) => any, extra = '') => {
     const out: any[] = []
     for (let da = 0; ; da += 1000) {
-      const { data, error } = await filtra(admin.from('rettifiche').select(campi))
+      const { data, error } = await filtra(admin.from('rettifiche').select(campi + extra))
         .gte('created_at', dal).lte('created_at', al).order('created_at', { ascending: false }).order('id').range(da, da + 999)
       if (error) throw new Error(error.message)
       out.push(...(data || []))
@@ -58,8 +59,11 @@ export async function GET(req: NextRequest) {
       const { data } = await admin.from('rettifiche').select('origine_rettifica_id').in('origine_rettifica_id', caricate.slice(i, i + 300))
       for (const f of (data || []) as any[]) conFiglia.add(f.origine_rettifica_id)
     }
-    // Il mio costo di detentore senza nessuno sotto da rettificare.
-    const mie = await leggi(q => q.eq('master_id', mio).eq('target_master_id', mio).eq('confermata', true))
+    // Il mio costo di detentore senza nessuno sotto da rettificare. Su queste, che sono righe MIE, anche l'esito del
+    // controllo Poste (se l'ho acceso): se Poste le smentisce le ho pagate al fornitore per niente, e si contestano.
+    // Sulle ricevute da sopra no: l'esito e' di chi ha caricato il file, e sotto non deve sapere che era sbagliata.
+    const conPoste = await controlloAttivo(admin, mio)
+    const mie = await leggi(q => q.eq('master_id', mio).eq('target_master_id', mio).eq('confermata', true), conPoste ? ',controllo' : '')
 
     const arr = (n: number) => Math.round(n * 100) / 100
     const righe: any[] = []
@@ -83,6 +87,7 @@ export async function GET(req: NextRequest) {
         id: r.id, ldv: r.numero_spedizione, quando: r.created_at,
         da: 'Tuo costo (contratto tuo)', importo: costo,
         motivo: 'Solo a tuo carico: sotto non c\'era niente da rettificare',
+        ...(conPoste && FERMA.has(r.controllo?.esito) ? { poste: r.controllo.motivo } : {}),
       })
     }
     righe.sort((a, b) => String(b.quando).localeCompare(String(a.quando)))
