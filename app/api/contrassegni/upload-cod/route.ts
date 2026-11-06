@@ -74,7 +74,8 @@ export async function POST(req: NextRequest) {
     for (const kk in rigaRaw) { riga[String(kk).trim().toLowerCase()] = (rigaRaw as any)[kk] }
     // 'shipment' = export contrassegni SpediamoPro (codice spedizione del provider, es. 6A54B0F9AB03D)
     // 'nr. ldv' = Distinta Contrassegni di SDA (la carica LOGIXIA per SDA EXPRESS L, vedi lib/cod-file-righe.ts)
-    const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || riga['nr. ldv'] || '').trim()
+    // 'nr ldv' (senza punto) = Lista Contrassegni SDA con lo stato della pratica (vedi 'status ctr' sotto)
+    const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || riga['nr. ldv'] || riga['nr ldv'] || '').trim()
     // Importo VERSATO dal corriere. Nei file Ecomize/Em express c'e' 'pagato' (quanto il corriere ha
     // davvero versato) accanto a 'contrassegno' (il nominale): a scendere al cliente e' il PAGATO.
     // Restano gli alias storici + 'COD amount [EUR]' (SpediamoPro). Virgola decimale gestita.
@@ -82,7 +83,8 @@ export async function POST(req: NextRequest) {
     // Lista Contrassegni del portale SDA (CSV col punto e virgola, la scarica LOGIXIA): 'Lettera di Vettura',
     // 'Importo contrassegno', 'Data di accredito'. Il 30/10/2026 'importo contrassegno' non era tra i nomi
     // conosciuti: 367 contrassegni da 27.759,19 € sono entrati in sosta a 0 €.
-    let importoRaw = riga['pagato'] ?? riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno'] ?? riga['importo contrassegno']
+    // Lista Contrassegni SDA con lo stato: 'Imp. Contr. Spedizione'.
+    let importoRaw = riga['pagato'] ?? riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno'] ?? riga['importo contrassegno'] ?? riga['imp. contr. spedizione']
     if (importoRaw == null) { const k = Object.keys(riga).find(x => x.startsWith('cod amount')); if (k) importoRaw = riga[k] }
     const colIncassoSda = Object.keys(riga).find(x => x.startsWith('incasso cor'))
     if (importoRaw == null && colIncassoSda) importoRaw = riga[colIncassoSda]
@@ -113,6 +115,10 @@ export async function POST(req: NextRequest) {
     // Lista Contrassegni SDA: stessa regola sulla data di accredito e sull'importo.
     if (('data di accredito' in riga) && !String(riga['data di accredito'] ?? '').trim()) { saltateNonPagate++; continue }
     if (('importo contrassegno' in riga) && !(importoCod > 0)) { saltateNonPagate++; continue }
+    // Lista Contrassegni SDA con lo stato della pratica: "Status CTR" e "Data Accr. (a Cliente)" NON decidono
+    // niente. Il file elenca anche i contrassegni che SDA non ha ancora accreditato (il 06/11/2026: 711 righe,
+    // tutte "Da Lavorare"), ma lo carica LOGIXIA quando ha deciso che sono da pagare (Lorenzo, 06/11).
+    if (('imp. contr. spedizione' in riga) && !(importoCod > 0)) { saltateNonPagate++; continue }
     codFile += importoCod
 
     // Match ESATTO per primo (usa l'indice su numero → veloce): copre la stragrande maggioranza.
