@@ -167,18 +167,13 @@ export async function POST(req: NextRequest) {
   // (masterId/clienteId presi da primaSped sopra); colli/peso e tracking sono gli stessi (stesso pacco).
   // Senza, un moovexpress cadeva nel ripiego Spedisci (nessun _carrierCode) → "Impossibile recuperare il
   // corriere". Per l'owner Poste si entra nel ramo poste qui sotto, con credenziali vere.
-  if (corriere.tipo === 'moovexpress' && primaSped.tracking_number) {
-    const { risolviGambeSpedizione } = await import('@/lib/condivisione-catena')
-    const gambe = await risolviGambeSpedizione(admin, primaSped.tracking_number)
-    const owner = gambe.find((g: any) => g.tipo && g.tipo !== 'moovexpress')
-    if (!owner) return NextResponse.json({ error: 'Contratto condiviso: nessun owner reale per prenotare il ritiro.' }, { status: 400 })
-    const { data: spO } = await admin.from('spedizioni').select('corriere_id').eq('id', owner.spedizioneId).maybeSingle()
-    const { data: corrO } = (spO as any)?.corriere_id
-      ? await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', (spO as any).corriere_id).maybeSingle()
-      : { data: null as any }
-    if (!corrO) return NextResponse.json({ error: 'Contratto condiviso: corriere dell\'owner non trovato per il ritiro.' }, { status: 400 })
-    corriere = corrO as any
-    cred = ((corrO as any).credenziali || {}) as Record<string, string>
+  // La risoluzione sta in lib/ritiro-poste: la usa anche l'API pubblica.
+  if (corriere.tipo === 'moovexpress') {
+    const { contrattoCheRitira } = await import('@/lib/ritiro-poste')
+    const ris = await contrattoCheRitira(admin, corriere, primaSped.tracking_number)
+    if ('errore' in ris) return NextResponse.json({ error: ris.errore }, { status: 400 })
+    corriere = ris.corriere
+    cred = ((ris.corriere as any).credenziali || {}) as Record<string, string>
   }
 
   if (!body.mittNome || !body.mittIndirizzo || !body.mittCitta || !body.mittCap) {
@@ -344,32 +339,22 @@ export async function POST(req: NextRequest) {
   // ══════════════════════════════════════════════════════
   // POSTE Delivery Business (KSync/ParcelPilot): ritiro ON-DEMAND via /pickup/booking (come FedEx).
   // bookingType RIT0001/2/3 dal contratto (settings, default RIT0003). Torna un bookingId.
+  // La prenotazione sta in lib/ritiro-poste: la stessa la usa l'API pubblica.
   // ══════════════════════════════════════════════════════
   if (corriere.tipo === 'poste') {
-    const { ritiroPrenotaKsync } = await import('@/lib/ksync')
-    const st: any = corriere.settings || {}
-    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope }
-    const ts = pickupTimeSpedisci(body.orarioRitiro)
-    try {
-      const ris = await ritiroPrenotaKsync(credPo, {
-        bookingType: st.booking_type || 'RIT0003',
-        indirizzo: {
-          ragioneSociale: body.mittNome, referente: body.mittNome, indirizzo: body.mittIndirizzo,
-          cap: body.mittCap, citta: body.mittCitta,
-          provincia: siglaProvincia(body.mittProvincia || '') || (body.mittProvincia || ''), paese: body.mittPaese || 'IT',
-          telefono: pulisciTelefono(body.mittTelefono) || '', email: body.mittEmail || '',
-        },
-        numColli: colliTotali, pesoKg: pesoTotale,
-        shipmentId: primaSped.tracking_number || primaSped.numero || '',
-        dataRitiro: body.dataRitiro, timeSlot: ts === 'PM' ? 'PM' : 'AM', note: body.istruzioni,
-      })
-      if (!ris.ok || !ris.bookingId) return NextResponse.json({ error: erroreRitiroPulito(ris.errore || 'Poste: ritiro non riuscito') }, { status: 400 })
-      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(ris.bookingId)
-      if (insErr) return NextResponse.json({ error: `Ritiro creato (${ris.bookingId}) ma errore DB: ${insErr.message}` }, { status: 500 })
-      return NextResponse.json({ id: nuovoRitiro.id, pickupId: ris.bookingId })
-    } catch (e: any) {
-      return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
-    }
+    const { prenotaRitiroPoste } = await import('@/lib/ritiro-poste')
+    const ris = await prenotaRitiroPoste(admin, {
+      corriere, masterId, clienteId, spedizioni,
+      mittente: {
+        nome: body.mittNome, indirizzo: body.mittIndirizzo, citta: body.mittCitta, cap: body.mittCap,
+        provincia: body.mittProvincia, paese: body.mittPaese, telefono: body.mittTelefono, email: body.mittEmail,
+      },
+      data: body.dataRitiro, fascia: pickupTimeSpedisci(body.orarioRitiro) === 'PM' ? 'PM' : 'AM',
+      note: body.istruzioni, contenuto: body.contenuto,
+    })
+    if (ris.ok) return NextResponse.json({ id: ris.ritiroId, pickupId: ris.codice })
+    if (ris.motivo === 'registrazione') return NextResponse.json({ error: `Ritiro creato (${ris.codice}) ma errore DB: ${ris.errore}` }, { status: 500 })
+    return NextResponse.json({ error: ris.errore }, { status: 400 })
   }
 
   // ══════════════════════════════════════════════════════

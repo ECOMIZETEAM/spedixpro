@@ -9,9 +9,11 @@
 //
 // Chi integra parla solo con noi: nessun messaggio lo manda al portale o all'assistenza del corriere.
 
-// Su quali contratti /api/v1/pickups sa prenotare un ritiro.
+// Su quali contratti /api/v1/pickups sa prenotare un ritiro. Poste diretto e i ponti di condivisione
+// dal 06/11/2026 (lib/ritiro-poste): sul ponte vale se il contratto vero dello stesso pacco e' Poste
+// diretto (SDA EXPRESS L), e la rotta lo verifica sulle spedizioni prima di chiamare il corriere.
 export function ritiroPrenotabileConPickups(tipo: string | null | undefined): boolean {
-  return tipo === 'spediamopro' || tipo === 'spedisci'
+  return tipo === 'spediamopro' || tipo === 'spedisci' || tipo === 'poste' || tipo === 'moovexpress'
 }
 
 // Cosa deve fare chi integra quando il ritiro chiesto alla creazione NON e' stato prenotato.
@@ -22,9 +24,9 @@ export function avvisoRitiroNonPrenotato(tipo: string | null | undefined): strin
   return messaggioRitiroNonPrenotabileViaApi(tipo)
 }
 
-// Contratti su cui via API il ritiro non si prenota in nessun modo. Ponti di condivisione e Poste
-// diretto si prenotano dalla sezione Ritiri del portale (che ha i rami che qui mancano); gli altri
-// solo tramite l'assistenza.
+// Contratti su cui via API il ritiro non si prenota in nessun modo. I ponti di condivisione il cui
+// contratto vero non e' Poste diretto si prenotano dalla sezione Ritiri del portale (che ha i rami che
+// qui mancano); gli altri solo tramite l'assistenza.
 export function messaggioRitiroNonPrenotabileViaApi(tipo: string | null | undefined): string {
   if (tipo === 'moovexpress' || tipo === 'poste') {
     return 'Su questo contratto il ritiro non si può prenotare via API: richiedilo dal portale (sezione Ritiri) oppure contatta l\'assistenza.'
@@ -55,9 +57,10 @@ export function ritiroInRisposta(r: {
   codice?: string | null
   tipo?: string | null
   spedizioneId?: string | null
+  avviso?: string | null   // il motivo vero, quando la porta ha provato a prenotare e non e' riuscita
 }): RitiroApi {
   if (!r.prenotato) {
-    return { richiesto: false, data: null, intervallo: null, codice: null, avviso: avvisoRitiroNonPrenotato(r.tipo) }
+    return { richiesto: false, data: null, intervallo: null, codice: null, avviso: r.avviso || avvisoRitiroNonPrenotato(r.tipo) }
   }
   const codice = r.codice || null
   return {

@@ -11,7 +11,7 @@ import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { erroreIndirizzoItaliano, cittaPerLaSpedizione } from '@/lib/citta-spedizione'
 import { spedizioneDoppioneAttiva, messaggioDoppione } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
-import { ritiroInRisposta } from '@/lib/ritiro-api'
+import { ritiroInRisposta, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
@@ -799,6 +799,59 @@ export async function POST(req: NextRequest) {
     }
   } catch (e) { console.error('API cascata:', e) }
 
+  // IL RITIRO SU POSTE DIRETTO (SDA EXPRESS L, anche attraverso i ponti di condivisione).
+  // Alla creazione il contratto Poste non lo prenota: il portale lo fa subito dopo con /api/ritiri/crea,
+  // e qui si fa lo stesso, con le stesse funzioni (lib/ritiro-poste). Solo sulla gamba di chi spedisce
+  // davvero: sulle gambe sotto il cliente e' il conto di un master collegato (ledger), e prenotare anche
+  // li' farebbe un ritiro per ogni livello della fila sullo stesso pacco. Se non riesce la spedizione
+  // resta valida (e' gia' creata e pagata): la risposta dice perche' e che si puo' riprovare.
+  let avvisoRitiro: string | null = null
+  if (_vuoleRitiro && !ritiroPrenotato && inserted?.id && !(cliente as any)?.ledger
+    && (corriere.tipo === 'poste' || corriere.tipo === 'moovexpress')) {
+    try {
+      const { contrattoCheRitira, prenotaRitiroPoste, motivoRitiroNonValido } = await import('@/lib/ritiro-poste')
+      const ritira = await contrattoCheRitira(admin, corriere, numero)
+      if (!('corriere' in ritira) || ritira.corriere?.tipo !== 'poste') {
+        // Ponte su un contratto che non e' Poste diretto: qui non c'e' un ramo, e /pickups lo rifiuta.
+        avvisoRitiro = messaggioRitiroNonPrenotabileViaApi(corriere.tipo)
+      } else {
+        const motivo = motivoRitiroNonValido(_dataRitiro, body.shipFrom?.phone)
+        if (motivo) {
+          avvisoRitiro = `Ritiro non prenotato: ${motivo} Correggi e richiedilo con POST /api/v1/pickups.`
+        } else {
+          const esito = await prenotaRitiroPoste(admin, {
+            corriere: ritira.corriere, masterId, clienteId: ctx.clienteId,
+            spedizioni: [{ id: inserted.id, numero, tracking_number: numero, colli: packages.length, peso_reale: pesoReale }],
+            mittente: {
+              nome: body.shipFrom.name, indirizzo: body.shipFrom.street1, citta: body.shipFrom.city, cap: body.shipFrom.postalCode,
+              provincia: body.shipFrom.state, paese: 'IT', telefono: body.shipFrom.phone, email: body.shipFrom.email,
+            },
+            data: _dataRitiro, fascia: _pomeriggio ? 'PM' : 'AM',
+            note: body.notes ? String(body.notes) : null, contenuto: body.contenuto ? String(body.contenuto) : null,
+          })
+          if (esito.ok) {
+            ritiroPrenotato = true
+            codiceRitiro = esito.codice
+            // La riga era nata con il ritiro spento (non era ancora prenotato): il portale mostra
+            // "Ritiro richiesto" da questi campi.
+            await admin.from('spedizioni').update({
+              richiedi_ritiro: true, data_ritiro: _dataRitiro, intervallo_ritiro: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
+            }).eq('id', inserted.id)
+          } else if (esito.motivo === 'registrazione') {
+            // Prenotato presso il corriere ma non registrato: il codice va dato, o si rischia un doppione.
+            console.error('[V1][RITIRO][POSTE] ritiro prenotato ma non registrato:', esito.codice, esito.errore)
+            avvisoRitiro = `Ritiro prenotato presso il corriere (${esito.codice}) ma non registrato a sistema: non richiederlo di nuovo, contatta l'assistenza indicando questo codice.`
+          } else {
+            avvisoRitiro = `Ritiro non prenotato: ${esito.errore} Puoi riprovare con POST /api/v1/pickups.`
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error('[V1][RITIRO][POSTE]', e?.message)
+      avvisoRitiro = 'Ritiro non prenotato per un errore temporaneo: richiedilo con POST /api/v1/pickups.'
+    }
+  }
+
   // Notifica ai webhook del cliente (best-effort: non blocca né fa fallire la creazione)
   inviaWebhook({
     clienteId: ctx.clienteId, corriereId: corriere.id, evento: 'shipment.created',
@@ -814,7 +867,7 @@ export async function POST(req: NextRequest) {
     // Se il ritiro e' stato chiesto, la risposta dice se e' stato PRENOTATO e, se no, cosa fare.
     ...(_vuoleRitiro ? { ritiro: ritiroInRisposta({
       prenotato: ritiroPrenotato, data: _dataRitiro, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
-      codice: codiceRitiro, tipo: corriere.tipo, spedizioneId: inserted?.id || null,
+      codice: codiceRitiro, tipo: corriere.tipo, spedizioneId: inserted?.id || null, avviso: avvisoRitiro,
     }) } : {}),
   })
 }
