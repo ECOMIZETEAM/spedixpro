@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { isAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
+import { fermaIResi, spedizioniRese } from '@/lib/cod-resi-fermi'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,7 +41,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ totale: 0, righe: [] })
   }
 
-  const tutte = await fetchAll(() => filtra(admin.from('cod_da_caricare').select('spedizione_id,importo')))
+  const lette = await fetchAll(() => filtra(admin.from('cod_da_caricare').select('spedizione_id,importo')).order('spedizione_id', { ascending: true }))
+  // MULTIEXPRESS: i resi stanno nel loro riquadro, non nella tendina del gruppo (lib/cod-resi-fermi.ts).
+  const rese = fermaIResi(mio) ? await spedizioniRese(admin, lette.map((r: any) => r.spedizione_id)) : new Set<string>()
+  const tutte = lette.filter((r: any) => !rese.has(r.spedizione_id))
   const ids = tutte.map((r: any) => r.spedizione_id).filter(Boolean)
   const info = new Map<string, any>()
   for (let i = 0; i < ids.length; i += 300) {

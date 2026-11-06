@@ -36,7 +36,8 @@ export default function DistinteContrassegniPage() {
   // destinatari, carico rimesse). Modo indeterminato: e' una POST unica, non sappiamo la percentuale.
   const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string;sottotitolo?:string}|null>(null)
   const [caricando, setCaricando] = useState(false)
-  const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number}>({gruppi:[],totale:0,spedizioni:0})
+  const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number;resiFermi:any[];resiTotale:number}>({gruppi:[],totale:0,spedizioni:0,resiFermi:[],resiTotale:0})
+  const [selResi, setSelResi] = useState<Set<string>>(new Set())          // resi fermati scelti per farli scendere (solo MULTIEXPRESS)
   const [selDest, setSelDest] = useState<Set<string>>(new Set())        // gruppi INTERI selezionati
   const [selSped, setSelSped] = useState<Record<string, Set<string>>>({}) // spedizioni singole per gruppo
   const [espansi, setEspansi] = useState<Set<string>>(new Set())          // tendine aperte
@@ -62,8 +63,8 @@ export default function DistinteContrassegniPage() {
 
   function caricaDaCaricare() {
     fetch('/api/contrassegni/da-caricare').then(r=>r.json()).then(d=>{
-      setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0) })
-      setSelDest(new Set()); setSelSped({}); setEspansi(new Set()); setDettGruppo({})
+      setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0), resiFermi: d?.resiFermi || [], resiTotale: Number(d?.resiTotale||0) })
+      setSelDest(new Set()); setSelSped({}); setEspansi(new Set()); setDettGruppo({}); setSelResi(new Set())
     }).catch(()=>{})
   }
 
@@ -136,11 +137,32 @@ export default function DistinteContrassegniPage() {
           + `Spedizioni caricate: ${j.spedizioniCaricate} · € ${Number(j.totaleCaricato||0).toFixed(2)}\n`
           + (j.giaCaricate ? `Già in una tua distinta (saltate): ${j.giaCaricate}\n` : '')
           + (j.senzaImporto ? `Importo a zero, restano in attesa: ${j.senzaImporto}\n` : '')
-          + (j.nonRiuscite ? `Non caricate, tornate in attesa: ${j.nonRiuscite}\n` : '') })
+          + (j.nonRiuscite ? `Non caricate, tornate in attesa: ${j.nonRiuscite}\n` : '')
+          + (j.resiFermati ? `\nResi rimasti fermi: ${j.resiFermati} — sono tornati al mittente. Li trovi nel riquadro «Resi fermati»: scendono solo se li scegli lì.\n` : '') })
         caricaDaCaricare(); carica()
       } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
     setAvanz(null)
+    setCaricando(false)
+  }
+
+  // RESI FERMATI (solo MULTIEXPRESS): scendono solo quelli scelti qui, uno per uno.
+  async function faiScendereResi() {
+    const ids = Array.from(selResi)
+    if (!ids.length) { await dialog.alert({ title:'Nessuna selezione', message:'Seleziona almeno un reso da far scendere.' }); return }
+    const scelti = daCaricare.resiFermi.filter((r:any) => selResi.has(r.spedizione_id))
+    const tot = scelti.reduce((s:number, r:any) => s + Number(r.importo || 0), 0)
+    const ok = await dialog.confirm({ title:'Far scendere i resi?', message:`${ids.length} contrassegni di pacchi tornati al mittente, € ${tot.toFixed(2)}. Il destinatario non li ha pagati: se li fai scendere, li paghi tu al livello sotto. Confermi?` })
+    if (!ok) return
+    setCaricando(true)
+    try {
+      const r = await fetch('/api/contrassegni/da-caricare', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ resi: ids }) })
+      const j = await r.json()
+      if (j.success) {
+        await dialog.alert({ title:'Resi fatti scendere', message: `Distinte create: ${j.distinteCreate}\nSpedizioni caricate: ${j.spedizioniCaricate} · € ${Number(j.totaleCaricato||0).toFixed(2)}` })
+        caricaDaCaricare(); carica()
+      } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
+    } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
     setCaricando(false)
   }
 
@@ -498,6 +520,55 @@ export default function DistinteContrassegniPage() {
                 </Fragment>
                 )
               })}
+            </tbody>
+          </table>
+        </div>
+        )
+      })()}
+
+      {/* RESI FERMATI (solo MULTIEXPRESS, lib/cod-resi-fermi.ts): contrassegni di pacchi tornati al mittente.
+          Fuori dai gruppi verdi: non scendono con "Seleziona tutti", solo se scelti qui. Lasciarli = tenerli. */}
+      {daCaricare.resiFermi.length > 0 && (() => {
+        const tutti = selResi.size === daCaricare.resiFermi.length
+        return (
+        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fca5a5',overflow:'hidden',marginBottom:'16px'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #fecaca',background:'#fef2f2',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
+            <div>
+              <div style={{fontSize:'13px',fontWeight:800,color:'#b91c1c'}}>Resi fermati — {daCaricare.resiFermi.length} spedizioni · € {daCaricare.resiTotale.toFixed(2)}</div>
+              <div style={{fontSize:'11.5px',color:'#991b1b',marginTop:'2px'}}>Questi pacchi sono tornati al mittente: il destinatario non ha pagato il contrassegno. Restano qui e non scendono con gli altri. Se vuoi farli scendere lo stesso, selezionali e premi «Fai scendere i selezionati».</div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#991b1b',cursor:'pointer',fontWeight:600}}>
+                <input type="checkbox" checked={tutti}
+                  onChange={e=>setSelResi(e.target.checked ? new Set(daCaricare.resiFermi.map((r:any)=>r.spedizione_id)) : new Set())}
+                  style={{width:'15px',height:'15px',cursor:'pointer'}}/>
+                Seleziona tutti
+              </label>
+              <button onClick={faiScendereResi} disabled={caricando || !selResi.size}
+                style={{padding:'7px 16px',background:selResi.size?'#b91c1c':'#d1d5db',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:700,cursor:selResi.size?'pointer':'default'}}>
+                {caricando ? 'Caricamento…' : `Fai scendere i selezionati (${selResi.size})`}
+              </button>
+            </div>
+          </div>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+            <thead><tr style={{background:'#f9fafb'}}>
+              {['','LDV','Mittente → destinatario','Scenderebbe a','Contrassegno','Reso il'].map((h,i)=><th key={i} style={{textAlign:'left' as const,padding:'7px 12px',fontWeight:700,textTransform:'uppercase' as const,fontSize:'10.5px',color:'#1a1a1a',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {daCaricare.resiFermi.map((r:any)=>(
+                <tr key={r.spedizione_id} style={{borderBottom:'1px solid #f3f4f6'}}>
+                  <td style={{padding:'7px 12px',width:'28px'}}>
+                    <input type="checkbox" checked={selResi.has(r.spedizione_id)}
+                      onChange={e=>setSelResi(prev=>{ const n = new Set(prev); if (e.target.checked) n.add(r.spedizione_id); else n.delete(r.spedizione_id); return n })}
+                      style={{width:'14px',height:'14px',cursor:'pointer'}}/>
+                  </td>
+                  <td style={{padding:'7px 12px',fontWeight:700,color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{r.numero}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{r.mitt_nome || '—'} → {r.dest_nome || '—'}{r.dest_citta ? ` (${r.dest_citta})` : ''}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{r.verso}</td>
+                  <td style={{padding:'7px 12px',fontWeight:700,color:'#1a1a1a',whiteSpace:'nowrap' as const}}>€ {Number(r.importo||0).toFixed(2)}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{r.reso_il ? new Date(r.reso_il).toLocaleDateString('it-IT') : '—'}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

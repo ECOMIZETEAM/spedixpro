@@ -4,6 +4,7 @@ import { gestisceLaRete } from '@/lib/ruoli'
 import { isAgente, bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
+import { fermaIResi, spedizioniRese } from '@/lib/cod-resi-fermi'
 
 // La creazione delle distinte fa molti round-trip: col default la funzione poteva essere uccisa
 // a meta' (testata creata, righe no) lasciando distinte fantasma col totale pieno.
@@ -44,13 +45,18 @@ export async function GET() {
     }
   } catch (e: any) { console.error('[COD][DA-CARICARE][auto-recupero rimesse]', e?.message) }
 
-  const righe = await fetchAll(() => admin.from('cod_da_caricare')
+  const tutteLeRighe = await fetchAll(() => admin.from('cod_da_caricare')
     .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,created_at')
-    .eq('master_id', utente.master_id).order('created_at', { ascending: true }))
-  if (!righe.length) return NextResponse.json({ gruppi: [], totale: 0, spedizioni: 0 })
+    .eq('master_id', utente.master_id).order('created_at', { ascending: true }).order('id', { ascending: true }))
+  if (!tutteLeRighe.length) return NextResponse.json({ gruppi: [], totale: 0, spedizioni: 0 })
 
-  const cliIds = Array.from(new Set(righe.map((r: any) => r.cliente_id).filter(Boolean)))
-  const mstIds = Array.from(new Set(righe.map((r: any) => r.target_master_id).filter(Boolean)))
+  // RESI FERMATI (solo MULTIEXPRESS, lib/cod-resi-fermi.ts): fuori dai gruppi, in un elenco a parte.
+  const rese = fermaIResi(utente.master_id) ? await spedizioniRese(admin, tutteLeRighe.map((r: any) => r.spedizione_id)) : new Set<string>()
+  const righe = tutteLeRighe.filter((r: any) => !rese.has(r.spedizione_id))
+  const ferme = tutteLeRighe.filter((r: any) => rese.has(r.spedizione_id))
+
+  const cliIds = Array.from(new Set(tutteLeRighe.map((r: any) => r.cliente_id).filter(Boolean)))
+  const mstIds = Array.from(new Set(tutteLeRighe.map((r: any) => r.target_master_id).filter(Boolean)))
   const [{ data: cli }, { data: mst }] = await Promise.all([
     cliIds.length ? admin.from('clienti').select('id,ragione_sociale').in('id', cliIds) : Promise.resolve({ data: [] as any[] }),
     mstIds.length ? admin.from('masters').select('id,nome').in('id', mstIds) : Promise.resolve({ data: [] as any[] }),
@@ -79,10 +85,33 @@ export async function GET() {
     .map(g => ({ ...g, totale: Math.round(g.totale * 100) / 100, origini: Array.from(g.origini) }))
     .sort((a, b) => (a.tipo === b.tipo ? b.totale - a.totale : a.tipo === 'cliente' ? -1 : 1))
 
+  // I resi fermi con quello che serve a decidere: LDV, a chi scenderebbero, per quanto, chi l'ha spedito e a chi.
+  const resiFermi: any[] = []
+  if (ferme.length) {
+    const info = new Map<string, any>()
+    const ids = ferme.map((r: any) => r.spedizione_id)
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data: sp } = await admin.from('spedizioni').select('id,numero,mitt_nome,dest_nome,dest_citta,created_at,reso_il').in('id', ids.slice(i, i + 300))
+      for (const s of (sp || [])) info.set((s as any).id, s)
+    }
+    for (const r of ferme as any[]) {
+      const s = info.get(r.spedizione_id) || {}
+      resiFermi.push({
+        spedizione_id: r.spedizione_id, numero: s.numero || '—', importo: Math.round((Number(r.importo) || 0) * 100) / 100,
+        mitt_nome: s.mitt_nome || '', dest_nome: s.dest_nome || '', dest_citta: s.dest_citta || '',
+        spedita_il: s.created_at || null, reso_il: s.reso_il || null,
+        verso: r.cliente_id ? (nomeCli.get(r.cliente_id) || '—') : (r.target_master_id ? (nomeMst.get(r.target_master_id) || '—') : 'Contrassegni propri'),
+      })
+    }
+    resiFermi.sort((a, b) => String(a.verso).localeCompare(String(b.verso)) || String(a.numero).localeCompare(String(b.numero)))
+  }
+
   return NextResponse.json({
     gruppi,
     totale: Math.round(gruppi.reduce((s, g) => s + g.totale, 0) * 100) / 100,
     spedizioni: righe.length,
+    resiFermi,
+    resiTotale: Math.round(resiFermi.reduce((s, r) => s + r.importo, 0) * 100) / 100,
   })
 }
 
@@ -100,7 +129,9 @@ export async function POST(req: NextRequest) {
   // delle sue spedizioni, le altre restano in sosta. Il POST poi le raggruppa comunque per
   // destinatario e crea una distinta per gruppo — quindi selezioni miste (più clienti) funzionano.
   const spedizioniSel: string[] = Array.isArray(body.spedizioni) ? body.spedizioni.filter(Boolean).map(String) : []
-  if (!destinatari.length && !spedizioniSel.length) return NextResponse.json({ error: 'Seleziona almeno un contrassegno da caricare' }, { status: 400 })
+  // Resi fermati che il master sceglie di far scendere (riquadro a parte, solo MULTIEXPRESS).
+  const resiSel: string[] = Array.isArray(body.resi) ? body.resi.filter(Boolean).map(String) : []
+  if (!destinatari.length && !spedizioniSel.length && !resiSel.length) return NextResponse.json({ error: 'Seleziona almeno un contrassegno da caricare' }, { status: 400 })
 
   const admin = createAdminSupabase()
   const cliIds = destinatari.filter(d => d.startsWith('c:')).map(d => d.slice(2))
@@ -111,6 +142,38 @@ export async function POST(req: NextRequest) {
   //    secondo non ottiene nulla (Postgres serializza le delete sulla stessa riga) → niente
   //    distinte doppie. Se poi qualcosa va storto, le righe vengono RIMESSE in sosta.
   const claim: any[] = []
+  let resiFermati = 0
+  if (fermaIResi(mio)) {
+    // MULTIEXPRESS: i resi non si prendono con il gruppo né con la tendina, solo se scelti nel loro
+    // riquadro (lib/cod-resi-fermi.ts). Le righe scelte si prendono per spedizione, una per una: un
+    // reso non viene mai tolto dalla sosta e rimesso, resta dov'è.
+    const inSosta = await fetchAll(() => admin.from('cod_da_caricare')
+      .select('spedizione_id,cliente_id,target_master_id').eq('master_id', mio).order('id', { ascending: true }))
+    const rese = await spedizioniRese(admin, inSosta.map((r: any) => r.spedizione_id))
+    const vuoleResi = new Set(resiSel), singole = new Set(spedizioniSel)
+    const scelte = new Set<string>()
+    for (const r of inSosta as any[]) {
+      const nelGruppo = (r.cliente_id && cliIds.includes(r.cliente_id))
+        || (r.target_master_id && mstIds.includes(r.target_master_id))
+        || (vuoleProprio && !r.cliente_id && !r.target_master_id)
+      if (rese.has(r.spedizione_id)) {
+        if (vuoleResi.has(r.spedizione_id)) scelte.add(r.spedizione_id)
+        else if (nelGruppo || singole.has(r.spedizione_id)) resiFermati++
+        continue
+      }
+      if (nelGruppo || singole.has(r.spedizione_id)) scelte.add(r.spedizione_id)
+    }
+    const ids = Array.from(scelte)
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data } = await admin.from('cod_da_caricare').delete()
+        .eq('master_id', mio).in('spedizione_id', ids.slice(i, i + 300))
+        .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,origine_id')
+      claim.push(...(data || []))
+    }
+    if (!claim.length && resiFermati) {
+      return NextResponse.json({ success: true, distinteCreate: 0, totaleCaricato: 0, spedizioniCaricate: 0, giaCaricate: 0, senzaImporto: 0, nonRiuscite: 0, resiFermati })
+    }
+  } else {
   if (cliIds.length) {
     const { data } = await admin.from('cod_da_caricare').delete()
       .eq('master_id', mio).in('cliente_id', cliIds)
@@ -139,6 +202,7 @@ export async function POST(req: NextRequest) {
         .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,origine_id')
       claim.push(...(data || []))
     }
+  }
   }
   if (!claim.length) return NextResponse.json({ error: 'Nessun contrassegno da caricare per la selezione (forse è già stato caricato).' }, { status: 400 })
 
@@ -248,6 +312,7 @@ export async function POST(req: NextRequest) {
       giaCaricate: giaInDistinta.length,
       senzaImporto: senzaImporto.length,
       nonRiuscite: falliti.length,
+      resiFermati,                 // solo MULTIEXPRESS: resi selezionati col gruppo e rimasti fermi
     })
   } catch (e: any) {
     await rimettiInSosta(claim)     // errore imprevisto: tutto torna in sosta, niente va perso
