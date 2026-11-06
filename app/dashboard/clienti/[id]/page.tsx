@@ -153,7 +153,7 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
           <button onClick={() => assegna()} disabled={busy === 'assegna' || !sel} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 16px', fontSize: '13px', fontWeight: 700, cursor: (busy === 'assegna' || !sel) ? 'default' : 'pointer', opacity: (busy === 'assegna' || !sel) ? 0.6 : 1 }}>{busy === 'assegna' ? '…' : 'Assegna'}</button>
           {corrente && <a href={`/dashboard/listini/clienti/${corrente.id}`} className="lst-link" style={{ fontSize: '12px' }}>apri “{corrente.nome}”</a>}
         </div>
-        <div style={{ fontSize: '11.5px', color: '#9ca3af', marginBottom: contratti.length ? '14px' : 0 }}>Il listino lo crei in <b>Listini Clienti</b> (coi tuoi prezzi, solo per questo collegato) e lo assegni qui: i contratti dentro vengono condivisi. Se poi ne aggiungi, premi <b>Aggiorna</b>. Non si condivide un contratto che il collegato ha già, o che arriva da lui; se il suo master gliel'ha tolto, lo sostituisci tu.</div>
+        <div style={{ fontSize: '11.5px', color: '#9ca3af', marginBottom: contratti.length ? '14px' : 0 }}>Il listino lo crei in <b>Listini Clienti</b> (coi tuoi prezzi, solo per questo collegato) e lo assegni qui: i contratti dentro vengono condivisi. Se poi ne aggiungi, gli compaiono appena salvi il listino. Non si condivide un contratto che il collegato ha già, o che arriva da lui; se il suo master gliel'ha tolto, lo sostituisci tu.</div>
 
         {contratti.length > 0 && (
           <div>

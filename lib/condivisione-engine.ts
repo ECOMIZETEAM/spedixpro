@@ -292,6 +292,27 @@ async function materializzaContratto(
       settings: { in_attesa_costo: true }, multicollo: true, inserimento_ritiri: true, attivo: false, livello: 1, proprio: false,
     }).select('id').single()
     if (eC || !nc) return { ok: false, reason: 'Creazione corriere sul compratore non riuscita.' }
+    // Da quando il salvataggio del listino crea i ponti (lib/listino-modificato), due salvataggi a pochi
+    // secondi l'uno dall'altro girano in parallelo e possono trovare tutti e due il ponte mancante. Due
+    // ponti con lo stesso nome sul collegato rompono la regola "una riga per nome": la catena ne sceglie
+    // uno a caso. Resta il più vecchio; chi ha creato l'altro lo toglie subito (è appena nato: niente
+    // storico, niente prezzi), insieme alla chiave se l'ha emessa lui, e aggiorna i prezzi su quello che
+    // resta: il secondo salvataggio aggiorna, come il terzo e i successivi.
+    const { data: gemelli, error: eG } = await admin.from('corrieri').select('id,created_at')
+      .eq('master_id', buyer).eq('tipo', 'moovexpress')
+      .eq('credenziali->>fornitore_master_id', seller).eq('credenziali->>corriere_origine_id', corriereId)
+    if (!eG && (gemelli || []).length > 1) {
+      const primo = [...(gemelli as any[])].sort((a, b) =>
+        String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)))[0]
+      if (primo.id !== nc.id) {
+        await admin.from('corrieri').delete().eq('id', nc.id)
+        if (!keyEsist) await admin.from('api_keys').delete().eq('chiave', chiave).eq('cliente_id', ledgerId)
+        console.info(`[condivisione] ponte doppio evitato: "${corr.nome_contratto}" per ${buyer}, resta ${primo.id}`)
+        const propagazione = await propaga(primo.id)
+        if (propagazione.ok) await admin.from('corrieri').update({ attivo: true, settings: {} }).eq('id', primo.id).eq('settings->>in_attesa_costo', 'true')
+        return { ok: true, propagazione, buyerCorriereId: primo.id }
+      }
+    }
     buyerCorrId = nc.id
     creato = true
   } else {
@@ -465,11 +486,10 @@ export async function assegnaListinoCondivisione(
 }
 
 /* RIALLINEA un collegamento al suo listino d'ingrosso ATTUALE: riporta il costo sui ponti che ci sono
- * (anche dopo un ritocco a mano dei prezzi) e accende quelli rimasti in attesa di costo. Gira da solo
- * quando il venditore salva il listino. Con `creaMancanti` (solo dal bottone Aggiorna della scheda, cioè
- * da un master del venditore) crea anche i ponti dei contratti aggiunti al listino dopo l'Assegna. Il
- * salvataggio da solo non crea niente: può farlo anche un operatore, e ricreerebbe un contratto che il
- * collegato ha tolto. Non sostituisce copie di nessuno (lo fa solo l'Assegna, su conferma) e non
+ * (anche dopo un ritocco a mano dei prezzi) e accende quelli rimasti in attesa di costo. Con `creaMancanti`
+ * crea anche i ponti dei contratti aggiunti al listino dopo l'Assegna: lo passano il salvataggio del
+ * listino (lib/listino-modificato: il primo salvataggio crea, i successivi aggiornano) e il bottone
+ * Aggiorna della scheda. Non sostituisce copie di nessuno (lo fa solo l'Assegna, su conferma) e non
  * riaccende ponti in pausa. L'addebito era già giusto: il prezzo vero lo dà la /api/v1 del venditore. */
 export async function risincronizzaCondivisione(admin: any, linkId: string, opts: { creaMancanti?: boolean } = {}): Promise<{
   ok: boolean; reason?: string; contratti?: number; creati?: string[]; daAttivare?: string[]; daConfermare?: string[]; saltati?: { nome: string; motivo: string }[]

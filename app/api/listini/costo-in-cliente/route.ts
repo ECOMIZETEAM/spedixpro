@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { normalizzaMarkup, creaApplicaMarkup } from '@/lib/markup-fasce'
-import { propagaListinoACascata } from '@/lib/copia-listino-submaster'
+import { propagaListinoModificato } from '@/lib/listino-modificato'
 
 // DUPLICA il COSTO di un contratto (listini_corrieri_fasce/supplementi del master, per UN corriere)
 // dentro un LISTINO CLIENTE (nuovo o esistente), applicando una maggiorazione. La maggiorazione può
@@ -100,8 +100,10 @@ export async function POST(req: NextRequest) {
   // (after), come il salvataggio del listino cliente; no-op se il listino non è assegnato a nessuno.
   const listinoFinale = targetId as string
   after(async () => {
-    try { await propagaListinoACascata(createAdminSupabase(), listinoFinale) }
-    catch (e) { console.error('propaga dopo costo-in-cliente ai sotto-master:', e) }
+    // Stessa propagazione del salvataggio del listino: sotto-master E master collegati. Se il listino è
+    // l'ingrosso di un collegato, il contratto appena portato qui gli compare (lib/listino-modificato).
+    try { await propagaListinoModificato(createAdminSupabase(), listinoFinale) }
+    catch (e) { console.error('propaga dopo costo-in-cliente:', e) }
   })
 
   return NextResponse.json({ id: targetId, creato, nome_corriere: corr.nome_contratto })

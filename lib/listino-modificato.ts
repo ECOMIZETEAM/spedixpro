@@ -20,11 +20,17 @@ export async function propagaListinoModificato(admin: any, listinoId: string): P
   } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
 
   // AUTO RE-SYNC CONDIVISIONE: se questo listino è il prezzo d'ingrosso di un master collegato (è il
-  // listino_cliente_id di un cliente-ledger), riporta i costi sui contratti che gli sono già condivisi —
-  // così ritoccare i prezzi qui aggiorna da solo il costo mostrato al collegato. NON crea contratti nuovi
-  // né sostituisce le sue copie: salvare un listino lo può anche un operatore, e ricreerebbe un contratto
-  // che il collegato ha tolto. Quelli li attiva un master dalla scheda del collegato (Aggiorna / Assegna).
-  // L'addebito era già live. Best-effort.
+  // listino_cliente_id di un cliente-ledger), riporta i costi sui contratti che gli sono già condivisi
+  // E CREA quelli che il venditore ci ha appena messo: il salvataggio fa quello che faceva il bottone
+  // Aggiorna della scheda del collegato.
+  // Prima il salvataggio riallineava solo i costi, e i contratti nuovi restavano «da attivare» finché un
+  // master del venditore non premeva Aggiorna. Il 6/11/2026 Wave ha messo GLS NI W, GLS NI W Europa e
+  // GLS NI W LIGHT nel listino di MULTIEXPRESS, l'ha salvato tre volte, e MULTIEXPRESS non li vedeva.
+  // Regola di Lorenzo: «una volta che salva Wave, in automatico MULTI li deve vedere» — è il listino del
+  // venditore a dire cosa il collegato compra.
+  // Restano fuori, come per Aggiorna: le copie del collegato da sostituire (tolgono righe di un altro
+  // master, solo dall'Assegna con conferma), i ponti spenti (non si riaccendono da qui) e i collegamenti
+  // del vecchio tipo (un contratto solo: solo costo). L'addebito era già live. Best-effort.
   try {
     const { risincronizzaCondivisione } = await import('@/lib/condivisione-engine')
     const { data: ledgers } = await admin.from('clienti').select('id').eq('ledger', true).eq('listino_cliente_id', listinoId)
@@ -35,7 +41,14 @@ export async function propagaListinoModificato(admin: any, listinoId: string): P
     // solo il costo, senza creargli contratti nuovi.
     for (const l of (ledgers || [])) {
       const { data: links } = await admin.from('corrieri_condivisi').select('id').eq('cliente_ledger_id', (l as any).id).eq('stato', 'attiva')
-      for (const link of (links || [])) { await risincronizzaCondivisione(admin, (link as any).id); collegamenti++ }
+      for (const link of (links || [])) {
+        const r = await risincronizzaCondivisione(admin, (link as any).id, { creaMancanti: true })
+        collegamenti++
+        // Nei log, per sapere quando e da quale salvataggio è nato un contratto sul portale del collegato.
+        if (r.creati?.length || r.daConfermare?.length) {
+          console.info(`[CONDIVISIONE][SALVATAGGIO] listino ${listinoId} collegamento ${(link as any).id}: creati ${JSON.stringify(r.creati || [])}, da sostituire con Assegna ${JSON.stringify(r.daConfermare || [])}`)
+        }
+      }
     }
   } catch (e) { console.error('Re-sync condivisione dopo salvataggio listino:', e) }
 
