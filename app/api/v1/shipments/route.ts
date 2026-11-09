@@ -165,6 +165,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Collo non accettato da questo contratto: ${_motivoLimite}.` }, { status: 400 })
   }
 
+  // GLS DIRETTO CHE NON PUO' FARE QUESTA SPEDIZIONE: le stesse regole della creazione dal portale, prima
+  // del credito. Il nazionale non va all'estero; il Parcel (Europa) non va in Italia, ne' fuori dall'UE,
+  // ne' col contrassegno, e vuole il telefono del destinatario.
+  if (corriere.tipo === 'gls') {
+    const { motivoGlsNonServe, servizioGls } = await import('@/lib/gls')
+    const no = motivoGlsNonServe(corriere, { paese: body.shipTo?.country, cap: body.shipTo?.postalCode, contrassegno: body.codValue })
+      || (servizioGls((corriere as any).settings) === 'P' && String(body.shipTo?.phone || '').replace(/\D/g, '').length < 6
+        ? 'Per GLS Europa serve il telefono del destinatario (shipTo.phone).' : null)
+    if (no) return NextResponse.json({ error: no }, { status: 400 })
+  }
+
   // IL RITIRO CHIESTO DA CHI INTEGRA.
   // Si accettano due forme perche' l'API pubblica parla inglese ma i client italiani mandano gia'
   // i nomi del portale: meglio leggere tutte e due che rispondere 200 OK ignorando la richiesta.
@@ -747,6 +758,88 @@ export async function POST(req: NextRequest) {
       console.error('[V1][INPOST]', e?.message)
       return errore(erroreCorrierePulito(e?.message))
     }
+  } else if (corriere.tipo === 'gls') {
+    // GLS DIRETTO: diretto (costoCorrente=0), come gli altri qui sopra. Da qui passano soprattutto i
+    // contratti CONDIVISI tra reti: il compratore crea dal suo portale e il ponte chiama questa API del
+    // venditore con la chiave del contratto. Il ramo non c'era: i tre GLS di Wave condivisi a MULTIEXPRESS
+    // e QUICK il 06/11/2026 mostravano il prezzo ma rispondevano "Tipo contratto non supportato", e il
+    // cliente MOI CHERI non poteva spedire (09/11).
+    // La chiamata e' quella della creazione dal portale (app/api/spedizioni/crea, ramo GLS): contatti veri
+    // del destinatario, contrassegno solo in ModalitaIncasso, Bda, Europa. A GLS la spedizione la trasmette
+    // la chiusura di sera come tutte le GLS: legge il numero nudo da raw_response.numero, come tracking,
+    // annullo e svincolo.
+    const credGls = {
+      sigla_sede: cred.sigla_sede, user_webservice: cred.user_webservice,
+      password_webservice: cred.password_webservice, codice_contratto: cred.codice_contratto,
+    }
+    if (!credGls.sigla_sede || !credGls.user_webservice || !credGls.password_webservice) return errore('Contratto non configurato correttamente')
+    try {
+      const { creaSpedizioneGls, etichetteGls, servizioGls } = await import('@/lib/gls')
+      // Sul Parcel il Bda e' obbligatorio e tiene 11 caratteri: si taglia qui, cosi' AddParcel e
+      // GetPdfBySped ricevono lo stesso valore (l'etichetta si cerca anche per Bda).
+      const parcelGls = servizioGls((corriere as any).settings) === 'P'
+      const _rif = (body.rifOrdine ? String(body.rifOrdine) : '').trim()
+      const bda = parcelGls
+        ? (_rif.substring(0, 11) || 'MX' + Date.now().toString(36).toUpperCase().slice(-9))
+        : (_rif.substring(0, 20) || undefined)
+      const _im = String(body.incassoModalita || 'C')
+      const modalitaIncassoGls = (_im === 'AB' || _im === 'A') ? 'AB' : _im === 'AC' ? 'AC' : 'CONT'
+      const risGls = await creaSpedizioneGls(credGls, {
+        ragioneSociale: body.shipTo.name,
+        indirizzo: conPresso(body.shipTo.street1 || '', pressoTo),
+        localita: body.shipTo.city,
+        cap: body.shipTo.postalCode,
+        provincia: body.shipTo.state,
+        pesiColli: packages.map((p: any) => parseFloat(p?.weight) || 1),
+        importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
+        modalitaIncasso: body.codValue ? modalitaIncassoGls : undefined,
+        assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        note: body.notes ? String(body.notes) : undefined,
+        bda,
+        email: body.shipTo.email || undefined,
+        cellulare: body.shipTo.phone || undefined,
+        telefono: body.shipTo.phone || undefined,
+        ...(parcelGls ? { tipoSpedizione: 'P' as const, paese: body.shipTo.country, personaRiferimento: body.shipTo.name } : {}),
+      })
+      if (!risGls.numeroSpedizione) {
+        // Il motivo vero resta nei log, con le password coperte (come nel portale).
+        console.error('[V1][GLS] create rifiutata', {
+          contratto: corriere.nome_contratto,
+          dest: `${body.shipTo?.postalCode || ''} ${body.shipTo?.city || ''} ${body.shipTo?.state || ''} ${body.shipTo?.country || ''}`.trim(),
+          errore: risGls.errore,
+          raw: String(risGls.raw || '').replace(/(Password\w*(?:&gt;|>))[^<&]*/gi, '$1***').slice(0, 400),
+        })
+        return errore(erroreCorrierePulito(risGls.errore || 'GLS: creazione non riuscita'))
+      }
+      numero = risGls.tracking || risGls.numeroSpedizione
+      costoCorrente = 0
+      raw = {
+        _gls: true, numero: risGls.numeroSpedizione, tracking: numero, siglaMittente: risGls.siglaMittente,
+        siglaSedeDestino: risGls.siglaSedeDestino, glsCheck: risGls.glsCheck, ...(parcelGls ? { parcel: true, bda } : {}),
+      }
+      // Un'etichetta per collo, unite in una per la spedizione. Mittente stampato: dove il contratto lo
+      // chiede ci va quello vero e non l'intestatario del conto GLS (lib/etichetta-mittente).
+      try {
+        const { stampaMittenteSpedizione } = await import('@/lib/etichetta-mittente')
+        const mittenteGls = (await stampaMittenteSpedizione(admin, corriere as any).catch(() => false))
+          ? { nome: body.shipFrom?.name, destinatario: body.shipTo?.name } : null
+        const et = await etichetteGls(credGls, risGls.numeroSpedizione, risGls.numeroColli, { bda, mittente: mittenteGls })
+        if (et.etichette.length) {
+          const { unisciEtichette } = await import('@/lib/easyparcel')
+          const merged = await unisciEtichette(et.etichette)
+          etichettaUrl = `data:application/pdf;base64,${merged || et.etichette[0]}`
+          if (packages.length > 1) {
+            colliDettaglio = packages.map((p: any, i: number) => ({
+              numero: i + 1, lunghezza: p?.length || null, larghezza: p?.width || null, altezza: p?.height || null, peso: p?.weight || null,
+              etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : null,
+            }))
+          }
+        }
+      } catch (e) { console.error('[V1][GLS] etichette:', (e as any)?.message) }
+    } catch (e: any) {
+      console.error('[V1][GLS]', e?.message)
+      return errore(erroreCorrierePulito(e?.message))
+    }
   } else if (corriere.tipo === 'moovexpress') {
     // CONDIVISIONE CONTRATTI: provider a COSTO ESTERNO (W) — il corriere punta all'`/api/v1` del VENDITORE
     // con la api_key ricevuta all'Accetta. Diversamente dai diretti, costoCorrente = W (il prezzo che il
@@ -843,6 +936,14 @@ export async function POST(req: NextRequest) {
   }).select('id').single()
   // Qui NON si storna: il pacco dal corriere esiste gia' e va pagato. Il messaggio del database
   // (tabelle, colonne, vincoli) non esce: descrive la nostra struttura interna a chi si integra.
+  // Eccezione GLS diretto, come nel portale: prima della chiusura di sera la spedizione non e' ancora
+  // trasmessa, quindi si toglie da GLS e il credito torna. Solo se GLS conferma l'annullo.
+  if (insErr && corriere.tipo === 'gls' && raw?.numero) {
+    const { annullaSpedizioneGls } = await import('@/lib/gls')
+    const annullata = await annullaSpedizioneGls(cred as any, String(raw.numero)).catch(() => false)
+    console.error('[V1][GLS][INSERT]', numero, insErr.message, annullata ? 'annullata su GLS' : 'NON annullata su GLS')
+    if (annullata) return errore('Spedizione non registrata e annullata sul corriere: riprova.', 500)
+  }
   if (insErr) { console.error('[V1][INSERT]', numero, insErr.message); return NextResponse.json({ error: `Spedizione creata sul corriere (${numero}) ma non registrata: contatta l'assistenza indicando il numero ${numero}`, tracking: numero }, { status: 500 }) }
 
   // EMAIL BRAND MoovExpress a mittente e destinatario (in background, best-effort):
