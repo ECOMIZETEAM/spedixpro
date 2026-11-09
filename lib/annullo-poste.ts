@@ -16,7 +16,7 @@
 // che legge poste.it) e lo script dell'arretrato.
 
 import { risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
-import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
+import { annullaGambePacco } from '@/lib/annullaSpedizione'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { statoDaLetturaPoste } from '@/lib/tracking-poste'
 
@@ -56,31 +56,12 @@ export async function paccoPartito(admin: any, gambe: GambaSpedizione[]): Promis
   return { partito: !!righe?.length, quando: null }
 }
 
-// ANNULLO: tutte le gambe annullate, poi lo storno di ciascuna con la funzione di sempre (idempotente,
-// segno opposto all'addebito, rettifiche comprese). Sui pacchi condivisi stornare la sola gamba del
-// cliente lascerebbe addebitati i master sopra: e' la trappola del 5/10 (Epos Caffe').
-// `richiestoAt` resta sulla riga annullata: da li' partono i 30 giorni di sorveglianza.
+// ANNULLO: tutte le gambe annullate e stornate (lib/annullaSpedizione, annullaGambePacco). Su Poste non
+// c'e' nulla da mandare al corriere: la LDV resta emessa, e da `richiestoAt` parte la sorveglianza.
 export async function annullaPaccoPoste(
   admin: any, gambe: GambaSpedizione[], rich: { richiestoAt?: string | null; da?: string | null },
 ): Promise<{ gambe: number }> {
-  const ids = gambe.map(g => g.spedizioneId)
-  const { data: righe } = await admin.from('spedizioni').select('id,numero,dest_nome,stato,stato_precedente').in('id', ids)
-  const quando = rich.richiestoAt || new Date().toISOString()
-  for (const r of (righe || [])) {
-    if (r.stato === 'annullata') continue
-    await admin.from('spedizioni').update({
-      stato: 'annullata',
-      // Della gamba in attesa conta lo stato di prima della richiesta; le altre non erano in attesa.
-      stato_precedente: r.stato === 'annullamento_pending' ? (r.stato_precedente || 'in_lavorazione') : r.stato,
-      annullamento_richiesto_at: quando,
-      annullamento_da: rich.da || null,
-      annullamento_errore: null,
-    }).eq('id', r.id)
-  }
-  for (const r of (righe || [])) await rimborsaAnnulloSpedizione(admin, r, rich.da || null)
-  // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
-  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, ids) } catch {}
-  return { gambe: (righe || []).length }
+  return annullaGambePacco(admin, gambe, rich)
 }
 
 export interface RiaddebitoPianificato {

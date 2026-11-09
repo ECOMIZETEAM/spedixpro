@@ -109,6 +109,21 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ success: true, stato: 'annullamento_manuale', message: 'Annullamento richiesto: verrà completato dall\'assistenza e il credito stornato alla conferma.' })
   }
 
+  // PACCO GLS CONDIVISO FRA RETI: stesso ramo di spedizioni/elimina, SUBITO e sul pacco intero (lib/annullo-gls).
+  // Con le 48 ore la gamba GLS del detentore non sarebbe stata in attesa, e la chiusura di sera l'avrebbe
+  // trasmessa a GLS prima dell'annullo.
+  if (corr?.tipo === 'moovexpress' || corr?.tipo === 'gls') {
+    const { data: tr } = await admin.from('spedizioni').select('tracking_number').eq('id', id).maybeSingle()
+    const { gambePaccoGls, annullaPaccoGls } = await import('@/lib/annullo-gls')
+    const gambe = await gambePaccoGls(admin, tr?.tracking_number)
+    if (gambe) {
+      const r = await annullaPaccoGls(admin, gambe, { da: null })
+      if (r.ok) return NextResponse.json({ success: true, stato: 'annullata', message: 'Spedizione annullata e credito stornato.' })
+      await admin.from('spedizioni').update({ annullamento_errore: `Annullo non riuscito: ${r.motivo}` }).eq('id', id)
+      return NextResponse.json({ error: `Annullo non riuscito: ${r.motivo}` }, { status: 409 })
+    }
+  }
+
   // STESSA regola della UI: la cancellazione va in ATTESA 48h (annullamento_pending), poi il cron
   // invia l'annullo al corriere e fa lo storno. Niente annullata immediata (no bypass del pending).
   const { error: updErr } = await admin.from('spedizioni').update({

@@ -131,6 +131,22 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica in questo caso, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
+  // ── PACCO GLS CONDIVISO FRA RETI: come il GLS diretto qui sotto, SUBITO, ma sul pacco intero. ──
+  // Da qualunque gamba si chieda (il cliente sulla sua gamba-ponte, o il detentore sulla gamba GLS): si
+  // toglie da GLS e si annullano e stornano tutte le gambe (lib/annullo-gls). Annullando una gamba sola
+  // restava addebitato chi stava sopra, oppure partiva verso GLS un pacco gia' rimborsato.
+  if (corr?.tipo === 'moovexpress' || corr?.tipo === 'gls') {
+    const { gambePaccoGls, annullaPaccoGls } = await import('@/lib/annullo-gls')
+    const gambe = await gambePaccoGls(admin, (sped as any).tracking_number)
+    if (gambe) {
+      const r = await annullaPaccoGls(admin, gambe, { da: user.id })
+      if (r.ok) return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
+      const msg = `Annullo non riuscito: ${r.motivo} La spedizione resta valida.`
+      await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+  }
+
   // ── GLS / BRT DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──
   // GLS è "attesa-chiusura": PRIMA della chiusura distinta (confermata_vettore) la spedizione NON è ancora
   // trasmessa a GLS, quindi si annulla in sicurezza (DeleteSped) e si rimborsa; DOPO la chiusura GLS
