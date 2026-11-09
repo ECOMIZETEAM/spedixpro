@@ -15,8 +15,9 @@ import { ritiroInRisposta, messaggioRitiroNonPrenotabileViaApi } from '@/lib/rit
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
-  normalizzaEtichetta, telValidoSp, indirizzoEtichetta,
+  normalizzaEtichetta, telValidoSp, indirizzoEtichetta, emailValidaSp,
 } from '@/lib/spediamopro'
+import { modalitaConsegna, trovaPuntoDaCodice, puntoDichiarato, depositoDaRichiesta, depositoInRisposta, ErrorePunti, type PuntoApi } from '@/lib/punti-consegna'
 
 // IL TETTO DI DURATA, che qui non c'era.
 // Oltre la chiamata d'ordine il pacco e' COMPRATO: se la funzione viene uccisa fra l'ordine e la
@@ -172,6 +173,72 @@ export async function POST(req: NextRequest) {
   const _dataRitiro = String(body.pickup?.date || body.dataRitiro || '')
   const _pomeriggio = String(body.pickup?.time || body.orarioRitiro || '').toLowerCase().startsWith('pom')
 
+  // CONSEGNA A UN PUNTO (PuntoPoste, Ufficio Postale, Fermopoint, locker).
+  // Fino al 09/11/2026 questa porta non leggeva nessun punto: sui contratti a punto il fornitore
+  // rifiutava l'ordine (o non c'era modo di dire dove consegnare), quindi da qui non si spediva.
+  // Le regole sono quelle della creazione dal portale, nello stesso ordine, e TUTTE prima di toccare
+  // il credito o il corriere: su questi contratti dopo l'ordine non si torna indietro.
+  //   deliveryPoint.code  = il punto, preso da GET /api/v1/delivery-points (anche come stringa);
+  //   deliveryPoint.postalCode = il CAP del punto (facoltativo: senza, si cerca vicino a shipTo);
+  //   dropoffType = dove il mittente deposita sui contratti PuntoPoste: ufficio_postale | punto_poste.
+  // Il PREZZO resta quello di oggi, sull'indirizzo del destinatario (shipTo), come nel portale: il
+  // punto si sceglie vicino a lui. Sul ponte di condivisione decide il venditore: qui si passa e basta.
+  const _modalita = corriere.tipo === 'moovexpress' ? null : modalitaConsegna(corriere)
+  const _dp = body.deliveryPoint
+  const _codicePunto = String((_dp && typeof _dp === 'object' ? _dp.code : _dp) || body.shipTo?.pointCode || '').trim()
+  const _capPunto = String((_dp && typeof _dp === 'object' ? (_dp.postalCode || _dp.cap) : '') || '').trim()
+  let puntoConsegna: PuntoApi | null = null       // il punto ritrovato fra quelli del contratto
+  let depositoTipo: 'FMP' | 'APT' | null = null   // pudo_mittente dei contratti PuntoPoste
+  if (_modalita) {
+    if (!_modalita.aUnPunto && (_dp != null || body.shipTo?.pointCode)) {
+      return NextResponse.json({ error: 'Questo contratto consegna a domicilio: deliveryPoint non è previsto. La consegna a un punto si fa con la chiave di un contratto a punto (vedi GET /api/v1/account).' }, { status: 400 })
+    }
+    if (_modalita.deposito) {
+      depositoTipo = depositoDaRichiesta(body.dropoffType ?? body.depositoTipo)
+      if (!depositoTipo) {
+        return NextResponse.json({ error: 'Su questo contratto il mittente porta il pacco in un Ufficio Postale o in un Punto Poste: indica dropoffType = "ufficio_postale" oppure "punto_poste".' }, { status: 400 })
+      }
+    }
+    // InPost diretto passa il codice al corriere cosi' com'e' (vedi il suo ramo): qui solo gli altri.
+    if (_modalita.aUnPunto && !_modalita.inpostLocker) {
+      if (!_codicePunto) {
+        return NextResponse.json({ error: 'Questo contratto consegna a un punto: indica deliveryPoint.code (cerca i punti con GET /api/v1/delivery-points).' }, { status: 400 })
+      }
+      // Il codice per ritirare (PIN Fermopoint, apertura locker) il corriere lo manda all'email del
+      // destinatario: senza, il pacco arriva al punto e nessuno lo puo' ritirare (portale, 14/10).
+      if (_modalita.emailObbligatoria && !emailValidaSp(body.shipTo?.email)) {
+        return NextResponse.json({ error: "Email del destinatario obbligatoria (shipTo.email): per la consegna al punto il corriere gli manda lì il codice per ritirare il pacco." }, { status: 400 })
+      }
+      // Il punto si RITROVA fra quelli del contratto: un codice di un altro corriere fa rifiutare
+      // l'ordine (successo dal portale, 21-23/09), e l'indirizzo del punto serve a etichetta e preventivo.
+      const capRicerca = _capPunto || String(body.shipTo?.postalCode || '').trim()
+      try {
+        puntoConsegna = await trovaPuntoDaCodice(corriere, _codicePunto, { cap: capRicerca, citta: _capPunto ? undefined : body.shipTo?.city })
+      } catch (e: any) {
+        if (!(e instanceof ErrorePunti)) throw e
+        // Ricerca del fornitore giu' (non un CAP sbagliato): si usa il punto rimandato da chi integra,
+        // se e' completo — come fa il portale col punto scelto nel browser. Altrimenti si dice di riprovare.
+        const dichiarato = e.stato >= 500 ? puntoDichiarato(_dp, _codicePunto) : null
+        if (!dichiarato) {
+          return NextResponse.json({ error: e.stato >= 500
+            ? `${e.message} Riprova tra poco, oppure manda in deliveryPoint il punto intero come restituito da GET /api/v1/delivery-points (code, address, postalCode, city, province).`
+            : e.message }, { status: e.stato })
+        }
+        console.error('[V1][PUNTO] ricerca del fornitore giu\': si usa il punto rimandato da chi integra', _codicePunto, dichiarato.postalCode)
+        puntoConsegna = dichiarato
+      }
+      if (!puntoConsegna) {
+        return NextResponse.json({ error: `Punto ${_codicePunto} non trovato fra quelli di questo contratto vicino al CAP ${capRicerca}: usa un code restituito da GET /api/v1/delivery-points e passa anche deliveryPoint.postalCode (il CAP del punto).` }, { status: 400 })
+      }
+    }
+  }
+  // Sui contratti PuntoPoste il pacco lo porta il mittente: il corriere non passa. Il fornitore
+  // rifiuta l'ordine con un ritiro dentro (175 "Ritiro non attivabile"): come il portale, si spegne.
+  const _ritiroAlCorriere = _vuoleRitiro && !_modalita?.deposito
+  const _avvisoRitiroDeposito = (_vuoleRitiro && _modalita?.deposito)
+    ? 'Su questo contratto il pacco lo consegna il mittente in un Ufficio Postale o in un Punto Poste (dropoffType): il ritiro non è previsto.'
+    : null
+
   // Prezzo a carico del cliente (listino cliente, contratto della key)
   const ris = await calcolaPrezzoListino(admin, {
     listinoId: cliente.listino_cliente_id,
@@ -284,6 +351,8 @@ export async function POST(req: NextRequest) {
   // porta invece salvava solo il primo collo -> chi stampa da API riceveva una etichetta sola su un
   // pacco da N colli. Resta null sul mono-collo e su spediamopro (che gia' consegna il PDF unito).
   let colliDettaglio: any[] | null = null
+  // Il locker InPost scelto: InPost lo riceve cosi' com'e', qui serve solo a dirlo nella risposta.
+  let puntoInpostScelto: string | null = null
 
   if (corriere.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
@@ -353,6 +422,16 @@ export async function POST(req: NextRequest) {
     const consignee: any = { name: body.shipTo.name?.substring(0,35), address: indirizzoEtichetta(body.shipTo.street1 || '', pressoTo, maxAddr), postalCode: body.shipTo.postalCode, city: body.shipTo.city?.substring(0,35), province: body.shipTo.state?.substring(0,2).toUpperCase(), country: (body.shipTo.country||'IT').toUpperCase() }
     if (body.shipTo.phone) consignee.phone = body.shipTo.phone
     if (body.shipTo.email) consignee.email = body.shipTo.email.substring(0,50)
+    // CONSEGNA A UN PUNTO (Fermopoint / Locker): come il portale, l'indirizzo per preventivo ed
+    // etichetta e' quello del PUNTO; nome e contatti restano del destinatario vero, che ritira e
+    // riceve per email il codice (verificata sopra).
+    if (puntoConsegna) {
+      if (puntoConsegna.address) consignee.address = String(puntoConsegna.address).substring(0, 35)
+      if (puntoConsegna.postalCode) consignee.postalCode = puntoConsegna.postalCode
+      if (puntoConsegna.city) consignee.city = String(puntoConsegna.city).substring(0, 35)
+      if (puntoConsegna.province) consignee.province = String(puntoConsegna.province).substring(0, 2).toUpperCase()
+      consignee.email = String(body.shipTo?.email || '').trim().substring(0, 50)
+    }
     // MULTICOLLO: un parcel per OGNI collo (prima si inviava un solo parcel col peso totale).
     const parcels = packages.map((p: any) => ({ weight: kgToGrams(parseFloat(p?.weight)||1), length: cmToMm(p?.length||10), width: cmToMm(p?.width||10), height: cmToMm(p?.height||10) }))
     // GUARDIA DIMENSIONI LOCKER S (gemella del portale, vedi crea/route.ts): il costo InPost dipende
@@ -388,7 +467,10 @@ export async function POST(req: NextRequest) {
       // solo nel Riferimento. Il campo NOTE di SpediamoPro e' max ~20 char (oltre = 422): si tronca; i
       // caratteri li normalizza la lib. Regola: se scrivono in note, deve arrivare in note.
       const noteEtichettaV1 = body.notes ? String(body.notes).trim().substring(0, 20) : undefined
-      const shipment = await spediamoproCreateShipment(cred.authcode, { parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: externalRefV1, notes: noteEtichettaV1 })
+      const shipment = await spediamoproCreateShipment(cred.authcode, {
+        parcels, sender, consignee, quotation, cashOnDeliveryAmount: cod, insuredAmount: ins, externalReference: externalRefV1, notes: noteEtichettaV1,
+        ...(puntoConsegna ? { deliveryPudo: puntoConsegna.code } : {}),
+      })
       let trk = shipment.trackingCode; if (!trk) trk = await spediamoproWaitForTracking(cred.authcode, shipment.id)
       numero = trk || shipment.code || `SP-${shipment.id}`; costoCorrente = centsToEuro(shipment.totalPrice)
       // ZIP multicollo → PDF unico; PDF/immagini mono-collo invariati. Se non pronta, resta null (riscaricata on-demand).
@@ -416,7 +498,12 @@ export async function POST(req: NextRequest) {
       const quoteArgs = {
         colli: packages.map((p: any) => ({ peso: parseFloat(p?.weight) || 1, larghezza: parseFloat(p?.width) || 10, profondita: parseFloat(p?.length) || 10, altezza: parseFloat(p?.height) || 10 })),
         mittente: { cap: body.shipFrom.postalCode, localita: body.shipFrom.city, provincia: body.shipFrom.state, nazione: 'IT' },
-        destinatario: { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() },
+        // Consegna a un PUNTO: il preventivo vuole la localita' del PUNTO (con quella di casa, o vuota,
+        // per questi servizi non torna l'offerta). Come il portale. Serve solo al codice offerta: il
+        // prezzo al cliente resta il nostro listino.
+        destinatario: puntoConsegna
+          ? { cap: puntoConsegna.postalCode, localita: puntoConsegna.city || body.shipTo.city, provincia: puntoConsegna.province || body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() }
+          : { cap: body.shipTo.postalCode, localita: body.shipTo.city, provincia: body.shipTo.state, nazione: (body.shipTo.country || 'IT').toUpperCase() },
         contenuto: body.contenuto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
       }
       const offerte = await easyparcelQuotation(apikey, quoteArgs)
@@ -468,19 +555,29 @@ export async function POST(req: NextRequest) {
       // con ripiego sull'email di servizio se manca; sul nazionale resta l'email di servizio (stessa
       // scelta del portale, vedi memoria "email schermo corriere").
       const esteroDest = String(body.shipTo.country || 'IT').toUpperCase() !== 'IT'
-      const emailDest = esteroDest ? (String(body.shipTo?.email || '').trim() || EMAIL_PER_CORRIERE) : EMAIL_PER_CORRIERE
+      // Consegna a un PUNTO: l'avviso di giacenza / il codice di ritiro lo manda il CORRIERE al
+      // destinatario, quindi gli serve l'email vera (come il portale; ripiego su quella di servizio).
+      const emailDest = (esteroDest || puntoConsegna) ? (String(body.shipTo?.email || '').trim() || EMAIL_PER_CORRIERE) : EMAIL_PER_CORRIERE
+      // Consegna a un PUNTO: sull'etichetta l'indirizzo e' quello del punto, la via di casa non serve.
+      // Stessa forma del portale ("nome - via - CAP localita'").
+      const indirizzoDest = puntoConsegna
+        ? [puntoConsegna.name, puntoConsegna.address, [puntoConsegna.postalCode, puntoConsegna.city].filter(Boolean).join(' ')].filter(Boolean).join(' - ').slice(0, 100)
+        : conPresso(body.shipTo.street1 || '', pressoTo)
       const ordine = await easyparcelOrder(apikey, {
         codiceOfferta: String(offerta.codice_offerta),
-        ...(_vuoleRitiro ? { ritiro: ritiroEasyparcel(_dataRitiro, _pomeriggio) } : {}),
+        ...(_ritiroAlCorriere ? { ritiro: ritiroEasyparcel(_dataRitiro, _pomeriggio) } : {}),
         // Il "presso" non ha un campo dedicato: si accoda all'indirizzo, come per l'altro provider.
         mittente: { nominativo: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), email: EMAIL_PER_CORRIERE, cellulare: cellM, contatto: body.shipFrom.name },
-        destinatario: { nominativo: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), email: emailDest, cellulare: cellD, contatto: body.shipTo.name },
+        destinatario: { nominativo: body.shipTo.name, indirizzo: indirizzoDest, email: emailDest, cellulare: cellD, contatto: body.shipTo.name },
         note: body.notes || undefined,
         contrassegno: codReq, assicurazione: assReq,
         ...(dogana ? { dogana } : {}),
+        // PuntoPoste: dove deposita il mittente (TIPO di sportello) e il punto preciso di consegna.
+        ...(depositoTipo ? { pudoMittente: depositoTipo } : {}),
+        ...(puntoConsegna ? { pudoDestinatario: puntoConsegna.code } : {}),
       })
       // Ordine accettato col blocco ritiro dentro: il ritiro e' prenotato, anche se il codice arriva dopo.
-      if (_vuoleRitiro) ritiroPrenotato = true
+      if (_ritiroAlCorriere) ritiroPrenotato = true
       let ldv: string | null = null
       try {
         // QUANTO SI ASPETTA LA LETTERA DI VETTURA.
@@ -492,7 +589,7 @@ export async function POST(req: NextRequest) {
         // NESSUNA delle 48 spedizioni ha preso il numero al primo colpo.
         // Budget ~18s: come nella creazione dal portale, evita il timeout a 60s durante i rallentamenti
         // DVA (rischio ordine orfano). Si esce col provvisorio e la LDV la prende il recupero/background.
-        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _vuoleRitiro ? 6 : 8, 1200, _vuoleRitiro, 18000, packages.length)
+        const w = await easyparcelWaybill(apikey, ordine.idOrdine, _ritiroAlCorriere ? 6 : 8, 1200, _ritiroAlCorriere, 18000, packages.length)
         ldv = w.numero || null
         codiceRitiro = w.codiceRitiro || null
         // MULTICOLLO: il provider torna una etichetta per collo in w.singole. Come il portale: si
@@ -627,8 +724,11 @@ export async function POST(req: NextRequest) {
     // Il MODO lo decide il CONTRATTO: locker = solo a locker (serve il punto), domicilio = solo a casa
     // (pointId ignorato). Coerente col portale, così l'API non manda un Domicilio a un locker o viceversa.
     const contrattoLocker = String((corriere as any)?.settings?.consegna || '') === 'locker'
-    const pointId = contrattoLocker ? (String(body.inpostPointId || body.pointId || '').trim() || undefined) : undefined
-    if (contrattoLocker && !pointId) return errore('Questo contratto InPost consegna solo a locker: indica il locker di destinazione (inpostPointId). Per il domicilio usa il contratto InPost Domicilio.')
+    // deliveryPoint.code e' il campo di tutti i contratti a punto; inpostPointId/pointId restano per
+    // chi si era gia' integrato col nome vecchio.
+    const pointId = contrattoLocker ? (String(body.inpostPointId || body.pointId || _codicePunto || '').trim() || undefined) : undefined
+    if (contrattoLocker && !pointId) return errore('Questo contratto InPost consegna solo a locker: indica il locker di destinazione (deliveryPoint.code, cercalo con GET /api/v1/delivery-points). Per il domicilio usa il contratto InPost Domicilio.')
+    puntoInpostScelto = pointId || null
     try {
       const { creaSpedizioneInpost, etichettaInpost } = await import('@/lib/inpost')
       const risIp = await creaSpedizioneInpost(credIp, {
@@ -669,6 +769,11 @@ export async function POST(req: NextRequest) {
         contenuto: body.contenuto ? String(body.contenuto) : undefined,
         rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
         pickup: _vuoleRitiro ? { requested: true, date: _dataRitiro, time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
+        // Consegna a un punto: il contratto vero sta dal venditore, che controlla e usa questi campi.
+        // Solo se arrivati: sulle spedizioni a domicilio la chiamata resta identica a prima.
+        ...(body.deliveryPoint != null ? { deliveryPoint: body.deliveryPoint } : {}),
+        ...(body.dropoffType ? { dropoffType: String(body.dropoffType) } : {}),
+        ...(body.inpostPointId ? { inpostPointId: String(body.inpostPointId) } : {}),
       })
       numero = risMv.tracking
       costoCorrente = risMv.prezzo   // W: costo esterno (come spedisci), NON 0
@@ -699,8 +804,20 @@ export async function POST(req: NextRequest) {
     mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_presso: pressoFrom || null, mitt_citta: body.shipFrom.city,
     mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
     mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
-    dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_presso: pressoTo || null, dest_citta: body.shipTo.city,
-    dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+    // Consegna a un PUNTO sui contratti SpediamoPro: sulla scheda l'indirizzo e' quello del punto,
+    // come nel portale (che su DVA invece tiene quello di casa: qui lo stesso).
+    ...(puntoConsegna && corriere.tipo === 'spediamopro' ? {
+      dest_nome: body.shipTo.name,
+      dest_indirizzo: puntoConsegna.address ? [puntoConsegna.name, puntoConsegna.address].filter(Boolean).join(' - ').slice(0, 100) : body.shipTo.street1,
+      dest_presso: pressoTo || null,
+      dest_citta: puntoConsegna.city || body.shipTo.city,
+      dest_provincia: puntoConsegna.province || body.shipTo.state,
+      dest_cap: puntoConsegna.postalCode || body.shipTo.postalCode,
+    } : {
+      dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_presso: pressoTo || null, dest_citta: body.shipTo.city,
+      dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode,
+    }),
+    dest_paese: body.shipTo.country || 'IT',
     dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
     colli: packages.length, peso_reale: pesoReale,
     peso_volume: ris?.peso_volume || null, peso_fatturato: ris?.peso_fatturato || null,
@@ -867,7 +984,13 @@ export async function POST(req: NextRequest) {
     // Se il ritiro e' stato chiesto, la risposta dice se e' stato PRENOTATO e, se no, cosa fare.
     ...(_vuoleRitiro ? { ritiro: ritiroInRisposta({
       prenotato: ritiroPrenotato, data: _dataRitiro, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
-      codice: codiceRitiro, tipo: corriere.tipo, spedizioneId: inserted?.id || null, avviso: avvisoRitiro,
+      codice: codiceRitiro, tipo: corriere.tipo, spedizioneId: inserted?.id || null, avviso: avvisoRitiro || _avvisoRitiroDeposito,
     }) } : {}),
+    // Dove va il pacco, quando non va a casa: il punto come l'ha registrato il corriere.
+    ...(puntoConsegna ? { punto_consegna: {
+      code: puntoConsegna.code, type: puntoConsegna.type, name: puntoConsegna.name, address: puntoConsegna.address,
+      postalCode: puntoConsegna.postalCode, city: puntoConsegna.city, province: puntoConsegna.province,
+    } } : puntoInpostScelto ? { punto_consegna: { code: puntoInpostScelto } } : {}),
+    ...(depositoTipo ? { deposito: depositoInRisposta(depositoTipo) } : {}),
   })
 }

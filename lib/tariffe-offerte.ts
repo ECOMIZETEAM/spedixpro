@@ -16,7 +16,7 @@
  * a leggere i contratti (prima proseguiva senza mettere nessun flag). Chi mostra l'elenco a una
  * persona puo' catturare l'errore e mostrare tutto, come fa la rotta del preventivo; chi sceglie da
  * solo no: senza flag un PuntoPoste passerebbe per consegna a domicilio. */
-import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
+import { modalitaConsegna } from '@/lib/punti-consegna'
 
 // Marca le tariffe dei contratti "PuntoPoste" (PDB-P2H/P2TAB/P2UP) coi flag _deposito (il mittente
 // sceglie dove depositare: Ufficio Postale/Punto Poste) e _consegna_punto (tipologia RTZ/FMP del punto
@@ -32,8 +32,10 @@ export async function annotaPuntoPoste(admin: any, risultati: any[]) {
   const perId = new Map<string, any>((corr || []).map((c: any) => [c.id, c]))
   for (const r of risultati) {
     const c = perId.get(r._corriere_id); if (!c) continue
-    const cred = c.credenziali || {}
-    if (c.tipo === 'inpost' && (c.settings as any)?.consegna === 'locker') {
+    // La regola sta in lib/punti-consegna: la legge anche l'API pubblica, che spedisce a un punto
+    // con gli stessi contratti. Qui si traduce solo nei flag che il form del portale si aspetta.
+    const m = modalitaConsegna(c)
+    if (m.inpostLocker) {
       // InPost LOCKER: consegna a un LOCKER/PUDO (non a domicilio). Flag distinto dal PuntoPoste perché
       // usa il SUO selettore (InpostLockerPicker) e la SUA ricerca punti. Il Domicilio InPost (stesso
       // tipo, senza consegna=locker) resta consegna a casa e NON mostra alcun punto.
@@ -41,15 +43,13 @@ export async function annotaPuntoPoste(admin: any, risultati: any[]) {
     } else if (c.tipo === 'spediamopro') {
       // SpediamoPro: SOLO consegna a un punto (deliveryPudo), nessun deposito. _consegna_punto = il
       // corriere per la ricerca punti (brt/inpost/sda). Serve al form per mostrare il selettore-punto.
-      const courier = spediamoproPudoCourier(cred.service_id)
-      if (courier) r._consegna_punto = courier
+      if (m.courierSp) r._consegna_punto = m.courierSp
       // Qui il codice di ritiro arriva al destinatario per email: il form la chiede prima di comprare
       // (il server ricontrolla, vedi il ramo spediamopro di /api/spedizioni/crea).
-      if (courier) r._email_obbligatoria = true
+      if (m.emailObbligatoria) r._email_obbligatoria = true
     } else {
-      const cfg = pudoConfigDaVettore(cred.vettore)
-      if (cfg.deposito) r._deposito = true
-      if (cfg.consegnaTipologia) r._consegna_punto = cfg.consegnaTipologia
+      if (m.deposito) r._deposito = true
+      if (m.tipologiaDva) r._consegna_punto = m.tipologiaDva
     }
   }
 }

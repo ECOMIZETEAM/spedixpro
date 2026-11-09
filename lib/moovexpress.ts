@@ -40,6 +40,11 @@ export type MoovexpressCreaInput = {
   rifOrdine?: string
   valoreMerce?: number
   pickup?: { requested: boolean; date?: string; time?: string }
+  // Consegna a un punto: il punto (e il tipo di deposito dei contratti PuntoPoste) li sceglie chi
+  // spedisce, ma li usa il contratto vero, che sta dal venditore. Si passano cosi' come sono arrivati.
+  deliveryPoint?: unknown
+  dropoffType?: string
+  inpostPointId?: string
 }
 export type MoovexpressCreaResult = {
   id: string           // id della spedizione DAL LATO VENDITORE (per scaricare l'etichetta)
@@ -102,6 +107,38 @@ export async function creaSpedizioneMoovexpress(cred: MoovexpressCred, dati: Moo
   if (!r.ok) throw new Error(j?.error || `Errore dal fornitore (${r.status})`)
   if (!j?.tracking) throw new Error('Il fornitore non ha restituito un numero di spedizione.')
   return { id: String(j.id || ''), tracking: String(j.tracking), prezzo: Number(j.prezzo) || 0, label_url: String(j.label_url || ''), ritiro: j.ritiro }
+}
+
+// I PUNTI DI CONSEGNA di un contratto condiviso: il compratore non ha le credenziali del fornitore
+// vero, quindi la ricerca la fa il venditore (GET /api/v1/delivery-points). La risposta torna cosi'
+// com'e', stato compreso: un CAP sbagliato resta un 400 per chi l'ha scritto.
+export async function puntiMoovexpress(cred: MoovexpressCred, query: URLSearchParams): Promise<{ stato: number; corpo: any }> {
+  if (!cred?.api_key) return { stato: 400, corpo: { error: 'Contratto non configurato correttamente' } }
+  try {
+    const r = await fetch(`${baseUrl(cred)}/api/v1/delivery-points?${query}`, {
+      headers: { Authorization: `Bearer ${cred.api_key}` }, signal: AbortSignal.timeout(20000),
+    })
+    const j: any = await r.json().catch(() => ({}))
+    return { stato: r.status, corpo: j }
+  } catch {
+    return { stato: 502, corpo: { error: 'Ricerca punti non disponibile in questo momento.' } }
+  }
+}
+
+// Che consegna fa il contratto vero (domicilio o punto), letto dal venditore. Null se non risponde:
+// chi lo mostra deve saperlo assente, non indovinarlo.
+export async function consegnaMoovexpress(cred: MoovexpressCred): Promise<any | null> {
+  if (!cred?.api_key) return null
+  try {
+    const r = await fetch(`${baseUrl(cred)}/api/v1/account`, {
+      headers: { Authorization: `Bearer ${cred.api_key}` }, signal: AbortSignal.timeout(5000),
+    })
+    if (!r.ok) return null
+    const j: any = await r.json().catch(() => null)
+    return j?.consegna ?? null
+  } catch {
+    return null
+  }
 }
 
 // Scarica l'etichetta dal venditore. `labelUrl` è quello tornato dalla create (relativo o assoluto).
