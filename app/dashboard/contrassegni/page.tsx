@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
+import { etichettaModalitaCod } from '@/lib/contrassegno-modalita'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -151,6 +152,7 @@ export default function ListaContrassegniPage() {
       Indirizzo: [s.dest_indirizzo, s.dest_citta, s.dest_cap, s.dest_provincia].filter(Boolean).join(', '),
       'Data Spedizione': s.created_at ? new Date(s.created_at).toLocaleDateString('it-IT') : '',
       Contrassegno: Number(s.contrassegno||0),
+      'Modalità incasso': etichettaModalitaCod(s.contrassegno_modalita) || '',
       'Stato spedizione': STATI_SPED[s.stato]?.label || s.stato || '',
       'N. Distinta': s.distinta_numero || '',
       'Stato contrassegno': (STATI_COD[s.stato_contrassegno||'in_attesa']||STATI_COD['in_attesa']).label,
@@ -273,6 +275,8 @@ export default function ListaContrassegniPage() {
                   // con divisori verticali, così un campo assente (distinta) non lascia una linea a vuoto.
                   const secItems: { l: any; v: any }[] = [
                     { l: 'Contrassegno', v: <b style={{color:'#1a1a1a'}}>€ {Number(s.contrassegno).toFixed(2)}</b> },
+                    // Gli assegni si riconoscono dal codice di Poste (ABM/ACM), come ha chiesto LOGIXIA.
+                    ...(['ABM','ACM'].includes(s.contrassegno_modalita) ? [{ l: 'Incasso', v: <b style={{color:'#1d4ed8'}}>{etichettaModalitaCod(s.contrassegno_modalita)}</b> }] : []),
                     { l: 'Stato spedizione', v: <span style={{background:stSped.bg,color:stSped.color,padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>{stSped.label}</span> },
                     { l: 'N. Distinta', v: <span style={{color:s.distinta_numero?'#f97316':'#9ca3af',fontWeight:s.distinta_numero?'700':'400'}}>{s.distinta_numero||'—'}</span> },
                     { l: 'Aggiornato', v: new Date(s.updated_at||s.created_at).toLocaleDateString('it-IT') },

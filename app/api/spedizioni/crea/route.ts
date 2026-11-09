@@ -33,6 +33,7 @@ const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (is
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
+import { modalitaCodPoste, modalitaCodDaRichiesta } from '@/lib/contrassegno-modalita'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
 
 
@@ -2827,6 +2828,9 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1,   // kg: creaKsync converte in grammi
       }))
 
+      // Come si incassa il contrassegno: contanti, assegno bancario o circolare (lib/contrassegno-modalita).
+      const codPo = Number(body.codValue || 0) > 0 ? modalitaCodPoste(body.incassoModalita, settingsPo.modalita_pagamento_cod) : null
+
       const ris = await creaKsync(credPo, {
         product: productPo,
         clientReferenceId: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
@@ -2845,7 +2849,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         colli: colliPo,
         contrassegno: body.codValue ? Number(body.codValue) : undefined,
         codiceContrassegno: settingsPo.codice_contrassegno ? String(settingsPo.codice_contrassegno) : undefined,
-        modalitaPagamentoCod: settingsPo.modalita_pagamento_cod ? String(settingsPo.modalita_pagamento_cod) : undefined,
+        modalitaPagamentoCod: codPo || undefined,
         assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         codiceAssicurazione: settingsPo.codice_assicurazione ? String(settingsPo.codice_assicurazione) : undefined,
       })
@@ -2880,7 +2884,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         colli: packages.length, peso_reale: pesoReale,
         peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
         lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
-        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        contrassegno: body.codValue || 0, contrassegno_modalita: codPo, assicurazione: body.insuranceValue || 0,
         tracking_number: numeroFinale,
         etichetta_url: etichettaUrl,
         colli_dettaglio: colliDettaglio,
@@ -3302,6 +3306,8 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         })),
         shipFrom: body.shipFrom, shipTo: body.shipTo,
         codValue: body.codValue ? Number(body.codValue) : undefined,
+        // Contanti o assegno: lo usa il contratto vero, che sta dal venditore (per SDA EXPRESS L, Poste).
+        ...(Number(body.codValue || 0) > 0 && body.incassoModalita ? { incassoModalita: String(body.incassoModalita) } : {}),
         insuranceValue: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
         notes: body.notes ? String(body.notes) : undefined,
@@ -3346,7 +3352,8 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         colli: packages.length, peso_reale: pesoReale,
         peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
         lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
-        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        // La modalita' che il venditore ha davvero mandato al corriere (null se non e' un contratto Poste).
+        contrassegno: body.codValue || 0, contrassegno_modalita: modalitaCodDaRichiesta(ris.codMode), assicurazione: body.insuranceValue || 0,
         tracking_number: numeroFinale,
         etichetta_url: etichettaUrl,
         colli_dettaglio: colliDettaglio,

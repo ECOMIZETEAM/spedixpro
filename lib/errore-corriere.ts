@@ -199,6 +199,19 @@ export function erroreCorrierePulito(raw: any): string {
   }
   if (/timed\s*out|timeout|0 bytes received/.test(t))
     return 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.'
+  // CONTRASSEGNO OLTRE IL MASSIMO DELLA MODALITA' DI INCASSO. Poste: "Importo non compatibile con metodo di
+  // rimessa contanti | Il valore di contrassegno 2.415 e' superiore al massimo consentito:1.999,99". Il
+  // 29/10/2026 la regola generica piu' sotto lo rendeva "non gestibile… o importo oltre il massimo", senza il
+  // numero e senza dire che con l'assegno si arriva a 12.499,99 €: il cliente ha pensato all'assicurazione.
+  // Il massimo si legge dalla risposta, non si scrive qui: se Poste lo cambia, il messaggio lo segue.
+  // Il testo contiene di proposito "massimo consentito: <importo>" e "contanti": al salto di condivisione
+  // dopo esce identico invece di diventare il messaggio generico.
+  const maxCod = String(raw || '').match(/massimo consentito\s*:?\s*([\d.]+,\d{2})/i)
+  if (maxCod && /contrassegn|rimessa/.test(t)) {
+    return /contant/.test(t)
+      ? `Contrassegno in contanti oltre il massimo consentito: ${maxCod[1]} €. Scegli l'incasso con assegno bancario o circolare, oppure riduci l'importo.`
+      : `Contrassegno oltre il massimo consentito: ${maxCod[1]} € per l'incasso con assegno. Riduci l'importo.`
+  }
   // CREDITO di un conto A MONTE esaurito — tipico della CONDIVISIONE ("Credito insufficiente:
   // disponibili € X, spedizione € Y", che arriva dal venditore) o del conto-corriere del master
   // ("120 CREDIT - ... (credito: 0.53, costo: ...)"). Quel saldo è del MASTER/detentore, NON del

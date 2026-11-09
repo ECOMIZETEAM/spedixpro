@@ -15,6 +15,7 @@ const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpac
 import { useDialog } from '@/app/components/DialogProvider'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import { etichettaModalitaCod } from '@/lib/contrassegno-modalita'
 // I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
 // iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
 function filtriDefault() {
@@ -287,6 +288,8 @@ export default function DistinteContrassegniPage() {
       data: r.spedizioni?.created_at ? new Date(r.spedizioni.created_at).toLocaleDateString('it-IT') : '',
       iniziale: Number(r.importo_cod || 0),
       rimborsato: Number(r.importo_cod || 0),
+      // Contrassegno incassato con assegno: si segna col codice di Poste (ABM/ACM), come ha chiesto LOGIXIA.
+      incasso: etichettaModalitaCod(r.spedizioni?.contrassegno_modalita) || '',
     }))
   }
   // Nome file dell'export: "Distinta contrassegni <CLIENTE> <numero>" — il cliente e' il nome che
@@ -307,8 +310,8 @@ export default function DistinteContrassegniPage() {
     doc.text('Cliente ' + (d.clienti?.ragione_sociale || ''), 14, 32)
     autoTable(doc, {
       startY: 40,
-      head: [['Spedizioni','Rif. Mittente','Destinatario','Data Spedizione','Contr. iniziale','Contr. rimborsato']],
-      body: righe.map((r: any) => [r.numero, r.mittente, r.destinatario, r.data, r.iniziale.toFixed(2) + ' €', r.rimborsato.toFixed(2) + ' €']),
+      head: [['Spedizioni','Rif. Mittente','Destinatario','Data Spedizione','Incasso','Contr. iniziale','Contr. rimborsato']],
+      body: righe.map((r: any) => [r.numero, r.mittente, r.destinatario, r.data, r.incasso, r.iniziale.toFixed(2) + ' €', r.rimborsato.toFixed(2) + ' €']),
       styles: { fontSize: 9 }, headStyles: { fillColor: [255,255,255], textColor: [0,0,0], fontStyle: 'bold' },
     })
     const endY = (doc as any).lastAutoTable.finalY + 12
@@ -320,7 +323,7 @@ export default function DistinteContrassegniPage() {
   async function esportaExcel(d: any) {
     const { utils, writeFile } = await import('xlsx')
     const righe = estraiRighe(d)
-    const ws = utils.json_to_sheet(righe.map((r: any) => ({ Spedizioni: r.numero, 'Rif. Mittente': r.mittente, Destinatario: r.destinatario, 'Data Spedizione': r.data, 'Contr. iniziale': r.iniziale, 'Contr. rimborsato': r.rimborsato })))
+    const ws = utils.json_to_sheet(righe.map((r: any) => ({ Spedizioni: r.numero, 'Rif. Mittente': r.mittente, Destinatario: r.destinatario, 'Data Spedizione': r.data, Incasso: r.incasso, 'Contr. iniziale': r.iniziale, 'Contr. rimborsato': r.rimborsato })))
     const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Distinta ' + d.numero)
     writeFile(wb, nomeFileDistinta(d) + '.xlsx')
   }
@@ -496,6 +499,7 @@ export default function DistinteContrassegniPage() {
                                     <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
                                     <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
                                     <span title="Data spedizione" style={{color:'#9ca3af',fontSize:'11px',whiteSpace:'nowrap' as const,minWidth:'66px',textAlign:'right' as const}}>{s.created_at?new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):''}</span>
+                                    {['ABM','ACM'].includes(s.contrassegno_modalita) && <span title={etichettaModalitaCod(s.contrassegno_modalita) || ''} style={{fontSize:'10px',fontWeight:700,color:'#1d4ed8',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'1px 5px',whiteSpace:'nowrap' as const}}>{s.contrassegno_modalita}</span>}
                                     {s.parziale && <span title={`COD parziale: il corriere ha incassato € ${Number(s.importo).toFixed(2)} sui € ${Number(s.dichiarato).toFixed(2)} dichiarati. Al cliente scende solo l'incassato.`} style={{fontSize:'10px',fontWeight:700,color:'#0369a1',background:'#e0f2fe',border:'1px solid #bae6fd',borderRadius:'4px',padding:'1px 5px',whiteSpace:'nowrap' as const}}>PARZIALE</span>}
                                     <span style={{fontWeight:700,color: s.parziale ? '#0369a1' : '#15803d',whiteSpace:'nowrap' as const,minWidth:'72px',textAlign:'right' as const}}>€ {Number(s.importo).toFixed(2)}</span>
                                   </label>

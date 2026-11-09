@@ -12,6 +12,7 @@ import { erroreIndirizzoItaliano, cittaPerLaSpedizione } from '@/lib/citta-spedi
 import { spedizioneDoppioneAttiva, messaggioDoppione, doppioneSenzaTesta } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { ritiroInRisposta, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
+import { modalitaCodPoste, modalitaCodDaRichiesta, type ModalitaCod } from '@/lib/contrassegno-modalita'
 import { EMAIL_PER_CORRIERE,
   spediamoproGetQuotation, spediamoproCreateShipment, spediamoproGetLabel,
   spediamoproWaitForTracking, kgToGrams, cmToMm, euroToCents, centsToEuro,
@@ -75,7 +76,9 @@ export async function GET(req: NextRequest) {
 // API pubblica MoovExpress — crea una spedizione sul contratto della API key.
 // Auth: Authorization: Bearer <api_key>
 // Body: { packages:[{weight,length,width,height}], shipFrom:{...}, shipTo:{...}, codValue?, insuranceValue?, notes?, contenuto?,
+//         incassoModalita?: 'C'|'AB'|'AC' (contanti / assegno bancario / circolare: GLS e SDA EXPRESS L),
 //         pickup?: { requested: true, date: 'AAAA-MM-GG', time?: 'mattina'|'pomeriggio' } }
+// Sui contratti Poste la risposta dice come si incassera' il contrassegno: `codMode: 'CON'|'ABM'|'ACM'`.
 // Il RITIRO va chiesto QUI: su alcuni contratti si prenota solo insieme all'ordine e non si puo'
 // aggiungere dopo — /api/v1/pickups per quei contratti risponde 400 apposta. Se il ritiro e' stato
 // chiesto, la risposta contiene `ritiro: { richiesto, data, intervallo, codice, avviso? }`, dove
@@ -402,6 +405,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   let numero = '', costoCorrente = 0, etichettaUrl: string | null = null, raw: any = null
   // Il codice del ritiro prenotato dal corriere: va restituito a chi integra, come fa il portale.
   let codiceRitiro: string | null = null
+  // Come il corriere incassera' il contrassegno (CON / ABM / ACM): solo dove finisce su un contratto Poste.
+  let codModeUsata: ModalitaCod | null = null
   // Se il ritiro chiesto e' PARTITO davvero verso il corriere. Lo accendono solo i rami che lo
   // prenotano (easyparcel dentro l'ordine, ponte se il venditore conferma): prima la risposta diceva
   // richiesto:true su ogni contratto, anche dove non si prenotava niente (vedi lib/ritiro-api).
@@ -762,6 +767,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     if (!productPo) return errore('Contratto non configurato correttamente')
     try {
       const { creaKsync, etichettaKsync } = await import('@/lib/ksync')
+      // Contanti, assegno bancario o circolare: lo sceglie chi spedisce (lib/contrassegno-modalita).
+      codModeUsata = Number(body.codValue || 0) > 0 ? modalitaCodPoste(body.incassoModalita, settingsPo.modalita_pagamento_cod) : null
       const risPo = await creaKsync(credPo, {
         product: productPo,
         clientReferenceId: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
@@ -772,7 +779,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         colli: packages.map((p: any) => ({ altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined, profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1 })),
         contrassegno: body.codValue ? Number(body.codValue) : undefined,
         codiceContrassegno: settingsPo.codice_contrassegno ? String(settingsPo.codice_contrassegno) : undefined,
-        modalitaPagamentoCod: settingsPo.modalita_pagamento_cod ? String(settingsPo.modalita_pagamento_cod) : undefined,
+        modalitaPagamentoCod: codModeUsata || undefined,
         assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         codiceAssicurazione: settingsPo.codice_assicurazione ? String(settingsPo.codice_assicurazione) : undefined,
       })
@@ -914,6 +921,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         shipFrom: { ...body.shipFrom, street1: conPresso(body.shipFrom.street1 || '', pressoFrom) },
         shipTo: { ...body.shipTo, street1: conPresso(body.shipTo.street1 || '', pressoTo) },
         codValue: body.codValue ? Number(body.codValue) : undefined,
+        // Contanti o assegno: lo usa il contratto vero, che sta dal venditore (per SDA EXPRESS L, Poste).
+        ...(Number(body.codValue || 0) > 0 && body.incassoModalita ? { incassoModalita: String(body.incassoModalita) } : {}),
         insuranceValue: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
         notes: body.notes ? String(body.notes) : undefined,
@@ -928,6 +937,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       }, { scadenza })
       numero = risMv.tracking
       costoCorrente = risMv.prezzo   // W: costo esterno (come spedisci), NON 0
+      codModeUsata = modalitaCodDaRichiesta(risMv.codMode)   // quella che il venditore ha davvero mandato
       codiceRitiro = risMv.ritiro?.codice || null
       // Prenotato solo se lo conferma il venditore: per SDA EXPRESS L la catena finisce su un contratto
       // Poste diretto, che alla creazione non prenota, e la sua risposta torna richiesto:false.
@@ -983,7 +993,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     // colonna — con NULL non trovavano mai niente, quindi l'API era l'unica porta SENZA protezione
     // contro il doppio addebito dello stesso ordine (vedi CONTROLLORE-SUPREMO.md).
     rif_ordine: (body.rifOrdine ? String(body.rifOrdine).trim() : '') || null,
-    contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+    contrassegno: body.codValue || 0, contrassegno_modalita: codModeUsata, assicurazione: body.insuranceValue || 0,
     tracking_number: numero, etichetta_url: etichettaUrl, colli_dettaglio: colliDettaglio, raw_response: raw, stato: 'in_lavorazione',
     costo_spedizione: costoCorrente, costo_totale: costoCliente, note: body.notes || null, contenuto: body.contenuto || null,
     // Il ritiro si segna sulla spedizione solo se e' stato prenotato: il portale mostra "Ritiro
@@ -1142,6 +1152,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   return NextResponse.json({
     id: inserted?.id || null, tracking: numero, contratto: corriere.nome_contratto,
     prezzo: costoCliente, valuta: 'EUR', label_url: `/api/v1/shipments/${inserted?.id}/label`, stato: 'in_lavorazione',
+    // Come si incassera' il contrassegno, quando il contratto e' Poste: lo legge anche il ponte che ha chiamato.
+    ...(codModeUsata ? { codMode: codModeUsata } : {}),
     // Se il ritiro e' stato chiesto, la risposta dice se e' stato PRENOTATO e, se no, cosa fare.
     ...(_vuoleRitiro ? { ritiro: ritiroInRisposta({
       prenotato: ritiroPrenotato, data: _dataRitiro, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00',

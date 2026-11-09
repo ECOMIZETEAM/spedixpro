@@ -25,7 +25,7 @@ import { modalitaConsegna } from '@/lib/punti-consegna'
 export async function annotaPuntoPoste(admin: any, risultati: any[]) {
   const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
   if (!ids.length) return
-  const { data: corr, error } = await admin.from('corrieri').select('id,tipo,credenziali,settings').in('id', ids)
+  const { data: corr, error } = await admin.from('corrieri').select('id,master_id,tipo,nome_contratto,credenziali,settings').in('id', ids)
   // Il client non solleva da solo quando la lettura fallisce: torna `error` e nessun dato. Senza
   // questo controllo si usciva di qui con zero flag, cioe' "nessun contratto e' a un punto".
   if (error) throw new Error('lettura contratti a un punto: ' + error.message)
@@ -51,6 +51,45 @@ export async function annotaPuntoPoste(admin: any, risultati: any[]) {
       if (m.deposito) r._deposito = true
       if (m.tipologiaDva) r._consegna_punto = m.tipologiaDva
     }
+  }
+  // L'assegno e' solo una voce in piu' nella tendina: se non si riesce a capirlo, si resta a contanti.
+  // Non deve mai far fallire l'elenco ne' l'anteprima dei prezzi degli import, che non catturano.
+  try { await annotaAssegnoPoste(admin, risultati, perId) } catch { /* resta solo contanti */ }
+}
+
+// ASSEGNO SUI CONTRATTI POSTE (SDA EXPRESS L). La tendina "Modalità di incasso" offre contanti, assegno
+// bancario e assegno circolare solo se il pacco finisce su un contratto Poste diretto: quello della tariffa,
+// o quello in fondo alla fila dei ponti di condivisione (Wave, MULTIEXPRESS e i loro sotto-master spediscono
+// sul contratto di LOGIXIA).
+// Il contratto d'origine scritto nel ponte non basta: le copie scese dall'albero non ce l'hanno (GTS EXPRESS,
+// 09/11/2026: ponte SDA EXPRESS L senza origine, eppure spedisce su LOGIXIA). La spedizione vera risale la
+// fila PER NOME (risolviCatenaCondivisione), ma farlo qui costava ~1 s in piu' per ogni elenco corrieri,
+// che si apre di continuo. Quindi la stessa regola, letta al contrario: un ponte finisce su Poste se tutti i
+// contratti veri col suo nome sono Poste. Due letture per elenco. Se un giorno nasce un contratto non Poste
+// con lo stesso nome, la seconda lettura lo vede e la tendina torna a solo contanti.
+// Un errore qui lascia la tendina com'era (solo contanti), non blocca l'elenco.
+async function annotaAssegnoPoste(admin: any, risultati: any[], perId: Map<string, any>) {
+  const nome = (s: any) => String(s || '').trim().toLowerCase()
+  const ponti: any[] = []
+  for (const r of risultati) {
+    const c = perId.get(r._corriere_id); if (!c) continue
+    if (c.tipo === 'poste') r._poste_assegno = true
+    else if (c.tipo === 'moovexpress') ponti.push(r)
+  }
+  if (!ponti.length) return
+  const { data: poste, error } = await admin.from('corrieri').select('nome_contratto').eq('tipo', 'poste')
+  if (error) return
+  const nomiPoste = new Set((poste || []).map((c: any) => nome(c.nome_contratto)))
+  const candidati = [...new Set(ponti.map(r => nome(perId.get(r._corriere_id)?.nome_contratto)).filter(n => nomiPoste.has(n)))]
+  if (!candidati.length) return
+  const { data: altri, error: e2 } = await admin.from('corrieri').select('nome_contratto')
+    .not('tipo', 'in', '(moovexpress,poste)')
+    .or(candidati.map(n => `nome_contratto.ilike.${n.replace(/[%_,()*\\]/g, '_')}`).join(','))
+  if (e2) return
+  const nonSoloPoste = new Set((altri || []).map((c: any) => nome(c.nome_contratto)))
+  for (const r of ponti) {
+    const n = nome(perId.get(r._corriere_id)?.nome_contratto)
+    if (nomiPoste.has(n) && !nonSoloPoste.has(n)) r._poste_assegno = true
   }
 }
 

@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
   const al = p.get('al')
 
   let query = supabase.from('distinte_contrassegni')
-    .select('*, clienti(ragione_sociale), distinte_contrassegni_righe(id,numero_spedizione,importo_cod,importo_sistema,spedizioni(dest_nome,rif_destinatario,mitt_nome,created_at))')
+    .select('*, clienti(ragione_sociale), distinte_contrassegni_righe(id,numero_spedizione,importo_cod,importo_sistema,spedizioni(dest_nome,rif_destinatario,mitt_nome,created_at,contrassegno_modalita))')
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
 

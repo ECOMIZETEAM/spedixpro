@@ -70,6 +70,9 @@ export type MoovexpressCreaInput = {
   shipFrom: Record<string, any>
   shipTo: Record<string, any>
   codValue?: number
+  // Contanti o assegno (C / AB / AC): la decide chi spedisce, la usa il contratto vero che sta dal
+  // venditore. Su SDA EXPRESS L e' cio' che fa partire il contrassegno con assegno (lib/contrassegno-modalita).
+  incassoModalita?: string
   insuranceValue?: number
   notes?: string
   contenuto?: string
@@ -90,6 +93,7 @@ export type MoovexpressCreaResult = {
   prezzo: number       // W: quanto il venditore addebita al compratore (= costo per il compratore)
   label_url: string    // relativo: /api/v1/shipments/<id>/label
   ritiro?: any
+  codMode?: string     // CON / ABM / ACM: come il corriere incassera' il contrassegno (solo contratti Poste)
 }
 
 export type MoovexpressQuotaInput = {
@@ -130,6 +134,7 @@ export async function quotaMoovexpress(cred: MoovexpressCred, dati: MoovexpressQ
 
 const comeRisultato = (j: any): MoovexpressCreaResult => ({
   id: String(j.id || ''), tracking: String(j.tracking), prezzo: Number(j.prezzo) || 0, label_url: String(j.label_url || ''), ritiro: j.ritiro,
+  codMode: j.codMode ? String(j.codMode) : undefined,
 })
 
 // Crea la spedizione sul contratto del venditore. Lancia un Error col messaggio del fornitore se la rifiuta,

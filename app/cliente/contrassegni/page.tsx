@@ -38,10 +38,11 @@ export default function ContrassegniCliente() {
       doc.text('Cliente '+(clienteNome||''), 14, 26)
       autoTable(doc, {
         startY: 32, styles:{fontSize:8,cellPadding:2}, headStyles:{fillColor:[255,255,255],textColor:[0,0,0],fontStyle:'bold',lineWidth:0.1},
-        head: [['Spedizioni','Destinatario','Data Spedizione','Contr. iniziale','Contr. rimborsato']],
+        head: [['Spedizioni','Destinatario','Data Spedizione','Incasso','Contr. iniziale','Contr. rimborsato']],
         body: (righe||[]).map((r:any)=>[
           r.numeroSpedizione||'', (r.destinatario||'')+(r.citta?(' - '+r.citta):''),
           r.dataSpedizione?new Date(r.dataSpedizione).toLocaleDateString('it-IT'):'',
+          r.incasso||'',
           Number(r.contrIniziale||0).toFixed(2)+' €', Number(r.contrRimborsato||0).toFixed(2)+' €',
         ]),
       })
@@ -61,6 +62,7 @@ export default function ContrassegniCliente() {
       const rows = (righe||[]).map((r:any)=>({
         Spedizione:r.numeroSpedizione, Destinatario:r.destinatario, Citta:r.citta,
         DataSpedizione:r.dataSpedizione?new Date(r.dataSpedizione).toLocaleDateString('it-IT'):'',
+        Incasso:r.incasso||'',
         ContrIniziale:r.contrIniziale, ContrRimborsato:r.contrRimborsato,
       }))
       const ws = utils.json_to_sheet(rows)

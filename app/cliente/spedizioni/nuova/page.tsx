@@ -12,12 +12,13 @@ import InpostLockerPicker, { type InpostPuntoScelto } from '@/app/components/Inp
 const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
+import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -165,6 +166,8 @@ export default function NuovaSpedizioneCliente() {
     : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
     : (selected?._corriere_tipo === 'SO' && selected?._spedisci_assegno) ? [['C','CONTANTE'],['AB','ASSEGNO BANCARIO'],['AC','ASSEGNO CIRCOLARE']]
     : (selected?._corriere_tipo === 'brt' && selected?._brt_assegno) ? [['C','CONTANTE'],['BM','ASSEGNO BANCARIO']]
+    // Contratti che finiscono su Poste (SDA EXPRESS L, anche dietro i ponti): il flag lo mette annotaPuntoPoste.
+    : selected?._poste_assegno ? OPZIONI_INCASSO_POSTE
     : [['C','CONTANTE']]
   const accDisponibili = (selected?.accessori_disponibili || [])
   // Importo accessorio = prezzo fisso + % del PREZZO SPEDIZIONE (nolo+fuel+sponda), come dice il campo

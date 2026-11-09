@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
   const ids = tutte.map((r: any) => r.spedizione_id).filter(Boolean)
   const info = new Map<string, any>()
   for (let i = 0; i < ids.length; i += 300) {
-    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at,contrassegno').in('id', ids.slice(i, i + 300))
+    const { data: sp } = await admin.from('spedizioni').select('id,numero,dest_nome,dest_citta,created_at,contrassegno,contrassegno_modalita').in('id', ids.slice(i, i + 300))
     for (const s of (sp || [])) info.set((s as any).id, s)
   }
 
@@ -68,6 +68,8 @@ export async function GET(req: NextRequest) {
       dest_nome: s.dest_nome || '',
       dest_citta: s.dest_citta || '',
       created_at: s.created_at || null,
+      // CON / ABM / ACM sui contratti Poste: chi rimette i soldi deve sapere che arriva un assegno.
+      contrassegno_modalita: s.contrassegno_modalita || null,
     }
   }).sort((a: any, b: any) => {
     const d = String(b.created_at || '').localeCompare(String(a.created_at || ''))
