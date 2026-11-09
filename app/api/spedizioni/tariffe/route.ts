@@ -10,6 +10,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { annotaPuntoPoste, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
 import { motivoGlsNonServe } from '@/lib/gls'
 import { erroreIndirizzoItaliano } from '@/lib/citta-spedizione'
+import { completaProvinciaDaCap } from '@/lib/provincia-da-cap'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -22,6 +23,10 @@ export async function POST(req: NextRequest) {
   // La creazione lo ferma comunque: qui serve solo a non mostrarlo.
   const fuoriPaese = erroreIndirizzoItaliano({ cap: body?.shipTo?.postalCode, citta: body?.shipTo?.city, paese: body?.shipTo?.country })
   if (fuoriPaese) return NextResponse.json({ error: fuoriPaese }, { status: 400 })
+  // Consegna a un punto: il modulo manda solo il CAP. La provincia decide la zona (jolly di provincia
+  // come "Venezia/Laguna"): la si ricava dal CAP, come fa la creazione — stesso CAP, stesso prezzo.
+  // Vedi lib/provincia-da-cap → completaProvinciaDaCap. Una provincia scritta non si tocca.
+  completaProvinciaDaCap(body?.shipTo)
   // CONTRATTI "A UN PUNTO" (PuntoPoste/Ufficio Postale/Fermopoint/Locker): richiedono di SCEGLIERE un
   // punto (o un deposito) che esiste solo nella creazione manuale. Vanno quindi ESCLUSI di default dalle
   // tariffe, così una porta che sceglie in automatico "il prezzo più basso" non li assegna mai per

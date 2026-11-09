@@ -35,6 +35,7 @@ import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { modalitaCodPoste, modalitaCodDaRichiesta } from '@/lib/contrassegno-modalita'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
+import { completaProvinciaDaCap } from '@/lib/provincia-da-cap'
 
 
 // La creazione parla con i corrieri: alcuni rispondono subito, altri si prendono qualche secondo
@@ -282,8 +283,11 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
 
   const cred = corriereRecord.credenziali as Record<string, string>
 
-  // Consegna a un PUNTO (PuntoPoste/Ufficio Postale): il destinatario non ha una provincia (il pacco va
-  // al punto, la zona la dà il CAP). Si riconosce da body.puntoArrivo. La consegna a casa la richiede.
+  // Consegna a un PUNTO (PuntoPoste/Ufficio Postale): il modulo non chiede la provincia del destinatario
+  // (il pacco va al punto). Si riconosce da body.puntoArrivo. La consegna a casa la richiede.
+  // La zona pero' la decide anche la provincia: la si ricava dal CAP, come fa il preventivo
+  // (lib/provincia-da-cap → completaProvinciaDaCap, con il caso vero che l'ha resa necessaria).
+  if (String(body.puntoArrivo || '').trim()) completaProvinciaDaCap(body.shipTo)
   if (!body.shipTo?.state?.trim() && !String(body.puntoArrivo || '').trim()) return NextResponse.json({ error: 'Provincia destinatario obbligatoria' }, { status: 400 })
   if (!body.shipFrom?.state?.trim()) return NextResponse.json({ error: 'Provincia mittente obbligatoria' }, { status: 400 })
 
