@@ -12,11 +12,49 @@
  * creazione del compratore (addebitaCatena col prezzo tornato qui), come per ogni altro provider.
  */
 
+import { MSG_PONTE_NON_CONCLUSO } from '@/lib/errore-corriere'
+
 export type MoovexpressCred = {
   api_key: string
   base_url?: string           // API del venditore; oggi lo stesso portale, domani un dominio suo
   fornitore_master_id?: string
   corriere_origine_id?: string
+}
+
+// I TEMPI DEL PONTE. Ogni salto (portale → Wave → LOGIXIA → Poste) e' una funzione con lo stesso tetto di
+// durata, e nessuno diceva al venditore quanto tempo restava a chi lo chiamava. Quando il database
+// rallentava, chi stava in alto moriva per primo mentre quelli sotto finivano il lavoro: la LDV nasceva e le
+// gambe d'ingrosso venivano addebitate, ma la spedizione del cliente no. Dal 2 al 9/11/2026 e' successo 19
+// volte su SDA EXPRESS L. Wave ha pagato a LOGIXIA 110,50 € e MULTI ha pagato a Wave 56,20 €, senza
+// nessuna spedizione da vendere. Esempio: il 9/11 la prenotazione di Wave presso LOGIXIA e' nata alle
+// 12:20:54 ora italiana, un secondo prima che Wave morisse. LOGIXIA non poteva saperlo e alle 12:20:58 ha
+// creato la LDV 282343J064551.
+// Ora chi chiama dice quanto tempo gli resta (PONTE_HDR_TEMPO) e il venditore non parte se non fa in tempo.
+// Ogni richiesta ha un codice (PONTE_HDR_RICHIESTA): se la risposta non arriva, prima di dire «non creata»
+// si chiede al venditore com'e' andata.
+export const PONTE_HDR_TEMPO = 'x-moovexpress-tempo-ms'
+export const PONTE_HDR_RICHIESTA = 'x-moovexpress-richiesta'
+// Al compratore, dopo la risposta: scaricare l'etichetta, scrivere la riga, addebitare.
+const MARGINE_DOPO_MS = 25_000
+// Per chiedere al venditore com'e' andata quando la risposta non arriva.
+const MARGINE_VERIFICA_MS = 8_000
+// Sotto questo tempo il venditore non fa in tempo: non lo si chiama nemmeno.
+const MINIMO_VENDITORE_MS = 15_000
+// Il venditore non chiama il corriere se a chi lo chiama resta meno di cosi'.
+export const MINIMO_CREAZIONE_MS = 10_000
+
+// Fino a quando questa richiesta puo' lavorare: il proprio tetto, o meno se chi chiama ha detto di avere
+// meno tempo (e' il salto di sopra del ponte). `t0` = il primo istante della rotta.
+export function scadenzaRichiesta(req: Request, t0: number, maxDurationS: number): number {
+  const propria = t0 + maxDurationS * 1000 - 3_000
+  const dichiarato = Number(req.headers.get(PONTE_HDR_TEMPO))
+  return Number.isFinite(dichiarato) && dichiarato > 0 ? Math.min(propria, t0 + dichiarato) : propria
+}
+
+// La spedizione non e' nata dalla parte di chi spedisce: il credito torna. Se dal venditore e' nata lo
+// stesso, la sentinella (lib/ponte-orfane) annulla le sue gambe.
+export class PonteNonConcluso extends Error {
+  constructor() { super(MSG_PONTE_NON_CONCLUSO); this.name = 'PonteNonConcluso' }
 }
 
 // Base dell'API del venditore. Oggi loopback sullo stesso portale; si può fissare per-contratto
@@ -90,23 +128,95 @@ export async function quotaMoovexpress(cred: MoovexpressCred, dati: MoovexpressQ
   return j as MoovexpressQuota
 }
 
-// Crea la spedizione sul contratto del venditore. Lancia un Error col messaggio del fornitore su fallita.
-export async function creaSpedizioneMoovexpress(cred: MoovexpressCred, dati: MoovexpressCreaInput): Promise<MoovexpressCreaResult> {
+const comeRisultato = (j: any): MoovexpressCreaResult => ({
+  id: String(j.id || ''), tracking: String(j.tracking), prezzo: Number(j.prezzo) || 0, label_url: String(j.label_url || ''), ritiro: j.ritiro,
+})
+
+// Crea la spedizione sul contratto del venditore. Lancia un Error col messaggio del fornitore se la rifiuta,
+// e PonteNonConcluso se non si riesce a sapere com'e' andata. `scadenza` = fino a quando chi chiama puo'
+// lavorare (scadenzaRichiesta).
+//
+// Un 4xx e' un rifiuto vero: la spedizione non c'e'. Un 5xx (il 504 di quando il venditore muore), una
+// risposta che non arriva o un 200 senza numero NON dicono "non creata". Prima si leggevano tutti come un
+// rifiuto e il credito tornava al cliente, mentre la LDV e le gambe sotto restavano addebitate.
+export async function creaSpedizioneMoovexpress(
+  cred: MoovexpressCred, dati: MoovexpressCreaInput, opz: { scadenza?: number } = {},
+): Promise<MoovexpressCreaResult> {
   if (!cred?.api_key) throw new Error('Contratto senza chiave: rifare la condivisione.')
-  let r: Response
+  const scadenza = opz.scadenza ?? Date.now() + 57_000
+  const tempo = scadenza - Date.now() - MARGINE_DOPO_MS - MARGINE_VERIFICA_MS
+  if (tempo < MINIMO_VENDITORE_MS) {
+    // Non si chiama: il venditore creerebbe una LDV che qui nessuno farebbe in tempo a registrare.
+    console.error('[PONTE] tempo finito prima di chiamare il venditore', { restano_ms: scadenza - Date.now() })
+    throw new PonteNonConcluso()
+  }
+  const codice = crypto.randomUUID()
+  let r: Response | null = null
+  let j: any = {}
   try {
     r = await fetch(`${baseUrl(cred)}/api/v1/shipments`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cred.api_key}` },
+      headers: {
+        'Content-Type': 'application/json', Authorization: `Bearer ${cred.api_key}`,
+        [PONTE_HDR_RICHIESTA]: codice,
+        // Un secondo in meno per il viaggio della richiesta.
+        [PONTE_HDR_TEMPO]: String(tempo - 1_000),
+      },
       body: JSON.stringify(dati),
+      signal: AbortSignal.timeout(tempo),
     })
+    j = await r.json().catch(() => ({}))
   } catch (e: any) {
-    throw new Error('Fornitore non raggiungibile: ' + (e?.message || 'rete'))
+    console.error('[PONTE] risposta del venditore non arrivata', codice, e?.name || '', e?.message || '')
+    r = null
   }
-  const j: any = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(j?.error || `Errore dal fornitore (${r.status})`)
-  if (!j?.tracking) throw new Error('Il fornitore non ha restituito un numero di spedizione.')
-  return { id: String(j.id || ''), tracking: String(j.tracking), prezzo: Number(j.prezzo) || 0, label_url: String(j.label_url || ''), ritiro: j.ritiro }
+  if (r && r.status < 500) {
+    if (!r.ok) throw new Error(j?.error || `Errore dal fornitore (${r.status})`)
+    if (j?.tracking) return comeRisultato(j)
+  }
+
+  // ESITO INCERTO: si chiede al venditore cosa e' successo a questa richiesta, per pochi secondi. Il
+  // venditore ha la stessa scadenza della nostra attesa, quindi quando smettiamo di aspettare ha gia'
+  // finito o rinunciato. Se ha risposto con un 5xx, chi lo ha servito e' gia' morto.
+  const esito = await verificaRichiesta(cred, codice, Math.min(scadenza - MARGINE_DOPO_MS, Date.now() + MARGINE_VERIFICA_MS))
+  if (esito.stato === 'fatta' && esito.risposta?.tracking) {
+    // E' nata: la si tiene. E' la stessa richiesta (stessi pesi, stesso contrassegno), e il cliente non
+    // vede un errore su una spedizione che esiste.
+    console.warn('[PONTE] risposta persa ma spedizione nata dal venditore: adottata', codice, esito.risposta.tracking, r ? `http ${r.status}` : 'nessuna risposta')
+    return comeRisultato(esito.risposta)
+  }
+  if (esito.stato === 'fallita') throw new Error(esito.risposta?.error || `Errore dal fornitore (${esito.risposta?.status || r?.status || '—'})`)
+  console.error('[PONTE] esito non concluso', codice, esito.stato, r ? `http ${r.status}` : 'nessuna risposta')
+  throw new PonteNonConcluso()
+}
+
+// Com'e' andata una richiesta del ponte, chiesto al venditore (GET /api/v1/shipments?richiesta=<codice>).
+// 'fatta' e 'fallita' sono definitive. 'in_corso' vuol dire che il venditore sta ancora lavorando, quindi si
+// richiede finche' c'e' tempo. 'assente' vuol dire che non risulta registrata.
+// Nessuna delle due dice che non e' nata: la registrazione poteva essere fallita con il database lento.
+async function verificaRichiesta(cred: MoovexpressCred, codice: string, finoA: number): Promise<{ stato: string; risposta?: any }> {
+  let ultimo: { stato: string; risposta?: any } = { stato: 'ignoto' }
+  let assente = 0
+  while (finoA - Date.now() > 1_000) {
+    try {
+      const r = await fetch(`${baseUrl(cred)}/api/v1/shipments?richiesta=${encodeURIComponent(codice)}`, {
+        headers: { Authorization: `Bearer ${cred.api_key}` },
+        signal: AbortSignal.timeout(Math.min(5_000, finoA - Date.now())),
+      })
+      const j: any = await r.json().catch(() => ({}))
+      if (r.status === 404 && j && 'richiesta' in j) {
+        ultimo = { stato: 'assente' }
+        // Due volte di fila: non arrivera' (la richiesta non e' giunta, o il registro non si e' scritto).
+        if (++assente >= 2) return ultimo
+      } else if (r.ok && j?.richiesta?.stato) {
+        ultimo = { stato: String(j.richiesta.stato), risposta: j.richiesta.risposta }
+        if (ultimo.stato === 'fatta' || ultimo.stato === 'fallita') return ultimo
+      }
+    } catch { /* non risponde nemmeno qui: si riprova finche' c'e' tempo */ }
+    if (finoA - Date.now() < 3_000) break
+    await new Promise(res => setTimeout(res, 2_000))
+  }
+  return ultimo
 }
 
 // I PUNTI DI CONSEGNA di un contratto condiviso: il compratore non ha le credenziali del fornitore
@@ -148,10 +258,12 @@ export async function consegnaMoovexpress(cred: MoovexpressCred): Promise<any | 
 // UPS passate da un ponte) sono finite su Storage come sped.pdf con dentro una GIF, e al download il
 // cliente riceveva un "PDF" che non si apriva. Il tipo si legge dai BYTE, non dall'intestazione: la riga
 // del venditore può essere a sua volta un ponte con lo stesso errore, e l'intestazione lo ripeterebbe.
-export async function etichettaMoovexpress(cred: MoovexpressCred, labelUrl: string): Promise<{ buffer: Buffer; mime: string }> {
+// Con un tempo massimo: senza, un venditore lento teneva fermo il compratore fino al suo tetto di durata,
+// e la riga della spedizione non veniva mai scritta (la LDV restava orfana).
+export async function etichettaMoovexpress(cred: MoovexpressCred, labelUrl: string, opz: { timeoutMs?: number } = {}): Promise<{ buffer: Buffer; mime: string }> {
   if (!labelUrl) throw new Error('Nessuna etichetta da scaricare.')
   const url = /^https?:\/\//i.test(labelUrl) ? labelUrl : `${baseUrl(cred)}${labelUrl}`
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${cred.api_key}` } })
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${cred.api_key}` }, signal: AbortSignal.timeout(Math.max(3_000, opz.timeoutMs ?? 20_000)) })
   if (!r.ok) throw new Error(`Etichetta non disponibile dal fornitore (${r.status})`)
   const buffer = Buffer.from(await r.arrayBuffer())
   const dichiarato = String(r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()

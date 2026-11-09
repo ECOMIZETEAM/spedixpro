@@ -6,10 +6,10 @@ import { registraMovimento, descrizioneSpedizione } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
 import { inviaWebhook } from '@/lib/webhooks'
-import { erroreCorrierePulito } from '@/lib/errore-corriere'
+import { erroreCorrierePulito, MSG_TENTATIVO_IN_ANNULLO, MSG_PONTE_NON_CONCLUSO } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { erroreIndirizzoItaliano, cittaPerLaSpedizione } from '@/lib/citta-spedizione'
-import { spedizioneDoppioneAttiva, messaggioDoppione } from '@/lib/guardia-doppione'
+import { spedizioneDoppioneAttiva, messaggioDoppione, doppioneSenzaTesta } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { ritiroInRisposta, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
 import { EMAIL_PER_CORRIERE,
@@ -18,6 +18,8 @@ import { EMAIL_PER_CORRIERE,
   normalizzaEtichetta, telValidoSp, indirizzoEtichetta, emailValidaSp,
 } from '@/lib/spediamopro'
 import { modalitaConsegna, trovaPuntoDaCodice, puntoDichiarato, depositoDaRichiesta, depositoInRisposta, ErrorePunti, type PuntoApi } from '@/lib/punti-consegna'
+import { PONTE_HDR_RICHIESTA, scadenzaRichiesta, MINIMO_CREAZIONE_MS } from '@/lib/moovexpress'
+import { apriRichiestaPonte, chiudiRichiestaPonte, leggiRichiestaPonte, codiceRichiestaValido, type RegistroPonte } from '@/lib/ponte-richieste'
 
 // IL TETTO DI DURATA, che qui non c'era.
 // Oltre la chiamata d'ordine il pacco e' COMPRATO: se la funzione viene uccisa fra l'ordine e la
@@ -25,7 +27,11 @@ import { modalitaConsegna, trovaPuntoDaCodice, puntoDichiarato, depositoDaRichie
 // nessun movimento, un 504 a chi integra, che ritenta e compra un secondo pacco. E' peggio di un
 // numero provvisorio, che almeno resta registrato e recuperabile. Alzando l'attesa della lettera di
 // vettura la coda misurata arriva a 10-22 secondi: senza un tetto dichiarato si andava a sbattere.
-export const maxDuration = 60
+// 120 e non 60 per il PONTE DI CONDIVISIONE: questa rotta chiama se stessa un salto piu' in basso
+// (Wave → LOGIXIA) e ogni salto deve lasciare tempo a quello sotto (lib/moovexpress, PONTE_HDR_TEMPO).
+// Con 60 a due salti il 9/11/2026 il database lento bastava a far morire chi stava sopra mentre la LDV
+// nasceva sotto. Il tetto vero di ogni richiesta del ponte e' la scadenza che le passa chi la chiama.
+export const maxDuration = 120
 
 // GET /api/v1/shipments — elenca le spedizioni del cliente della API key (paginata).
 // Molti client "testano il collegamento" con una GET qui: senza questa si otteneva 405.
@@ -35,6 +41,19 @@ export async function GET(req: NextRequest) {
   const _b = rispostaBlocco(ctx); if (_b) return _b
   const admin = createAdminSupabase()
   const url = new URL(req.url)
+  // ?richiesta=<codice>: com'e' finita una creazione del ponte di cui il compratore non ha avuto la
+  // risposta (lib/ponte-richieste). Solo le richieste di questa chiave.
+  if (url.searchParams.has('richiesta')) {
+    const codice = codiceRichiestaValido(url.searchParams.get('richiesta'))
+    if (!codice) return NextResponse.json({ error: 'Codice richiesta non valido' }, { status: 400 })
+    try {
+      const r = await leggiRichiestaPonte(admin, codice, ctx.clienteId)
+      return r ? NextResponse.json({ richiesta: r }) : NextResponse.json({ richiesta: null }, { status: 404 })
+    } catch (e: any) {
+      console.error('[PONTE][REGISTRO] lettura', codice, e?.message)
+      return NextResponse.json({ error: 'Registro non leggibile in questo momento' }, { status: 503 })
+    }
+  }
   const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get('limit') || '50') || 50))
   const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0') || 0)
   const stato = url.searchParams.get('stato')
@@ -61,12 +80,34 @@ export async function GET(req: NextRequest) {
 // aggiungere dopo — /api/v1/pickups per quei contratti risponde 400 apposta. Se il ritiro e' stato
 // chiesto, la risposta contiene `ritiro: { richiesto, data, intervallo, codice, avviso? }`, dove
 // richiesto=true vuol dire prenotato; sugli altri contratti richiesto=false e l'avviso dice come fare.
+//
+// Se la chiamata arriva da un ponte di condivisione (PONTE_HDR_RICHIESTA), com'e' finita si scrive nel
+// registro (lib/ponte-richieste) quando la risposta e' pronta, qualunque strada abbia preso la rotta:
+// e' quello che il compratore legge se la risposta non gli arriva.
 export async function POST(req: NextRequest) {
+  const t0 = Date.now()
+  const reg: RegistroPonte = { codice: null, aperta: false }
+  const res = await creaSpedizioneApi(req, t0, reg)
+  if (reg.aperta && reg.codice) await chiudiRichiestaPonte(createAdminSupabase(), reg.codice, res)
+  return res
+}
+
+async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPonte): Promise<Response> {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
   const _b = rispostaBlocco(ctx); if (_b) return _b
   const body = await req.json().catch(() => ({}))
   const admin = createAdminSupabase()
+  // Fino a quando questa richiesta puo' lavorare: se arriva da un ponte, quanto resta a chi l'ha chiamata.
+  const scadenza = scadenzaRichiesta(req, t0, maxDuration)
+  {
+    const codice = codiceRichiestaValido(req.headers.get(PONTE_HDR_RICHIESTA))
+    if (codice) {
+      const aperta = await apriRichiestaPonte(admin, codice, ctx.clienteId)
+      if (aperta === 'doppia') return NextResponse.json({ error: 'Richiesta già ricevuta: non ne è stata creata un\'altra.' }, { status: 409 })
+      if (aperta === 'aperta') { reg.codice = codice; reg.aperta = true }
+    }
+  }
 
   if (!body.shipTo?.state?.toString().trim() && (body.shipTo?.country || 'IT') === 'IT')
     return NextResponse.json({ error: 'Provincia destinatario obbligatoria (shipTo.state)' }, { status: 400 })
@@ -115,10 +156,17 @@ export async function POST(req: NextRequest) {
     const dup = await spedizioneDoppioneAttiva(admin, {
       clienteId: ctx.clienteId, rifOrdine: body.rifOrdine, destCap: body.shipTo?.postalCode,
     })
-    if (dup) return NextResponse.json(
-      { error: messaggioDoppione(dup.numero), gia_spedito: dup.numero, gia_spedito_id: dup.id },
-      { status: 409 },
-    )
+    if (dup) {
+      // Chi chiama con la chiave di un conto d'ingrosso e' il ponte di un altro master, e il messaggio arriva
+      // fino al suo cliente. Il numero della gamba ("…-216b3342") e' interno. Se il pacco non ha la
+      // spedizione del cliente sopra non e' un ordine gia' spedito: e' un tentativo rimasto a meta', che la
+      // sentinella (lib/ponte-orfane) sta per annullare. Il 9/11/2026 282343J064551 bloccava cosi' il cliente.
+      let messaggio = messaggioDoppione(dup.numero)
+      if ((cliente as any)?.ledger) {
+        messaggio = await doppioneSenzaTesta(admin, dup.tracking) ? MSG_TENTATIVO_IN_ANNULLO : messaggioDoppione(dup.tracking || dup.numero)
+      }
+      return NextResponse.json({ error: messaggio, gia_spedito: dup.numero, gia_spedito_id: dup.id }, { status: 409 })
+    }
   }
 
   // Nessun blocco per limite o canone: chi si integra e' un CLIENTE, e non deve subire i conti
@@ -364,6 +412,16 @@ export async function POST(req: NextRequest) {
   let colliDettaglio: any[] | null = null
   // Il locker InPost scelto: InPost lo riceve cosi' com'e', qui serve solo a dirlo nella risposta.
   let puntoInpostScelto: string | null = null
+
+  // PONTE: se a chi ci ha chiamato resta troppo poco tempo, il corriere non si chiama. La LDV nascerebbe
+  // quando chi la aspettava e' gia' morto, e resterebbe addebitata senza la spedizione del cliente
+  // (282343J064551, 9/11/2026: prenotazione alle 12:20:54, chi chiamava e' morto alle 12:20:55, LDV alle
+  // 12:20:58). Senza ponte la scadenza e' il tetto di questa rotta, e qui non si arriva mai cosi' tardi.
+  if (scadenza - Date.now() < MINIMO_CREAZIONE_MS) {
+    console.error('[V1][PONTE] tempo finito prima del corriere', { contratto: corriere.nome_contratto, restano_ms: scadenza - Date.now() })
+    // 400 e non 5xx: e' un no sicuro (il corriere non e' stato chiamato), e chi chiama non deve verificare.
+    return errore(MSG_PONTE_NON_CONCLUSO, 400)
+  }
 
   if (corriere.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
@@ -867,14 +925,16 @@ export async function POST(req: NextRequest) {
         ...(body.deliveryPoint != null ? { deliveryPoint: body.deliveryPoint } : {}),
         ...(body.dropoffType ? { dropoffType: String(body.dropoffType) } : {}),
         ...(body.inpostPointId ? { inpostPointId: String(body.inpostPointId) } : {}),
-      })
+      }, { scadenza })
       numero = risMv.tracking
       costoCorrente = risMv.prezzo   // W: costo esterno (come spedisci), NON 0
       codiceRitiro = risMv.ritiro?.codice || null
       // Prenotato solo se lo conferma il venditore: per SDA EXPRESS L la catena finisce su un contratto
       // Poste diretto, che alla creazione non prenota, e la sua risposta torna richiesto:false.
       ritiroPrenotato = _vuoleRitiro && risMv.ritiro?.richiesto === true
-      try { const lab = await etichettaMoovexpress(credMv, risMv.label_url); if (lab.buffer.length) etichettaUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}` } catch (e) { console.error('[V1][MOOVEXPRESS] etichetta:', (e as any)?.message) }
+      // L'etichetta puo' aspettare solo finche' resta il tempo di scrivere la riga e addebitare: senza la
+      // riga la LDV resterebbe orfana.
+      try { const lab = await etichettaMoovexpress(credMv, risMv.label_url, { timeoutMs: scadenza - Date.now() - 12_000 }); if (lab.buffer.length) etichettaUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}` } catch (e) { console.error('[V1][MOOVEXPRESS] etichetta:', (e as any)?.message) }
       // _ritiroPrenotato: sul ponte e' l'unico posto da cui il dettaglio (GET) puo' rileggerlo.
       raw = { _moovexpress: true, tracking: numero, venditore_spedizione_id: risMv.id || null, label_url: risMv.label_url || null, _ritiroPrenotato: ritiroPrenotato, _codiceRitiro: codiceRitiro }
     } catch (e: any) {

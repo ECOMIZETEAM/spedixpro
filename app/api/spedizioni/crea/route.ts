@@ -40,7 +40,11 @@ import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
 // per emettere la lettera di vettura. Senza un tetto esplicito vale quello brevissimo di default,
 // e una richiesta che scade dopo che l'ordine e' gia' stato PAGATO e' il peggio che possa capitare:
 // il pacco esiste dal corriere e da noi no. Un minuto e' molto piu' di quanto serva davvero.
-export const maxDuration = 60
+// Due minuti per il PONTE DI CONDIVISIONE: da qui si chiama l'/api/v1 del venditore, che a sua volta puo'
+// chiamarne un altro (SDA EXPRESS L: portale → Wave → LOGIXIA), e ogni salto deve lasciare tempo a quello
+// sotto (lib/moovexpress). Con 60 secondi, il 9/11/2026 il database lento bastava a far morire questa rotta
+// mentre la LDV nasceva sotto, e la LDV restava addebitata ai master senza la spedizione del cliente.
+export const maxDuration = 120
 
 // IL COSTO DEL MASTER NON ESCE DALLA CREAZIONE. Ogni ramo corriere chiude con `costo`: quanto paga il
 // master al corriere o al fornitore (shipmentCost, totalPrice, importo, il suo listino corrieri). Questa
@@ -49,7 +53,7 @@ export const maxDuration = 60
 // d'errore restano intatte: quella del credito insufficiente (402) porta in `costo` il prezzo DEL
 // CLIENTE, ed e' quello che la finestra di pagamento mostra.
 export async function POST(req: NextRequest) {
-  const res = await creaSpedizioneInterna(req)
+  const res = await creaSpedizioneInterna(req, Date.now())
   if (!res.ok) return res
   const corpo = await res.clone().json().catch(() => null)
   if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo) || !('costo' in corpo)) return res
@@ -59,7 +63,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(resto, { status: res.status, headers })
 }
 
-async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
+// `t0` = il primo istante della richiesta: da li' si conta il tempo che resta al ponte (lib/moovexpress).
+async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Response> {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
@@ -3286,6 +3291,9 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
     }
     try {
       const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')
+      // Il tetto di questa rotta meno tre secondi: e' il tempo che il ponte divide fra il venditore e il
+      // lavoro da fare qui dopo la sua risposta (lib/moovexpress).
+      const scadenzaPonte = t0 + maxDuration * 1000 - 3_000
 
       const ris = await creaSpedizioneMoovexpress(credMv, {
         packages: packages.map((p: any) => ({
@@ -3300,7 +3308,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         contenuto: body.contenuto ? String(body.contenuto) : undefined,
         rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
         pickup: _vuoleRitiro ? { requested: true, date: String(body.dataRitiro), time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
-      })
+      }, { scadenza: scadenzaPonte })
       const numeroFinale = ris.tracking
       // W = quanto il venditore addebita al compratore = il COSTO per questo master.
       const costoCorrente = ris.prezzo
@@ -3309,8 +3317,10 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       // Etichetta del venditore (quella del corriere reale, propagata su per ogni salto): scaricata subito e
       // salvata come data URL, così non dipende da una chiamata live dopo. Col suo tipo: UPS è una GIF.
       let etichettaUrl: string | null = null
+      // Si aspetta solo finche' resta il tempo di scrivere la riga e addebitare: senza la riga la LDV
+      // resterebbe orfana.
       try {
-        const lab = await etichettaMoovexpress(credMv, ris.label_url)
+        const lab = await etichettaMoovexpress(credMv, ris.label_url, { timeoutMs: scadenzaPonte - Date.now() - 12_000 })
         if (lab.buffer.length) etichettaUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}`
       } catch (e) { console.error('[CREA][MOOVEXPRESS] etichetta:', (e as any)?.message) }
 

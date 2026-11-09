@@ -60,6 +60,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/spedizioni/ponte-orfane-cron",
+      "schedule": "7,22,37,52 * * * *"
+    },
+    {
       "path": "/api/spedizioni/avvisa-giacenze",
       "schedule": "20 8-19 * * *"
     },
