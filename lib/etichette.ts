@@ -256,8 +256,8 @@ export async function leggiEtichettaCompleta(
   // resaSda: la resa pulita SDA EXPRESS L va CHIESTA, e la chiedono solo le porte di stampa (true, o una
   // funzione che decide in base a chi stampa: la si chiama solo se il contratto e' SDA). Senza, esce la
   // 1011 com'e' arrivata da Poste: un punto nuovo che salva l'etichetta e dimentica l'opzione salva
-  // l'originale, non una resa. L'API v1 non la chiede: da li' la catena della condivisione scarica
-  // l'etichetta e la SALVA sulla riga del compratore (lib/moovexpress).
+  // l'originale, non una resa. L'API v1 la chiede solo per i partner: la catena della condivisione
+  // (chiavi dei clienti-ledger) scarica da li' l'etichetta e la SALVA sulla riga del compratore.
   opz: { resaSda?: boolean | (() => Promise<boolean>) } = {}
 ): Promise<EtichettaLetta | null> {
   const et = await leggiEtichettaGrezza(admin, sped)
