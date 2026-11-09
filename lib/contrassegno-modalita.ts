@@ -43,3 +43,11 @@ export function etichettaModalitaCod(m: unknown): string | null {
 export const OPZIONI_INCASSO_POSTE: [string, string][] = [
   ['C', 'CONTANTE'], ['AB', 'ASSEGNO BANCARIO (ABM)'], ['AC', 'ASSEGNO CIRCOLARE (ACM)'],
 ]
+
+// Il contrassegno e' un assegno intestato al mittente (ABM/ACM): il valore e' il titolo, non denaro che
+// passa dai conti. Lungo la fila delle rimesse si consegna l'assegno, non si paga: un bonifico o una
+// compensazione sul credito farebbero avere al cliente i soldi E l'assegno (Lorenzo, 09/11/2026).
+export const eAssegno = (m: unknown): boolean => {
+  const v = String(m ?? '').trim().toUpperCase()
+  return v === 'ABM' || v === 'ACM'
+}

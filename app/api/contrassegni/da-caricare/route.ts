@@ -1,3 +1,4 @@
+import { eAssegno } from '@/lib/contrassegno-modalita'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
@@ -224,10 +225,10 @@ export async function POST(req: NextRequest) {
     // Dati spedizione: numero LDV e contrassegno DI SISTEMA (importo_sistema deve restare il valore
     // a sistema, non quello del file: serve al confronto file-vs-sistema).
     const spedIds = Array.from(new Set(claim.map(r => r.spedizione_id)))
-    const infoSped = new Map<string, { numero: string; cod: number }>()
+    const infoSped = new Map<string, { numero: string; cod: number; assegno: boolean }>()
     for (let i = 0; i < spedIds.length; i += 300) {
-      const { data: sp } = await admin.from('spedizioni').select('id,numero,contrassegno').in('id', spedIds.slice(i, i + 300))
-      for (const s of (sp || [])) infoSped.set((s as any).id, { numero: (s as any).numero, cod: Number((s as any).contrassegno) || 0 })
+      const { data: sp } = await admin.from('spedizioni').select('id,numero,contrassegno,contrassegno_modalita').in('id', spedIds.slice(i, i + 300))
+      for (const s of (sp || [])) infoSped.set((s as any).id, { numero: (s as any).numero, cod: Number((s as any).contrassegno) || 0, assegno: eAssegno((s as any).contrassegno_modalita) })
     }
 
     // ANTI-DUPLICATO mirato: solo le spedizioni in gioco, usando la colonna denormalizzata
@@ -244,7 +245,10 @@ export async function POST(req: NextRequest) {
     for (const r of claim) {
       if (giaMie.has(r.spedizione_id)) { giaInDistinta.push(r); continue }        // gia' gestita: non torna in sosta
       if (!(Number(r.importo) > 0)) { senzaImporto.push(r); continue }            // importo 0: resta in sosta
-      const k = r.cliente_id ? `c:${r.cliente_id}` : (r.target_master_id ? `m:${r.target_master_id}` : 'proprio')
+      // Gli ASSEGNI (ABM/ACM) in una distinta loro: si chiude consegnando l'assegno, mai con soldi
+      // (lib/contrassegno-modalita). Nello stesso totale dei contanti verrebbero pagati due volte.
+      const k = (r.cliente_id ? `c:${r.cliente_id}` : (r.target_master_id ? `m:${r.target_master_id}` : 'proprio'))
+        + (infoSped.get(r.spedizione_id)?.assegno ? '|assegni' : '')
       if (!perDest.has(k)) perDest.set(k, [])
       perDest.get(k)!.push(r)
     }
@@ -253,7 +257,8 @@ export async function POST(req: NextRequest) {
     let create = 0, totaleCaricato = 0, spedizioniCaricate = 0
     const falliti: any[] = []
 
-    for (const [k, rows] of perDest) {
+    for (const [chiave, rows] of perDest) {
+      const k = chiave.split('|')[0]
       const totale = Math.round(rows.reduce((s, r) => s + (Number(r.importo) || 0), 0) * 100) / 100
       const versoCliente = k.startsWith('c:')
       const versoProprio = k === 'proprio'   // COD del master stesso: già incassato → distinta subito 'pagata'

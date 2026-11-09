@@ -1,3 +1,4 @@
+import { eAssegno } from '@/lib/contrassegno-modalita'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
   const spedizioni: any[] = []
   for (let i = 0; i < spedizioneIds.length; i += 300) {
     const { data } = await admin.from('spedizioni')
-      .select('id,master_id,cliente_id,corriere_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id,tracking_number')
+      .select('id,master_id,cliente_id,corriere_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id,tracking_number,contrassegno_modalita')
       .in('id', spedizioneIds.slice(i, i + 300)).gt('contrassegno', 0)
     spedizioni.push(...(data || []))
   }
@@ -118,7 +119,7 @@ export async function POST(req: NextRequest) {
     }
     if (origIds.size) {
       const { data: orig, error: eO } = await admin.from('spedizioni')
-        .select('id,master_id,cliente_id,corriere_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id,tracking_number,corrieri(tipo,nome_contratto)')
+        .select('id,master_id,cliente_id,corriere_id,contrassegno,numero,stato_contrassegno,distinta_contrassegno_id,tracking_number,contrassegno_modalita,corrieri(tipo,nome_contratto)')
         .in('id', [...origIds])
       if (eO) return NextResponse.json({ error: 'Contrassegni condivisi non leggibili: riprova.' }, { status: 500 })
       const perTrk = new Map((orig || []).map((o: any) => [o.tracking_number, o]))
@@ -183,9 +184,13 @@ export async function POST(req: NextRequest) {
   }
 
   // ── ANTICIPO VERSO LA RETE: tre controlli prima di pagare il sotto-master.
-  const gruppi = new Map<string, any[]>()   // 'c:<cliente>' | 'm:<sotto-master>'
+  const gruppi = new Map<string, any[]>()   // 'c:<cliente>' | 'm:<sotto-master>' | 'l:<ledger>', '|assegni' in coda
+  // Gli ASSEGNI (ABM/ACM) vanno in una distinta loro: si chiude solo consegnando l'assegno, mai con un
+  // bonifico o una compensazione (lib/contrassegno-modalita). Mescolati ai contanti finirebbero nello
+  // stesso totale, e pagarlo vorrebbe dire dare al cliente i soldi e anche l'assegno.
+  const coda = (s: any) => eAssegno(s.contrassegno_modalita) ? '|assegni' : ''
   for (const s of versoCliente) {
-    const k = 'c:' + s.cliente_id
+    const k = 'c:' + s.cliente_id + coda(s)
     if (!gruppi.has(k)) gruppi.set(k, [])
     gruppi.get(k)!.push(s)
   }
@@ -228,7 +233,7 @@ export async function POST(req: NextRequest) {
       if (fila) {
         // Un salto a collegamento (si paga sul ledger) e uno d'albero verso lo stesso master non vanno nella
         // stessa distinta: la compensazione sceglie un conto solo per tutta la distinta.
-        const k = (ledger ? 'l:' : 'm:') + target
+        const k = (ledger ? 'l:' : 'm:') + target + coda(s)
         if (!gruppi.has(k)) gruppi.set(k, [])
         gruppi.get(k)!.push(s)
         continue
@@ -245,14 +250,15 @@ export async function POST(req: NextRequest) {
         escludi(s, `contratto proprio di ${nomiMaster.get(det)}: il contrassegno lo incassa lui`)
         continue
       }
-      const k = 'm:' + target
+      const k = 'm:' + target + coda(s)
       if (!gruppi.has(k)) gruppi.set(k, [])
       gruppi.get(k)!.push(s)
     }
   }
 
   const distinte: any[] = []
-  for (const [k, sped] of gruppi) {
+  for (const [chiave, sped] of gruppi) {
+    const k = chiave.split('|')[0]
     const alCliente = k.startsWith('c:')
     const totale = Math.round(sped.reduce((acc, s) => acc + Number(s.contrassegno || 0), 0) * 100) / 100
     // Numero progressivo PER MASTER (indice unico uniq_distinte_cod_master_numero): se due creazioni

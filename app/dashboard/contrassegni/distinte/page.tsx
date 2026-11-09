@@ -15,7 +15,7 @@ const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpac
 import { useDialog } from '@/app/components/DialogProvider'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
-import { etichettaModalitaCod } from '@/lib/contrassegno-modalita'
+import { etichettaModalitaCod, eAssegno } from '@/lib/contrassegno-modalita'
 // I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
 // iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
 function filtriDefault() {
@@ -331,7 +331,19 @@ export default function DistinteContrassegniPage() {
     setModalPagamento(null); setMetodoPagamento(''); setImportoPag(''); setSuddividi(false)
     setRighePag([{metodo:'',importo:''},{metodo:'',importo:''}])
   }
+  // Distinta di contrassegni incassati con assegno (ABM/ACM): si chiude consegnando gli assegni, mai con
+  // soldi. Il server lo impone comunque (PUT /api/contrassegni/distinte/[id]); qui si evita di proporlo.
+  const soloAssegni = (d: any) => { const r = d?.distinte_contrassegni_righe || []; return r.length > 0 && r.every((x: any) => eAssegno(x.spedizioni?.contrassegno_modalita)) }
   async function confermaPagamento() {
+    if (soloAssegni(modalPagamento)) {
+      setConfermando(true)
+      const res = await fetch('/api/contrassegni/distinte/' + modalPagamento.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ metodoPagamento: 'assegno' }) })
+      const data = await res.json()
+      setConfermando(false)
+      if (data.success) { chiudiModalPagamento(); carica() }
+      else await dialog.alert({ title: 'Errore', message: data.error || 'Errore durante la conferma.' })
+      return
+    }
     const totale = Number(modalPagamento?.totale_iniziale || 0)
     const residuo = Math.round((totale - Number(modalPagamento?.totale_pagato || 0)) * 100) / 100
     let payload: any
@@ -720,6 +732,13 @@ export default function DistinteContrassegniPage() {
                   <div style={{color:'#a16207'}}><strong>Già pagato:</strong> € {Number(modalPagamento.totale_pagato).toFixed(2)} · <strong>Residuo:</strong> € {(Number(modalPagamento.totale_iniziale)-Number(modalPagamento.totale_pagato)).toFixed(2)}</div>
                 )}
               </div>
+              {soloAssegni(modalPagamento) ? (
+                <div style={{marginBottom:'16px',fontSize:'12.5px',color:'#1e3a8a',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'10px 12px',lineHeight:1.5}}>
+                  <strong>Contrassegni incassati con assegno (ABM/ACM)</strong>, intestato al mittente.
+                  La distinta si chiude <strong>consegnando gli assegni</strong>: nessun bonifico e nessuna compensazione sul credito.
+                  <div style={{marginTop:'6px'}}>Tipo pagamento: <strong>Assegno</strong></div>
+                </div>
+              ) : (<>
               <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'12.5px',color:'#1a1a1a',cursor:'pointer',marginBottom:'12px'}}>
                 <input type="checkbox" checked={suddividi} onChange={e=>setSuddividi(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
                 Suddividi il pagamento in più modalità
@@ -781,6 +800,7 @@ export default function DistinteContrassegniPage() {
                   })()}
                 </div>
               )}
+              </>)}
               <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
                 <button onClick={chiudiModalPagamento}
                   style={{padding:'8px 20px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>
