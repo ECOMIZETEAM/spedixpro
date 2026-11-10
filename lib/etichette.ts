@@ -341,6 +341,55 @@ async function leggiEtichettaGrezza(
   return null
 }
 
+// L'ETICHETTA CHE ALLA CREAZIONE NON C'ERA ANCORA: la si prende adesso e la si salva sulla riga.
+//
+// GLS diretto: GLS genera il PDF con un attimo di ritardo dopo AddParcel (lib/gls,
+// recuperaEtichettaGlsSalvando).
+// PONTE fra reti (corriere tipo 'moovexpress'): la riga del compratore salva l'etichetta che il venditore
+// le da' alla creazione, e dopo non la richiedeva piu'. Il 10/11/2026 le 28 GLS di DE ROSA SRL (cliente
+// di QUICK sul GLS NI W LIGHT di Wave) sono nate cosi': GLS non aveva ancora il PDF, la riga di Wave e'
+// rimasta senza, la rotta etichetta dell'API non la riprendeva, e quella di Quick non l'ha mai avuta.
+// In stampa usciva "ETICHETTA NON DISPONIBILE" su pacchi gia' creati su GLS. Qui la si richiede al
+// venditore, che a sua volta, se manca anche a lui, la riprende dal corriere con questa stessa funzione.
+//
+// Un posto solo per le porte che stampano: dettaglio, elenco (singola e in blocco) e API. Mai bloccante.
+export async function recuperaEtichettaMancante(
+  admin: any,
+  sped: { id: string; corriere_id?: string | null; master_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any },
+): Promise<EtichettaLetta | null> {
+  const raw = (sped?.raw_response || {}) as any
+  try {
+    if (raw._gls) {
+      const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+      const buf = await recuperaEtichettaGlsSalvando(admin, sped)
+      return buf?.length ? { buffer: buf, mime: 'application/pdf', ext: 'pdf' } : null
+    }
+    if (raw._moovexpress && raw.label_url && sped.master_id && sped.corriere_id) {
+      const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
+      if (corr?.tipo !== 'moovexpress') return null
+      // La chiave e' quella con cui la riga e' stata creata (app/api/spedizioni/crea, ramo moovexpress).
+      const { risolviChiaveDispatch } = await import('@/lib/condivisione-catena')
+      const cred = await risolviChiaveDispatch(admin, sped.master_id, corr.nome_contratto)
+      if (!cred) return null
+      const { etichettaMoovexpress } = await import('@/lib/moovexpress')
+      const lab = await etichettaMoovexpress(cred as any, String(raw.label_url))
+      if (!lab.buffer.length) return null
+      // Salvata come alla creazione: sulla spedizione e su ogni collo (una LDV, un file per tutto il pacco).
+      const dataUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}`
+      const colli = Array.isArray(sped.colli_dettaglio) ? (sped.colli_dettaglio as any[]) : null
+      try {
+        await admin.from('spedizioni').update({
+          etichetta_url: dataUrl, ...(colli?.length ? { colli_dettaglio: colli.map((c: any) => ({ ...c, etichetta_url: dataUrl })) } : {}),
+        }).eq('id', sped.id)
+      } catch { /* il salvataggio e' best-effort: l'importante e' restituire l'etichetta adesso */ }
+      return { buffer: lab.buffer, mime: lab.mime, ext: estensioneDa(lab.mime) }
+    }
+  } catch (e: any) {
+    console.error('[ETICHETTE] recupero etichetta mancante', sped?.id, e?.message)
+  }
+  return null
+}
+
 // ARCHIVIA UN LOTTO: prende le righe che hanno ancora il PDF dentro, lo mette su Storage e scrive
 // il percorso. NON cancella il base64: finche' non c'e' la prova sul campo, le copie restano due.
 //

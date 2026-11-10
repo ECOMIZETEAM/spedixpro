@@ -105,21 +105,19 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Ripiego GLS on-demand (contratto proprio): l'etichetta GLS può non essere pronta subito dopo la
-  // creazione. Se manca, la si scarica ORA da GLS e la si salva, come per DVA/SpediamoPro qui sotto.
-  if ((sped as any)?.raw_response?._gls) {
-    try {
-      const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
-      const buf = await recuperaEtichettaGlsSalvando(createAdminSupabase(), { id, ...(sped as any) })
-      if (buf?.length) {
-        const out = await conRiepilogo(buf)
-        return new NextResponse(new Uint8Array(out), { status: 200, headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.pdf"`,
-          'Cache-Control': 'private, max-age=600',
-        } })
-      }
-    } catch (e) { console.error('[ETICHETTA][GLS] recupero on-demand:', e) }
+  // Ripiego on-demand per GLS (PDF generato in ritardo) e per i PONTI fra reti (l'etichetta si chiede al
+  // venditore): se manca, la si prende ORA e la si salva, come per DVA/SpediamoPro qui sotto (lib/etichette).
+  {
+    const { recuperaEtichettaMancante } = await import('@/lib/etichette')
+    const et = await recuperaEtichettaMancante(createAdminSupabase(), { id, ...(sped as any) })
+    if (et) {
+      const out = et.mime === 'application/pdf' ? await conRiepilogo(et.buffer) : et.buffer
+      return new NextResponse(new Uint8Array(out), { status: 200, headers: {
+        'Content-Type': et.mime,
+        'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${et.ext}"`,
+        'Cache-Control': 'private, max-age=600',
+      } })
+    }
   }
 
   // Un collo solo (o etichette tutte identiche): prima quella della spedizione, poi quella del collo.

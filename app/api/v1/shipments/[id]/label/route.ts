@@ -2,14 +2,14 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { registraAudit } from '@/lib/audit'
-import { leggiEtichettaCompleta } from '@/lib/etichette'
+import { leggiEtichettaCompleta, recuperaEtichettaMancante } from '@/lib/etichette'
 import { attendiTmp } from '@/lib/tmp-completa'
 
 // Su una spedizione provvisoria la rotta aspetta la LDV fino a ~20 s (vedi sotto): il tetto deve
 // lasciare spazio anche a un tentativo lento del fornitore.
 export const maxDuration = 60
 
-const CAMPI = 'id,numero,stato,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id,corriere_id,rif_ordine,contenuto'
+const CAMPI = 'id,numero,stato,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id,corriere_id,colli,rif_ordine,contenuto'
 
 // Scarica l'etichetta (LDV) PDF della spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -49,6 +49,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { data: riletta } = await admin.from('spedizioni').select(CAMPI).eq('id', id).maybeSingle()
     if (riletta) s = riletta
     et = await leggiEtichettaCompleta(admin, s as any, { resaSda })
+  }
+  // ETICHETTA NON SALVATA ALLA CREAZIONE (GLS che la genera in ritardo, o un ponte): la si riprende ora.
+  // E' anche la porta da cui passa la catena della condivisione: senza, la riga del compratore restava
+  // senza etichetta per sempre (lib/etichette, recuperaEtichettaMancante).
+  // master_id letto a parte: in leggiEtichettaCompleta accende la riscrittura del mittente, che qui non va toccata.
+  if (!et) {
+    const { data: m } = await admin.from('spedizioni').select('master_id').eq('id', id).maybeSingle()
+    et = await recuperaEtichettaMancante(admin, { ...(s as any), master_id: m?.master_id || null })
   }
   if (!et) {
     // ANCORA NON PRONTA: 503 con Retry-After, non 404. Il 404 diceva "non esiste", e chi lo riceveva

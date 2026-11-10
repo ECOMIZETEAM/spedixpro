@@ -28,15 +28,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
   let et = await leggiEtichettaCompleta(admin, sped as any, { resaSda })
 
-  // Ripiego GLS on-demand: l'etichetta del contratto proprio può non essere pronta subito dopo la
-  // creazione (GLS la genera con un attimo di ritardo). Se manca, la si scarica ORA e la si salva —
-  // così il tasto non resta "non disponibile" per un problema di sola tempistica.
-  if (!et && (sped as any)?.raw_response?._gls) {
-    try {
-      const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
-      const buf = await recuperaEtichettaGlsSalvando(admin, { id, ...(sped as any) })
-      if (buf?.length) et = { buffer: buf, mime: 'application/pdf', ext: 'pdf' }
-    } catch (e) { console.error('[ETICHETTA][GLS] recupero on-demand:', e) }
+  // Ripiego on-demand: l'etichetta GLS può non essere pronta subito dopo la creazione (GLS la genera con
+  // un attimo di ritardo), e quella di un PONTE fra reti si chiede al venditore. Se manca, la si prende
+  // ORA e la si salva — così il tasto non resta "non disponibile" per un problema di sola tempistica.
+  // master_id letto a parte: nella select sopra accenderebbe la riscrittura del mittente in leggiEtichettaCompleta.
+  if (!et) {
+    const { recuperaEtichettaMancante } = await import('@/lib/etichette')
+    const { data: m } = await admin.from('spedizioni').select('master_id').eq('id', id).maybeSingle()
+    et = await recuperaEtichettaMancante(admin, { id, ...(sped as any), master_id: m?.master_id || null })
   }
 
   if (!et) {

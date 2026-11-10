@@ -110,12 +110,13 @@ export async function POST(req: NextRequest) {
     // AddParcel). Lo recuperiamo ORA da GLS e lo salviamo, esattamente come fa l'apertura singola: senza
     // questo, la stampa in blocco produceva il foglio "ETICHETTA NON DISPONIBILE" mentre aprendo la stessa
     // spedizione da sola l'etichetta si auto-riparava — incoerenza + rischio pacco GLS senza etichetta.
-    if (!sorgenti.length && (s as any).raw_response?._gls) {
-      try {
-        const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
-        const buf = await recuperaEtichettaGlsSalvando(admin, s as any)
-        if (buf) sorgenti.push({ bytes: new Uint8Array(buf) })
-      } catch (e) { console.error('[ETICHETTE-BULK][GLS] recupero on-demand:', e) }
+    // Stesso ripiego per i PONTI fra reti: la riga del compratore si fa ridare l'etichetta dal venditore
+    // (lib/etichette, recuperaEtichettaMancante). Il 10/11/2026 28 GLS di un cliente di QUICK sono uscite
+    // "non disponibile" due volte di fila, col pacco gia' creato su GLS.
+    if (!sorgenti.length && ((s as any).raw_response?._gls || (s as any).raw_response?._moovexpress)) {
+      const { recuperaEtichettaMancante } = await import('@/lib/etichette')
+      const et = await recuperaEtichettaMancante(admin, s as any)
+      if (et?.mime === 'application/pdf') sorgenti.push({ bytes: new Uint8Array(et.buffer) })
     }
 
     // RIPIEGO DVA: la spedizione e' ancora ferma sul numero provvisorio, quindi l'etichetta non c'e'
