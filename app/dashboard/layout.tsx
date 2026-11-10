@@ -9,6 +9,8 @@ import AvvisoImportante from './AvvisoImportante'
 import CongelatoGate from './CongelatoGate'
 import BannerDemo from '../components/BannerDemo'
 import { DialogProvider } from '../components/DialogProvider'
+import { contabilitaAttiva } from '@/lib/contabilita-banca'
+import { eTitolareOAdmin } from '@/lib/ruoli'
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
 // SENZA utente -> sidebar assente al primo accesso (il portale cliente aveva gia' lo stesso
@@ -66,6 +68,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
       isMultiexpress: utente?.master_id === 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b',
       ottimizzaMargini,
       vedeReteCompleta,
+      // Estratto conto: in prova solo su alcuni master, e solo per titolare e admin.
+      contabilita: contabilitaAttiva(utente?.master_id) && eTitolareOAdmin(utente),
     }}>
       <DialogProvider>
         {demo && demoScadenza && <BannerDemo scadenza={demoScadenza} />}

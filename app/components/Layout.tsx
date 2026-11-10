@@ -12,7 +12,7 @@ import { useAppNativa } from '@/lib/app-nativa'
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, soloContabilita?: boolean }
 type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
@@ -122,6 +122,8 @@ const NAV: NavItem[] = [
     { label: 'Contrassegni & Rischio', href: '/dashboard/statistiche/contrassegni' },
     { label: 'Fatturazione', href: '/dashboard/statistiche/fatturazione' },
     { label: 'Check Ricariche', href: '/dashboard/statistiche/check-ricariche' },
+    // Solo titolare e admin dei master dove la contabilita' e' accesa (lib/contabilita-banca).
+    { label: 'Estratto conto', href: '/dashboard/statistiche/estratto-conto', soloContabilita: true },
     { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto', soloMultiexpress: true },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
@@ -148,7 +150,7 @@ const NAV: NavItem[] = [
   { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean, contabilita?: boolean } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
@@ -158,14 +160,16 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const isMultiexpress = user?.isMultiexpress ?? false
   const ottimizzaMargini = user?.ottimizzaMargini ?? false
   const vedeReteCompleta = user?.vedeReteCompleta ?? false
+  const contabilita = user?.contabilita ?? false
   // Nell'app la voce Abbonamento non c'è: la pagina è un acquisto per gli store (lib/app-nativa).
   const app = useAppNativa()
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean }) => {
+  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean, soloContabilita?: boolean }) => {
     if (app && x.href === '/dashboard/abbonamento') return false
+    if (x.soloContabilita) return contabilita   // estratto conto: il conto in banca, solo titolare e admin
     if (x.soloOttimizzaMargini) return ottimizzaMargini   // voce riservata ai master col flag (oggi solo Ecomize LL)
     if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
     if (x.reteCompleta) return vedeReteCompleta   // voce riservata a chi vede l'INTERA rete (root): Accessi Rete
