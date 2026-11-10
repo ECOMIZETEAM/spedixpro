@@ -21,9 +21,9 @@ export default function EstrattoConto() {
   const [errore, setErrore] = useState('')
   const [esito, setEsito] = useState('')
   const [occupato, setOccupato] = useState('')
-  // I "di chi e'?" partono aperti: sono il lavoro da fare. Il valore iniziale sta qui e non in un `?? true`
-  // sul blocco, altrimenti il primo clic per chiuderlo lo riapriva (!undefined = true).
-  const [aperti, setAperti] = useState<Record<string, boolean>>({ chi: true })
+  // I blocchi che partono aperti hanno il valore iniziale qui e non in un `?? true` sul blocco, altrimenti il
+  // primo clic per chiuderli li riapriva (!undefined = true).
+  const [aperti, setAperti] = useState<Record<string, boolean>>({ chi: true, cli: true, usc: true })
   const [scelte, setScelte] = useState<Record<string, string>>({})
   const [soloDiff, setSoloDiff] = useState(true)
 
@@ -179,7 +179,7 @@ export default function EstrattoConto() {
               ])} />
             </Blocco>
 
-            <Blocco icona="👥" titolo="Cliente per cliente: ricaricato e pagato" aperto={aperti.cli ?? true} onApri={() => apri('cli')}
+            <Blocco icona="👥" titolo="Cliente per cliente: ricaricato e pagato" aperto={aperti.cli} onApri={() => apri('cli')}
               frase="Nel periodo: quanto gli avete ricaricato con bonifico e quanto ha pagato in banca (anche i bonifici senza una ricarica che torni)."
               azioni={<label style={{ fontSize: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}><input type="checkbox" checked={soloDiff} onChange={e => setSoloDiff(e.target.checked)} /> solo chi ha una differenza</label>}>
               <Tabella teste={['Cliente', 'Ricaricato', 'Pagato', 'Differenza']} destra={[1, 2, 3]} righe={r.perCliente.filter((x: any) => !soloDiff || Math.abs(x.differenza) >= 0.01).map((x: any) => [
@@ -188,13 +188,13 @@ export default function EstrattoConto() {
               ])} />
             </Blocco>
 
-            <Blocco icona="💸" titolo={`Uscite: ${eur(-r.totali.uscite)}`} aperto={aperti.usc ?? true} onApri={() => apri('usc')}
+            <Blocco icona="💸" titolo={`Uscite: ${eur(-r.totali.uscite)}`} aperto={aperti.usc} onApri={() => apri('usc')}
               frase="Dove sono andati i soldi, per voce. Ai bonifici verso una controparte puoi dare una voce tua (es. «Fornitore spedizioni»): vale anche per i prossimi.">
               {r.uscite.map((v: any) => (
                 <div key={v.voce} style={{ borderTop: '1px solid #f0f0f0', padding: '8px 0' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                     <button onClick={() => apri('u' + v.voce)} style={{ ...btnLink, padding: 0, color: NERO, fontWeight: 700, fontSize: '13px' }}>{aperti['u' + v.voce] ? '▾' : '▸'} {v.voce}</button>
-                    <span style={{ fontSize: '12px', color: '#6b7280' }}>{v.n} movimenti</span>
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>{v.n} {v.n === 1 ? 'movimento' : 'movimenti'}</span>
                     <b style={{ marginLeft: 'auto', color: ROSSO, fontSize: '13px' }}>{eur(-v.totale)}</b>
                     {v.controparti.length === 1 && v.righe[0]?.iban && (
                       <button style={btnLink} disabled={!!occupato} onClick={async () => {
@@ -264,7 +264,7 @@ function Gruppo({ g, testa, azioni, aperto, onApri }: any) {
         <div style={{ flex: '1 1 320px', minWidth: 0 }}>
           <div style={{ fontSize: '13px' }}><b>{g.nome || '(senza nome)'}</b> {testa}</div>
           <div style={{ fontSize: '11.5px', color: '#6b7280', marginTop: '2px' }}>
-            {g.n} bonifici · <b style={{ color: NERO }}>{eur(g.totale)}</b>{g.iban ? ` · IBAN ${g.iban}` : ''}{g.causali.length ? ` · «${g.causali.join('», «')}»` : ''}
+            {g.n} {g.n === 1 ? 'bonifico' : 'bonifici'} · <b style={{ color: NERO }}>{eur(g.totale)}</b>{g.iban ? ` · IBAN ${g.iban}` : ''}{g.causali.length ? ` · «${g.causali.join('», «')}»` : ''}
             {' '}<button onClick={onApri} style={{ ...btnLink, padding: 0, fontSize: '11.5px' }}>{aperto ? 'nascondi' : 'vedi i bonifici'}</button>
           </div>
         </div>
