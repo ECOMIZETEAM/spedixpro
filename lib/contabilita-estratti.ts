@@ -38,6 +38,13 @@ export async function salvaEstratto(admin: any, masterId: string, e: Estratto, n
     if (e2) throw new Error(e2.message)
     nuove += (data || []).length
   }
+  // Lo stesso file caricato due volte: nessun movimento nuovo, quindi nessun estratto nuovo. Senza questo
+  // l'elenco degli estratti si riempiva di doppioni vuoti (prova del 10/11). La riga e' appena nata e non
+  // ha niente attaccato: toglierla annulla il caricamento, non cancella storia.
+  if (nuove === 0) {
+    await admin.from('estratti_conto').delete().eq('id', est.id).eq('master_id', masterId)
+    return { estrattoId: null, righe: e.righe.length, nuove, giaPresenti: e.righe.length }
+  }
   return { estrattoId: est.id as string, righe: e.righe.length, nuove, giaPresenti: e.righe.length - nuove }
 }
 
@@ -75,28 +82,62 @@ async function movimenti(admin: any, masterId: string, dal: string, al: string) 
   return righe.map((r: any) => ({ ...r, importo: Number(r.importo), saldo: Number(r.saldo) }))
 }
 
-/** Lega un bonifico alle ricariche che paga, e le segna "arrivate" nel Check Ricariche con la data della
- *  banca. Si ricorda cosa ha segnato lui, per poterlo togliere se l'abbinamento si annulla. */
-async function abbina(admin: any, masterId: string, riga: { id: string, data: string }, ric: any[], modo: 'auto' | 'confermato', userId: string | null) {
-  for (const r of ric) {
-    const segnaEff = !r.bonifico_effettuato_il, segnaArr = !r.bonifico_arrivato_il
-    const { error } = await admin.from('abbinamenti_bonifici').insert({
-      master_id: masterId, riga_id: riga.id, ricarica_id: r.id, modo,
-      segnato_effettuato: segnaEff, segnato_arrivato: segnaArr, creato_da: userId,
-    })
-    if (error) { if (/duplicate key|23505/.test(error.message)) continue; throw new Error(error.message) }
-    const quando = riga.data + 'T12:00:00Z'
-    if (segnaEff) await admin.from('ricariche_check').update({ bonifico_effettuato_il: quando }).eq('id', r.id).eq('master_id', masterId).is('bonifico_effettuato_il', null)
-    if (segnaArr) await admin.from('ricariche_check').update({ bonifico_arrivato_il: quando }).eq('id', r.id).eq('master_id', masterId).is('bonifico_arrivato_il', null)
+/** Lega i bonifici alle ricariche che pagano, e segna le ricariche "arrivate" nel Check Ricariche con la data
+ *  della banca. Si ricorda cosa ha segnato lui, per poterlo togliere se l'abbinamento si annulla.
+ *  Tutto a blocchi: una scrittura per riga faceva 700 viaggi al database e il caricamento di ottobre durava
+ *  59 secondi, a un passo dal limite del server (60). */
+async function abbinaTutti(admin: any, masterId: string, legami: { riga: { id: string, data: string }, ric: any[] }[], userId: string | null): Promise<number> {
+  const nuovi = legami.flatMap(l => l.ric.map(r => ({
+    master_id: masterId, riga_id: l.riga.id, ricarica_id: r.id, modo: 'auto',
+    segnato_effettuato: !r.bonifico_effettuato_il, segnato_arrivato: !r.bonifico_arrivato_il, creato_da: userId,
+    _data: l.riga.data,
+  })))
+  const inseriti: typeof nuovi = []
+  for (let i = 0; i < nuovi.length; i += 500) {
+    const blocco = nuovi.slice(i, i + 500)
+    // Una ricarica gia' abbinata (indice unico) si salta: vale l'abbinamento che c'era.
+    const { data, error } = await admin.from('abbinamenti_bonifici')
+      .upsert(blocco.map(({ _data, ...x }) => x), { onConflict: 'ricarica_id', ignoreDuplicates: true }).select('ricarica_id')
+    if (error) throw new Error(error.message)
+    const fatti = new Set((data || []).map((x: any) => x.ricarica_id))
+    inseriti.push(...blocco.filter(x => fatti.has(x.ricarica_id)))
+  }
+  // Le ricariche si segnano per giorno del bonifico: un aggiornamento per giorno, non uno per ricarica.
+  for (const campo of ['bonifico_effettuato_il', 'bonifico_arrivato_il'] as const) {
+    const perGiorno = new Map<string, string[]>()
+    for (const x of inseriti) {
+      if (campo === 'bonifico_effettuato_il' ? !x.segnato_effettuato : !x.segnato_arrivato) continue
+      if (!perGiorno.has(x._data)) perGiorno.set(x._data, []); perGiorno.get(x._data)!.push(x.ricarica_id)
+    }
+    for (const [giorno, ids] of perGiorno) {
+      for (let i = 0; i < ids.length; i += 300) {
+        const { error } = await admin.from('ricariche_check').update({ [campo]: giorno + 'T12:00:00Z' })
+          .in('id', ids.slice(i, i + 300)).eq('master_id', masterId).is(campo, null)
+        if (error) throw new Error(error.message)
+      }
+    }
+  }
+  return inseriti.length
+}
+
+/** Aggiorna tante righe dell'estratto con gli stessi valori, a blocchi. */
+async function aggiornaRighe(admin: any, masterId: string, ids: string[], valori: Record<string, any>, soloSenzaCliente: boolean) {
+  for (let i = 0; i < ids.length; i += 300) {
+    let q = admin.from('estratti_righe').update(valori).in('id', ids.slice(i, i + 300)).eq('master_id', masterId)
+    if (soloSenzaCliente) q = q.is('target_id', null).is('assegnato', null)
+    const { error } = await q
+    if (error) throw new Error(error.message)
   }
 }
 
 /** Applica gli abbinamenti SICURI del periodo: bonifici di pagatori gia' noti, e bonifici gia' assegnati a un
  *  cliente che non hanno ancora trovato la loro ricarica (magari fatta dopo). Non chiede niente a nessuno. */
 export async function applicaSicuri(admin: any, masterId: string, dal: string, al: string) {
-  const [righe, ric, anag, pag] = await Promise.all([
+  const [righe, ric, anag, pag, giaEsclusi] = await Promise.all([
     movimenti(admin, masterId, dal, al), ricariche(admin, masterId, dal, al), anagrafiche(admin, masterId),
     fetchAllStretto(() => admin.from('pagatori_bonifico').select('target_tipo,target_id,nome,iban').eq('master_id', masterId).order('id')),
+    // Pagatori segnati "non e' un cliente", in qualunque mese: i loro bonifici nuovi restano fuori come i vecchi.
+    fetchAllStretto(() => admin.from('estratti_righe').select('nome,iban').eq('master_id', masterId).eq('assegnato', 'escluso').order('id')),
   ])
   const legate = new Set<string>()
   for (let i = 0; i < righe.length; i += 300) {
@@ -106,37 +147,38 @@ export async function applicaSicuri(admin: any, masterId: string, dal: string, a
   }
   const aperte = ric.filter((r: any) => !r.riga_id)
   const perId = new Map(aperte.map((r: any) => [r.id, r]))
-  // Pagatori segnati "non e' un cliente", in qualunque mese: i loro bonifici nuovi restano fuori come i vecchi.
-  const giaEsclusi = await fetchAllStretto(() => admin.from('estratti_righe').select('nome,iban').eq('master_id', masterId).eq('assegnato', 'escluso').order('id'))
   const esclusi = new Set(giaEsclusi.map((r: any) => chiavePagatore(r)))
-  let abbinati = 0, assegnati = 0
+  const libere = righe.filter(r => r.importo > 0 && r.iban && !r.target_id && !r.assegnato)
+  await aggiornaRighe(admin, masterId, libere.filter(r => esclusi.has(chiavePagatore(r))).map(r => r.id), { assegnato: 'escluso' }, true)
+  const daFare = libere.filter(r => !esclusi.has(chiavePagatore(r)))
+  const proposte = proponi(daFare as Entrata[], aperte as RicaricaAperta[], pag as any, anag)
+  const perCliente = new Map<string, string[]>()
+  const legami: { riga: any, ric: any[] }[] = []
   const usate = new Set<string>()
-  const daFare = righe.filter(r => r.importo > 0 && r.iban && !r.target_id && !r.assegnato)
-  for (const r of daFare) {
-    if (!esclusi.has(chiavePagatore(r))) continue
-    await admin.from('estratti_righe').update({ assegnato: 'escluso' }).eq('id', r.id).eq('master_id', masterId).is('assegnato', null)
-  }
-  const proposte = proponi(daFare.filter(r => !esclusi.has(chiavePagatore(r))) as Entrata[], aperte as RicaricaAperta[], pag as any, anag)
   for (const r of daFare) {
     const p = proposte.get(r.id)
     if (p?.esito !== 'sicuro') continue
-    await admin.from('estratti_righe').update({ target_tipo: p.target.tipo, target_id: p.target.id, assegnato: 'auto' })
-      .eq('id', r.id).eq('master_id', masterId).is('target_id', null)
-    assegnati++
+    const k = `${p.target.tipo}:${p.target.id}`
+    if (!perCliente.has(k)) perCliente.set(k, []); perCliente.get(k)!.push(r.id)
     const lista = p.ricariche.map(id => perId.get(id)).filter(Boolean)
     lista.forEach((x: any) => usate.add(x.id))
-    if (lista.length) { await abbina(admin, masterId, r, lista, 'auto', null); abbinati += lista.length }
+    if (lista.length) legami.push({ riga: r, ric: lista })
+  }
+  for (const [k, ids] of perCliente) {
+    const [tipo, id] = k.split(':')
+    await aggiornaRighe(admin, masterId, ids, { target_tipo: tipo, target_id: id, assegnato: 'auto' }, true)
   }
   // Bonifici gia' di un cliente ma senza ricarica: si riprova con quelle aperte di quel cliente.
-  for (const r of righe.filter(x => x.importo > 0 && x.target_id && !legate.has(x.id))) {
+  for (const r of righe.filter(x => x.importo > 0 && x.target_id && !legate.has(x.id)).sort((a, b) => a.data.localeCompare(b.data))) {
     const sue = aperte.filter((a: any) => !usate.has(a.id) && a.target_tipo === r.target_tipo && a.target_id === r.target_id)
     const ids = ricarichePagate(r as Entrata, sue as RicaricaAperta[])
     if (!ids) continue
     const lista = ids.map(id => perId.get(id)).filter(Boolean)
     lista.forEach((x: any) => usate.add(x.id))
-    await abbina(admin, masterId, r, lista, 'auto', null); abbinati += lista.length
+    legami.push({ riga: r, ric: lista })
   }
-  return { assegnati, abbinati }
+  const abbinati = await abbinaTutti(admin, masterId, legami, null)
+  return { assegnati: [...perCliente.values()].reduce((t, l) => t + l.length, 0), abbinati }
 }
 
 /** "Questo pagatore e' quel cliente" (risposta al "di chi e'?"): il nome e l'IBAN restano fra i suoi

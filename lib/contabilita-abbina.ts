@@ -58,28 +58,33 @@ export function corrisponde(nome: string, nomeBonifico: string): boolean {
 }
 
 /** Le ricariche aperte del cliente pagate da questo bonifico, o null.
+ *  0. se la causale scrive il giorno delle ricariche ("Ricarica prepagato del 01/10/2026") conta quel giorno,
+ *     prima di tutto: una sua ricarica dello stesso importo, o tutte le sue ricariche se sommano l'importo.
+ *     Senza questo, il bonifico del 01/10 "del 29/09" da 50 € prendeva la ricarica da 50 € del 01/10 (la piu'
+ *     vicina) e quello del 03/10 "del 01/10" restava con le ricariche del 30/09 (LA MARCA SERVICES, ottobre);
  *  1. una ricarica dello stesso importo, la piu' vicina (prima quelle fatte prima del bonifico);
- *  2. le ricariche del giorno scritto in causale ("Ricarica prepagato del 06/10/2026") che sommano l'importo;
- *  3. le ricariche di un giorno qualsiasi della finestra che sommano l'importo, il piu' vicino.
+ *  2. le ricariche di un giorno qualsiasi della finestra che sommano l'importo, il piu' vicino.
  *  La finestra va da 12 giorni prima del bonifico a 2 dopo (si ricarica anche quando il bonifico e' gia' arrivato). */
 export function ricarichePagate(e: Entrata, aperte: RicaricaAperta[]): string[] | null {
   const dE = g(e.data)
   const nella = aperte.filter(r => { const dd = dE - g(r.giorno); return dd >= -2 && dd <= 12 })
   if (!nella.length) return null
+  const perGiorno = new Map<string, RicaricaAperta[]>()
+  for (const r of nella) { const k = r.giorno.slice(0, 10); if (!perGiorno.has(k)) perGiorno.set(k, []); perGiorno.get(k)!.push(r) }
+  const somma = (l: RicaricaAperta[]) => l.reduce((t, r) => t + cent(r.importo), 0)
+  const m = e.causale.match(/(\d{2})\/(\d{2})\/(\d{4})/)
+  if (m) {
+    const l = perGiorno.get(`${m[3]}-${m[2]}-${m[1]}`) || []
+    const una = l.find(r => cent(r.importo) === cent(e.importo))
+    if (una) return [una.id]
+    if (l.length > 1 && somma(l) === cent(e.importo)) return l.map(r => r.id)
+  }
   const stesso = nella.filter(r => cent(r.importo) === cent(e.importo))
     .sort((a, b) => {
       const da = dE - g(a.giorno), db = dE - g(b.giorno)
       return (da < 0 ? 1 : 0) - (db < 0 ? 1 : 0) || Math.abs(da) - Math.abs(db)
     })
   if (stesso.length) return [stesso[0].id]
-  const perGiorno = new Map<string, RicaricaAperta[]>()
-  for (const r of nella) { const k = r.giorno.slice(0, 10); if (!perGiorno.has(k)) perGiorno.set(k, []); perGiorno.get(k)!.push(r) }
-  const somma = (l: RicaricaAperta[]) => l.reduce((t, r) => t + cent(r.importo), 0)
-  const m = e.causale.match(/(\d{2})\/(\d{2})\/(\d{4})/)
-  if (m) {
-    const l = perGiorno.get(`${m[3]}-${m[2]}-${m[1]}`)
-    if (l && l.length > 1 && somma(l) === cent(e.importo)) return l.map(r => r.id)
-  }
   const giorni = [...perGiorno.keys()].sort((a, b) => Math.abs(dE - g(a)) - Math.abs(dE - g(b)))
   for (const k of giorni) {
     const l = perGiorno.get(k)!
