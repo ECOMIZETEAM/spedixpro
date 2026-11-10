@@ -179,12 +179,20 @@ export type RigaReso = {
   da_giacenza?: boolean               // e' lo svincolo stesso a chiamare: la guardia non si applica
 }
 
+// 'costo_fornitore_gia_registrato': la riga del titolare non si scrive perche' il corriere gli ha gia'
+// addebitato il reso e il conto l'ha registrato (scripts/reso-titolare-costo-fornitore.sql). Per chi
+// chiama vale come pagato: il titolare il reso l'ha pagato, al corriere.
 export type EsitoReso = {
   spedizione_id: string
-  esito: 'addebitato' | 'gia_addebitato' | 'zero' | 'inesistente'
+  esito: 'addebitato' | 'gia_addebitato' | 'costo_fornitore_gia_registrato' | 'zero' | 'inesistente'
   importo?: number
   cliente_id?: string | null
   master_target_id?: string | null
+}
+
+// Qualcuno ha pagato quel reso (adesso, prima, o direttamente al corriere): il pacco puo' uscire dalla coda.
+export function resoPagato(esiti: EsitoReso[]): boolean {
+  return esiti.some(e => e.esito === 'addebitato' || e.esito === 'gia_addebitato' || e.esito === 'costo_fornitore_gia_registrato')
 }
 
 export async function addebitaResi(admin: any, righe: RigaReso[], createdBy?: string | null): Promise<EsitoReso[]> {

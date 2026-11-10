@@ -708,7 +708,15 @@ export function mapStatoSpediamopro(status: number | null): string | null {
     case 7: return 'spedita'
     case 8: return 'in_transito'
     case 9: return 'in_consegna'
-    case 10: case 12: return 'consegnata'
+    case 10: return 'consegnata'
+    // 12 NON E' UNA CONSEGNA: la spec del fornitore dice «delivered to a collection point», il pacco e'
+    // depositato al punto di ritiro (BRT-fermopoint, UPS Access Point, locker InPost) e aspetta il
+    // destinatario. Quando lo ritira il fornitore passa a 10 (verificato il 10/11/2026 su 39 pacchi al
+    // punto: «RITIRATA AL BRT-fermopoint», «RITIRATO DAL DESTINATARIO»). Se non lo ritira torna indietro:
+    // con 12 = consegnata il pacco diventava definitivo, il tracking smetteva di guardarlo e il reso lo
+    // si scopriva solo dalla fattura del corriere (es. 1ZGE70566816612298, fermo a un UPS Access Point
+    // in Svezia fino al limite di custodia e fatturato come reso il 06/11: per noi era consegnato).
+    case 12: return 'in_consegna'
     case 11: return 'eccezione'
     default: return null
   }
@@ -716,7 +724,7 @@ export function mapStatoSpediamopro(status: number | null): string | null {
 
 // IL RESO STA NEGLI EVENTI, NON NELLO STATUS. Lo status numerico di SpediamoPro non ha un valore
 // per "reso al mittente": quando il pacco viene reso e riconsegnato al mittente lo status diventa
-// 10/12 (consegnata) e la spedizione risultava consegnata al destinatario — falso, e per giunta
+// 10 (consegnata) e la spedizione risultava consegnata al destinatario — falso, e per giunta
 // il reso non veniva addebitato a nessuno. Il segnale c'e' solo negli eventi testuali ("RESO AL
 // MITTENTE"): qui li si guarda con la stessa regola blindata usata per gli altri corrieri.
 // events: [{ at, title, description }].

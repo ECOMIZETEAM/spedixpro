@@ -98,6 +98,12 @@ export function trovaRateContratto(rates: any[], cred: any): any | null {
 // reso compiuto perde il riconoscimento.
 const ANNUNCIO_DI_RESO = /(verr[àa]|verranno|sar[àa]|saranno|potrebbe|potrebbero|potr[àa]|potranno|stiamo per|restituiremo|rispediremo|rinvieremo|in corso di restituzione)[^.;]{0,45}(res[oa]|ritorn\w*|rientr\w*|restitu\w*|respint\w*|rispedit\w*|rinvi\w*)\w*[^.;]{0,25} al mittente/
 
+// L'annuncio da solo non e' un reso (vedi sopra). Serve a chi ha ANCHE un'altra prova che il ritorno c'e'
+// stato: oggi il giro del conto, che ha in mano la fattura del reso (lib/conto-fornitore).
+export function testoAnnunciaReso(testo: string): boolean {
+  return ANNUNCIO_DI_RESO.test((testo || '').toLowerCase())
+}
+
 export function testoIndicaReso(testo: string): boolean {
   const s = (testo || '').toLowerCase()
   if (ANNUNCIO_DI_RESO.test(s)) return false

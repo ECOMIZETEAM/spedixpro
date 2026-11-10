@@ -66,10 +66,152 @@ async function leggiConto(authcode: string, pagine: number): Promise<RigaConto[]
   return out
 }
 
-export type EsitoRiconciliazione = { lette: number; costi: number; scritti: number; euro: number; senzaSpedizione: number; inAttesa: number }
+export type EsitoRiconciliazione = {
+  lette: number; costi: number; scritti: number; euro: number; senzaSpedizione: number; inAttesa: number
+  resiSegnati: number
+  daControllare: { numero: string; stato: string; motivo: string }[]
+}
+
+// ── IL RESO FATTURATO DAL CORRIERE E' UN RESO ──
+//
+// Il costo da solo non bastava: si registrava al titolare, ma il pacco restava "non consegnato", "in
+// giacenza" o "consegnata", nessuno sotto lo pagava e il titolare non recuperava niente. Il fornitore
+// i BRT e gli UPS li fattura come reso senza mandare gli eventi del ritorno, quindi il tracking il
+// reso non lo vede mai: il 09/11/2026 erano 57 pacchi (992,87 EUR a valle), il 10/11 altri 57 (801,05),
+// tutti corretti a mano. Lorenzo, 10/11: «se ci addebitano quel costo, noi dobbiamo farlo pagare».
+//
+// Qui il pacco passa a reso_mittente; l'addebito lo fa la coda dei resi, come per ogni altro reso (il
+// trigger fn_reso_da_addebitare mette il pacco in coda, /api/cron/addebiti-code lo addebita a cliente
+// e catena). La riga del titolare non si scrive due volte: il suo costo e' il RESOFORN appena scritto,
+// e fn_addebita_resi salta la sua riga (scripts/reso-titolare-costo-fornitore.sql).
+//
+// Prima si rilegge il fornitore, perche' una fattura sbagliata non diventi un addebito:
+// - pacco MAI PARTITO (status 4/5/6/13, o 0 annullato): non e' un reso, e' da contestare
+//   (050261292815569, MULTI a suo nome, fermo in lavorazione dall'agosto e fatturato come reso);
+// - CONSEGNATO al destinatario (status 10) senza nessun reso negli eventi: da contestare anche questo
+//   (050224292877762, consegnato a Firenze il 07/09 e fatturato come reso il 06/10).
+// Quei pacchi restano come sono e tornano nell'esito del giro, da guardare a mano. Tutto il resto (in
+// viaggio, in giacenza, fermo al punto di ritiro, eccezione, o consegnato con il reso scritto negli
+// eventi, cioe' consegnato al mittente) e' un reso.
+const STATI_DA_SEGNARE = ['in_lavorazione', 'spedita', 'in_transito', 'in_consegna', 'in_giacenza', 'non_consegnato', 'eccezione', 'consegnata']
+const STATUS_MAI_PARTITO = new Set([0, 4, 5, 6, 13])
+// Un giro normale ne trova poche decine; con `pagine` alto (recupero d'arretrato) il resto va al giro dopo.
+const LETTURE_MAX = 80
+
+export type DecisioneResoFatturato = { reso: true; resoIl: string } | { reso: false; motivo: string }
+
+// Il reso fatturato, letto il tracking vivo del fornitore: e' un reso o una fattura da contestare?
+// `quando` e' il giorno della riga del conto, la data di ripiego del rientro.
+export async function decidiResoFatturato(
+  tr: { status: number | null; events: any[] }, quando?: string,
+): Promise<DecisioneResoFatturato> {
+  const { spediamoproEventiIndicanoReso } = await import('@/lib/spediamopro')
+  const { testoIndicaReso, testoAnnunciaReso } = await import('@/lib/spedisci')
+  const { istanteDaTesto } = await import('@/lib/tracking-eventi')
+  const status = tr.status === null || tr.status === undefined ? null : Number(tr.status)
+  const eventi = Array.isArray(tr.events) ? tr.events : []
+  if (status === null || STATUS_MAI_PARTITO.has(status)) {
+    return { reso: false, motivo: `reso fatturato ma il pacco non risulta partito (status ${status ?? '-'})` }
+  }
+  const resoNegliEventi = spediamoproEventiIndicanoReso(eventi)
+  const testo = (e: any) => `${e?.title || ''} ${e?.description || ''}`
+  // UPS consegna e poi scrive «Il pacco verrà restituito al mittente come richiesto dal destinatario»
+  // (1ZGE70566838916080, 1ZGE70566827802893): per testoIndicaReso e' un annuncio, e da solo non basta (su 12
+  // annunci dello storico 5 pacchi sono poi stati consegnati). Qui pero' c'e' anche la fattura del reso:
+  // un ritorno annunciato al futuro certo DOPO l'ultima consegna, insieme alla fattura, e' un reso. Il
+  // condizionale («potrebbe essere rispedito») no. La consegna si riconosce dal titolo, mai «NON CONSEGNATA»,
+  // e il ritorno con le regole rigide di lib/spedisci: un generico "al mittente" prenderebbe anche "dal
+  // mittente" e la rimessa del contrassegno al mittente, che arriva proprio dopo la consegna.
+  const ordinati = [...eventi].sort((a: any, b: any) => String(a?.at || a?.date || '').localeCompare(String(b?.at || b?.date || '')))
+  const iConsegna = ordinati.map((e: any) => {
+    const t = String(e?.title || '').toLowerCase()
+    return /\bconsegnat|\bdelivered\b/.test(t) && !/non consegnat|not delivered/.test(t)
+  }).lastIndexOf(true)
+  const ritornoDopoConsegna = iConsegna >= 0 && ordinati.slice(iConsegna + 1)
+    .some((e: any) => testoIndicaReso(testo(e)) || (testoAnnunciaReso(testo(e)) && !/\bpotr/i.test(testo(e))))
+  if (status === 10 && !resoNegliEventi && !ritornoDopoConsegna) {
+    return { reso: false, motivo: 'reso fatturato ma il corriere lo da consegnato al destinatario' }
+  }
+  // La data del rientro: l'evento di reso se il corriere lo scrive, se no il giorno della fattura.
+  // E' la data con cui il reso entra nella percentuale resi del cliente (resi_per_cliente_v2). Le date
+  // del fornitore arrivano senza fuso ed e' ora italiana: istanteDaTesto, non new Date().
+  const evReso = ordinati.find((e: any) => testoIndicaReso(testo(e)))
+  const resoIl = (evReso && istanteDaTesto(evReso.at || evReso.date)) || (quando && istanteDaTesto(quando)) || new Date().toISOString()
+  return { reso: true, resoIl }
+}
+
+async function segnaResiFatturati(
+  admin: any, authcode: string,
+  resi: { spedizioneId: string; quando?: string }[],
+  esito: EsitoRiconciliazione,
+): Promise<void> {
+  const quandoDi = new Map<string, string | undefined>()
+  for (const r of resi) if (!quandoDi.has(r.spedizioneId)) quandoDi.set(r.spedizioneId, r.quando)
+  const ids = [...quandoDi.keys()]
+  const candidati: any[] = []
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await admin.from('spedizioni')
+      .select('id,numero,tracking_number,stato,sp_id:raw_response->>id,sp_id2:raw_response->raw->data->>id')
+      .in('id', ids.slice(i, i + 200)).in('stato', STATI_DA_SEGNARE)
+    if (error) { console.error('[CONTO][RESI] spedizioni non lette:', error.message); return }
+    candidati.push(...(data || []))
+  }
+  if (!candidati.length) return
+
+  const { spediamoproGetTracking } = await import('@/lib/spediamopro')
+  const { notificaCambioStato } = await import('@/lib/tracking-notifica')
+  const inizio = Date.now()
+  let letti = 0
+  for (const s of candidati.slice(0, LETTURE_MAX)) {
+    // Il giro ha 300 secondi e prima ha gia' letto il conto: le letture si fermano a 150, il resto domani.
+    if (Date.now() - inizio > 150_000) break
+    letti++
+    const spid = s.sp_id || s.sp_id2
+    if (!spid) { esito.daControllare.push({ numero: s.numero, stato: s.stato, motivo: 'senza id del fornitore' }); continue }
+    let tr: Awaited<ReturnType<typeof spediamoproGetTracking>>
+    try {
+      tr = await Promise.race([
+        spediamoproGetTracking(authcode, Number(spid)),
+        new Promise<never>((_, ko) => setTimeout(() => ko(new Error('nessuna risposta in 20 secondi')), 20_000)),
+      ])
+    } catch (e: any) {
+      // Fornitore che non risponde: si riprova al giro dopo (la riga del conto resta nella finestra per due-tre
+      // giorni). Finisce comunque nel log: un pacco che non si legge mai uscirebbe dalla finestra col costo
+      // pagato e senza reso, cioe' il guasto di prima, in silenzio.
+      esito.daControllare.push({ numero: s.numero, stato: s.stato, motivo: 'tracking del fornitore non leggibile, si riprova: ' + String(e?.message || e).slice(0, 80) })
+      continue
+    }
+    const decisione = await decidiResoFatturato(tr, quandoDi.get(s.id))
+    if (!decisione.reso) { esito.daControllare.push({ numero: s.numero, stato: s.stato, motivo: decisione.motivo }); continue }
+    const resoIl = decisione.resoIl
+
+    // UN RESO E' UN EVENTO DEL PACCO: un pacco condiviso ha piu' gambe con lo stesso tracking_number, e la
+    // gamba di chi lo compra (il ponte) il reso non lo vedrebbe mai, perche' il fornitore non lo scrive.
+    // Si segnano tutte; l'addebito resta uno solo per pagatore (fn_addebita_resi e il trigger
+    // trg_reso_una_volta_per_pacco), come quando il reso lo porta il tracking.
+    let gambe: any[] = [s]
+    if (s.tracking_number) {
+      const { data: g } = await admin.from('spedizioni').select('id,numero,stato')
+        .eq('tracking_number', s.tracking_number).in('stato', STATI_DA_SEGNARE)
+      if (g?.length) gambe = g
+    }
+    for (const g of gambe) {
+      // Solo se lo stato e' ancora quello letto: se nel frattempo il tracking l'ha cambiato, vince lui.
+      const { data: ok, error } = await admin.from('spedizioni')
+        .update({ stato: 'reso_mittente', reso_il: resoIl }).eq('id', g.id).eq('stato', g.stato).select('id')
+      if (error) { console.error('[CONTO][RESI] stato non aggiornato', g.numero, error.message); continue }
+      if (ok?.length) {
+        esito.resiSegnati++
+        // Chi si integra via API riceve l'avviso del reso come da ogni altra porta che cambia lo stato.
+        await notificaCambioStato(admin, g.id, 'reso_mittente', g.stato)
+      }
+    }
+  }
+  if (candidati.length > letti) console.log('[CONTO][RESI] rimandati al giro dopo:', candidati.length - letti)
+}
 
 export async function riconciliaCostiConto(admin: any, opts: { pagine?: number; createdBy?: string | null } = {}): Promise<EsitoRiconciliazione> {
-  const esito: EsitoRiconciliazione = { lette: 0, costi: 0, scritti: 0, euro: 0, senzaSpedizione: 0, inAttesa: 0 }
+  const esito: EsitoRiconciliazione = { lette: 0, costi: 0, scritti: 0, euro: 0, senzaSpedizione: 0, inAttesa: 0, resiSegnati: 0, daControllare: [] }
 
   // CHI PAGA IL CONTO E' CHI POSSIEDE IL CONTRATTO. Le credenziali sono le sue: i master che lo
   // rivendono usano la stessa chiave ma il conto non e' il loro. Una chiave = un pagatore.
@@ -169,6 +311,16 @@ export async function riconciliaCostiConto(admin: any, opts: { pagine?: number; 
         }
       }
     }))
+
+    // DOPO il costo, non prima: col RESOFORN gia' scritto la cascata del reso salta la riga del titolare.
+    // Se il costo non e' passato (errore), la cascata scrive la sua riga e il giro di domani scala solo la
+    // differenza: l'ordine normale, che gia' funzionava.
+    const resiFatturati = costi.filter(c => c.tipo === 'reso' && sped.get(c.code))
+      .map(c => ({ spedizioneId: sped.get(c.code)!.id, quando: c.quando }))
+    if (resiFatturati.length) {
+      try { await segnaResiFatturati(admin, authcode, resiFatturati, esito) }
+      catch (e: any) { console.error('[CONTO][RESI] resi fatturati non segnati:', e?.message) }
+    }
   }
   return esito
 }

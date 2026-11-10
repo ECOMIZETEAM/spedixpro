@@ -1,7 +1,7 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
-import { noloMaster, noloCliente, noloClienteDopoPartenza, applicaServizio, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloMaster, noloCliente, noloClienteDopoPartenza, applicaServizio, addebitaResi, resoPagato, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
 import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
 
@@ -210,7 +210,7 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
   try {
     const esiti = await addebitaResi(admin, righe, null)
     const cli = esiti.find(e => e.cliente_id === full.cliente_id && e.esito === 'addebitato')
-    return { addebitato: esiti.some(e => e.esito === 'addebitato' || e.esito === 'gia_addebitato'), importoCliente: Number(cli?.importo || 0) }
+    return { addebitato: resoPagato(esiti), importoCliente: Number(cli?.importo || 0) }
   } catch (e) { console.error('Errore addebito reso condivisione:', e); return { addebitato: false, importoCliente: 0 } }
 }
 
@@ -296,8 +296,9 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
     const cli = esiti.find(e => e.cliente_id && e.esito === 'addebitato')
     return {
       // "addebitato" vuol dire che qualcuno ha davvero pagato: se torna tutto zero il reso non e'
-      // stato incassato da nessuno, e chi chiama non deve marcarlo come gia' addebitato.
-      addebitato: esiti.some(e => e.esito === 'addebitato' || e.esito === 'gia_addebitato'),
+      // stato incassato da nessuno, e chi chiama non deve marcarlo come gia' addebitato. Il titolare che
+      // l'ha pagato direttamente al corriere conta come pagato (MULTI a suo nome, senza cliente sotto).
+      addebitato: resoPagato(esiti),
       importoCliente: Number(cli?.importo || 0),
     }
   } catch (e) {
