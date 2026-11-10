@@ -244,14 +244,14 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
 
   // Raggruppate per pagatore: un clic sistema tutti i suoi bonifici.
   // Il master li assegna una volta per pagatore. `omonimi`: il nome corrisponde a piu' clienti.
-  type Gruppo = { chiave: string, nome: string, iban: string | null, n: number, totale: number, causali: string[], omonimi: string[], righe: any[] }
+  type Gruppo = { chiave: string, nome: string, iban: string | null, n: number, totale: number, causali: string[], omonimi: string[], senzaRicariche: boolean, righe: any[] }
   const chiEe = () => {
     const m = new Map<string, Gruppo>()
     for (const r of libere) {
       // Gli scollegati a mano restano qui anche se il nome e' noto: li assegna il master.
       const p = proposte.get(r.id); if (!p || (p.esito !== 'ignoto' && r.assegnato !== 'libero')) continue
       const k = chiavePagatore(r)
-      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], omonimi: p.esito === 'ignoto' ? p.omonimi.map(t => nome(t.tipo, t.id)) : [], righe: [] })
+      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], omonimi: p.esito === 'ignoto' ? p.omonimi.map(t => nome(t.tipo, t.id)) : [], senzaRicariche: p.esito === 'ignoto' && !!p.senzaRicariche, righe: [] })
       const gg = m.get(k)!
       gg.n++; gg.totale = r2(gg.totale + r.importo); gg.righe.push(riga(r))
       if (r.causale && !gg.causali.includes(r.causale) && gg.causali.length < 3) gg.causali.push(r.causale)

@@ -21,7 +21,9 @@ export default function EstrattoConto() {
   const [errore, setErrore] = useState('')
   const [esito, setEsito] = useState('')
   const [occupato, setOccupato] = useState('')
-  const [aperti, setAperti] = useState<Record<string, boolean>>({})
+  // I "di chi e'?" partono aperti: sono il lavoro da fare. Il valore iniziale sta qui e non in un `?? true`
+  // sul blocco, altrimenti il primo clic per chiuderlo lo riapriva (!undefined = true).
+  const [aperti, setAperti] = useState<Record<string, boolean>>({ chi: true })
   const [scelte, setScelte] = useState<Record<string, string>>({})
   const [soloDiff, setSoloDiff] = useState(true)
 
@@ -130,11 +132,12 @@ export default function EstrattoConto() {
               ])} />
             </Blocco>
 
-            <Blocco icona="❓" titolo={`${r.chiEe.length} pagatori: di chi sono questi bonifici?`} totale={r.chiEe.reduce((t: number, g: any) => t + g.totale, 0)} aperto={aperti.chi ?? true} onApri={() => apri('chi')}
+            <Blocco icona="❓" titolo={`${r.chiEe.length} pagatori: di chi sono questi bonifici?`} totale={r.chiEe.reduce((t: number, g: any) => t + g.totale, 0)} aperto={aperti.chi} onApri={() => apri('chi')}
               frase="Il nome di chi ha pagato non corrisponde a nessun cliente né a nessun nome salvato in «Chi paga i bonifici». Scegli il cliente una volta: il nome e l'IBAN restano salvati su di lui e da qui in poi i suoi bonifici si abbinano da soli.">
               {r.chiEe.map((g: any) => (
                 <Gruppo key={g.chiave} g={g} aperto={aperti['g' + g.chiave]} onApri={() => apri('g' + g.chiave)}
-                  testa={g.omonimi.length ? <span style={{ color: '#b45309' }}>· stesso nome di più clienti: {g.omonimi.join(', ')}</span> : null}
+                  testa={g.senzaRicariche ? <span style={{ color: '#b45309' }}>· stesso nome di {g.omonimi.join(', ')}, che in quei giorni non ha ricariche: è davvero lui?</span>
+                    : g.omonimi.length ? <span style={{ color: '#b45309' }}>· stesso nome di più clienti: {g.omonimi.join(', ')}</span> : null}
                   azioni={<>
                     <div style={{ minWidth: '240px' }}>
                       <SelectCercabile value={scelte[g.chiave] || ''} onChange={(e: any) => setScelte(s => ({ ...s, [g.chiave]: e.target.value }))} style={campo}>

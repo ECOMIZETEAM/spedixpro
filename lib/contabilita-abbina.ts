@@ -21,14 +21,31 @@ export type Entrata = { id: string, data: string, nome: string, causale: string,
 
 // 'iban' / 'pagatore' = fra i nomi salvati del cliente; 'cliente' = e' il nome del cliente stesso.
 // 'ignoto' con piu' clienti in `omonimi`: il nome corrisponde a piu' clienti (es. due anagrafiche
-// "LA NUOVA POSTA SNC") e nessuna ricarica dice quale: lo sceglie il master.
+// "LA NUOVA POSTA SNC") e nessuna ricarica dice quale: lo sceglie il master. Con `senzaRicariche` il nome
+// corrisponde, ma quel cliente in quei giorni non e' stato ricaricato: lo sceglie il master.
 export type Proposta =
   | { esito: 'sicuro', target: Target, ricariche: string[], perche: 'iban' | 'pagatore' | 'cliente' }
-  | { esito: 'ignoto', omonimi: Target[] }
+  | { esito: 'ignoto', omonimi: Target[], senzaRicariche?: boolean }
 
 const GIORNO = 86400000
 const g = (d: string) => Date.parse(d.slice(0, 10) + 'T00:00:00Z') / GIORNO
 const cent = (x: number) => Math.round(x * 100)
+/** La finestra di un bonifico: ricariche da 12 giorni prima a 2 dopo (si ricarica anche a bonifico arrivato). */
+const nellaFinestra = (e: Entrata, r: RicaricaAperta) => { const dd = g(e.data) - g(r.giorno); return dd >= -2 && dd <= 12 }
+
+/** Ricariche CONSECUTIVE (in ordine di ora) che sommano esattamente `importo` e finiscono in una delle
+ *  posizioni `fini`, provate nell'ordine dato: "tutto quello che restava da pagare fino a li'". */
+function consecutive(lista: RicaricaAperta[], importo: number, fini: number[]): string[] | null {
+  for (const j of fini) {
+    let t = 0
+    for (let i = j; i >= 0; i--) {
+      t += cent(lista[i].importo)
+      if (t === cent(importo)) return lista.slice(i, j + 1).map(r => r.id)
+      if (t > cent(importo)) break
+    }
+  }
+  return null
+}
 
 /** Il nome per confrontarlo: maiuscole, senza accenti e punteggiatura ("R.I.A.M." = "R I A M"). */
 export function norma(s: string): string {
@@ -66,11 +83,14 @@ export function corrisponde(nome: string, nomeBonifico: string): boolean {
  *     dentro i 220 € "del 27/10". Se niente torna il bonifico resta del cliente senza ricarica, da guardare:
  *     ripiegare sul "piu' vicino" contraddirebbe la causale;
  *  1. una ricarica dello stesso importo, la piu' vicina (prima quelle fatte prima del bonifico);
- *  2. le ricariche di un giorno qualsiasi della finestra che sommano l'importo, il piu' vicino.
+ *  2. le ricariche di un giorno qualsiasi della finestra che sommano l'importo, il piu' vicino;
+ *  3. ricariche consecutive di piu' giorni che sommano l'importo, prima quelle che finiscono entro il giorno
+ *     del bonifico: BRILLITALIA paga 1.000 € ogni due ricariche da 500 di giorni diversi, A.L. TRASPORTI
+ *     600 € per cinque ricariche dal 15 al 27/10 (ottobre: 5 bonifici, 4.000 €, restavano senza ricarica).
  *  La finestra va da 12 giorni prima del bonifico a 2 dopo (si ricarica anche quando il bonifico e' gia' arrivato). */
 export function ricarichePagate(e: Entrata, aperte: RicaricaAperta[]): string[] | null {
   const dE = g(e.data)
-  const nella = aperte.filter(r => { const dd = dE - g(r.giorno); return dd >= -2 && dd <= 12 })
+  const nella = aperte.filter(r => nellaFinestra(e, r))
   if (!nella.length) return null
   const perGiorno = new Map<string, RicaricaAperta[]>()
   for (const r of nella) { const k = r.giorno.slice(0, 10); if (!perGiorno.has(k)) perGiorno.set(k, []); perGiorno.get(k)!.push(r) }
@@ -82,15 +102,7 @@ export function ricarichePagate(e: Entrata, aperte: RicaricaAperta[]): string[] 
     if (una) return [una.id]
     // sort stabile: dentro lo stesso giorno resta l'ordine dell'ora
     const fino = nella.filter(r => r.giorno.slice(0, 10) <= giornoCausale).sort((a, b) => g(a.giorno) - g(b.giorno))
-    for (let j = fino.length - 1; j >= 0; j--) {
-      let t = 0
-      for (let i = j; i >= 0; i--) {
-        t += cent(fino[i].importo)
-        if (t === cent(e.importo)) return fino.slice(i, j + 1).map(r => r.id)
-        if (t > cent(e.importo)) break
-      }
-    }
-    return null
+    return consecutive(fino, e.importo, fino.map((_, i) => i).reverse())
   }
   const stesso = nella.filter(r => cent(r.importo) === cent(e.importo))
     .sort((a, b) => {
@@ -103,7 +115,10 @@ export function ricarichePagate(e: Entrata, aperte: RicaricaAperta[]): string[] 
     const l = perGiorno.get(k)!
     if (l.length > 1 && somma(l) === cent(e.importo)) return l.map(r => r.id)
   }
-  return null
+  const tutte = [...nella].sort((a, b) => g(a.giorno) - g(b.giorno))
+  const idx = tutte.map((_, i) => i)
+  const entro = idx.filter(i => g(tutte[i].giorno) <= dE).reverse(), dopo = idx.filter(i => g(tutte[i].giorno) > dE)
+  return consecutive(tutte, e.importo, [...entro, ...dopo])
 }
 
 // Chi e' ricaricato o paga, come "cliente:<id>" o "master:<id>". Le ricariche e i pagatori lo hanno in
@@ -131,6 +146,13 @@ export function proponi(entrate: Entrata[], aperte: RicaricaAperta[], pagatori: 
       : dalPagatore.length ? [dalPagatore, 'pagatore' as const]
       : [dalCliente, 'cliente' as const]
     if (!candidati.length) { esiti.set(e.id, { esito: 'ignoto', omonimi: [] }); continue }
+    // Il solo nome del cliente basta se quel cliente e' stato ricaricato in quei giorni (regola di Lorenzo:
+    // "se ricarica Ecomize LL e arriva un bonifico Ecomize LL, allora ok"). I bonifici di MAYLING S.R.L.S.
+    // finivano sul vecchio cliente "MAYLING", mai piu' ricaricato, mentre Ecomize ricarica il sotto-master
+    // "Mayling Anna Parlanti" (ottobre: 11 bonifici, 3.000 €). Nome e IBAN salvati dal master valgono sempre.
+    if (perche === 'cliente' && !candidati.some(c => apertePer(c).some(r => nellaFinestra(e, r)))) {
+      esiti.set(e.id, { esito: 'ignoto', omonimi: candidati.map(daChiave), senzaRicariche: true }); continue
+    }
     // Uno solo: e' lui. Piu' d'uno (stesso nome su due clienti): decide la ricarica pagata, se e' una sola.
     let t: string | null = candidati.length === 1 ? candidati[0] : null
     let ric: string[] | null = t ? ricarichePagate(e, apertePer(t)) : null
