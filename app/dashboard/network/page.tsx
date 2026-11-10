@@ -7,6 +7,15 @@ const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',ov
 const th = {padding:'9px 12px',fontSize:'11px',fontWeight:700 as const,textTransform:'uppercase' as const,color:'#666',textAlign:'left' as const,whiteSpace:'nowrap' as const}
 const td = {padding:'9px 12px',fontSize:'12.5px',color:'#1a1a1a',borderTop:'1px solid #f0f0f0'}
 
+// L'ORA DELL'ADDEBITO, IN ORA ITALIANA: «alle 00:10» se il mittente ha confermato tutto insieme,
+// «dalle 07:11 alle 21:20» se nello stesso giorno l'ha fatto in più riprese.
+const ORA_IT = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' })
+function orarioBlocco(b: { primo: number, ts: number }): string {
+  if (!isFinite(b.primo) || !b.ts) return ''
+  const da = ORA_IT.format(b.primo), a = ORA_IT.format(b.ts)
+  return da === a ? ` alle ${da}` : ` dalle ${da} alle ${a}`
+}
+
 export default function NetworkRicevutiPage() {
   const [tab, setTab] = useState<'rettifiche'|'contrassegni'|'resi'>('rettifiche')
   const [dati, setDati] = useState<any>({rettifiche:[],contrassegni:[],resi:[]})
@@ -31,8 +40,12 @@ export default function NetworkRicevutiPage() {
   useEffect(()=>{ carica() }, [])
 
   // UN BLOCCO, NON CINQUANTASETTE RIGHE.
-  // Le rettifiche arrivano tutte insieme, dallo stesso file dello stesso mittente: si decidono
-  // insieme. Il dettaglio resta, ma si apre solo se uno lo vuole vedere.
+  // Le rettifiche arrivano tutte insieme, dallo stesso mittente: si decidono insieme. Il dettaglio
+  // resta, ma si apre solo se uno lo vuole vedere.
+  // IL BLOCCO E' L'ADDEBITO, NON LA NASCITA DELLA RIGA: mittente + giorno in cui ha confermato (la
+  // chiave la mette la rotta, lib/network-invii). Per giorno di nascita, le 299 righe che MULTIEXPRESS
+  // ha addebitato in una volta a Ecomize Solution (531,88 €) si vedevano in tre blocchi da 366,99,
+  // 163,24 e 1,65, e chi le riceveva pensava che il resto fosse sparito.
   const { blocchi, proprie } = (() => {
     const m = new Map<string, any>()
     const proprie: any[] = []
@@ -41,12 +54,15 @@ export default function NetworkRicevutiPage() {
       // blocchi da propagare: sotto di te non c'è nessuno, sono già a tuo carico. Sezione a parte,
       // niente "propaga / Le assorbo io" — che suona come accollarsi il costo di un altro.
       if (r.propria && !r.propagazione) { proprie.push(r); continue }
-      const giorno = new Date(r.created_at).toLocaleDateString('it-IT')
+      const giorno = r.invio_giorno || new Date(r.created_at).toLocaleDateString('it-IT')
       const da = r.masters?.nome || '—'
-      const k = da + '|' + giorno
-      if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [] })
+      const k = r.blocco || (da + '|' + giorno)
+      if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, primo: Infinity, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [], parziale: false })
       const b = m.get(k)
-      b.ts = Math.max(b.ts, new Date(r.created_at).getTime())   // data VERA del blocco, per l'ordinamento
+      const t = Number(r.addebitata_ts) || new Date(r.created_at).getTime()
+      b.ts = Math.max(b.ts, t)          // ultimo addebito del blocco: serve all'ordinamento
+      b.primo = Math.min(b.primo, t)    // primo addebito: si scrive l'ora
+      if (r.blocco_parziale) b.parziale = true
       const addebito = (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)   // addebito vero = ripesatura + supplementi fissi
       b.righe.push(r); b.totale += addebito
       // Il totale che conta è quello del DA DECIDERE, non di tutto il blocco: 578 già decise + 2 nuove
@@ -328,10 +344,15 @@ export default function NetworkRicevutiPage() {
                       <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
                         Da {b.da} · {b.daDecidere.length > 0
                           ? <><span style={{color:ACCENT}}>{b.daDecidere.length} da caricare</span> · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totaleDaDecidere).toFixed(2)}</span></>
-                          : <>{b.righe.length} rettifiche · <span style={{color:'#999'}}>già decise</span></>}
+                          : <>{b.righe.length} rettifiche · € {Math.abs(b.totale).toFixed(2)} · <span style={{color:'#999'}}>già decise</span></>}
                       </div>
                       <div style={{fontSize:'12px',color:'#8a8a8a',marginTop:'3px'}}>
-                        Ricevute il {b.giorno} · già scalate dal tuo credito.
+                        {/* QUANDO E QUANTO TI E' STATO ADDEBITATO, come lo vede chi te l'ha mandato: e' il numero
+                            da confrontare col mittente. Su un blocco a meta' (il giorno piu' vecchio dello storico,
+                            vedi lib/network-invii) il totale intero non si scrive: sarebbe sbagliato. */}
+                        Addebitate il {b.giorno}{orarioBlocco(b)}
+                        {b.parziale ? '' : ` · ${b.righe.length} ${b.righe.length === 1 ? 'riga' : 'righe'} per € ${Math.abs(b.totale).toFixed(2)}`}
+                        {' '}· già scalate dal tuo credito.
                         {b.daDecidere.length
                           ? (b.righe.length > b.daDecidere.length ? ` Le altre ${b.righe.length - b.daDecidere.length} le hai già decise.` : '') + ' Caricandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi addebitarle.'
                           : ' Già decise.'}
