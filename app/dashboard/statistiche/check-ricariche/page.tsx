@@ -13,7 +13,7 @@ const td: any = { padding: '9px 12px', fontSize: '12.5px', color: '#1a1a1a', bor
 const btn: any = { background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }
 const btnSec: any = { background: '#fff', color: '#555', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '6px 10px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }
 
-const METODO: Record<string, string> = { cod_compensati: '🔁 Contrassegni compensati', contanti: '💵 Contanti', altro: 'Altro pagamento' }
+const METODO: Record<string, string> = { cod_compensati: '🔁 Contrassegni compensati', contanti: '💵 Contanti', altro: 'Altro pagamento', giro: 'Giro dei bonifici dei suoi clienti' }
 
 const STATI: [string, string][] = [['', 'Tutti'], ['alert', '⚠ Solo alert'], ['in_attesa', 'In attesa bonifico'], ['effettuato', 'Bonifico effettuato'], ['arrivato', 'Arrivati']]
 

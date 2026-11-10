@@ -3,7 +3,7 @@
 // Tabelle (scripts/contabilita-banca.sql): estratti_conto, estratti_righe, abbinamenti_bonifici, uscite_voci,
 // piu' pagatori_bonifico e ricariche_check del passo 1.
 import { fetchAllStretto } from '@/lib/fetch-all'
-import { ricordaPagatore, pulisciIban } from '@/lib/contabilita-banca'
+import { ricordaPagatore, pulisciIban, sottoSulConto, type SottoSulConto } from '@/lib/contabilita-banca'
 import { chiaveDi, norma, principale, proponi, ricarichePagate, voceUscita, type Anagrafica, type Entrata, type RicaricaAperta, type Target } from '@/lib/contabilita-abbina'
 import type { Estratto } from '@/lib/estratto-finom'
 
@@ -13,6 +13,18 @@ const r2 = (x: number) => Math.round(x * 100) / 100
 const giornoRoma = (ts: string) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' })
 // Un pagatore si riconosce dall'IBAN, se c'e', altrimenti dal nome.
 const chiavePagatore = (r: { iban: string | null, nome: string }) => r.iban || 'N:' + norma(r.nome)
+
+// IL CONTO E LA SUA RETE. Sul conto di Ecomize Solution arrivano anche i bonifici dei clienti di Ecomize LL e
+// Dg Express (conti_condivisi): le loro ricariche si cercano insieme a quelle del master, e i loro clienti
+// stanno nella tendina con accanto il sotto-master. Sono ricariche che il master NON ha fatto: si toccano solo
+// per segnarle arrivate (quando un bonifico le paga) e per girarle al sotto-master.
+type Rete = { ids: string[], sotto: SottoSulConto[] }
+async function reteDi(admin: any, masterId: string): Promise<Rete> {
+  const sotto = await sottoSulConto(admin, masterId)
+  return { ids: [masterId, ...sotto.map(x => x.id)], sotto }
+}
+// Le tabelle del giro (passo 3) possono non esserci ancora: senza, nessun giro esiste.
+const tabellaMancante = (e: any) => /giri_bonifici/.test(e?.message || '') && /does not exist|Could not find|schema cache/i.test(e?.message || '')
 
 /** Per ogni IBAN salvato, i clienti che paga ("cliente:<id>", "master:<id>"). Piu' d'uno = profili dello
  *  stesso cliente pagati dallo stesso conto (lib/contabilita-abbina, proponi). */
@@ -74,22 +86,24 @@ export async function salvaEstratto(admin: any, masterId: string, e: Estratto, n
   return { estrattoId: est.id as string, righe: e.righe.length, nuove, giaPresenti: e.righe.length - nuove }
 }
 
-/** Clienti e sotto-master diretti del master: fra questi si cerca chi ha pagato. */
-async function anagrafiche(admin: any, masterId: string): Promise<Anagrafica[]> {
+/** Clienti e sotto-master diretti del master, e quelli dei sotto-master che pagano sul suo conto (con `di`):
+ *  fra questi si cerca chi ha pagato. */
+async function anagrafiche(admin: any, rete: Rete): Promise<Anagrafica[]> {
   const [cli, sub] = await Promise.all([
-    fetchAllStretto(() => admin.from('clienti').select('id,ragione_sociale').eq('master_id', masterId).order('id')),
-    fetchAllStretto(() => admin.from('masters').select('id,nome').eq('parent_master_id', masterId).order('id')),
+    fetchAllStretto(() => admin.from('clienti').select('id,ragione_sociale,master_id').in('master_id', rete.ids).order('id')),
+    fetchAllStretto(() => admin.from('masters').select('id,nome,parent_master_id').in('parent_master_id', rete.ids).order('id')),
   ])
-  return [...cli.map((c: any) => ({ tipo: 'cliente' as const, id: c.id, nome: c.ragione_sociale || '' })),
-    ...sub.map((m: any) => ({ tipo: 'master' as const, id: m.id, nome: m.nome || '' }))]
+  const di = new Map(rete.sotto.map(x => [x.id, x.nome]))
+  return [...cli.map((c: any) => ({ tipo: 'cliente' as const, id: c.id, nome: c.ragione_sociale || '', di: di.get(c.master_id) })),
+    ...sub.map((m: any) => ({ tipo: 'master' as const, id: m.id, nome: m.nome || '', di: di.get(m.parent_master_id) }))]
 }
 
 /** Le ricariche che si aspettano un bonifico (bonifico, o di prima che esistesse il campo) intorno al periodo,
  *  con quelle gia' abbinate segnate. */
-async function ricariche(admin: any, masterId: string, dal: string, al: string) {
+async function ricariche(admin: any, rete: Rete, dal: string, al: string) {
   const righe = await fetchAllStretto(() => admin.from('ricariche_check')
-    .select('id,target_tipo,target_id,target_nome,importo,ricaricato_il,metodo,mittente,bonifico_effettuato_il,bonifico_arrivato_il')
-    .eq('master_id', masterId).gte('ricaricato_il', spostaGiorni(dal, -15)).lte('ricaricato_il', spostaGiorni(al, 4))
+    .select('id,master_id,target_tipo,target_id,target_nome,importo,ricaricato_il,metodo,mittente,bonifico_effettuato_il,bonifico_arrivato_il')
+    .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -15)).lte('ricaricato_il', spostaGiorni(al, 4))
     .or('metodo.is.null,metodo.eq.bonifico').order('ricaricato_il').order('id'))
   const ids = righe.map((r: any) => r.id)
   const abbinate = new Map<string, string>()
@@ -112,7 +126,7 @@ async function movimenti(admin: any, masterId: string, dal: string, al: string) 
  *  della banca. Si ricorda cosa ha segnato lui, per poterlo togliere se l'abbinamento si annulla.
  *  Tutto a blocchi: una scrittura per riga faceva 700 viaggi al database e il caricamento di ottobre durava
  *  59 secondi, a un passo dal limite del server (60). */
-async function abbinaTutti(admin: any, masterId: string, legami: { riga: { id: string, data: string }, ric: any[] }[], userId: string | null): Promise<number> {
+async function abbinaTutti(admin: any, masterId: string, rete: Rete, legami: { riga: { id: string, data: string }, ric: any[] }[], userId: string | null): Promise<number> {
   const nuovi = legami.flatMap(l => l.ric.map(r => ({
     master_id: masterId, riga_id: l.riga.id, ricarica_id: r.id, modo: 'auto',
     segnato_effettuato: !r.bonifico_effettuato_il, segnato_arrivato: !r.bonifico_arrivato_il, creato_da: userId,
@@ -137,8 +151,9 @@ async function abbinaTutti(admin: any, masterId: string, legami: { riga: { id: s
     }
     for (const [giorno, ids] of perGiorno) {
       for (let i = 0; i < ids.length; i += 300) {
+        // anche quelle dei sotto-master sul conto: nel loro Check Ricariche risultano arrivate
         const { error } = await admin.from('ricariche_check').update({ [campo]: giorno + 'T12:00:00Z' })
-          .in('id', ids.slice(i, i + 300)).eq('master_id', masterId).is(campo, null)
+          .in('id', ids.slice(i, i + 300)).in('master_id', rete.ids).is(campo, null)
         if (error) throw new Error(error.message)
       }
     }
@@ -159,8 +174,9 @@ async function aggiornaRighe(admin: any, masterId: string, ids: string[], valori
 /** Applica gli abbinamenti SICURI del periodo: bonifici di pagatori gia' noti, e bonifici gia' assegnati a un
  *  cliente che non hanno ancora trovato la loro ricarica (magari fatta dopo). Non chiede niente a nessuno. */
 export async function applicaSicuri(admin: any, masterId: string, dal: string, al: string) {
+  const rete = await reteDi(admin, masterId)
   const [righe, ric, anag, pag, giaEsclusi] = await Promise.all([
-    movimenti(admin, masterId, dal, al), ricariche(admin, masterId, dal, al), anagrafiche(admin, masterId),
+    movimenti(admin, masterId, dal, al), ricariche(admin, rete, dal, al), anagrafiche(admin, rete),
     fetchAllStretto(() => admin.from('pagatori_bonifico').select('target_tipo,target_id,nome,iban').eq('master_id', masterId).order('id')),
     // Pagatori segnati "non e' un cliente", in qualunque mese: i loro bonifici nuovi restano fuori come i vecchi.
     fetchAllStretto(() => admin.from('estratti_righe').select('nome,iban').eq('master_id', masterId).eq('assegnato', 'escluso').order('id')),
@@ -206,7 +222,7 @@ export async function applicaSicuri(admin: any, masterId: string, dal: string, a
     lista.forEach((x: any) => usate.add(x.id))
     legami.push({ riga: r, ric: lista })
   }
-  const abbinati = await abbinaTutti(admin, masterId, legami, null)
+  const abbinati = await abbinaTutti(admin, masterId, rete, legami, null)
   return { assegnati: [...perCliente.values()].reduce((t, l) => t + l.length, 0), abbinati }
 }
 
@@ -278,18 +294,24 @@ export async function includiPagatore(admin: any, masterId: string, p: { nome: s
  *  "di chi e'?" finche' il master non sceglie: se tornasse senza stato, alla prossima apertura il nome
  *  (ancora noto) lo riabbinerebbe da solo allo stesso cliente. */
 export async function scollegaRiga(admin: any, masterId: string, rigaId: string) {
+  const rete = await reteDi(admin, masterId)
+  // Un bonifico che paga ricariche gia' girate al sotto-master non si scollega: il sotto-master ha gia' avuto
+  // quel credito. Prima si annulla il giro (lo blocca anche il database, trg_abbinamento_girato).
+  const { data: gir, error: eg } = await admin.from('giri_bonifici_ricariche').select('giro_id').eq('riga_id', rigaId).eq('attivo', true).limit(1)
+  if (eg && !tabellaMancante(eg)) throw new Error(eg.message)
+  if (gir?.length) throw new Error('Questo bonifico è già stato girato al sotto-master: prima annulla il giro')
   const { data: abb, error } = await admin.from('abbinamenti_bonifici').select('id,ricarica_id,segnato_effettuato,segnato_arrivato').eq('riga_id', rigaId).eq('master_id', masterId)
   if (error) throw new Error(error.message)
   // I clienti delle ricariche che pagava, prima di toglierle: con due profili non e' solo quello della riga.
   const { data: ricPagate, error: e0 } = (abb || []).length
-    ? await admin.from('ricariche_check').select('target_tipo,target_id').in('id', abb!.map((a: any) => a.ricarica_id)).eq('master_id', masterId)
+    ? await admin.from('ricariche_check').select('target_tipo,target_id').in('id', abb!.map((a: any) => a.ricarica_id)).in('master_id', rete.ids)
     : { data: [], error: null }
   if (e0) throw new Error(e0.message)
   for (const a of abb || []) {
     const torna: any = {}
     if (a.segnato_arrivato) torna.bonifico_arrivato_il = null
     if (a.segnato_effettuato) torna.bonifico_effettuato_il = null
-    if (Object.keys(torna).length) await admin.from('ricariche_check').update(torna).eq('id', a.ricarica_id).eq('master_id', masterId)
+    if (Object.keys(torna).length) await admin.from('ricariche_check').update(torna).eq('id', a.ricarica_id).in('master_id', rete.ids)
     await admin.from('abbinamenti_bonifici').delete().eq('id', a.id).eq('master_id', masterId)
   }
   const { data: prima } = await admin.from('estratti_righe').select('iban,target_tipo,target_id').eq('id', rigaId).eq('master_id', masterId).maybeSingle()
@@ -332,14 +354,70 @@ export async function scollegaRiga(admin: any, masterId: string, rigaId: string)
   }
 }
 
+/** IL GIRO AI SOTTO-MASTER: per ognuno, le ricariche dei suoi clienti pagate da un bonifico arrivato sul conto
+ *  del master dal giorno di conti_condivisi, non ancora girate (quelle che il pulsante gira), e i giri fatti.
+ *  Non dipende dal periodo guardato: il giro e' di tutto quello che e' arrivato e non e' stato girato.
+ *  Una ricarica fatta prima del giorno del giro ma pagata da un bonifico arrivato dopo si gira: conta il giorno
+ *  del bonifico, come nella funzione del database (gira_bonifici_sotto_master). */
+async function situazioneGiri(admin: any, masterId: string, rete: Rete, nome: (t: string, id: string) => string) {
+  if (!rete.sotto.length) return null
+  const primo = rete.sotto.map(x => x.giroDal).sort()[0]
+  const ricS = await fetchAllStretto(() => admin.from('ricariche_check')
+    .select('id,master_id,target_tipo,target_id,target_nome,importo,ricaricato_il')
+    .in('master_id', rete.sotto.map(x => x.id)).gte('ricaricato_il', spostaGiorni(primo, -15)).order('ricaricato_il').order('id'))
+  const ids = ricS.map((r: any) => r.id)
+  const rigaDi = new Map<string, string>()
+  const girate = new Set<string>()
+  for (let i = 0; i < ids.length; i += 300) {
+    const pezzo = ids.slice(i, i + 300)
+    const [{ data: a, error: e1 }, { data: g, error: e2 }] = await Promise.all([
+      admin.from('abbinamenti_bonifici').select('ricarica_id,riga_id').eq('master_id', masterId).in('ricarica_id', pezzo),
+      admin.from('giri_bonifici_ricariche').select('ricarica_id').in('ricarica_id', pezzo).eq('attivo', true),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2 && !tabellaMancante(e2)) throw new Error(e2.message)
+    for (const x of a || []) rigaDi.set(x.ricarica_id, x.riga_id)
+    for (const x of g || []) girate.add(x.ricarica_id)
+  }
+  const righeIds = [...new Set(rigaDi.values())]
+  const bonifico = new Map<string, any>()
+  for (let i = 0; i < righeIds.length; i += 300) {
+    const { data, error } = await admin.from('estratti_righe').select('id,data,nome,causale').eq('master_id', masterId).in('id', righeIds.slice(i, i + 300))
+    if (error) throw new Error(error.message)
+    for (const x of data || []) bonifico.set(x.id, x)
+  }
+  const { data: giri, error: e3 } = await admin.from('giri_bonifici')
+    .select('id,sotto_master_id,importo,n_ricariche,bonifici_dal,bonifici_al,creato_il,annullato_il')
+    .eq('master_id', masterId).order('creato_il', { ascending: false }).limit(30)
+  if (e3 && !tabellaMancante(e3)) throw new Error(e3.message)
+  const nomeSotto = new Map(rete.sotto.map(x => [x.id, x.nome]))
+  return {
+    sotto: rete.sotto.map(x => {
+      const da = ricS.filter((r: any) => r.master_id === x.id && rigaDi.has(r.id) && !girate.has(r.id)
+        && String(bonifico.get(rigaDi.get(r.id)!)?.data || '') >= x.giroDal)
+        .map((r: any) => { const b = bonifico.get(rigaDi.get(r.id)!)
+          return { id: r.id, giorno: giornoRoma(r.ricaricato_il), importo: Number(r.importo), cliente: nome(r.target_tipo, r.target_id) !== '—' ? nome(r.target_tipo, r.target_id) : (r.target_nome || '—'),
+            bonifico: { data: b.data, nome: b.nome, causale: b.causale } } })
+        .sort((a: any, b: any) => a.bonifico.data.localeCompare(b.bonifico.data) || a.giorno.localeCompare(b.giorno))
+      return { id: x.id, nome: x.nome, giroDal: x.giroDal, daGirare: { n: da.length, totale: r2(da.reduce((t: number, r: any) => t + r.importo, 0)), righe: da } }
+    }),
+    giri: (giri || []).map((g: any) => ({ id: g.id, sotto: nomeSotto.get(g.sotto_master_id) || '—', importo: Number(g.importo), n: g.n_ricariche,
+      dal: g.bonifici_dal, al: g.bonifici_al, il: giornoRoma(g.creato_il), annullato: g.annullato_il ? giornoRoma(g.annullato_il) : null })),
+  }
+}
+
 /** Il racconto del periodo, a blocchi (come piace a Lorenzo: numero, frase, elenco da aprire). */
 export async function resoconto(admin: any, masterId: string, dal: string, al: string) {
+  const rete = await reteDi(admin, masterId)
   const [righe, ric, anag, pag, voci] = await Promise.all([
-    movimenti(admin, masterId, dal, al), ricariche(admin, masterId, dal, al), anagrafiche(admin, masterId),
+    movimenti(admin, masterId, dal, al), ricariche(admin, rete, dal, al), anagrafiche(admin, rete),
     fetchAllStretto(() => admin.from('pagatori_bonifico').select('target_tipo,target_id,nome,iban').eq('master_id', masterId).order('id')),
     fetchAllStretto(() => admin.from('uscite_voci').select('controparte,voce').eq('master_id', masterId).order('controparte')),
   ])
-  const nomeDi = new Map(anag.map(a => [`${a.tipo}:${a.id}`, a.nome]))
+  // I clienti dei sotto-master si leggono con accanto il sotto-master: "ARIOLDI GIULIA · Ecomize LL". Ecomize
+  // Solution vedeva gia' quel nome nelle rettifiche e lo credeva suo (Lorenzo, 10/11).
+  const etichetta = (a: Anagrafica) => a.di ? `${a.nome} · ${a.di}` : a.nome
+  const nomeDi = new Map(anag.map(a => [`${a.tipo}:${a.id}`, etichetta(a)]))
   for (const r of ric) if (!nomeDi.has(`${r.target_tipo}:${r.target_id}`)) nomeDi.set(`${r.target_tipo}:${r.target_id}`, r.target_nome || '—')
   const nome = (t: string, id: string) => nomeDi.get(`${t}:${id}`) || '—'
   const nomeK = (k: string) => nomeDi.get(k) || '—'
@@ -425,9 +503,32 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     const x = perVoce.get(v)!; x.n++; x.totale = r2(x.totale + r.importo); x.controparti.add(r.nome); x.righe.push(riga(r))
   }
   const somma = (l: any[]) => r2(l.reduce((t, r) => t + r.importo, 0))
-  const altri = await fetchAllStretto(() => admin.from('ricariche_check').select('id,importo,metodo,target_tipo,target_id,target_nome,ricaricato_il')
-    .eq('master_id', masterId).gte('ricaricato_il', spostaGiorni(dal, -1)).lte('ricaricato_il', spostaGiorni(al, 1)).not('metodo', 'is', null).neq('metodo', 'bonifico').order('ricaricato_il').order('id'))
+  const altri = await fetchAllStretto(() => admin.from('ricariche_check').select('id,master_id,importo,metodo,target_tipo,target_id,target_nome,ricaricato_il')
+    .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -1)).lte('ricaricato_il', spostaGiorni(al, 1)).not('metodo', 'is', null).neq('metodo', 'bonifico').order('ricaricato_il').order('id'))
   const altriNel = altri.map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il) })).filter((r: any) => r.giorno >= dal && r.giorno <= al)
+  // Una ricarica a un sotto-master sul conto, fatta dal master: si puo' segnare "giro dei bonifici dei suoi
+  // clienti" (prima del pulsante il giro si faceva a mano: ottobre, 36.663 € a Ecomize LL).
+  const sottoIds = new Set(rete.sotto.map(x => x.id))
+  const giroPossibile = (r: any) => r.master_id === masterId && r.target_tipo === 'master' && sottoIds.has(r.target_id)
+  const giri = await situazioneGiri(admin, masterId, rete, nome)
+  // I bonifici che pagano ricariche gia' girate: niente Scollega, si annulla il giro.
+  const girataDa = new Map<string, string>()
+  if (giri) {
+    const idsS = ric.filter(r => r.riga_id && sottoIds.has(r.master_id)).map(r => r.id)
+    for (let i = 0; i < idsS.length; i += 300) {
+      const { data, error } = await admin.from('giri_bonifici_ricariche').select('ricarica_id,giro_id').in('ricarica_id', idsS.slice(i, i + 300)).eq('attivo', true)
+      if (error && !tabellaMancante(error)) throw new Error(error.message)
+      for (const x of data || []) girataDa.set(x.ricarica_id, x.giro_id)
+    }
+  }
+  const giroDi = new Map((giri?.giri || []).map((g: any) => [g.id, g]))
+  const girato = (r: any) => {
+    const y = (ricPerRiga.get(r.id) || []).find((z: any) => girataDa.has(z.id))
+    if (!y) return null
+    const g: any = giroDi.get(girataDa.get(y.id)!)
+    return g ? `girato a ${g.sotto} il ${g.il.split('-').reverse().join('/')}` : 'girato al sotto-master'
+  }
+
   // "Non e' un cliente", per pagatore: da qui si annulla.
   const esclusiPer = new Map<string, { nome: string, iban: string | null, n: number, totale: number }>()
   for (const r of clienti.filter(x => x.assegnato === 'escluso')) {
@@ -440,7 +541,7 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     periodo: { dal, al },
     totali: { entrate: somma(entrate), nEntrate: entrate.length, uscite: somma(uscite), nUscite: uscite.length },
     abbinati: { n: abbinati.length, totale: somma(abbinati), ricariche: abbinati.reduce((t, r) => t + (ricPerRiga.get(r.id)?.length || 0), 0),
-      righe: abbinati.map(r => ({ ...riga(r), cliente: clienteDi(r), assegnato: r.assegnato, ricariche: ricPerRiga.get(r.id)!.map(breve) })) },
+      righe: abbinati.map(r => ({ ...riga(r), cliente: clienteDi(r), assegnato: r.assegnato, ricariche: ricPerRiga.get(r.id)!.map(breve), girato: girato(r) })) },
     pagatiSenzaRicarica: { n: soloCliente.length, totale: somma(soloCliente), righe: soloCliente.map(r => ({ ...riga(r), cliente: clienteDi(r) })) },
     chiEe: chiEe(),
     esclusi: { n: clienti.filter(r => r.assegnato === 'escluso').length, totale: somma(clienti.filter(r => r.assegnato === 'escluso')),
@@ -449,13 +550,15 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     ricaricheSenzaBonifico: { n: senzaBonifico.length, totale: somma(senzaBonifico), dopoIl: ultimoUtile,
       // `aManoArrivata`: nella ricarica o nel Check Ricariche qualcuno l'ha segnata "arrivata", ma in banca non
       // c'e': o il bonifico ha un nome che il portale non conosce, o non e' arrivato davvero.
-      righe: senzaBonifico.map(r => ({ ...breve(r), mittente: r.mittente, target: { tipo: r.target_tipo, id: r.target_id }, aManoArrivata: r.bonifico_arrivato_il ? giornoRoma(r.bonifico_arrivato_il) : null })) },
+      righe: senzaBonifico.map(r => ({ ...breve(r), mittente: r.mittente, target: { tipo: r.target_tipo, id: r.target_id }, aManoArrivata: r.bonifico_arrivato_il ? giornoRoma(r.bonifico_arrivato_il) : null,
+        giroPossibile: giroPossibile(r), delSotto: r.master_id !== masterId, di: r.master_id })) },
     ricaricheRecenti: { n: recenti.length, totale: somma(recenti) },
-    altriMetodi: { n: altriNel.length, totale: somma(altriNel), righe: altriNel.map((r: any) => ({ ...breve(r), cliente: nome(r.target_tipo, r.target_id) !== '—' ? nome(r.target_tipo, r.target_id) : (r.target_nome || '—'), metodo: r.metodo })) },
+    altriMetodi: { n: altriNel.length, totale: somma(altriNel), righe: altriNel.map((r: any) => ({ ...breve(r), cliente: nome(r.target_tipo, r.target_id) !== '—' ? nome(r.target_tipo, r.target_id) : (r.target_nome || '—'), metodo: r.metodo, giroPossibile: giroPossibile(r) })) },
+    giri,
     perCliente: [...perCliente.values()].map(v => ({ ...v, differenza: r2(v.pagato - v.ricaricato) }))
       .sort((a, b) => Math.abs(b.differenza) - Math.abs(a.differenza)),
     uscite: [...perVoce.values()].map(v => ({ voce: v.voce, n: v.n, totale: v.totale, controparti: [...v.controparti].slice(0, 5), righe: v.righe }))
       .sort((a, b) => a.totale - b.totale),
-    anagrafiche: anag.map(a => ({ target: `${a.tipo === 'master' ? 'm:' : ''}${a.id}`, nome: a.nome })).sort((a, b) => a.nome.localeCompare(b.nome)),
+    anagrafiche: anag.map(a => ({ target: `${a.tipo === 'master' ? 'm:' : ''}${a.id}`, nome: etichetta(a) })).sort((a, b) => a.nome.localeCompare(b.nome)),
   }
 }

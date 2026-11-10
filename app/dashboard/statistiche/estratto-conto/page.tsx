@@ -23,7 +23,10 @@ export default function EstrattoConto() {
   const [occupato, setOccupato] = useState('')
   // I blocchi che partono aperti hanno il valore iniziale qui e non in un `?? true` sul blocco, altrimenti il
   // primo clic per chiuderli li riapriva (!undefined = true).
-  const [aperti, setAperti] = useState<Record<string, boolean>>({ chi: true, cli: true, usc: true })
+  const [aperti, setAperti] = useState<Record<string, boolean>>({ chi: true, cli: true, usc: true, giro: true })
+  // Le ricariche senza bonifico, di chi: tutte, del master ('mio') o di un sotto-master sul conto (il suo id).
+  // Con Ecomize LL e Dg Express a ottobre passano da 191 a 407: tutte insieme non si leggono.
+  const [filtroSenza, setFiltroSenza] = useState('')
   // I clienti scelti per ogni pagatore del "di chi e'?": uno, o piu' profili pagati con un bonifico solo.
   // Finche' il master non tocca, valgono quelli a cui l'IBAN e' gia' salvato (g.noti).
   const [scelte, setScelte] = useState<Record<string, string[]>>({})
@@ -111,6 +114,27 @@ export default function EstrattoConto() {
     await leggi()
   }
 
+  // IL GIRO AI SOTTO-MASTER: decide sempre il master (Lorenzo, 10/11). Una conferma con le cifre, poi una
+  // ricarica sola; il database non lascia girare due volte la stessa ricarica.
+  async function gira(x: any) {
+    const d = x.daGirare
+    const dal = d.righe[0]?.bonifico.data, al = d.righe[d.righe.length - 1]?.bonifico.data
+    if (!await dialog.confirm({ title: `Ricaricare ${x.nome} di ${eur(d.totale)}?`,
+      message: `Sono ${d.n} ${d.n === 1 ? 'ricarica' : 'ricariche'} dei suoi clienti, pagate dai bonifici arrivati sul tuo conto ${dal === al ? `il ${it(dal)}` : `dal ${it(dal)} al ${it(al)}`}. ${x.nome} vedrà la ricarica nei suoi movimenti. Se ti accorgi di un errore, il giro si annulla.`,
+      confirmText: `Ricarica ${eur(d.totale)}` })) return
+    setEsito('')
+    const e = await azione('giro' + x.id, { azione: 'gira', sotto: x.id, ricariche: d.righe.map((y: any) => y.id) })
+    if (e) setEsito(`Ricaricata ${x.nome} di ${eur(e.importo)}: ${e.ricariche} ${e.ricariche === 1 ? 'ricarica' : 'ricariche'} dei suoi clienti. Il suo credito ora è ${eur(e.saldo)}.`)
+  }
+  async function annullaGiro(g: any) {
+    if (!await dialog.confirm({ title: `Annullare il giro del ${it(g.il)} a ${g.sotto}?`,
+      message: `A ${g.sotto} si tolgono ${eur(g.importo)} con una rettifica (la ricarica resta nello storico). Le sue ${g.n} ricariche tornano da girare.`,
+      confirmText: 'Annulla il giro', danger: true })) return
+    setEsito('')
+    const e = await azione('ag' + g.id, { azione: 'annulla_giro', giro: g.id })
+    if (e) setEsito(`Giro annullato: tolti ${eur(e.importo)} a ${g.sotto}.`)
+  }
+
   const apri = (k: string) => setAperti(a => ({ ...a, [k]: !a[k] }))
   const estrattoDelPeriodo = estratti.find(e => periodo && e.dal === periodo.dal && e.al === periodo.al)
 
@@ -156,7 +180,9 @@ export default function EstrattoConto() {
                 it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
                 // Con due profili si vede quale ricarica e' di chi.
                 x.ricariche.map((y: any) => `${it(y.giorno)} ${eur(y.importo)}${new Set(x.ricariche.map((z: any) => z.cliente)).size > 1 ? ` (${y.cliente})` : ''}`).join(' + '),
-                <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
+                // Girato al sotto-master: non si scollega, si annulla il giro (blocco «Da girare»).
+                x.girato ? <span style={{ fontSize: '11px', color: '#6b7280', whiteSpace: 'nowrap' }}>{x.girato}</span>
+                  : <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
               ])} />
             </Blocco>
 
@@ -167,6 +193,38 @@ export default function EstrattoConto() {
                   it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
                   <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
                 ])} />
+              </Blocco>
+            )}
+
+            {r.giri && (
+              <Blocco icona="↪" titolo={`Da girare ai sotto-master: ${eur(r.giri.sotto.reduce((t: number, x: any) => t + x.daGirare.totale, 0))}`} aperto={aperti.giro} onApri={() => apri('giro')}
+                frase={`Sul tuo conto arrivano anche i bonifici dei clienti di ${r.giri.sotto.map((x: any) => x.nome).join(' e ')}. Quando un bonifico paga una ricarica che il sotto-master ha fatto al suo cliente, quella ricarica va girata a lui: con il pulsante lo ricarichi della somma, una volta sola. Si girano i bonifici arrivati dal ${it(r.giri.sotto[0]?.giroDal)}: quelli di prima li hai già girati a mano.`}>
+                {r.giri.sotto.map((x: any) => (
+                  <div key={x.id} style={{ borderTop: '1px solid #f0f0f0', padding: '10px 0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 280px', fontSize: '13px' }}>
+                        <b>{x.nome}</b>{' '}
+                        <span style={{ color: '#6b7280', fontSize: '12px' }}>{x.daGirare.n ? `${x.daGirare.n} ${x.daGirare.n === 1 ? 'ricarica' : 'ricariche'} dei suoi clienti pagate in banca e non ancora girate` : 'niente da girare'}</span>
+                        {x.daGirare.n > 0 && <> <button onClick={() => apri('gs' + x.id)} style={{ ...btnLink, padding: 0, fontSize: '12px' }}>{aperti['gs' + x.id] ? 'nascondi' : 'vedi quali'}</button></>}
+                      </div>
+                      <b style={{ fontSize: '13px' }}>{eur(x.daGirare.totale)}</b>
+                      <button style={{ ...btn, opacity: x.daGirare.n ? 1 : 0.4, cursor: x.daGirare.n ? 'pointer' : 'default' }} disabled={!!occupato || !x.daGirare.n} onClick={() => gira(x)}>{`Ricarica ${x.nome}`}</button>
+                    </div>
+                    {aperti['gs' + x.id] && <Tabella teste={['Bonifico del', 'Bonifico da', 'Cliente', 'Ricaricato il', 'Importo']} destra={[4]} righe={x.daGirare.righe.map((y: any) => [
+                      it(y.bonifico.data), <Nome x={y.bonifico} />, y.cliente, it(y.giorno), eur(y.importo)])} />}
+                  </div>
+                ))}
+                {r.giri.giri.length > 0 && (
+                  <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: '8px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: NERO, margin: '4px 0' }}>Giri fatti</div>
+                    <Tabella teste={['Il', 'A', 'Bonifici', 'Ricariche', 'Importo', '']} destra={[4]} righe={r.giri.giri.map((g: any) => [
+                      it(g.il), g.sotto, g.dal === g.al ? it(g.dal) : `${it(g.dal)} – ${it(g.al)}`, g.n,
+                      g.annullato ? <span style={{ color: '#9ca3af', textDecoration: 'line-through' }}>{eur(g.importo)}</span> : eur(g.importo),
+                      g.annullato ? <span style={{ fontSize: '11px', color: '#9ca3af' }}>annullato il {it(g.annullato)}</span>
+                        : <button style={btnLink} disabled={!!occupato} onClick={() => annullaGiro(g)}>Annulla giro</button>,
+                    ])} />
+                  </div>
+                )}
               </Blocco>
             )}
 
@@ -206,13 +264,32 @@ export default function EstrattoConto() {
 
             <Blocco icona="❌" titolo={`${r.ricaricheSenzaBonifico.n} ricariche con il bonifico mai arrivato`} totale={r.ricaricheSenzaBonifico.totale} aperto={aperti.senza} onApri={() => apri('senza')}
               frase={`Ricariche fatte fino al ${it(r.ricaricheSenzaBonifico.dopoIl)} per cui in banca non c'è un bonifico.${r.ricaricheRecenti.n ? ` Le ${r.ricaricheRecenti.n} degli ultimi tre giorni (${eur(r.ricaricheRecenti.totale)}) non sono qui: il bonifico può arrivare nel prossimo estratto.` : ''} Se una non era un bonifico, dillo qui e non la si cerca più.`}>
-              <Tabella teste={['Ricaricata il', 'Cliente', 'Importo', 'Bonifico da', 'Non era un bonifico?']} righe={r.ricaricheSenzaBonifico.righe.map((x: any) => [
+              {r.giri && (() => {
+                const conta = (f: (x: any) => boolean) => r.ricaricheSenzaBonifico.righe.filter(f).length
+                const scelte = [{ k: '', t: 'Tutte', n: r.ricaricheSenzaBonifico.n }, { k: 'mio', t: 'I tuoi clienti', n: conta((x: any) => !x.delSotto) },
+                  ...r.giri.sotto.map((y: any) => ({ k: y.id, t: `Clienti di ${y.nome}`, n: conta((x: any) => x.di === y.id) }))]
+                return (
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '8px 0 2px' }}>
+                    {scelte.map(c => (
+                      <button key={c.k} type="button" onClick={() => setFiltroSenza(c.k)}
+                        style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                          border: `1px solid ${filtroSenza === c.k ? ARANCIO : '#d1d5db'}`, background: filtroSenza === c.k ? '#fff7ed' : '#fff', color: filtroSenza === c.k ? '#c2410c' : '#374151' }}>
+                        {c.t} · {c.n}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
+              <Tabella teste={['Ricaricata il', 'Cliente', 'Importo', 'Bonifico da', 'Non era un bonifico?']} righe={r.ricaricheSenzaBonifico.righe
+                .filter((x: any) => !filtroSenza || (filtroSenza === 'mio' ? !x.delSotto : x.di === filtroSenza)).map((x: any) => [
                 it(x.giorno),
                 <span>{x.cliente}{x.aManoArrivata && <span style={{ display: 'block', fontSize: '11px', color: '#b45309' }}>segnata «arrivata» a mano il {it(x.aManoArrivata)}, ma in banca non c&apos;è: il bonifico ha un altro nome?</span>}</span>,
                 eur(x.importo),
-                <span>{x.mittente || <span style={{ color: '#9ca3af' }}>—</span>} <button style={btnLink} disabled={!!occupato} onClick={() => scriviMittente(x)}>{x.mittente ? '✎' : '+ scrivi'}</button></span>,
+                // Le ricariche dei sotto-master le ha fatte il sotto-master: il nome di chi paga si dà dal «di chi è?».
+                x.delSotto ? <span style={{ color: '#9ca3af' }}>—</span>
+                  : <span>{x.mittente || <span style={{ color: '#9ca3af' }}>—</span>} <button style={btnLink} disabled={!!occupato} onClick={() => scriviMittente(x)}>{x.mittente ? '✎' : '+ scrivi'}</button></span>,
                 <select defaultValue="" disabled={!!occupato} onChange={e => { const v = e.target.value; if (v) azione('m' + x.id, { azione: 'metodo', ricarica_id: x.id, metodo: v }) }} style={{ ...campo, width: 'auto', padding: '4px 6px', fontSize: '12px' }}>
-                  <option value="">—</option><option value="cod_compensati">Contrassegni compensati</option><option value="contanti">Contanti</option><option value="altro">Altro</option>
+                  <option value="">—</option>{x.giroPossibile && <option value="giro">Giro dei bonifici dei suoi clienti</option>}<option value="cod_compensati">Contrassegni compensati</option><option value="contanti">Contanti</option><option value="altro">Altro</option>
                 </select>,
               ])} />
             </Blocco>
@@ -256,7 +333,7 @@ export default function EstrattoConto() {
                 {r.altriMetodi.righe.length > 0 && <Tabella teste={['Ricaricata il', 'Cliente', 'Importo', 'Pagata con']} destra={[2]} righe={r.altriMetodi.righe.map((x: any) => [
                   it(x.giorno), x.cliente, eur(x.importo),
                   <select value={x.metodo} disabled={!!occupato} onChange={e => azione('m' + x.id, { azione: 'metodo', ricarica_id: x.id, metodo: e.target.value })} style={{ ...campo, width: 'auto', padding: '4px 6px', fontSize: '12px' }}>
-                    <option value="bonifico">Bonifico</option><option value="cod_compensati">Contrassegni compensati</option><option value="contanti">Contanti</option><option value="altro">Altro</option>
+                    <option value="bonifico">Bonifico</option>{(x.giroPossibile || x.metodo === 'giro') && <option value="giro">Giro dei bonifici dei suoi clienti</option>}<option value="cod_compensati">Contrassegni compensati</option><option value="contanti">Contanti</option><option value="altro">Altro</option>
                   </select>,
                 ])} />}
               </Blocco>

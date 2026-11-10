@@ -16,7 +16,9 @@
 export type Target = { tipo: 'cliente' | 'master', id: string }
 export type RicaricaAperta = { id: string, target_tipo: 'cliente' | 'master', target_id: string, importo: number, giorno: string }
 export type PagatoreNoto = { target_tipo: 'cliente' | 'master', target_id: string, nome: string, iban: string | null }
-export type Anagrafica = { tipo: 'cliente' | 'master', id: string, nome: string }
+// `di`: il sotto-master di cui e' cliente, quando i suoi clienti pagano sul conto del master (conti_condivisi):
+// serve solo a mostrarlo, il nome si confronta senza.
+export type Anagrafica = { tipo: 'cliente' | 'master', id: string, nome: string, di?: string }
 export type Entrata = { id: string, data: string, nome: string, causale: string, iban: string | null, importo: number }
 
 // 'iban' / 'pagatore' = fra i nomi salvati del cliente; 'cliente' = e' il nome del cliente stesso.

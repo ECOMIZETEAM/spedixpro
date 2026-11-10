@@ -126,3 +126,168 @@ revoke all on table public.estratti_conto, public.estratti_righe, public.abbinam
 revoke all on table public.estratti_conto, public.estratti_righe, public.abbinamenti_bonifici, public.uscite_voci from anon;
 revoke all on table public.estratti_conto, public.estratti_righe, public.abbinamenti_bonifici, public.uscite_voci from authenticated;
 grant select, insert, update, delete on table public.estratti_conto, public.estratti_righe, public.abbinamenti_bonifici, public.uscite_voci to service_role;
+
+-- Passo 3: IL GIRO AI SOTTO-MASTER (Lorenzo, 10/11/2026). Sul conto di Ecomize Solution arrivano anche i
+-- bonifici dei clienti dei suoi sotto-master Ecomize LL e Dg Express. Ecomize LL ricarica il suo cliente (NS
+-- CONSULTING, 2.000 €), i soldi arrivano a Ecomize Solution, che deve ricaricare Ecomize LL degli stessi
+-- 2.000 €. Fino al 10/11 lo faceva a mano (ottobre: 10 ricariche "Accredito credito a scalare", 36.663 €,
+-- contro 34.583 € ricaricati da Ecomize LL ai suoi clienti); Dg Express non e' mai stata ricaricata e
+-- risultava a -44.645 € senza un pagamento. Da qui decide Ecomize Solution, con un pulsante: il portale le
+-- dice quali ricariche dei clienti del sotto-master sono pagate da un bonifico sul suo conto, e quelle si
+-- girano una volta sola.
+
+-- Quali sotto-master pagano sul conto di chi, e da quale giorno dei bonifici si gira dal portale. Quelli
+-- prima li ha gia' girati a mano (Lorenzo: "oggi chiudiamo il tutto, da domani partiamo"): riproporli
+-- darebbe il credito due volte.
+create table if not exists public.conti_condivisi (
+  master_id uuid not null references public.masters(id),
+  sotto_master_id uuid not null references public.masters(id),
+  giro_dal date not null,
+  creato_il timestamptz not null default now(),
+  primary key (master_id, sotto_master_id),
+  check (master_id <> sotto_master_id)
+);
+
+-- 'giro' = la ricarica al sotto-master pagata dai bonifici dei suoi clienti: non si aspetta un bonifico suo.
+alter table public.ricariche_check drop constraint if exists ricariche_check_metodo_check;
+alter table public.ricariche_check add constraint ricariche_check_metodo_check
+  check (metodo in ('bonifico', 'cod_compensati', 'contanti', 'altro', 'giro'));
+
+-- Un giro: una ricarica al sotto-master per un gruppo di ricariche dei suoi clienti pagate in banca.
+-- Niente cancellazioni a cascata: e' storia di soldi. Annullato = rettifica opposta, la riga resta.
+create table if not exists public.giri_bonifici (
+  id uuid primary key default gen_random_uuid(),
+  master_id uuid not null references public.masters(id),
+  sotto_master_id uuid not null references public.masters(id),
+  importo numeric(14,2) not null check (importo > 0),
+  n_ricariche integer not null check (n_ricariche > 0),
+  bonifici_dal date not null,
+  bonifici_al date not null,
+  ricarica_check_id uuid references public.ricariche_check(id),
+  creato_da uuid,
+  creato_il timestamptz not null default now(),
+  annullato_il timestamptz,
+  annullato_da uuid
+);
+create index if not exists giri_bonifici_master on public.giri_bonifici (master_id, creato_il desc);
+
+-- Le ricariche dei clienti girate, col bonifico che le ha pagate. Una ricarica sta in un giro attivo solo:
+-- lo garantisce l'indice, anche con due clic insieme.
+create table if not exists public.giri_bonifici_ricariche (
+  giro_id uuid not null references public.giri_bonifici(id),
+  ricarica_id uuid not null references public.ricariche_check(id),
+  riga_id uuid not null references public.estratti_righe(id),
+  importo numeric(14,2) not null,
+  attivo boolean not null default true,
+  primary key (giro_id, ricarica_id)
+);
+create unique index if not exists giri_bonifici_ricarica_attiva on public.giri_bonifici_ricariche (ricarica_id) where attivo;
+create index if not exists giri_bonifici_ricariche_riga on public.giri_bonifici_ricariche (riga_id) where attivo;
+
+alter table public.conti_condivisi enable row level security;
+alter table public.giri_bonifici enable row level security;
+alter table public.giri_bonifici_ricariche enable row level security;
+revoke all on table public.conti_condivisi, public.giri_bonifici, public.giri_bonifici_ricariche from public;
+revoke all on table public.conti_condivisi, public.giri_bonifici, public.giri_bonifici_ricariche from anon;
+revoke all on table public.conti_condivisi, public.giri_bonifici, public.giri_bonifici_ricariche from authenticated;
+grant select, insert, update, delete on table public.conti_condivisi, public.giri_bonifici, public.giri_bonifici_ricariche to service_role;
+
+-- Una ricarica girata resta abbinata al suo bonifico: scollegarla lascerebbe al sotto-master un credito
+-- senza piu' i soldi dietro. Prima si annulla il giro.
+create or replace function public.fn_abbinamento_girato() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if exists (select 1 from public.giri_bonifici_ricariche g where g.ricarica_id = old.ricarica_id and g.attivo) then
+    raise exception 'Questa ricarica è già stata girata al sotto-master: prima annulla il giro' using errcode = 'P0001';
+  end if;
+  return old;
+end $$;
+drop trigger if exists trg_abbinamento_girato on public.abbinamenti_bonifici;
+create trigger trg_abbinamento_girato before delete on public.abbinamenti_bonifici
+  for each row execute function public.fn_abbinamento_girato();
+
+-- IL GIRO: controlla, segna e ricarica in una transazione sola. Si girano solo ricariche del sotto-master
+-- pagate da un bonifico del conto del master, dal giorno di conti_condivisi in poi, mai girate. La ricarica
+-- passa da registra_movimento_master, la stessa della ricarica a mano (conto rete, saldo, movimento), e nel
+-- Check Ricariche del master nasce gia' arrivata con metodo 'giro': i soldi sono quei bonifici.
+create or replace function public.gira_bonifici_sotto_master(p_master uuid, p_sotto uuid, p_ricariche uuid[], p_creato_da uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_dal_min date; v_ids uuid[]; v_n integer; v_tot numeric; v_dal date; v_al date;
+  v_giro uuid; v_check uuid; v_nome text; v_saldo numeric;
+begin
+  select giro_dal into v_dal_min from public.conti_condivisi where master_id = p_master and sotto_master_id = p_sotto;
+  if v_dal_min is null then
+    raise exception 'Questo sotto-master non paga sul tuo conto' using errcode = 'P0001';
+  end if;
+  select coalesce(array_agg(distinct x), '{}') into v_ids from unnest(coalesce(p_ricariche, '{}')) x;
+  if cardinality(v_ids) = 0 then
+    raise exception 'Nessuna ricarica da girare' using errcode = 'P0001';
+  end if;
+  -- Due clic insieme non fanno due ricariche: un giro alla volta per sotto-master.
+  perform pg_advisory_xact_lock(hashtextextended('giro_bonifici:' || p_sotto::text, 0));
+  select count(*), round(sum(rc.importo), 2), min(er.data), max(er.data) into v_n, v_tot, v_dal, v_al
+    from public.ricariche_check rc
+    join public.abbinamenti_bonifici a on a.ricarica_id = rc.id and a.master_id = p_master
+    join public.estratti_righe er on er.id = a.riga_id and er.master_id = p_master
+   where rc.id = any(v_ids) and rc.master_id = p_sotto and er.data >= v_dal_min
+     and not exists (select 1 from public.giri_bonifici_ricariche g where g.ricarica_id = rc.id and g.attivo);
+  if v_n <> cardinality(v_ids) then
+    raise exception 'Alcune ricariche non si possono più girare (già girate, scollegate o con il bonifico prima del %): ricarica la pagina',
+      to_char(v_dal_min, 'DD/MM/YYYY') using errcode = 'P0001';
+  end if;
+  insert into public.giri_bonifici (master_id, sotto_master_id, importo, n_ricariche, bonifici_dal, bonifici_al, creato_da)
+  values (p_master, p_sotto, v_tot, v_n, v_dal, v_al, p_creato_da) returning id into v_giro;
+  insert into public.giri_bonifici_ricariche (giro_id, ricarica_id, riga_id, importo)
+  select v_giro, rc.id, a.riga_id, rc.importo
+    from public.ricariche_check rc join public.abbinamenti_bonifici a on a.ricarica_id = rc.id
+   where rc.id = any(v_ids);
+  v_saldo := public.registra_movimento_master(p_master, p_sotto, 'ricarica',
+    format('Bonifici dei tuoi clienti arrivati dal %s al %s (%s ricariche)', to_char(v_dal, 'DD/MM/YYYY'), to_char(v_al, 'DD/MM/YYYY'), v_n),
+    v_tot, 'giro ' || v_giro::text, null, p_creato_da);
+  select nome into v_nome from public.masters where id = p_sotto;
+  insert into public.ricariche_check (master_id, target_tipo, target_id, target_nome, importo, created_by,
+    bonifico_effettuato_il, bonifico_arrivato_il, metodo, note)
+  values (p_master, 'master', p_sotto, v_nome, v_tot, p_creato_da, now(), now(), 'giro',
+    format('Giro di %s ricariche dei suoi clienti, bonifici dal %s al %s', v_n, to_char(v_dal, 'DD/MM/YYYY'), to_char(v_al, 'DD/MM/YYYY')))
+  returning id into v_check;
+  update public.giri_bonifici set ricarica_check_id = v_check where id = v_giro;
+  return jsonb_build_object('giro', v_giro, 'importo', v_tot, 'ricariche', v_n, 'saldo', v_saldo, 'dal', v_dal, 'al', v_al);
+end $$;
+
+-- ANNULLARE UN GIRO: la rettifica opposta sul sotto-master, il giro resta segnato annullato, le ricariche
+-- tornano girabili (e scollegabili). Lo storico non si cancella.
+create or replace function public.annulla_giro_bonifici(p_master uuid, p_giro uuid, p_annullato_da uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare g record; v_saldo numeric;
+begin
+  select * into g from public.giri_bonifici where id = p_giro and master_id = p_master for update;
+  if not found then
+    raise exception 'Giro non trovato' using errcode = 'P0001';
+  end if;
+  if g.annullato_il is not null then
+    raise exception 'Questo giro è già stato annullato' using errcode = 'P0001';
+  end if;
+  v_saldo := public.registra_movimento_master(p_master, g.sotto_master_id, 'rettifica',
+    format('Annullata la ricarica del %s per i bonifici dei tuoi clienti dal %s al %s',
+      to_char(g.creato_il at time zone 'Europe/Rome', 'DD/MM/YYYY'), to_char(g.bonifici_dal, 'DD/MM/YYYY'), to_char(g.bonifici_al, 'DD/MM/YYYY')),
+    -g.importo, 'giro ' || p_giro::text || ' annullato', null, p_annullato_da);
+  update public.giri_bonifici set annullato_il = now(), annullato_da = p_annullato_da where id = p_giro;
+  update public.giri_bonifici_ricariche set attivo = false where giro_id = p_giro;
+  update public.ricariche_check
+     set note = left(coalesce(note || ' · ', '') || 'giro annullato il ' || to_char(now() at time zone 'Europe/Rome', 'DD/MM/YYYY'), 500)
+   where id = g.ricarica_check_id;
+  return jsonb_build_object('importo', g.importo, 'saldo', v_saldo);
+end $$;
+
+revoke all on function public.gira_bonifici_sotto_master(uuid, uuid, uuid[], uuid) from public, anon, authenticated;
+revoke all on function public.annulla_giro_bonifici(uuid, uuid, uuid) from public, anon, authenticated;
+revoke all on function public.fn_abbinamento_girato() from public, anon, authenticated;
+grant execute on function public.gira_bonifici_sotto_master(uuid, uuid, uuid[], uuid) to service_role;
+grant execute on function public.annulla_giro_bonifici(uuid, uuid, uuid) to service_role;
+
+-- Ecomize Solution: Ecomize LL e Dg Express pagano sul suo conto; fino al 10/11 girato a mano.
+insert into public.conti_condivisi (master_id, sotto_master_id, giro_dal) values
+  ('75b08143-26c8-4903-8091-cd03fbd635ed', '0bfa96db-0564-4d90-8f22-989db001f8ad', '2026-11-11'),
+  ('75b08143-26c8-4903-8091-cd03fbd635ed', '394a68a7-c36b-4369-849b-31e0df8b206a', '2026-11-11')
+on conflict (master_id, sotto_master_id) do nothing;

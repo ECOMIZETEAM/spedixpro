@@ -18,7 +18,31 @@ export const METODI_PAGAMENTO = [
 ] as const
 export type MetodoPagamento = typeof METODI_PAGAMENTO[number]['valore']
 export const metodoValido = (m: unknown): m is MetodoPagamento => METODI_PAGAMENTO.some(x => x.valore === m)
-export const etichettaMetodo = (m?: string | null) => METODI_PAGAMENTO.find(x => x.valore === m)?.etichetta || null
+// 'giro' = la ricarica a un sotto-master pagata dai bonifici dei SUOI clienti arrivati sul conto del master
+// (Ecomize LL, Dg Express). Non si sceglie nella finestra di ricarica: nasce dal pulsante dell'estratto conto,
+// o si segna dall'estratto sulle ricariche fatte a mano prima che il pulsante esistesse.
+export const METODI_ESTRATTO = [...METODI_PAGAMENTO, { valore: 'giro', etichetta: 'Giro dei bonifici dei suoi clienti' }] as const
+export type MetodoEstratto = typeof METODI_ESTRATTO[number]['valore']
+export const metodoEstrattoValido = (m: unknown): m is MetodoEstratto => METODI_ESTRATTO.some(x => x.valore === m)
+export const etichettaMetodo = (m?: string | null) => METODI_ESTRATTO.find(x => x.valore === m)?.etichetta || null
+
+export type SottoSulConto = { id: string, nome: string, giroDal: string }
+/** I sotto-master i cui clienti pagano sul conto in banca di questo master (tabella conti_condivisi), e da quale
+ *  giorno dei bonifici si girano dal portale. Ecomize Solution: Ecomize LL e Dg Express, dall'11/11/2026.
+ *  Se la tabella non c'e' ancora (codice rilasciato prima del database) la funzione resta spenta: nessun
+ *  sotto-master, l'estratto conto lavora come prima. Ogni altro errore si ferma. */
+export async function sottoSulConto(admin: any, masterId: string): Promise<SottoSulConto[]> {
+  const { data, error } = await admin.from('conti_condivisi').select('sotto_master_id,giro_dal').eq('master_id', masterId)
+  if (error) {
+    if (/conti_condivisi/.test(error.message || '') && /does not exist|Could not find|schema cache/i.test(error.message || '')) return []
+    throw new Error(error.message)
+  }
+  if (!data?.length) return []
+  const { data: m, error: e2 } = await admin.from('masters').select('id,nome').in('id', data.map((x: any) => x.sotto_master_id))
+  if (e2) throw new Error(e2.message)
+  const nomi = new Map((m || []).map((x: any) => [x.id, x.nome || '—']))
+  return data.map((x: any) => ({ id: x.sotto_master_id, nome: String(nomi.get(x.sotto_master_id) || '—'), giroDal: String(x.giro_dal).slice(0, 10) }))
+}
 
 /** Il nome come lo si salva: spazi in fila ridotti a uno, al massimo 140 caratteri (il limite della tabella). */
 export function pulisciNome(s: unknown): string {
