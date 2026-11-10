@@ -57,11 +57,14 @@ export function corrisponde(nome: string, nomeBonifico: string): boolean {
   return ordinato(a) === ordinato(b)
 }
 
-/** Le ricariche aperte del cliente pagate da questo bonifico, o null.
- *  0. se la causale scrive il giorno delle ricariche ("Ricarica prepagato del 01/10/2026") conta quel giorno,
- *     prima di tutto: una sua ricarica dello stesso importo, o tutte le sue ricariche se sommano l'importo.
- *     Senza questo, il bonifico del 01/10 "del 29/09" da 50 € prendeva la ricarica da 50 € del 01/10 (la piu'
- *     vicina) e quello del 03/10 "del 01/10" restava con le ricariche del 30/09 (LA MARCA SERVICES, ottobre);
+/** Le ricariche aperte del cliente pagate da questo bonifico, o null. Le ricariche arrivano in ordine di ora.
+ *  0. se la causale scrive una data della finestra ("Ricarica prepagato del 01/10/2026") decide lei, e basta:
+ *     una ricarica di quel giorno dello stesso importo, altrimenti le ricariche ancora da pagare consecutive
+ *     che finiscono a quel giorno (o prima) e sommano l'importo. LA MARCA SERVICES paga cosi': 155 € "del
+ *     20/10" = 50+50 del 19/10 e 15+40 del 20/10. Guardando solo quel giorno tre suoi bonifici di ottobre
+ *     restavano senza ricarica, e quello "del 28/10" si prendeva la ricarica da 100 € del 27/10, che era
+ *     dentro i 220 € "del 27/10". Se niente torna il bonifico resta del cliente senza ricarica, da guardare:
+ *     ripiegare sul "piu' vicino" contraddirebbe la causale;
  *  1. una ricarica dello stesso importo, la piu' vicina (prima quelle fatte prima del bonifico);
  *  2. le ricariche di un giorno qualsiasi della finestra che sommano l'importo, il piu' vicino.
  *  La finestra va da 12 giorni prima del bonifico a 2 dopo (si ricarica anche quando il bonifico e' gia' arrivato). */
@@ -73,11 +76,21 @@ export function ricarichePagate(e: Entrata, aperte: RicaricaAperta[]): string[] 
   for (const r of nella) { const k = r.giorno.slice(0, 10); if (!perGiorno.has(k)) perGiorno.set(k, []); perGiorno.get(k)!.push(r) }
   const somma = (l: RicaricaAperta[]) => l.reduce((t, r) => t + cent(r.importo), 0)
   const m = e.causale.match(/(\d{2})\/(\d{2})\/(\d{4})/)
-  if (m) {
-    const l = perGiorno.get(`${m[3]}-${m[2]}-${m[1]}`) || []
-    const una = l.find(r => cent(r.importo) === cent(e.importo))
+  const giornoCausale = m ? `${m[3]}-${m[2]}-${m[1]}` : ''
+  if (giornoCausale && dE - g(giornoCausale) >= -2 && dE - g(giornoCausale) <= 12) {
+    const una = (perGiorno.get(giornoCausale) || []).find(r => cent(r.importo) === cent(e.importo))
     if (una) return [una.id]
-    if (l.length > 1 && somma(l) === cent(e.importo)) return l.map(r => r.id)
+    // sort stabile: dentro lo stesso giorno resta l'ordine dell'ora
+    const fino = nella.filter(r => r.giorno.slice(0, 10) <= giornoCausale).sort((a, b) => g(a.giorno) - g(b.giorno))
+    for (let j = fino.length - 1; j >= 0; j--) {
+      let t = 0
+      for (let i = j; i >= 0; i--) {
+        t += cent(fino[i].importo)
+        if (t === cent(e.importo)) return fino.slice(i, j + 1).map(r => r.id)
+        if (t > cent(e.importo)) break
+      }
+    }
+    return null
   }
   const stesso = nella.filter(r => cent(r.importo) === cent(e.importo))
     .sort((a, b) => {
