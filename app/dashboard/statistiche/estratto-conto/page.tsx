@@ -217,7 +217,7 @@ function Blocco({ icona, titolo, totale, frase, aperto, onApri, azioni, children
   return (
     <div style={{ ...card, marginBottom: '14px' }}>
       <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', borderBottom: aperto ? '1px solid #f0f0f0' : 'none' }}>
-        <button onClick={onApri} style={{ ...btnLink, padding: 0, color: NERO, fontSize: '14px', fontWeight: 700 }}>{aperto ? '▾' : '▸'} {icona} {titolo}</button>
+        <button onClick={onApri} style={{ ...btnLink, padding: 0, color: NERO, fontSize: '14px', fontWeight: 700, textAlign: 'left' }}>{aperto ? '▾' : '▸'} {icona} {titolo}</button>
         {totale !== undefined && <b style={{ fontSize: '14px', color: NERO }}>{eur(totale)}</b>}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>{azioni}</span>
         {frase && <div style={{ flexBasis: '100%', fontSize: '12px', color: '#6b7280' }}>{frase}</div>}
