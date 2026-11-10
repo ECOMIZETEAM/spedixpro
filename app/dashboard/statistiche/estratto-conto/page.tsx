@@ -67,6 +67,21 @@ export default function EstrattoConto() {
     }
   }
 
+  // Chi ha fatto il bonifico di una ricarica, scritto dopo: resta fra i nomi del cliente e, se in banca
+  // c'e' un bonifico con quel nome, la ricarica si abbina subito.
+  async function scriviMittente(x: any) {
+    if (occupato) return
+    const nome = await dialog.prompt({ title: `Chi ha fatto il bonifico per ${x.cliente}?`, placeholder: 'il nome come compare in banca', defaultValue: x.mittente || '' })
+    if (nome === null) return
+    setOccupato('mitt' + x.id); setErrore('')
+    try {
+      const res = await fetch('/api/statistiche/check-ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: x.id, azione: 'mittente', mittente: nome }) })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d.error) { setErrore(d.error || 'Non salvato'); return }
+    } catch { setErrore('Errore di rete'); return } finally { setOccupato('') }
+    await leggi()
+  }
+
   const apri = (k: string) => setAperti(a => ({ ...a, [k]: !a[k] }))
   const estrattoDelPeriodo = estratti.find(e => periodo && e.dal === periodo.dal && e.al === periodo.al)
 
@@ -137,7 +152,8 @@ export default function EstrattoConto() {
             <Blocco icona="❌" titolo={`${r.ricaricheSenzaBonifico.n} ricariche con il bonifico mai arrivato`} totale={r.ricaricheSenzaBonifico.totale} aperto={aperti.senza} onApri={() => apri('senza')}
               frase={`Ricariche fatte fino al ${it(r.ricaricheSenzaBonifico.dopoIl)} per cui in banca non c'è un bonifico.${r.ricaricheRecenti.n ? ` Le ${r.ricaricheRecenti.n} degli ultimi tre giorni (${eur(r.ricaricheRecenti.totale)}) non sono qui: il bonifico può arrivare nel prossimo estratto.` : ''} Se una non era un bonifico, dillo qui e non la si cerca più.`}>
               <Tabella teste={['Ricaricata il', 'Cliente', 'Importo', 'Bonifico da', 'Non era un bonifico?']} righe={r.ricaricheSenzaBonifico.righe.map((x: any) => [
-                it(x.giorno), x.cliente, eur(x.importo), x.mittente || '—',
+                it(x.giorno), x.cliente, eur(x.importo),
+                <span>{x.mittente || <span style={{ color: '#9ca3af' }}>—</span>} <button style={btnLink} disabled={!!occupato} onClick={() => scriviMittente(x)}>{x.mittente ? '✎' : '+ scrivi'}</button></span>,
                 <select defaultValue="" disabled={!!occupato} onChange={e => { const v = e.target.value; if (v) azione('m' + x.id, { azione: 'metodo', ricarica_id: x.id, metodo: v }) }} style={{ ...campo, width: 'auto', padding: '4px 6px', fontSize: '12px' }}>
                   <option value="">—</option><option value="cod_compensati">Contrassegni compensati</option><option value="contanti">Contanti</option><option value="altro">Altro</option>
                 </select>,

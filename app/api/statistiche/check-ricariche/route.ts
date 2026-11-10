@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vedeLaRete } from '@/lib/perimetro'
+import { gestisceLaRete } from '@/lib/ruoli'
+import { contabilitaAttiva, pulisciNome, ricordaPagatore } from '@/lib/contabilita-banca'
 
 // CHECK RICARICHE: monitoraggio bonifici delle ricariche manuali (vedi tabella ricariche_check).
 // Ogni master vede SOLO le ricariche che ha fatto lui (master_id esatto): il bonifico arriva a lui.
@@ -14,7 +16,7 @@ async function staff(supabase: any) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
   const { data: u } = await supabase.from('utenti').select('ruolo,master_id').eq('id', user.id).single()
-  return vedeLaRete(u) ? { user, master_id: u.master_id } : null
+  return vedeLaRete(u) ? { user, master_id: u.master_id, ruolo: (u as any).ruolo as string } : null
 }
 
 // Calcola stato e alert di una riga (rispetto ad adesso).
@@ -72,14 +74,15 @@ export async function GET(req: NextRequest) {
     n_alert: righe.filter((r: any) => r.alert).length,
     soglie: { no_bonifico: GIORNI_NO_BONIFICO, no_arrivo: GIORNI_NO_ARRIVO },
   }
-  return NextResponse.json({ righe, riepilogo })
+  // contabilita: la pagina mostra "chi ha pagato" anche da scrivere dopo (lib/contabilita-banca).
+  return NextResponse.json({ righe, riepilogo, contabilita: contabilitaAttiva(s.master_id) })
 }
 
 // Le uniche azioni ammesse, con la GUARDIA sullo stato attuale (transizione rigida). L'update scatta
 // SOLO se lo stato di partenza e' quello giusto: cosi' due click, un doppio invio o una richiesta in
 // ritardo non possono "saltare" lo stato. È il cuore delle regole rigide sui bonifici.
 //   in_attesa --effettuato--> effettuato --arrivato--> arrivato   (+ le due annulla, un passo alla volta)
-const AZIONI = ['effettuato', 'arrivato', 'annulla_effettuato', 'annulla_arrivato', 'nota', 'elimina']
+const AZIONI = ['effettuato', 'arrivato', 'annulla_effettuato', 'annulla_arrivato', 'nota', 'elimina', 'mittente']
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -93,10 +96,28 @@ export async function POST(req: NextRequest) {
   // La riga dev'essere del MIO master: conoscere un id qualsiasi non basta. E ogni scrittura ripete
   // il vincolo master (eq master_id) come cintura, oltre alla guardia di stato.
   const { data: riga } = await admin.from('ricariche_check')
-    .select('id,master_id,bonifico_effettuato_il,bonifico_arrivato_il').eq('id', id).maybeSingle()
+    .select('id,master_id,target_tipo,target_id,metodo,bonifico_effettuato_il,bonifico_arrivato_il').eq('id', id).maybeSingle()
   if (!riga || riga.master_id !== s.master_id) return NextResponse.json({ error: 'Riga non trovata nella tua rete' }, { status: 403 })
 
   const now = new Date().toISOString()
+
+  // Chi ha fatto il bonifico, scritto anche dopo la ricarica (Lorenzo, 10/11): resta sulla ricarica e fra i
+  // nomi del cliente, cosi' l'estratto conto lo riconosce. Lo scrive chi puo' ricaricare, dove la
+  // contabilita' e' accesa. Una ricarica senza metodo (di prima del campo) diventa "bonifico".
+  if (azione === 'mittente') {
+    if (!contabilitaAttiva(s.master_id) || !gestisceLaRete({ ruolo: s.ruolo })) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    if (riga.metodo && riga.metodo !== 'bonifico') return NextResponse.json({ error: 'Questa ricarica non è stata pagata con bonifico' }, { status: 400 })
+    const nome = pulisciNome(b.mittente)
+    const { error } = await admin.from('ricariche_check').update({ mittente: nome || null, metodo: 'bonifico' }).eq('id', id).eq('master_id', s.master_id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    if (nome) {
+      try {
+        await ricordaPagatore(admin, { masterId: s.master_id, targetTipo: riga.target_tipo, targetId: riga.target_id, nome, origine: 'ricarica', createdBy: s.user.id, usato: true })
+      } catch (e: any) { return NextResponse.json({ error: 'Nome salvato sulla ricarica ma non sul cliente: ' + (e?.message || e) }, { status: 500 }) }
+    }
+    const { data: fresh } = await admin.from('ricariche_check').select('*').eq('id', id).maybeSingle()
+    return NextResponse.json({ ok: true, riga: fresh ? arricchisci(fresh) : null })
+  }
 
   if (azione === 'elimina') {
     const { error } = await admin.from('ricariche_check').delete().eq('id', id).eq('master_id', s.master_id)

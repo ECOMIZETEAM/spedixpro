@@ -25,6 +25,7 @@ export default function CheckRicariche() {
   const [cerca, setCerca] = useState('')
   const [facendo, setFacendo] = useState('')
   const [err, setErr] = useState('')
+  const [contabilita, setContabilita] = useState(false)
   const dialog = useDialog()
 
   function carica() {
@@ -34,7 +35,7 @@ export default function CheckRicariche() {
     if (cerca.trim()) qs.set('q', cerca.trim())
     fetch(`/api/statistiche/check-ricariche?${qs.toString()}`)
       .then(r => r.json())
-      .then(d => { setRighe(Array.isArray(d?.righe) ? d.righe : []); setRiep(d?.riepilogo || null); setLoading(false) })
+      .then(d => { setRighe(Array.isArray(d?.righe) ? d.righe : []); setRiep(d?.riepilogo || null); setContabilita(d?.contabilita === true); setLoading(false) })
       .catch(() => { setLoading(false); setErr('Errore nel caricamento') })
   }
   useEffect(() => { carica() }, [stato])
@@ -63,6 +64,20 @@ export default function CheckRicariche() {
       else if (d?.riga) setRighe(prev => prev.map(r => (r.id === id ? d.riga : r)))
       carica()
     } catch { setErr('Errore di rete — ricarica la pagina') } finally { setFacendo('') }
+  }
+
+  // Chi ha fatto il bonifico, anche dopo la ricarica: resta pure fra i nomi del cliente.
+  async function scriviMittente(r: any) {
+    if (facendo) return
+    const nome = await dialog.prompt({ title: `Chi ha fatto il bonifico per ${r.target_nome || 'questa ricarica'}?`, placeholder: 'il nome come compare in banca, es. SALVATORE PELLE', defaultValue: r.mittente || '' })
+    if (nome === null) return
+    setFacendo(r.id + 'mittente'); setErr('')
+    try {
+      const res = await fetch('/api/statistiche/check-ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: r.id, azione: 'mittente', mittente: nome }) })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d?.error) { setErr(d?.error || 'Non salvato'); return }
+      if (d?.riga) setRighe(prev => prev.map(x => (x.id === r.id ? d.riga : x)))
+    } catch { setErr('Errore di rete') } finally { setFacendo('') }
   }
 
   const dataOra = (s: any) => { try { return new Date(s).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
@@ -143,7 +158,11 @@ export default function CheckRicariche() {
                       <span style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 700, color: r.target_tipo === 'master' ? '#7c3aed' : '#0891b2', background: r.target_tipo === 'master' ? '#f3e8ff' : '#ecfeff', padding: '1px 6px', borderRadius: '4px' }}>
                         {r.target_tipo === 'master' ? 'sotto-master' : 'cliente'}
                       </span>
-                      {r.mittente && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>bonifico da {r.mittente}</div>}
+                      {r.mittente && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>bonifico da {r.mittente}
+                        {contabilita && <button onClick={() => scriviMittente(r)} disabled={!!facendo} title="Cambia il nome" style={{ background: 'none', border: 'none', color: '#f97316', cursor: 'pointer', fontSize: '11px', padding: '0 4px' }}>✎</button>}</div>}
+                      {!r.mittente && contabilita && r.stato !== 'altro_metodo' && (
+                        <button onClick={() => scriviMittente(r)} disabled={!!facendo} style={{ display: 'block', background: 'none', border: 'none', color: '#f97316', cursor: 'pointer', fontSize: '11px', fontWeight: 600, padding: '2px 0 0' }}>+ chi ha fatto il bonifico?</button>
+                      )}
                     </td>
                     <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{eur(r.importo)}</td>
                     <td style={td}>{badgeStato(r)}</td>
