@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 import { registraAudit } from '@/lib/audit'
 import { COLONNE_PAGAMENTO, assorbitiDelCliente, componiPacco, contrassegnoDi, metodoPagamentoDi } from '@/lib/ordini-uniti'
+import { inDistinta, STATI_SPEDIZIONE_IN_ANNULLO } from '@/lib/evasione-ordini'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -51,12 +52,17 @@ export async function GET(req: NextRequest) {
   const dataSpedizione = new Map<string, string>()
   // Anche numero, tracking e stato: un ordine spedito da noi mostra il suo tracking al posto di «Crea
   // spedizione» (Lorenzo, 22/10/2026: «è stato evaso da MoovExpress stesso, dovrebbe dare il tracking»).
-  const spedizione = new Map<string, { numero: string | null; token: string | null; stato: string | null }>()
+  // `attesa_distinta`: la spedizione non e' ancora in una distinta, quindi l'ordine sul negozio non e' ancora
+  // evaso (lib/evasione-ordini, inDistinta): la pagina lo dice, invece di lasciar pensare a un guasto.
+  const spedizione = new Map<string, { numero: string | null; token: string | null; stato: string | null; attesa_distinta: boolean }>()
   for (let i = 0; i < spedIds.length; i += 200) {
-    const { data } = await supabase.from('spedizioni').select('id,created_at,numero,tracking_number,tracking_token,stato').in('id', spedIds.slice(i, i + 200))
+    const { data } = await supabase.from('spedizioni').select('id,created_at,numero,tracking_number,tracking_token,stato,distinta_id').in('id', spedIds.slice(i, i + 200))
     for (const s of (data || [])) {
       dataSpedizione.set(String(s.id), s.created_at)
-      spedizione.set(String(s.id), { numero: s.tracking_number || s.numero || null, token: s.tracking_token || null, stato: s.stato || null })
+      spedizione.set(String(s.id), {
+        numero: s.tracking_number || s.numero || null, token: s.tracking_token || null, stato: s.stato || null,
+        attesa_distinta: !inDistinta(s) && !STATI_SPEDIZIONE_IN_ANNULLO.includes(String(s.stato || '')),
+      })
     }
   }
   const rows = (ordini as any[]).map(({ d1, d2, d3, d4, d5, d6, d7, d8, n1, n2, ...o }: any) => {

@@ -18,6 +18,34 @@ import { assorbitiDi, assorbitiNelPacco } from '@/lib/ordini-uniti'
 // mancava, e il recupero poteva evadere una spedizione che si stava annullando.
 export const STATI_SPEDIZIONE_IN_ANNULLO = ['annullata', 'annullamento_pending', 'annullamento_manuale', 'storno_richiesto']
 
+// L'EVASIONE SUL NEGOZIO PARTE ALLA CHIUSURA DELLA DISTINTA, NON ALLA CREAZIONE DELL'ETICHETTA.
+//
+// Lorenzo, 10/11/2026, per tutti i negozi. Evadendo all'etichetta, il compratore riceveva l'email «il tuo
+// ordine e' stato spedito» col tracking quando il pacco era ancora dal mittente, e se poi l'etichetta si
+// annullava l'email restava, con un tracking morto. La distinta e' il momento in cui il pacco va al
+// corriere; ed e' anche cio' che dice la guida Shopify sul ciclo di un ordine: l'evasione si crea dopo
+// l'imballaggio, prima del ritiro del corriere.
+// Chi non chiude la distinta a mano ce l'ha la sera, con la chiusura automatica (app/api/distinte/
+// chiusura-automatica, che la segna e mette 'spedita'); chi ha la distinta automatica spenta la chiude
+// lui. E se il tracking va avanti prima (ritirata, in transito), la spedizione non e' piu'
+// 'in_lavorazione' e l'evasione parte lo stesso: il pacco e' gia' in viaggio.
+// Fino ad allora, su Shopify l'ordine e' segnato «In corso» (segnaInCorsoShopify in lib/shopify): senza,
+// restava «Non evaso» mentre da noi era spedito, ed e' la bocciatura 2.1.4 di settembre.
+// Sta qui perche' la leggono l'evasione (lib/fulfillMarketplace), il recupero, che fra i tentativi non
+// deve contare chi aspetta la distinta (dopo otto giri l'ordine sarebbe uscito dai recuperi per sempre),
+// e l'elenco ordini, che lo dice al cliente.
+export function inDistinta(s: { stato?: string | null; distinta_id?: string | null } | null | undefined): boolean {
+  if (!s) return false
+  if (s.distinta_id) return true
+  const stato = String(s.stato || '')
+  return stato !== '' && stato !== 'in_lavorazione'
+}
+
+// L'esito della riga Shopify segnata «In corso» in attesa della distinta. Non e' un'evasione e non e'
+// finale: il recupero la riprende, e se la spedizione si annulla prima della distinta l'annullo su
+// Shopify riapre l'ordine (lib/shopify, esitoAnnulloOrdine).
+export const ESITO_IN_CORSO = 'in_corso'
+
 // Oltre questi giri falliti (uno ogni 20 minuti, circa 2h40) il recupero si arrende su un ordine: e' un
 // errore permanente (negozio giu' da giorni, chiave in sola lettura). Lo usano il recupero delle evasioni
 // e l'annullo delle evasioni su Shopify.

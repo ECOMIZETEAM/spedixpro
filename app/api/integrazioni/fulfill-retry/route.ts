@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
-import { ESITI_DA_RIPETERE, MAX_TENTATIVI_NEGOZIO, PIATTAFORME_UNITI_EVASI, STATI_SPEDIZIONE_IN_ANNULLO, spedizioneDelPacco } from '@/lib/evasione-ordini'
+import { ESITI_DA_RIPETERE, MAX_TENTATIVI_NEGOZIO, PIATTAFORME_UNITI_EVASI, STATI_SPEDIZIONE_IN_ANNULLO, inDistinta, spedizioneDelPacco } from '@/lib/evasione-ordini'
 import { PREFISSO_ANNULLO, riconciliaEvasioniAnnullate } from '@/lib/shopify'
 
 export const dynamic = 'force-dynamic'
@@ -96,12 +96,16 @@ export async function GET(req: NextRequest) {
     // torna "Bad Request" (e' il guasto che ha fermato purge-pii da settembre 2026).
     const sped: any[] = []
     for (let i = 0; i < spedIds.length; i += 200) {
-      const { data } = await admin.from('spedizioni').select('id,tracking_number,stato').in('id', spedIds.slice(i, i + 200))
+      const { data } = await admin.from('spedizioni').select('id,tracking_number,stato,distinta_id').in('id', spedIds.slice(i, i + 200))
       sped.push(...(data || []))
     }
+    // ...e nemmeno quelle che aspettano la DISTINTA (inDistinta, lib/evasione-ordini, dal 10/11/2026):
+    // fulfillMarketplace non le evade, e contarle come fallite vorrebbe dire arrendersi dopo otto giri,
+    // cioe' prima della chiusura serale, e non evaderle mai piu'.
     const prontiSet = new Set(sped
       .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number))
       .filter((s: any) => !STATI_SPEDIZIONE_IN_ANNULLO.includes(String(s.stato || '')))
+      .filter((s: any) => inDistinta(s))
       .map((s: any) => s.id))
 
     // fulfillMarketplace filtra da sé le LDV provvisorie e salta i già evasi.

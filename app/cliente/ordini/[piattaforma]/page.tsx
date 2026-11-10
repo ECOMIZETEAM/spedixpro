@@ -62,6 +62,10 @@ function badgeEvasione(o:any){
   if (o.fulfillment_stato==='attesa' || o.fulfillment_stato==='esterno') return <span title={o.fulfillment_errore || ''} style={{color:'#1d4ed8',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#eff6ff',border:'1px solid #bfdbfe',cursor:'help',whiteSpace:'nowrap'}}>{o.fulfillment_stato==='attesa' ? '⏳ In attesa dal negozio' : 'ℹ Evasione del magazzino esterno'}</span>
   // IL NEGOZIANTE HA ANNULLATO L'ORDINE dopo che l'avevamo preso: se l'etichetta c'e', il pacco non deve
   // partire. Prima la riga restava «✓ Spedito» senza nessun avviso.
+  // IN ATTESA DELLA DISTINTA (dal 10/11/2026): l'evasione col tracking parte quando la spedizione entra in una
+  // distinta (lib/evasione-ordini, inDistinta). Su Shopify intanto l'ordine e' «In corso». Non e' un guasto:
+  // stesso blu dell'attesa.
+  if (o.fulfillment_stato!=='ok' && o.fulfillment_stato!=='errore' && (o.fulfillment_stato==='in_corso' || o.spedizione?.attesa_distinta)) return <span title={o.piattaforma==='shopify' ? 'Su Shopify l\'ordine risulta «In corso». Il tracking arriva al negozio, con l\'email al compratore, alla chiusura della distinta (la sera, se non la chiudi prima).' : 'Il tracking arriva al negozio alla chiusura della distinta (la sera, se non la chiudi prima).'} style={{color:'#1d4ed8',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#eff6ff',border:'1px solid #bfdbfe',cursor:'help',whiteSpace:'nowrap'}}>⏳ Evaso alla chiusura distinta</span>
   if (o.fulfillment_stato==='annullato_store') return <span title={o.fulfillment_errore || 'Ordine annullato sul negozio'} style={{color:'#991b1b',fontSize:'10px',fontWeight:700,padding:'2px 6px',borderRadius:'999px',background:'#fee2e2',border:'1px solid #fecaca',cursor:'help',whiteSpace:'nowrap'}}>⛔ Annullato sul negozio</span>
   return null
 }
