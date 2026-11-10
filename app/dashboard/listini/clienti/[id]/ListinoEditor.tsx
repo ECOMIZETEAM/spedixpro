@@ -419,6 +419,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     const r = (supplementiEsistenti||[]).find(s => s.tipo === 'sponda')
     return r ? Number(r.valore) || 0 : 0
   })
+  // Minimo a collo (multicollo): euro per collo, 0 = non prezzato (lib/pricing → noloMulticollo).
+  const [minimoCollo, setMinimoCollo] = useState<number>(() => {
+    if (bozza?.minimoCollo != null) return bozza.minimoCollo
+    return Math.max(0, ...(supplementiEsistenti||[]).filter(s => s.tipo === 'minimo_collo').map(s => Number(s.valore) || 0))
+  })
 
   // Salva la bozza in sessionStorage ad ogni modifica (persiste tra le navigazioni), con l'impronta del
   // listino del server da cui e' partita.
@@ -428,10 +433,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     primoGiro.current = false
     if (cambiata && !modificata) setModificata(true)
     try {
-      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg }))
+      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo }))
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg])
+  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo])
 
   function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
   function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
@@ -458,6 +463,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             giacenze: { servizi: giacenzeServizi, apertura: aperturaGiacenza },
             ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
             sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
+            minimo_collo: minimoCollo,
             ...(conSupplementi ? { supplementiCorriere } : {}),
           }
         })
@@ -522,7 +528,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const supplementoSotto = conSupplementi && supplementiCorriere.some(v => { const c = costiSupplMaster?.[`supplemento_corriere|${v.nome.toLowerCase()}`]?.valore || 0; return c > 0 && (Number(v.prezzo) || 0) < c - 0.005 })
   const qualcheGiacenzaSotto = aperturaSotto || supplementoSotto || giacenzeServizi.some((s: any) => servizioSotto('giacenza', s).sotto)
   const qualcheAccessorioSotto = serviziAccessori.some((s: any) => servizioSotto('accessorio', s).sotto)
-  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto }
+  // Minimo a collo: sotto costo se e' piu' basso del mio. Vuoto non e' una perdita: il multicollo su
+  // quel contratto semplicemente non si vende (lo dice la nota sotto il campo).
+  const costoMinimoCollo = costiSupplMaster?.['minimo_collo|minimo a collo']?.valore || 0
+  const minimoCollSotto = costoMinimoCollo > 0 && (Number(minimoCollo) || 0) > 0 && (Number(minimoCollo) || 0) < costoMinimoCollo - 0.005
+  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto, extra: minimoCollSotto }
 
   // Corpo dell'editor del contratto aperto (dentro la tendina)
   const editorContratto = (
@@ -842,6 +852,21 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             </div>
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
+
+          <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'28px 0 4px'}}>Multicollo: minimo a collo</div>
+          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Con due o più colli la spedizione costa almeno <b>numero di colli × minimo</b>; se la fascia sul peso totale è più cara, vale la fascia. Es: minimo 9,00 € → 4 colli da 5 kg = 4 × 9,00 = 36,00 €, anche se la fascia dei 20 kg costa 16,00 €.</div>
+          <div style={{display:'flex',gap:'12px',alignItems:'flex-end',flexWrap:'wrap' as const}}>
+            <div>
+              <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Minimo per collo (€)</label>
+              <NumInput value={minimoCollo} onChange={setMinimoCollo} style={{...inp,width:'120px',textAlign:'right' as const,...(minimoCollSotto?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
+            </div>
+            {costoMinimoCollo > 0 && <span style={{fontSize:'12px',color: minimoCollSotto ? '#dc2626' : '#666',paddingBottom:'8px'}}>il tuo costo: {eurE(costoMinimoCollo)} € a collo</span>}
+          </div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>
+            {costoMinimoCollo > 0
+              ? <>Il contratto ha un minimo a collo: finché questo campo è vuoto, il multicollo su questo contratto <b>non è disponibile</b> per chi usa questo listino.</>
+              : <>Lascia 0 se il contratto non ha un minimo a collo.</>}
+          </div>
         </div>
       )}
     </div>

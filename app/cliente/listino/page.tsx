@@ -34,6 +34,8 @@ const TABS: [string, string][] = [
   // motore dei prezzi, e qui non esisteva nessuna scheda in cui leggerla: la trovavi solo in
   // fattura. Il master nel suo editor la vede da sempre.
   ['sponda', 'Sponda idraulica'],
+  // Il minimo a collo cambia la cifra del multicollo: chi lo paga deve poterlo leggere qui.
+  ['minimo_collo', 'Multicollo'],
   ['giacenza', 'Giacenze'],
   ['ritiro', 'Ritiro'],
 ]
@@ -149,6 +151,7 @@ export default function ClienteListinoPage() {
 }
 
 function SupplTable({ tipo, righe }: { tipo: string; righe: any[] }) {
+  if (tipo === 'minimo_collo') return <MinimoCollo righe={righe} />
   if (!righe.length) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna voce impostata per questo corriere.</div>
 
   // SPONDA: una riga sola, con una regola sua. La soglia e' solo il grilletto — superata, il prezzo
@@ -233,3 +236,18 @@ const th = { fontSize: '11px', fontWeight: 700 as const, color: '#8a8a8a', textT
 const thL = { ...th, textAlign: 'left' as const }
 const td = { fontSize: '12.5px', color: '#1a1a1a', padding: '8px 10px', borderBottom: '1px solid #f6f6f6', textAlign: 'center' as const, whiteSpace: 'nowrap' as const }
 const tdL = { ...td, textAlign: 'left' as const, fontWeight: 600 as const, color: '#444' }
+
+// MINIMO A COLLO (multicollo): la stessa regola del motore (lib/pricing → noloMulticollo), a parole.
+function MinimoCollo({ righe }: { righe: any[] }) {
+  const v = Math.max(0, ...righe.map((r: any) => Number(r.prezzo) || 0))
+  if (!(v > 0)) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessun minimo a collo su questo corriere: il multicollo si paga con la fascia del peso totale.</div>
+  return (
+    <div style={{ fontSize: '12.5px', color: '#1a1a1a' }}>
+      <div style={{ marginBottom: '8px' }}>Con due o più colli: almeno <b>{eur(v)} per collo</b>.</div>
+      <div style={{ fontSize: '12px', color: '#666' }}>
+        Si paga il maggiore fra la fascia del peso totale e il numero di colli × {eur(v)}.
+        Esempio: 3 colli da 2 kg pagano almeno 3 × {eur(v)} = <b>{eur(3 * v)}</b>, anche se la fascia dei 6 kg costa meno.
+      </div>
+    </div>
+  )
+}

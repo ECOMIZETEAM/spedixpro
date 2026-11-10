@@ -261,7 +261,10 @@ export async function rilevaSottoCosto(admin: any, masterId: string): Promise<Ri
       }
     }
 
-    // ── ALTRI (ritiro…): come prima, fisso contro fisso e percentuale contro percentuale.
+    // ── ALTRI (ritiro, minimo a collo…): come prima, fisso contro fisso e percentuale contro percentuale.
+    // Il minimo a collo che MANCA, sui contratti che lo richiedono (settings del detentore), non e' una
+    // perdita: senza la voce il multicollo non si vende (lib/pricing → noloMulticollo). Si segnala solo
+    // quello scritto sotto costo.
     for (const s of cli) {
       if (['giacenza', 'giacenza_apertura', 'contrassegno', 'assicurazione', 'accessorio', 'sponda'].includes(s.tipo)) continue
       const c = costo.find((x: any) => x.tipo === s.tipo && String(x.nome || '').toLowerCase().trim() === String(s.nome || '').toLowerCase().trim())
@@ -269,7 +272,7 @@ export async function rilevaSottoCosto(admin: any, masterId: string): Promise<Ri
       const v = Number(s.valore) || 0, p = percDi(s.descrizione), cv = Number(c.valore) || 0, cp = percDi(c.descrizione)
       if (v >= cv - 0.005 && p >= cp - 0.005) continue
       righe.push({
-        ...base(listinoId, corriereId), zona: s.tipo === 'supplemento_corriere' ? 'supplementi del corriere' : s.tipo, tipo: 'supplemento', chiave: `s:${s.id}`, supplemento_id: s.id,
+        ...base(listinoId, corriereId), zona: s.tipo === 'supplemento_corriere' ? 'supplementi del corriere' : s.tipo === 'minimo_collo' ? 'multicollo' : s.tipo, tipo: 'supplemento', chiave: `s:${s.id}`, supplemento_id: s.id,
         descrizione: `${s.nome || s.tipo}${p < cp - 0.005 ? ` (tu ${cp}%, lui ${p}%)` : ''}`,
         prezzo_cliente: v, costo_tuo: cv, differenza: r2(v - cv),
       })

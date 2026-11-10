@@ -21,7 +21,7 @@ import { EMAIL_PER_CORRIERE,
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
-import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti, TIPO_MINIMO_COLLO, minimoACollo, noloMulticollo, regoleMulticollo, type RegolaMulticollo } from '@/lib/pricing'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -445,6 +445,21 @@ export async function calcolaTariffeCliente(
   let esclusiContrassegno = 0, esclusiAssic = 0, esclusiQuota = 0
   let ultimoErroreQuota = ''
 
+  // MINIMO A COLLO del listino del cliente e regola del contratto (lib/pricing → noloMulticollo): la
+  // stessa regola dell'addebito. Solo col multicollo: per un collo solo non si legge niente in piu'.
+  const minimoCollo = new Map<string, number>()
+  let regoleMC = new Map<string, RegolaMulticollo>()
+  if (tuttiColli.length > 1) {
+    const idsMC = Array.from(fascePerCorriere.keys())
+    const [{ data: supMC }, regole] = await Promise.all([
+      supabase.from('listini_clienti_supplementi').select('corriere_id,tipo,valore')
+        .eq('listino_id', cliente.listino_cliente_id).eq('tipo', TIPO_MINIMO_COLLO).in('corriere_id', idsMC),
+      regoleMulticollo(idsMC),
+    ])
+    for (const s of (supMC || []) as any[]) minimoCollo.set(s.corriere_id, Math.max(minimoCollo.get(s.corriere_id) || 0, minimoACollo([s])))
+    regoleMC = regole
+  }
+
   // CONTRATTI IN PAUSA — ramo CLIENTE (qui passa la quasi totalita' delle spedizioni).
   // Il controllo esisteva solo nel ramo "spedizione propria" del master: nel ramo cliente il
   // contratto sospeso veniva quotato col suo prezzo, l'utente lo sceglieva, compilava tutto e
@@ -516,8 +531,13 @@ export async function calcolaTariffeCliente(
     if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (codRichiesto) esclusiContrassegno++; continue }
     if (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (assicImporto > 0) esclusiAssic++; continue }
 
+    // Multicollo: il minimo a collo prima del fuel, come nell'addebito. null = su questo listino il
+    // multicollo di questo contratto non si vende (voce non prezzata, o paese escluso).
+    const noloMC = noloMulticollo(Number(fasciaGiusta.prezzo), tuttiColli.length, minimoCollo.get(corriereId) || 0, regoleMC.get(corriereId), paeseDest)
+    if (noloMC === null) { esclusiQuota++; ultimoErroreQuota = 'multicollo non prezzato per questo corriere'; continue }
+    const minimoVince = noloMC > Number(fasciaGiusta.prezzo)
     // Sponda e peso fatturato usano il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico).
-    const nolo = Number(fasciaGiusta.prezzo)
+    const nolo = noloMC
     const fuelPct = Number((fasciaGiusta as any).fuel) || 0
     const costoFuel = nolo * fuelPct / 100
     const sponda = calcolaSponda(corriereId, pesoPerFascia)
@@ -556,7 +576,9 @@ export async function calcolaTariffeCliente(
       // Avviso fuori sagoma (solo dove il contratto ha la regola, es. GLS di MULTIEXPRESS): NON blocca e
       // NON addebita — il supplemento lo fattura il corriere (rientra post-fattura). Solo un cartello.
       avviso_fuori_sagoma: avvisoFuoriSagoma(settsC, tuttiColli),
-      listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
+      listino_fascia: minimoVince
+        ? `${tuttiColli.length} colli × ${(minimoCollo.get(corriereId) || 0).toFixed(2).replace('.', ',')} € (minimo a collo)`
+        : `fino a ${fasciaGiusta.peso_max}kg`,
       // I servizi accessori si OFFRONO solo dove si TRASMETTONO davvero: canali diretti gls/brt, E
       // SPEDISCI di marca GLS (PROVATO 3/9: spedisci inoltra i codici al corriere, es. Exchange 200001 →
       // GLS 24 sull'etichetta — vedi codiceServizioSpedisci in corriere-logo). Sugli altri rivenditori

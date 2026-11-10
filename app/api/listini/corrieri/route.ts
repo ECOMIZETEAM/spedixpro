@@ -2,6 +2,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
+import { TIPO_MINIMO_COLLO, minimoACollo } from '@/lib/pricing'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -208,6 +209,9 @@ export async function POST(req: NextRequest) {
   const { data: supplCorrierePrima } = await supabase.from('listini_corrieri_supplementi')
     .select('tipo,nome,valore,tipo_calcolo,descrizione').in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
     .eq('tipo', TIPO_SUPPLEMENTO_CORRIERE).order('id', { ascending: true })
+  // Stessa cosa per il minimo a collo: una pagina aperta prima che la voce esistesse la cancellerebbe.
+  const { data: minimoCollPrima } = await supabase.from('listini_corrieri_supplementi')
+    .select('tipo,valore').in('listino_id', masterListinoIds).eq('corriere_id', corriereId).eq('tipo', TIPO_MINIMO_COLLO)
   await supabase.from('listini_corrieri_fasce').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
   await supabase.from('listini_corrieri_supplementi').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
 
@@ -270,6 +274,13 @@ export async function POST(req: NextRequest) {
         righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'sponda', nome: 'Sponda', valore: prezzo_kg, tipo_calcolo: 'per_kg', descrizione: JSON.stringify({ soglia_kg }) })
       }
     }
+  }
+  // MINIMO A COLLO (multicollo, lib/pricing → noloMulticollo): euro per collo; 0 o vuoto = non prezzato.
+  const minimoCollo = supplementi?.minimo_collo !== undefined
+    ? Number(supplementi.minimo_collo) || 0
+    : minimoACollo(minimoCollPrima || [])
+  if (minimoCollo > 0) {
+    righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: TIPO_MINIMO_COLLO, nome: 'Minimo a collo', valore: minimoCollo, tipo_calcolo: 'per_collo' })
   }
   const { createAdminSupabase: _adminSuppl } = await import('@/lib/supabase-admin')
   if (Array.isArray(supplementi?.supplementiCorriere) && await corriereConSupplementi(_adminSuppl(), corriereId)) {

@@ -101,8 +101,9 @@ export async function POST(req: NextRequest) {
         prima = sc.prezzo_fisso; dopo = alza(prima); primaP = sc.perc; dopoP = alzaPerc(primaP)
         d.prezzo_fisso = String(dopo); if (dopoP > 0) d.perc = String(dopoP)
         agg = { valore: dopo, descrizione: JSON.stringify(d) }
-      } else if (['giacenza_apertura', 'sponda', 'ritiro'].includes(s.tipo)) {
-        // un importo solo, nella colonna `valore`: la descrizione (soglia della sponda, % del ritiro) resta
+      } else if (['giacenza_apertura', 'sponda', 'ritiro', 'minimo_collo'].includes(s.tipo)) {
+        // un importo solo, nella colonna `valore`: la descrizione (soglia della sponda, % del ritiro) resta.
+        // Il minimo a collo e' euro per collo, letto solo da `valore` (lib/pricing → minimoACollo).
         prima = Number(s.valore) || 0; dopo = alza(prima)
         agg = { valore: dopo }
       } else {

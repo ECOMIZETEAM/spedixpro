@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
+import { TIPO_MINIMO_COLLO, minimoACollo } from '@/lib/pricing'
 
 // La propagazione a cascata tocca decine di sotto-master: col default (15s) la funzione veniva
 // TRONCATA a meta' -> propagazione parziale e prezzi disallineati a valle, in silenzio.
@@ -183,6 +184,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
           }
         }
       } catch (e) { console.error('Sponda di default dal listino corriere:', e) }
+    }
+
+    // MINIMO A COLLO (multicollo, lib/pricing → noloMulticollo): euro per collo, 0 = non prezzato.
+    // NIENTE valore di default dal costo, a differenza della sponda: un minimo non prezzato esclude il
+    // multicollo finche' il master non decide a quanto venderlo (regola di Lorenzo, 10/11/2026).
+    // Se la pagina non lo manda (aperta prima che la voce esistesse) resta quello di prima.
+    {
+      const minimo = supplementi.minimo_collo !== undefined
+        ? Number(supplementi.minimo_collo) || 0
+        : minimoACollo(_supplOld || [])
+      if (minimo > 0) righeSupplementi.push({ listino_id: id, corriere_id, tipo: TIPO_MINIMO_COLLO, nome: 'Minimo a collo', valore: minimo, tipo_calcolo: 'per_collo' })
     }
 
     // Supplementi del corriere (fuori misura…): dalla pagina se li manda, altrimenti restano quelli di

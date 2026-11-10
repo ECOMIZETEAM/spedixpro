@@ -123,6 +123,7 @@ export async function GET() {
           giacenza: [...perTipo('giacenza'), ...perTipo('giacenza_apertura')],
           ritiro: perTipo('ritiro'),
           sponda: perTipo('sponda'),
+          minimo_collo: perTipo('minimo_collo'),
         },
       }
     })

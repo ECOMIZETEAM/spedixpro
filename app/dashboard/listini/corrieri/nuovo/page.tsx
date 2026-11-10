@@ -145,6 +145,8 @@ export default function ListinoCorrierePage() {
   const [ritiroPercNolo, setRitiroPercNolo] = useState(0)
   const [spondaSoglia, setSpondaSoglia] = useState(150)
   const [spondaPrezzoKg, setSpondaPrezzoKg] = useState(0)
+  // Minimo a collo (multicollo): euro per collo, 0 = non prezzato (lib/pricing → noloMulticollo).
+  const [minimoCollo, setMinimoCollo] = useState(0)
 
   // ── Duplica il COSTO di questo contratto in un LISTINO CLIENTE (nuovo o esistente) + maggiorazione ──
   const [dupOpen, setDupOpen] = useState(false)
@@ -223,6 +225,7 @@ export default function ListinoCorrierePage() {
     const spondaDescr = spondaRiga ? parseDescr(spondaRiga.descrizione) : null
     setSpondaSoglia(spondaDescr?.soglia_kg ? Number(spondaDescr.soglia_kg)||150 : 150)
     setSpondaPrezzoKg(spondaRiga ? Number(spondaRiga.valore)||0 : 0)
+    setMinimoCollo(Math.max(0, ...(data.supplementi||[]).filter((s:any) => s.tipo === 'minimo_collo').map((s:any) => Number(s.valore)||0)))
     setLoading(false); setPronto(true)
   }
 
@@ -288,6 +291,7 @@ export default function ListinoCorrierePage() {
       giacenze: { servizi: giacenzeServizi, apertura: aperturaGiacenza },
       ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
       sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
+      minimo_collo: minimoCollo,
       ...(conSupplementi ? { supplementiCorriere } : {}),
     }
 
@@ -575,6 +579,14 @@ export default function ListinoCorrierePage() {
             </div>
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
+
+          <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'28px 0 4px'}}>Multicollo: minimo a collo</div>
+          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Con due o più colli la spedizione costa almeno <b>numero di colli × minimo</b>; se la fascia sul peso totale è più cara, vale la fascia. Es: minimo 7,85 € → 4 colli da 5 kg = 4 × 7,85 = 31,40 €, anche se la fascia dei 20 kg costa 13,43 €.</div>
+          <div>
+            <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Minimo per collo (€)</label>
+            <input type="number" step="0.01" value={minimoCollo||''} onChange={e=>setMinimoCollo(parseFloat(e.target.value)||0)} disabled={soloLetturaCorriere} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/>
+          </div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 se il contratto non ha un minimo a collo. Se il corriere lo richiede e non è prezzato, il multicollo su questo contratto non è disponibile.</div>
         </div>
       )}
     </div>

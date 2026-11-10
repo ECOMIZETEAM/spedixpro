@@ -369,6 +369,78 @@ export function supplPresenteMax(suppl: any[], tipo: string, pesoReale?: number 
   return { presente: max > 0, max }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MINIMO A COLLO (multicollo) — UNA regola sola, la chiamano tutti i calcoli.
+//
+// Il listino prezza il multicollo sul PESO TOTALE, come un pacco solo. Certi corrieri no: UPS fa
+// pagare la spedizione a piu' colli "il maggiore fra la tariffa sul peso totale e un minimo per ogni
+// collo". Misurato sui preventivi del fornitore il 10/11/2026 (UPS Europa, Milano → Berlino):
+//   1 collo da 5 kg   →  9,90         (la fascia normale)
+//   2 colli da 1 kg   → 15,70 = 2 × 7,85
+//   2 colli da 10 kg  → 15,70 = 2 × 7,85   (stesso prezzo: il peso non conta, conta il numero)
+//   4 colli da 5 kg   → 31,39 = 4 × 7,85
+// Il listino diceva 20 kg → 13,43. Caso vero 1ZGE70566822631916 (14/10, 4 colli da 5 kg verso la
+// Germania): MULTIEXPRESS ha pagato 31,39 al fornitore e incassato 13,53 da chi stava sotto.
+//
+// La VOCE (quanto vale il minimo) sta nel listino di ogni livello, come la sponda: riga dei
+// supplementi con tipo 'minimo_collo', `valore` = euro per collo, sullo stesso piano delle fasce
+// (prima del fuel). La REGOLA (se il contratto la vuole) sta solo sul contratto del DETENTORE
+// (`settings.multicollo_minimo_a_collo`), letta attraverso corrieri.contratto_id: le copie dei
+// sotto-master non portano le impostazioni del detentore (415 su 777 diverse il 28/10), il puntatore
+// al contratto invece lo tiene il database. Se il contratto la vuole e un livello non ha prezzato la
+// voce, il multicollo su quel contratto NON si vende ("non hai il prezzo? non usi e non vendi").
+//
+// `multicollo_paesi_esclusi`: verso questi paesi il multicollo non si vende proprio. UPS verso il
+// Regno Unito: 2 colli da 1 kg 59,51 contro 13,08 del collo singolo (preventivi del 10/11) — nessun
+// minimo a collo lo rappresenta.
+//
+// Un collo solo non passa mai di qui: per il monocollo non cambia niente, nemmeno una lettura.
+export const TIPO_MINIMO_COLLO = 'minimo_collo'
+
+export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[] }
+
+// Il valore della voce in un elenco di supplementi (gia' filtrato per listino e contratto). 0 = non
+// prezzata. Con due righe (un contratto salvato in due listini dello stesso master, succede) vince la
+// piu' alta: deterministico, e mai sotto il prezzo che il master ha scritto.
+export function minimoACollo(suppl: any[]): number {
+  let v = 0
+  for (const s of (suppl || [])) if (s?.tipo === TIPO_MINIMO_COLLO) v = Math.max(v, Number(s.valore) || 0)
+  return v
+}
+
+// Il nolo di una spedizione a `colli` colli con la regola del minimo. null = su questo livello il
+// multicollo non si vende (paese escluso, o regola del contratto e voce non prezzata).
+export function noloMulticollo(nolo: number, colli: number, minimo: number, regola: RegolaMulticollo | undefined, paese?: string): number | null {
+  if (!(colli > 1)) return nolo
+  const p = String(paese || 'IT').toUpperCase().trim()
+  if (regola?.paesiEsclusi.includes(p)) return null
+  if (minimo > 0) return Math.max(nolo, colli * minimo)
+  return regola?.minimoObbligatorio ? null : nolo
+}
+
+// La regola di ogni contratto, letta sul contratto del DETENTORE. Client di servizio, sempre: il
+// contratto del detentore e' di un altro master, e chi prezza la spedizione propria lo fa col token
+// della sua sessione, che quella riga non la vede. Si leggono solo `contratto_id` e `settings` — mai
+// le credenziali. Lettura fallita = nessuna regola: si applica comunque il minimo dove e' prezzato.
+export async function regoleMulticollo(corriereIds: string[]): Promise<Map<string, RegolaMulticollo>> {
+  const out = new Map<string, RegolaMulticollo>()
+  const ids = Array.from(new Set((corriereIds || []).filter(Boolean)))
+  if (!ids.length) return out
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const admin = createAdminSupabase()
+  const { data: righe } = await admin.from('corrieri').select('id,contratto_id').in('id', ids)
+  const detIds = Array.from(new Set((righe || []).map((r: any) => r.contratto_id || r.id).filter(Boolean))) as string[]
+  if (!detIds.length) return out
+  const { data: det } = await admin.from('corrieri').select('id,settings').in('id', detIds)
+  const settPerDet = new Map<string, any>((det || []).map((d: any) => [d.id, d.settings || {}]))
+  for (const r of (righe || []) as any[]) {
+    const s = settPerDet.get(r.contratto_id || r.id) || {}
+    const esclusi = Array.isArray(s.multicollo_paesi_esclusi) ? s.multicollo_paesi_esclusi.map((x: any) => String(x).toUpperCase().trim()) : []
+    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi })
+  }
+  return out
+}
+
 export type RisultatoPrezzo = {
   prezzo: number
   zona: string
@@ -605,6 +677,21 @@ export async function calcolaPrezzoListino(
     ? [[params.corriereId, fascePerCorriere.get(params.corriereId)!]] as [string, any[]][]
     : Array.from(fascePerCorriere.entries())
 
+  // MINIMO A COLLO (vedi noloMulticollo): solo col multicollo, il monocollo non legge niente in piu'.
+  const colli = packages.length
+  const minimoPerCorr = new Map<string, number>()
+  let regolaPerCorr = new Map<string, RegolaMulticollo>()
+  if (colli > 1) {
+    const idsC = entries.map(([cId]) => cId)
+    const [{ data: supM }, regole] = await Promise.all([
+      supabase.from('listini_clienti_supplementi').select('corriere_id,tipo,valore')
+        .eq('listino_id', listinoId).eq('tipo', TIPO_MINIMO_COLLO).in('corriere_id', idsC),
+      regoleMulticollo(idsC),
+    ])
+    for (const s of (supM || []) as any[]) minimoPerCorr.set(s.corriere_id, Math.max(minimoPerCorr.get(s.corriere_id) || 0, minimoACollo([s])))
+    regolaPerCorr = regole
+  }
+
   for (const [cId, fasceDelCorriere] of entries) {
     const settsC = (fasceDelCorriere[0]?.corrieri as any)?.settings || {}
     // La regola sta in un posto solo: qui mancava la soglia "peso reale fino a X kg", e questo e'
@@ -615,7 +702,11 @@ export async function calcolaPrezzoListino(
     const fascia = trovaFascia(fasceDelCorriere, pesoPerFascia, tagliaDaColli(packages))
     if (!fascia) continue
     const _fuelPct = Number((fascia as any).fuel) || 0
-    const prezzo = Number(fascia.prezzo) * (1 + _fuelPct / 100)
+    // Multicollo: il minimo a collo sta sullo stesso piano della fascia, il fuel si applica dopo.
+    // Nei ricalcoli delle rettifiche (zonaForzata) non si esclude, come per l'origine.
+    const noloFascia = noloMulticollo(Number(fascia.prezzo), colli, minimoPerCorr.get(cId) || 0, regolaPerCorr.get(cId), params.paese)
+    if (noloFascia === null && !params.zonaForzata) continue
+    const prezzo = (noloFascia ?? Number(fascia.prezzo)) * (1 + _fuelPct / 100)
     if (!isFinite(prezzo)) continue
     if (!miglior || prezzo < miglior.prezzo) {
       miglior = { prezzo, corriereId: cId, pesoMax: parseFloat(fascia.peso_max) || 0 }
@@ -837,10 +928,6 @@ export async function calcolaPrezzoCorriereDettaglio(
       } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
   }
-  // Fuel %: supplemento percentuale sul nolo di fascia (scorporato).
-  const noloBase = prezzo
-  const fuelAmt = fuelPct ? noloBase * (fuelPct / 100) : 0
-
   // ORDINE per id: con supplementi duplicati (piu' listini corrieri per lo stesso contratto) gli
   // scaglioni con lo STESSO valore_max restavano nell'ordine casuale del database -> la commissione
   // contrassegno/assicurazione poteva cambiare tra una chiamata e l'altra. Ora la scelta e' stabile.
@@ -850,6 +937,19 @@ export async function calcolaPrezzoCorriereDettaglio(
     .in('listino_id', listinoIds)
     .eq('corriere_id', corriereId)
     .order('id', { ascending: true })
+
+  // MINIMO A COLLO (vedi noloMulticollo): sullo stesso piano della fascia, prima del fuel. Solo col
+  // multicollo; nei ricalcoli delle rettifiche (zonaForzata) non si esclude, come per l'origine.
+  if (packages.length > 1) {
+    const regola = (await regoleMulticollo([corriereId])).get(corriereId)
+    const n = noloMulticollo(prezzo, packages.length, minimoACollo(suppl || []), regola, params.paese)
+    if (n === null && !params.zonaForzata) return null
+    if (n !== null) prezzo = n
+  }
+
+  // Fuel %: supplemento percentuale sul nolo di fascia (scorporato).
+  const noloBase = prezzo
+  const fuelAmt = fuelPct ? noloBase * (fuelPct / 100) : 0
 
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
@@ -1112,6 +1212,10 @@ async function creaCalcolatoreCorriereBase(
         fuelPct = Number(u.fuel) || 0
       } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
+    // Multicollo: il minimo a collo (vedi noloMulticollo), prima del fuel come nell'addebito. Qui si
+    // mostra un prezzo di ripiego per una spedizione che esiste gia': niente esclusione.
+    const nColliC = Math.max(1, Number(s.colli) || (Array.isArray(s.colli_dettaglio) ? s.colli_dettaglio.length : 0) || 1)
+    if (nColliC > 1) prezzo = Math.max(prezzo, nColliC * minimoACollo(supplPerCorriere.get(s.corriere_id) || []))
     if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
     const nolo = prezzo
@@ -1169,7 +1273,7 @@ async function creaCalcolatoreListinoClienteBase(
 
   const { data: suppl } = await supabase
     .from('listini_clienti_supplementi').select('corriere_id,tipo,valore,tipo_calcolo,descrizione')
-    .eq('listino_id', listinoId).in('tipo', ['contrassegno', 'assicurazione'])
+    .eq('listino_id', listinoId).in('tipo', ['contrassegno', 'assicurazione', TIPO_MINIMO_COLLO])
   const supplPerCorriere = new Map<string, any[]>()
   for (const s of suppl || []) {
     if (!supplPerCorriere.has(s.corriere_id)) supplPerCorriere.set(s.corriere_id, [])
@@ -1280,6 +1384,8 @@ async function creaCalcolatoreListinoClienteBase(
         fuelPct = Number(u.fuel) || 0
       } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
+    // Multicollo: il minimo a collo, come nel calcolatore del costo qui sopra (niente esclusione).
+    if (pacchi.length > 1) prezzo = Math.max(prezzo, pacchi.length * minimoACollo(supplPerCorriere.get(s.corriere_id) || []))
     if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
     const supplList = supplPerCorriere.get(s.corriere_id) || []
