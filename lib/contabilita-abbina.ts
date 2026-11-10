@@ -1,14 +1,17 @@
 // L'ABBINAMENTO fra i bonifici dell'estratto conto e le ricariche del portale (lib/contabilita-banca).
-// Regole decise con Lorenzo il 10/11/2026:
+// Regole di Lorenzo (10/11/2026):
 //  - si cercano in banca solo le ricariche pagate con bonifico (o di prima che esistesse il campo);
-//  - abbinamento SICURO (chi paga e' gia' noto: stesso IBAN o stesso nome fra i pagatori del cliente) = da solo;
-//  - abbinamento PROBABILE (il nome del cliente si legge nel bonifico) = lo conferma il master con un clic;
-//  - bonifico di cui non si sa chi sia = si mostra e basta, il master sceglie il cliente;
-//  - quando il master conferma, il nome e l'IBAN del bonifico restano fra i pagatori del cliente.
-// Casi veri di ottobre su cui e' tarato: SALVATORE PELLE paga "ricarica conto Giulia Arioldi" (il nome del
-// cliente non c'entra: serve il pagatore salvato); LA MARCA SERVICES fa un bonifico per tutte le ricariche
-// del giorno, "Ricarica prepagato del 06/10/2026" = 4 ricariche da 50 €; il solo importo non basta (500 € di
-// POSTA CENTRALE DI STALLONE sarebbero finiti sulla ricarica da 500 € di CAROVILLA dello stesso giorno).
+//  - un bonifico e' di un cliente SOLO se il nome corrisponde: un nome salvato in "Chi paga i bonifici"
+//    (o il suo IBAN), oppure il nome del cliente stesso ("se ricarica Ecomize LL e arriva un bonifico
+//    chiamato Ecomize LL allora ok"). "Non deve matchare i nomi che non corrispondono": niente nomi che si
+//    somigliano, niente causale, niente importo e data da soli. Quando il nome corrisponde, si abbina da solo;
+//  - gli altri bonifici restano senza cliente: il master sceglie di chi sono, e il nome con l'IBAN restano
+//    fra i pagatori di quel cliente.
+// Casi veri di ottobre: SALVATORE PELLE paga "ricarica conto Giulia Arioldi" (lo riconosce solo il pagatore
+// salvato); LA MARCA SERVICES (sul bonifico "LA MARCA SERVICES DI LA MARCA CARMINE") fa un bonifico per tutte le ricariche del giorno, "Ricarica prepagato del
+// 06/10/2026" = 4 ricariche da 50 €; il solo importo sbaglia (500 € di POSTA CENTRALE DI STALLONE sarebbero
+// finiti sulla ricarica da 500 € di CAROVILLA dello stesso giorno); un nome simile sbaglia ("NS CONSULTING
+// SRL" non e' "MD CONSULTING").
 
 export type Target = { tipo: 'cliente' | 'master', id: string }
 export type RicaricaAperta = { id: string, target_tipo: 'cliente' | 'master', target_id: string, importo: number, giorno: string }
@@ -16,10 +19,12 @@ export type PagatoreNoto = { target_tipo: 'cliente' | 'master', target_id: strin
 export type Anagrafica = { tipo: 'cliente' | 'master', id: string, nome: string }
 export type Entrata = { id: string, data: string, nome: string, causale: string, iban: string | null, importo: number }
 
+// 'iban' / 'pagatore' = fra i nomi salvati del cliente; 'cliente' = e' il nome del cliente stesso.
+// 'ignoto' con piu' clienti in `omonimi`: il nome corrisponde a piu' clienti (es. due anagrafiche
+// "LA NUOVA POSTA SNC") e nessuna ricarica dice quale: lo sceglie il master.
 export type Proposta =
-  | { esito: 'sicuro', target: Target, ricariche: string[], perche: 'iban' | 'nome' }
-  | { esito: 'probabile', target: Target, ricariche: string[] }
-  | { esito: 'ignoto', suggerimento: { target: Target, ricarica: string } | null }
+  | { esito: 'sicuro', target: Target, ricariche: string[], perche: 'iban' | 'pagatore' | 'cliente' }
+  | { esito: 'ignoto', omonimi: Target[] }
 
 const GIORNO = 86400000
 const g = (d: string) => Date.parse(d.slice(0, 10) + 'T00:00:00Z') / GIORNO
@@ -27,33 +32,29 @@ const cent = (x: number) => Math.round(x * 100)
 
 /** Il nome per confrontarlo: maiuscole, senza accenti e punteggiatura ("R.I.A.M." = "R I A M"). */
 export function norma(s: string): string {
-  return String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return String(s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/&/g, ' E ').replace(/[^A-Z0-9]+/g, ' ').trim().replace(/\s+/g, ' ')
 }
 
-// Parole che non dicono chi e': forme societarie, articoli, e quelle che hanno in tanti
-// ("POSTA CENTRALE" sono decine di clienti di Ecomize).
-const VUOTE = new Set(('SRL SRLS SNC SAS SPA SS DI DE DEL DELLA DELLE E C A IL LA LE LO GLI SOCIETA RESPONSABILITA LIMITATA ' +
-  'SEMPLIFICATA SEMPLIFIC RESPONSABILI COOPERATIVA DITTA SERVICE SERVICES POSTA POSTE CENTRALE RICARICA CONTO CREDITO ' +
-  'SPEDIZIONI SPEDIZIONE PLAFOND PIATTAFORMA EXPRESS LOGISTICA SERVIZI').split(' '))
-const parole = (s: string) => norma(s).split(' ').filter(w => w.length >= 3 && !VUOTE.has(w))
+// In coda al nome la banca scrive la forma societaria ("S.R.L.S.", "& C. S.A.S."), in testa a volte "DITTA":
+// non fanno parte del nome. Si tolgono le parole di coda finche' sono di questo elenco.
+const FORME = new Set('S R L SRL SRLS SNC SAS SPA SS C E SOCIETA A RESPONSABILITA RESPONSABILI LIMITATA SEMPLIFICATA SEMPLIFIC COOPERATIVA'.split(' '))
+function nomeNudo(s: string): string {
+  const p = norma(s).replace(/^DITTA /, '').split(' ')
+  while (p.length > 1 && FORME.has(p[p.length - 1])) p.pop()
+  return p.join(' ')
+}
 
-// Forme societarie in coda e "DITTA" in testa non fanno parte del nome ("R.I.A.M. LOGISTICA S.R.L.S.").
-const CODA = /( (S R L S|S R L|SRLS|SRL|S N C|SNC|S A S|SAS|S P A|SPA|S S|SOCIETA A RESPONSABILITA LIMITATA( SEMPLIFICATA)?))+$/
-const nomeNudo = (s: string) => norma(s).replace(/^DITTA /, '').replace(CODA, '').trim()
-
-/** Il nome del cliente si legge nel bonifico (nome o causale). Vale se il nome compare per intero
- *  ("LA MARCA SERVICES" dentro "LA MARCA SERVICES DI LA MARCA CARMINE"), oppure se ci sono tutte le sue
- *  parole distintive e sono almeno due. Una parola sola non basta: "NS CONSULTING SRL" non e' "MD CONSULTING".
- *  E ci vuole almeno una parola che non hanno in tanti: "POSTA CENTRALE" da solo non dice chi e'. */
-function nomeClienteNelBonifico(cliente: string, e: Entrata): boolean {
-  const p = parole(cliente)
-  if (!p.some(w => w.length >= 4)) return false
-  const testo = ` ${norma(e.nome + ' ' + e.causale)} `
-  const intero = nomeNudo(cliente)
-  if (intero.length >= 5 && testo.includes(` ${intero} `)) return true
-  const presenti = new Set(parole(e.nome + ' ' + e.causale))
-  return p.length >= 2 && p.every(w => presenti.has(w))
+/** Il nome del bonifico CORRISPONDE a questo nome: uguali a meno di forma societaria, punteggiatura e ordine
+ *  delle parole ("RULLO GIULIANA" = "Giuliana Rullo", "MAYLING S.R.L.S." = "MAYLING"). Nient'altro.
+ *  Non basta che il bonifico cominci col nome del cliente: "POSTA CENTRALE DI MIRKO CALASSO" non e' il
+ *  cliente "POSTA CENTRALE" (Calasso ha il suo, "Posta Centrale Calasso"); ottobre, 10 bonifici sbagliati. */
+export function corrisponde(nome: string, nomeBonifico: string): boolean {
+  const a = nomeNudo(nome), b = nomeNudo(nomeBonifico)
+  if (a.length < 3 || !b) return false
+  if (a === b) return true
+  const ordinato = (x: string) => x.split(' ').sort().join(' ')
+  return ordinato(a) === ordinato(b)
 }
 
 /** Le ricariche aperte del cliente pagate da questo bonifico, o null.
@@ -98,42 +99,30 @@ const chiaveAnag = (a: Anagrafica) => `${a.tipo}:${a.id}`
 export function proponi(entrate: Entrata[], aperte: RicaricaAperta[], pagatori: PagatoreNoto[], anagrafiche: Anagrafica[]): Map<string, Proposta> {
   const usate = new Set<string>()
   const apertePer = (t: string) => aperte.filter(r => !usate.has(r.id) && chiaveDi(r) === t)
-  const perIban = new Map<string, Set<string>>(), perNome = new Map<string, Set<string>>()
-  for (const p of pagatori) {
-    const t = chiaveDi(p)
-    if (p.iban) { if (!perIban.has(p.iban)) perIban.set(p.iban, new Set()); perIban.get(p.iban)!.add(t) }
-    const n = norma(p.nome); if (!perNome.has(n)) perNome.set(n, new Set()); perNome.get(n)!.add(t)
-  }
+  const perIban = new Map<string, Set<string>>()
+  for (const p of pagatori) if (p.iban) { if (!perIban.has(p.iban)) perIban.set(p.iban, new Set()); perIban.get(p.iban)!.add(chiaveDi(p)) }
   const daChiave = (t: string): Target => { const [tipo, id] = t.split(':'); return { tipo: tipo as Target['tipo'], id } }
   const esiti = new Map<string, Proposta>()
   for (const e of [...entrate].sort((a, b) => a.data.localeCompare(b.data))) {
     if (!(e.importo > 0) || !e.iban) continue
-    // 1. chi paga e' gia' noto: stesso IBAN, oppure stesso nome, fra i pagatori di UN solo cliente
-    const dallIban = e.iban ? perIban.get(e.iban) : undefined
-    const dalNome = perNome.get(norma(e.nome))
-    const noti = dallIban?.size === 1 ? dallIban : dalNome?.size === 1 ? dalNome : null
-    if (noti) {
-      const t = [...noti][0]
-      const ric = ricarichePagate(e, apertePer(t)) || []
-      ric.forEach(id => usate.add(id))
-      esiti.set(e.id, { esito: 'sicuro', target: daChiave(t), ricariche: ric, perche: dallIban?.size === 1 ? 'iban' : 'nome' })
-      continue
+    // Chi puo' essere, in ordine: l'IBAN salvato, il nome salvato fra i pagatori, il nome del cliente.
+    const dallIban = [...(perIban.get(e.iban) || [])]
+    const dalPagatore = [...new Set(pagatori.filter(p => corrisponde(p.nome, e.nome)).map(chiaveDi))]
+    const dalCliente = anagrafiche.filter(a => corrisponde(a.nome, e.nome)).map(chiaveAnag)
+    const [candidati, perche] = dallIban.length ? [dallIban, 'iban' as const]
+      : dalPagatore.length ? [dalPagatore, 'pagatore' as const]
+      : [dalCliente, 'cliente' as const]
+    if (!candidati.length) { esiti.set(e.id, { esito: 'ignoto', omonimi: [] }); continue }
+    // Uno solo: e' lui. Piu' d'uno (stesso nome su due clienti): decide la ricarica pagata, se e' una sola.
+    let t: string | null = candidati.length === 1 ? candidati[0] : null
+    let ric: string[] | null = t ? ricarichePagate(e, apertePer(t)) : null
+    if (!t) {
+      const conRicarica = candidati.map(c => ({ c, r: ricarichePagate(e, apertePer(c)) })).filter(x => x.r)
+      if (conRicarica.length === 1) { t = conRicarica[0].c; ric = conRicarica[0].r }
     }
-    // 2. il nome del cliente si legge nel bonifico: va confermato. Se i clienti possibili sono piu'
-    //    d'uno vince quello che ha una ricarica pagata da questo bonifico, altrimenti non si propone.
-    const possibili = anagrafiche.filter(a => nomeClienteNelBonifico(a.nome, e))
-    const conRicarica = possibili.map(a => ({ a, ric: ricarichePagate(e, apertePer(chiaveAnag(a))) })).filter(x => x.ric)
-    const scelto = possibili.length === 1 ? { a: possibili[0], ric: conRicarica[0]?.ric || null } : conRicarica.length === 1 ? conRicarica[0] : null
-    if (scelto) {
-      const ric = scelto.ric || []
-      ric.forEach(id => usate.add(id))
-      esiti.set(e.id, { esito: 'probabile', target: { tipo: scelto.a.tipo, id: scelto.a.id }, ricariche: ric })
-      continue
-    }
-    // 3. non si sa di chi e'. Se c'e' una sola ricarica aperta dello stesso importo nei giorni vicini la si
-    //    suggerisce, ma non si propone di confermarla con un clic: col solo importo si sbaglia spesso.
-    const uguali = aperte.filter(r => !usate.has(r.id) && cent(r.importo) === cent(e.importo) && Math.abs(g(e.data) - g(r.giorno)) <= 3)
-    esiti.set(e.id, { esito: 'ignoto', suggerimento: uguali.length === 1 ? { target: daChiave(chiaveDi(uguali[0])), ricarica: uguali[0].id } : null })
+    if (!t) { esiti.set(e.id, { esito: 'ignoto', omonimi: candidati.map(daChiave) }); continue }
+    ;(ric || []).forEach(id => usate.add(id))
+    esiti.set(e.id, { esito: 'sicuro', target: daChiave(t), ricariche: ric || [], perche })
   }
   return esiti
 }

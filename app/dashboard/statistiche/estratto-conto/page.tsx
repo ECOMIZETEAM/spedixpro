@@ -61,17 +61,6 @@ export default function EstrattoConto() {
     } catch { setErrore('Errore di rete'); return false } finally { setOccupato('') }
   }
 
-  const confermaTutti = async () => {
-    const lista = r?.daConfermare || []
-    if (!lista.length || !(await dialog.confirm({ title: `Confermare tutti i ${lista.length} pagatori?`, message: 'Ogni pagatore resta salvato sul cliente proposto, con il suo IBAN: dai prossimi estratti i suoi bonifici si abbinano da soli.', confirmText: 'Conferma tutti' }))) return
-    setOccupato('tutti'); setErrore('')
-    for (const g of lista) {
-      const res = await fetch('/api/contabilita/estratti/azione', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ azione: 'pagatore', nome: g.nome, iban: g.iban, target: (g.target.tipo === 'master' ? 'm:' : '') + g.target.id, ...periodo }) })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); setErrore(`${g.nome}: ${d.error || 'non riuscito'}`); break }
-    }
-    setOccupato(''); await leggi()
-  }
-
   const escludi = async (g: any) => {
     if (await dialog.confirm({ title: `«${g.nome}» non è un cliente?`, message: 'I suoi bonifici escono dai conti dei clienti (un rimborso, un giroconto…), anche nei prossimi estratti.', confirmText: 'Non è un cliente' })) {
       await azione('esc' + g.chiave, { azione: 'escludi', nome: g.nome, iban: g.iban })
@@ -118,7 +107,7 @@ export default function EstrattoConto() {
             </div>
 
             <Blocco icona="✅" titolo={`${r.abbinati.n} bonifici pagano ${r.abbinati.ricariche} ricariche`} totale={r.abbinati.totale} aperto={aperti.abb} onApri={() => apri('abb')}
-              frase="Abbinati: le ricariche risultano «arrivate» anche nel Check Ricariche, con la data della banca.">
+              frase="Abbinati perché il nome di chi ha pagato corrisponde al cliente o a un nome salvato in «Chi paga i bonifici». Le ricariche risultano «arrivate» anche nel Check Ricariche, con la data della banca.">
               <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', 'Ricariche pagate', '']} righe={r.abbinati.righe.map((x: any) => [
                 it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
                 x.ricariche.map((y: any) => `${it(y.giorno)} ${eur(y.importo)}`).join(' + '),
@@ -126,25 +115,11 @@ export default function EstrattoConto() {
               ])} />
             </Blocco>
 
-            <Blocco icona="🟡" titolo={`${r.daConfermare.length} pagatori da confermare`} totale={r.daConfermare.reduce((t: number, g: any) => t + g.totale, 0)} aperto={aperti.conf ?? true} onApri={() => apri('conf')}
-              frase="Il nome del cliente si legge nel bonifico. Conferma una volta sola: il pagatore resta salvato con il suo IBAN e dai prossimi estratti si abbina da solo."
-              azioni={r.daConfermare.length > 1 && <button style={btn} disabled={!!occupato} onClick={confermaTutti}>{occupato === 'tutti' ? 'Confermo…' : `Conferma tutti i ${r.daConfermare.length}`}</button>}>
-              {r.daConfermare.map((g: any) => (
-                <Gruppo key={g.chiave} g={g} aperto={aperti['g' + g.chiave]} onApri={() => apri('g' + g.chiave)}
-                  testa={<>→ <b>{g.clienteNome}</b>{g.ricariche ? <span style={{ color: '#6b7280' }}> · paga {g.ricariche} ricariche</span> : <span style={{ color: '#6b7280' }}> · nessuna ricarica dello stesso importo</span>}</>}
-                  azioni={<>
-                    <button style={btn} disabled={!!occupato} onClick={() => azione('p' + g.chiave, { azione: 'pagatore', nome: g.nome, iban: g.iban, target: (g.target.tipo === 'master' ? 'm:' : '') + g.target.id })}>Conferma</button>
-                    <button style={btnSec} disabled={!!occupato} onClick={() => escludi(g)}>Non è un cliente</button>
-                  </>} />
-              ))}
-              {!r.daConfermare.length && <Vuoto>Niente da confermare.</Vuoto>}
-            </Blocco>
-
             <Blocco icona="❓" titolo={`${r.chiEe.length} pagatori: di chi sono questi bonifici?`} totale={r.chiEe.reduce((t: number, g: any) => t + g.totale, 0)} aperto={aperti.chi ?? true} onApri={() => apri('chi')}
-              frase="Il portale non sa di quale cliente sono. Sceglilo una volta: il nome e l'IBAN restano sul cliente e tutti i suoi bonifici si abbinano da soli.">
+              frase="Il nome di chi ha pagato non corrisponde a nessun cliente né a nessun nome salvato in «Chi paga i bonifici». Scegli il cliente una volta: il nome e l'IBAN restano salvati su di lui e da qui in poi i suoi bonifici si abbinano da soli.">
               {r.chiEe.map((g: any) => (
                 <Gruppo key={g.chiave} g={g} aperto={aperti['g' + g.chiave]} onApri={() => apri('g' + g.chiave)}
-                  testa={g.suggerito ? <span style={{ color: '#6b7280' }}>forse <b style={{ color: NERO }}>{g.suggerito}</b> (stesso importo, stessi giorni)</span> : null}
+                  testa={g.omonimi.length ? <span style={{ color: '#b45309' }}>· stesso nome di più clienti: {g.omonimi.join(', ')}</span> : null}
                   azioni={<>
                     <div style={{ minWidth: '240px' }}>
                       <SelectCercabile value={scelte[g.chiave] || ''} onChange={(e: any) => setScelte(s => ({ ...s, [g.chiave]: e.target.value }))} style={campo}>

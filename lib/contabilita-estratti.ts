@@ -139,8 +139,8 @@ export async function applicaSicuri(admin: any, masterId: string, dal: string, a
   return { assegnati, abbinati }
 }
 
-/** "Questo pagatore e' quel cliente": il nome e l'IBAN restano fra i suoi pagatori, poi i bonifici sicuri
- *  si applicano da soli (tutti quelli di quel pagatore, anche negli altri mesi caricati). */
+/** "Questo pagatore e' quel cliente" (risposta al "di chi e'?"): il nome e l'IBAN restano fra i suoi
+ *  pagatori, poi i bonifici sicuri si applicano da soli, tutti quelli di quel pagatore nel periodo. */
 export async function assegnaPagatore(admin: any, masterId: string, userId: string, p: { nome: string, iban: string | null, target: Target }, periodo: { dal: string, al: string }) {
   await ricordaPagatore(admin, { masterId, targetTipo: p.target.tipo, targetId: p.target.id, nome: p.nome, iban: p.iban, origine: 'estratto', createdBy: userId })
   return applicaSicuri(admin, masterId, periodo.dal, periodo.al)
@@ -186,25 +186,24 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
 
   const entrate = righe.filter(r => r.importo > 0), uscite = righe.filter(r => r.importo < 0)
   const clienti = entrate.filter(r => r.iban)
-  // Proposte per quelle ancora senza cliente (non salvate: si ricalcolano ogni volta)
+  // Quelle ancora senza cliente (le sicure le ha gia' applicate applicaSicuri prima del resoconto)
   const libere = clienti.filter(r => !r.target_id && !r.assegnato)
   const aperte = ric.filter(r => !r.riga_id)
   const proposte = proponi(libere as Entrata[], aperte as RicaricaAperta[], pag as any, anag)
   const ricPerId = new Map(ric.map(r => [r.id, r]))
 
   // Raggruppate per pagatore: un clic sistema tutti i suoi bonifici.
-  type Gruppo = { chiave: string, nome: string, iban: string | null, n: number, totale: number, causali: string[], target: Target | null, clienteNome: string | null, ricariche: number, suggerito: string | null, righe: any[] }
-  const gruppi = (esito: 'probabile' | 'ignoto') => {
+  // Il master li assegna una volta per pagatore. `omonimi`: il nome corrisponde a piu' clienti.
+  type Gruppo = { chiave: string, nome: string, iban: string | null, n: number, totale: number, causali: string[], omonimi: string[], righe: any[] }
+  const chiEe = () => {
     const m = new Map<string, Gruppo>()
     for (const r of libere) {
-      const p = proposte.get(r.id); if (!p || p.esito !== esito) continue
+      const p = proposte.get(r.id); if (!p || p.esito !== 'ignoto') continue
       const k = chiavePagatore(r)
-      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], target: null, clienteNome: null, ricariche: 0, suggerito: null, righe: [] })
+      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], omonimi: p.omonimi.map(t => nome(t.tipo, t.id)), righe: [] })
       const gg = m.get(k)!
       gg.n++; gg.totale = r2(gg.totale + r.importo); gg.righe.push(riga(r))
       if (r.causale && !gg.causali.includes(r.causale) && gg.causali.length < 3) gg.causali.push(r.causale)
-      if (p.esito === 'probabile') { gg.target = p.target; gg.clienteNome = nome(p.target.tipo, p.target.id); gg.ricariche += p.ricariche.length }
-      if (p.esito === 'ignoto' && p.suggerimento && !gg.suggerito) gg.suggerito = nome(p.suggerimento.target.tipo, p.suggerimento.target.id)
     }
     return [...m.values()].sort((a, b) => b.totale - a.totale)
   }
@@ -242,8 +241,7 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     abbinati: { n: abbinati.length, totale: somma(abbinati), ricariche: abbinati.reduce((t, r) => t + (ricPerRiga.get(r.id)?.length || 0), 0),
       righe: abbinati.map(r => ({ ...riga(r), cliente: nome(r.target_tipo, r.target_id), assegnato: r.assegnato, ricariche: ricPerRiga.get(r.id)!.map(breve) })) },
     pagatiSenzaRicarica: { n: soloCliente.length, totale: somma(soloCliente), righe: soloCliente.map(r => ({ ...riga(r), cliente: nome(r.target_tipo, r.target_id) })) },
-    daConfermare: gruppi('probabile'),
-    chiEe: gruppi('ignoto'),
+    chiEe: chiEe(),
     esclusi: { n: clienti.filter(r => r.assegnato === 'escluso').length, totale: somma(clienti.filter(r => r.assegnato === 'escluso')) },
     altreEntrate: { n: entrate.length - clienti.length, totale: somma(entrate.filter(r => !r.iban)) },
     ricaricheSenzaBonifico: { n: senzaBonifico.length, totale: somma(senzaBonifico), dopoIl: ultimoUtile,
