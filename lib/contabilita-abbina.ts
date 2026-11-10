@@ -123,8 +123,19 @@ export function ricarichePagate(e: Entrata, aperte: RicaricaAperta[]): string[] 
 
 // Chi e' ricaricato o paga, come "cliente:<id>" o "master:<id>". Le ricariche e i pagatori lo hanno in
 // target_tipo/target_id; le anagrafiche in tipo/id. Tenute separate: una ricarica ha anche un suo id.
-const chiaveDi = (x: { target_tipo: string, target_id: string }) => `${x.target_tipo}:${x.target_id}`
+export const chiaveDi = (x: { target_tipo: string, target_id: string }) => `${x.target_tipo}:${x.target_id}`
 const chiaveAnag = (a: Anagrafica) => `${a.tipo}:${a.id}`
+
+/** Di chi e' un bonifico che paga ricariche di piu' profili: di quello che ne prende di piu' (a pari importo,
+ *  di quello ricaricato per primo). Serve solo a dargli un cliente: il pagato si conta ricarica per ricarica. */
+export function principale(ids: string[], ricariche: RicaricaAperta[]): string {
+  const quanto = new Map<string, number>()
+  const scelte = ricariche.filter(r => ids.includes(r.id))
+  for (const r of scelte) quanto.set(chiaveDi(r), (quanto.get(chiaveDi(r)) || 0) + cent(r.importo))
+  let meglio = chiaveDi(scelte[0])
+  for (const r of scelte) if ((quanto.get(chiaveDi(r)) || 0) > (quanto.get(meglio) || 0)) meglio = chiaveDi(r)
+  return meglio
+}
 
 /** Le proposte per i bonifici in entrata ancora senza cliente, dal piu' vecchio. Le ricariche usate da una
  *  proposta non si propongono per un altro bonifico. Le entrate senza IBAN (rimborsi della carta) non sono
@@ -152,6 +163,19 @@ export function proponi(entrate: Entrata[], aperte: RicaricaAperta[], pagatori: 
     // "Mayling Anna Parlanti" (ottobre: 11 bonifici, 3.000 €). Nome e IBAN salvati dal master valgono sempre.
     if (perche === 'cliente' && !candidati.some(c => apertePer(c).some(r => nellaFinestra(e, r)))) {
       esiti.set(e.id, { esito: 'ignoto', omonimi: candidati.map(daChiave), senzaRicariche: true }); continue
+    }
+    // Lo stesso IBAN salvato su piu' clienti: e' il master che l'ha detto, quel conto paga tutti. LA NUOVA POSTA
+    // S.N.C. ha due profili e li ricarica insieme, 500 € l'uno, con un bonifico solo da 1.000 € (ottobre: 12 e
+    // 21/10). Le ricariche dei profili si guardano insieme, come fossero di un cliente solo; il bonifico resta
+    // al profilo che ne prende di piu'. Solo con l'IBAN: un nome scritto a mano su due clienti puo' essere di
+    // due persone diverse (due MARIO ROSSI), e li' vale la regola di sotto.
+    if (perche === 'iban' && candidati.length > 1) {
+      const famiglia = new Set(candidati)
+      const insieme = aperte.filter(r => !usate.has(r.id) && famiglia.has(chiaveDi(r)))   // in ordine di ora
+      const ric = ricarichePagate(e, insieme)
+      ;(ric || []).forEach(id => usate.add(id))
+      esiti.set(e.id, { esito: 'sicuro', target: daChiave(ric ? principale(ric, insieme) : [...candidati].sort()[0]), ricariche: ric || [], perche })
+      continue
     }
     // Uno solo: e' lui. Piu' d'uno (stesso nome su due clienti): decide la ricarica pagata, se e' una sola.
     let t: string | null = candidati.length === 1 ? candidati[0] : null

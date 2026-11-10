@@ -24,7 +24,9 @@ export default function EstrattoConto() {
   // I blocchi che partono aperti hanno il valore iniziale qui e non in un `?? true` sul blocco, altrimenti il
   // primo clic per chiuderli li riapriva (!undefined = true).
   const [aperti, setAperti] = useState<Record<string, boolean>>({ chi: true, cli: true, usc: true })
-  const [scelte, setScelte] = useState<Record<string, string>>({})
+  // I clienti scelti per ogni pagatore del "di chi e'?": uno, o piu' profili pagati con un bonifico solo.
+  // Finche' il master non tocca, valgono quelli a cui l'IBAN e' gia' salvato (g.noti).
+  const [scelte, setScelte] = useState<Record<string, string[]>>({})
   const [soloDiff, setSoloDiff] = useState(true)
 
   async function leggi(p = periodo) {
@@ -52,15 +54,34 @@ export default function EstrattoConto() {
     } catch { setErrore('Errore di rete nel caricamento') } finally { setOccupato('') }
   }
 
-  async function azione(chiave: string, corpo: any) {
-    if (occupato) return false
+  async function azione(chiave: string, corpo: any): Promise<any> {
+    if (occupato) return null
     setOccupato(chiave); setErrore('')
     try {
       const res = await fetch('/api/contabilita/estratti/azione', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...corpo, ...periodo }) })
       const d = await res.json().catch(() => ({}))
-      if (!res.ok || d.error) { setErrore(d.error || 'Operazione non riuscita'); return false }
-      await leggi(); return true
-    } catch { setErrore('Errore di rete'); return false } finally { setOccupato('') }
+      if (!res.ok || d.error) { setErrore(d.error || 'Operazione non riuscita'); return null }
+      await leggi(); return d
+    } catch { setErrore('Errore di rete'); return null } finally { setOccupato('') }
+  }
+
+  const sceltiDi = (g: any): string[] => scelte[g.chiave] ?? (g.noti || []).map((n: any) => n.target)
+  const nomeTarget = (t: string) => r?.anagrafiche.find((a: any) => a.target === t)?.nome || '—'
+
+  // Dopo il salvataggio si dice subito cosa e' successo ai bonifici di quel pagatore: con piu' profili e'
+  // l'unico modo di capire se la scelta torna senza andarla a cercare fra gli abbinati.
+  async function salvaPagatore(g: any) {
+    const targets = sceltiDi(g)
+    if (!targets.length) return
+    setEsito('')
+    const d = await azione('c' + g.chiave, { azione: 'pagatore', nome: g.nome, iban: g.iban, targets })
+    if (!d?.pagatore) return
+    const p = d.pagatore
+    const chi = targets.length > 1 ? `${targets.length} profili (${targets.map(nomeTarget).join(', ')})` : nomeTarget(targets[0])
+    const unoMolti = (n: number, uno: string, molti: string) => `${n} ${n === 1 ? uno : molti}`
+    setEsito(`«${g.nome}» salvato su ${chi}. ${p.conRicarica
+      ? `${unoMolti(p.conRicarica, 'bonifico paga', 'bonifici pagano')} ${unoMolti(p.ricariche, 'ricarica', 'ricariche')}.` : 'Nessun bonifico trova una ricarica che torni.'}${p.senzaRicarica
+      ? ` ${unoMolti(p.senzaRicarica, 'resta', 'restano')} senza una ricarica che torni: li trovi nel blocco «bonifici di un cliente senza una ricarica».` : ''}`)
   }
 
   const scollega = async (x: any) => {
@@ -133,7 +154,8 @@ export default function EstrattoConto() {
               frase="Abbinati perché il nome di chi ha pagato corrisponde al cliente o a un nome salvato in «Chi paga i bonifici». Le ricariche risultano «arrivate» anche nel Check Ricariche, con la data della banca.">
               <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', 'Ricariche pagate', '']} righe={r.abbinati.righe.map((x: any) => [
                 it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
-                x.ricariche.map((y: any) => `${it(y.giorno)} ${eur(y.importo)}`).join(' + '),
+                // Con due profili si vede quale ricarica e' di chi.
+                x.ricariche.map((y: any) => `${it(y.giorno)} ${eur(y.importo)}${new Set(x.ricariche.map((z: any) => z.cliente)).size > 1 ? ` (${y.cliente})` : ''}`).join(' + '),
                 <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
               ])} />
             </Blocco>
@@ -149,29 +171,45 @@ export default function EstrattoConto() {
             )}
 
             <Blocco icona="❓" titolo={`${r.chiEe.length} pagatori: di chi sono questi bonifici?`} totale={r.chiEe.reduce((t: number, g: any) => t + g.totale, 0)} aperto={aperti.chi} onApri={() => apri('chi')}
-              frase="Il nome di chi ha pagato non corrisponde a nessun cliente né a nessun nome salvato in «Chi paga i bonifici». Scegli il cliente una volta: il nome e l'IBAN restano salvati su di lui e da qui in poi i suoi bonifici si abbinano da soli.">
-              {r.chiEe.map((g: any) => (
-                <Gruppo key={g.chiave} g={g} aperto={aperti['g' + g.chiave]} onApri={() => apri('g' + g.chiave)}
-                  testa={g.senzaRicariche ? <span style={{ color: '#b45309' }}>· stesso nome di {g.omonimi.join(', ')}, che in quei giorni non ha ricariche: è davvero lui?</span>
-                    : g.omonimi.length ? <span style={{ color: '#b45309' }}>· stesso nome di più clienti: {g.omonimi.join(', ')}</span> : null}
-                  azioni={<>
-                    <div style={{ minWidth: '240px' }}>
-                      <SelectCercabile value={scelte[g.chiave] || ''} onChange={(e: any) => setScelte(s => ({ ...s, [g.chiave]: e.target.value }))} style={campo}>
-                        <option value="">Di quale cliente è?</option>
-                        {r.anagrafiche.map((a: any) => <option key={a.target} value={a.target}>{a.nome}</option>)}
-                      </SelectCercabile>
-                    </div>
-                    <button style={btn} disabled={!!occupato || !scelte[g.chiave]} onClick={() => azione('c' + g.chiave, { azione: 'pagatore', nome: g.nome, iban: g.iban, target: scelte[g.chiave] })}>Salva</button>
-                    <button style={btnSec} disabled={!!occupato} onClick={() => escludi(g)}>Non è un cliente</button>
-                  </>} />
-              ))}
+              frase="Il nome di chi ha pagato non corrisponde a nessun cliente né a nessun nome salvato in «Chi paga i bonifici». Scegli il cliente una volta: il nome e l'IBAN restano salvati su di lui e da qui in poi i suoi bonifici si abbinano da soli. Se con un bonifico solo paga le ricariche di più profili, sceglili tutti.">
+              {r.chiEe.map((g: any) => {
+                const sel = sceltiDi(g)
+                const metti = (l: string[]) => setScelte(s => ({ ...s, [g.chiave]: l }))
+                return (
+                  <Gruppo key={g.chiave} g={g} aperto={aperti['g' + g.chiave]} onApri={() => apri('g' + g.chiave)}
+                    testa={g.senzaRicariche ? <span style={{ color: '#b45309' }}>· stesso nome di {g.omonimi.join(', ')}, che in quei giorni non ha ricariche: è davvero lui?</span>
+                      : g.omonimi.length ? <span style={{ color: '#b45309' }}>· stesso nome di più clienti: {g.omonimi.join(', ')}</span> : null}
+                    sotto={sel.length > 1 ? <div style={suggerimento}>Un suo bonifico può pagare le ricariche di tutti questi profili, anche insieme: per esempio 1.000 € = 500 dell&apos;uno + 500 dell&apos;altro, ricaricati negli stessi giorni.</div> : null}
+                    azioni={<>
+                      <div style={{ minWidth: '250px', maxWidth: '340px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {sel.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                            {sel.map(t => (
+                              <span key={t} style={chip}>{nomeTarget(t)}
+                                <button type="button" aria-label="Togli" title="Togli" disabled={!!occupato} onClick={() => metti(sel.filter(x => x !== t))} style={chipX}>×</button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <SelectCercabile value="" onChange={(e: any) => { const v = e.target.value; if (v && !sel.includes(v) && sel.length < 6) metti([...sel, v]) }} style={campo}>
+                          <option value="">{sel.length ? '+ un altro profilo dello stesso cliente' : 'Di quale cliente è?'}</option>
+                          {r.anagrafiche.filter((a: any) => !sel.includes(a.target)).map((a: any) => <option key={a.target} value={a.target}>{a.nome}</option>)}
+                        </SelectCercabile>
+                      </div>
+                      <button style={btn} disabled={!!occupato || !sel.length} onClick={() => salvaPagatore(g)}>{sel.length > 1 ? `Salva su ${sel.length} profili` : 'Salva'}</button>
+                      <button style={btnSec} disabled={!!occupato} onClick={() => escludi(g)}>Non è un cliente</button>
+                    </>} />
+                )
+              })}
               {!r.chiEe.length && <Vuoto>Tutti i bonifici hanno un cliente.</Vuoto>}
             </Blocco>
 
             <Blocco icona="❌" titolo={`${r.ricaricheSenzaBonifico.n} ricariche con il bonifico mai arrivato`} totale={r.ricaricheSenzaBonifico.totale} aperto={aperti.senza} onApri={() => apri('senza')}
               frase={`Ricariche fatte fino al ${it(r.ricaricheSenzaBonifico.dopoIl)} per cui in banca non c'è un bonifico.${r.ricaricheRecenti.n ? ` Le ${r.ricaricheRecenti.n} degli ultimi tre giorni (${eur(r.ricaricheRecenti.totale)}) non sono qui: il bonifico può arrivare nel prossimo estratto.` : ''} Se una non era un bonifico, dillo qui e non la si cerca più.`}>
               <Tabella teste={['Ricaricata il', 'Cliente', 'Importo', 'Bonifico da', 'Non era un bonifico?']} righe={r.ricaricheSenzaBonifico.righe.map((x: any) => [
-                it(x.giorno), x.cliente, eur(x.importo),
+                it(x.giorno),
+                <span>{x.cliente}{x.aManoArrivata && <span style={{ display: 'block', fontSize: '11px', color: '#b45309' }}>segnata «arrivata» a mano il {it(x.aManoArrivata)}, ma in banca non c&apos;è: il bonifico ha un altro nome?</span>}</span>,
+                eur(x.importo),
                 <span>{x.mittente || <span style={{ color: '#9ca3af' }}>—</span>} <button style={btnLink} disabled={!!occupato} onClick={() => scriviMittente(x)}>{x.mittente ? '✎' : '+ scrivi'}</button></span>,
                 <select defaultValue="" disabled={!!occupato} onChange={e => { const v = e.target.value; if (v) azione('m' + x.id, { azione: 'metodo', ricarica_id: x.id, metodo: v }) }} style={{ ...campo, width: 'auto', padding: '4px 6px', fontSize: '12px' }}>
                   <option value="">—</option><option value="cod_compensati">Contrassegni compensati</option><option value="contanti">Contanti</option><option value="altro">Altro</option>
@@ -257,7 +295,7 @@ function Blocco({ icona, titolo, totale, frase, aperto, onApri, azioni, children
   )
 }
 
-function Gruppo({ g, testa, azioni, aperto, onApri }: any) {
+function Gruppo({ g, testa, azioni, sotto, aperto, onApri }: any) {
   return (
     <div style={{ borderTop: '1px solid #f0f0f0', padding: '10px 0' }}>
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -270,6 +308,7 @@ function Gruppo({ g, testa, azioni, aperto, onApri }: any) {
         </div>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>{azioni}</div>
       </div>
+      {sotto}
       {aperto && <Tabella teste={['Data', 'Causale', 'Importo']} destra={[2]} righe={g.righe.map((x: any) => [it(x.data), x.causale || '—', eur(x.importo)])} />}
     </div>
   )
@@ -301,4 +340,7 @@ const btnSec: any = { background: '#fff', color: '#555', border: '1px solid #d5d
 const btnLink: any = { background: 'none', border: 'none', color: ARANCIO, fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '0 4px' }
 const campo: any = { width: '100%', padding: '7px 10px', border: '1px solid #d5d5d5', borderRadius: '6px', fontSize: '13px', color: NERO, background: '#fff', boxSizing: 'border-box' }
 const avvisoErr: any = { background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }
+const chip: any = { display: 'inline-flex', alignItems: 'center', gap: '2px', background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: '999px', padding: '2px 4px 2px 10px', fontSize: '12px', fontWeight: 600, maxWidth: '100%' }
+const chipX: any = { background: 'none', border: 'none', color: '#9a3412', cursor: 'pointer', fontSize: '15px', lineHeight: 1, padding: '0 4px' }
+const suggerimento: any = { fontSize: '11.5px', color: '#9a3412', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '6px', padding: '6px 10px', marginTop: '8px' }
 const avvisoOk: any = { background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }

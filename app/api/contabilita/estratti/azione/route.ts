@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 // LE AZIONI SULL'ESTRATTO CONTO (lib/contabilita-estratti), del titolare e dei suoi admin:
-//  - pagatore: "questo pagatore e' quel cliente" (conferma una proposta o risponde a "di chi e'?");
+//  - pagatore: "questo pagatore e' quel cliente", o quei profili (risponde a "di chi e'?");
 //  - escludi: "non e' un cliente" (un rimborso, un giroconto); includi: lo annulla;
 //  - scollega: toglie un abbinamento sbagliato;
 //  - metodo: una ricarica che non era un bonifico (es. contrassegni compensati) esce dall'attesa;
@@ -43,10 +43,19 @@ export async function POST(req: NextRequest) {
         if (!DATA.test(periodo.dal) || !DATA.test(periodo.al)) return NextResponse.json({ error: 'Periodo non valido' }, { status: 400 })
         const nome = pulisciNome(b?.nome)
         if (!nome) return NextResponse.json({ error: 'Pagatore senza nome' }, { status: 400 })
-        const t = await target(admin, c.masterId, b?.target)
-        if (!t) return NextResponse.json({ error: 'Cliente non trovato fra i tuoi' }, { status: 404 })
-        const esito = await assegnaPagatore(admin, c.masterId, c.userId, { nome, iban: pulisciIban(b?.iban), target: t }, periodo)
-        await audit('estratto_pagatore', `${nome} → ${t.tipo}:${t.id}`)
+        // Uno o piu' clienti: piu' profili dello stesso cliente pagati con un bonifico solo (LA NUOVA POSTA S.N.C.).
+        const scelti = [...new Set((Array.isArray(b?.targets) ? b.targets : [b?.target]).map((x: unknown) => String(x || '')).filter(Boolean))]
+        if (!scelti.length || scelti.length > 6) return NextResponse.json({ error: 'Scegli da 1 a 6 clienti' }, { status: 400 })
+        const targets: Target[] = []
+        for (const x of scelti) {
+          const t = await target(admin, c.masterId, x)
+          if (!t) return NextResponse.json({ error: 'Cliente non trovato fra i tuoi' }, { status: 404 })
+          targets.push(t)
+        }
+        const iban = pulisciIban(b?.iban)
+        if (targets.length > 1 && !iban) return NextResponse.json({ error: 'Più clienti insieme solo per un bonifico con IBAN' }, { status: 400 })
+        const esito = await assegnaPagatore(admin, c.masterId, c.userId, { nome, iban, targets }, periodo)
+        await audit('estratto_pagatore', `${nome}${iban ? ` (${iban})` : ''} → ${targets.map(t => `${t.tipo}:${t.id}`).join(', ')}`)
         return NextResponse.json({ ok: true, ...esito })
       }
       case 'escludi': {

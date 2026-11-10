@@ -4,7 +4,7 @@
 // piu' pagatori_bonifico e ricariche_check del passo 1.
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { ricordaPagatore, pulisciIban } from '@/lib/contabilita-banca'
-import { norma, proponi, ricarichePagate, voceUscita, type Anagrafica, type Entrata, type RicaricaAperta, type Target } from '@/lib/contabilita-abbina'
+import { chiaveDi, norma, principale, proponi, ricarichePagate, voceUscita, type Anagrafica, type Entrata, type RicaricaAperta, type Target } from '@/lib/contabilita-abbina'
 import type { Estratto } from '@/lib/estratto-finom'
 
 const GIORNO = 86400000
@@ -13,6 +13,20 @@ const r2 = (x: number) => Math.round(x * 100) / 100
 const giornoRoma = (ts: string) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Europe/Rome' })
 // Un pagatore si riconosce dall'IBAN, se c'e', altrimenti dal nome.
 const chiavePagatore = (r: { iban: string | null, nome: string }) => r.iban || 'N:' + norma(r.nome)
+
+/** Per ogni IBAN salvato, i clienti che paga ("cliente:<id>", "master:<id>"). Piu' d'uno = profili dello
+ *  stesso cliente pagati dallo stesso conto (lib/contabilita-abbina, proponi). */
+function clientiPerIban(pagatori: { target_tipo: string, target_id: string, iban: string | null }[]) {
+  const m = new Map<string, Set<string>>()
+  for (const p of pagatori) if (p.iban) { if (!m.has(p.iban)) m.set(p.iban, new Set()); m.get(p.iban)!.add(chiaveDi(p)) }
+  return m
+}
+/** I profili fra cui cercare le ricariche di un bonifico che ha gia' un cliente: quel cliente e, se il suo IBAN
+ *  e' salvato anche su altri profili insieme a lui, anche quelli. */
+function famigliaDi(r: { iban: string | null, target_tipo: string, target_id: string }, perIban: Map<string, Set<string>>): Set<string> {
+  const k = chiaveDi(r), s = r.iban ? perIban.get(r.iban) : null
+  return s && s.has(k) ? s : new Set([k])
+}
 
 /** Un movimento e' sempre lo stesso anche se arriva in due estratti che si sovrappongono: il saldo dopo
  *  il movimento lo distingue da un altro bonifico uguale dello stesso giorno. Non sempre: +100 da X, -100 a Y,
@@ -180,9 +194,12 @@ export async function applicaSicuri(admin: any, masterId: string, dal: string, a
     const [tipo, id] = k.split(':')
     await aggiornaRighe(admin, masterId, ids, { target_tipo: tipo, target_id: id, assegnato: 'auto' }, true)
   }
-  // Bonifici gia' di un cliente ma senza ricarica: si riprova con quelle aperte di quel cliente.
+  // Bonifici gia' di un cliente ma senza ricarica: si riprova con quelle aperte di quel cliente (e dei suoi
+  // altri profili pagati dallo stesso IBAN).
+  const perIban = clientiPerIban(pag as any)
   for (const r of righe.filter(x => x.importo > 0 && x.target_id && !legate.has(x.id)).sort((a, b) => a.data.localeCompare(b.data))) {
-    const sue = aperte.filter((a: any) => !usate.has(a.id) && a.target_tipo === r.target_tipo && a.target_id === r.target_id)
+    const famiglia = famigliaDi(r, perIban)
+    const sue = aperte.filter((a: any) => !usate.has(a.id) && famiglia.has(chiaveDi(a)))
     const ids = ricarichePagate(r as Entrata, sue as RicaricaAperta[])
     if (!ids) continue
     const lista = ids.map(id => perId.get(id)).filter(Boolean)
@@ -193,17 +210,51 @@ export async function applicaSicuri(admin: any, masterId: string, dal: string, a
   return { assegnati: [...perCliente.values()].reduce((t, l) => t + l.length, 0), abbinati }
 }
 
-/** "Questo pagatore e' quel cliente" (risposta al "di chi e'?"): il nome e l'IBAN restano fra i suoi
- *  pagatori, poi i bonifici sicuri si applicano da soli, tutti quelli di quel pagatore nel periodo. */
-export async function assegnaPagatore(admin: any, masterId: string, userId: string, p: { nome: string, iban: string | null, target: Target }, periodo: { dal: string, al: string }) {
-  await ricordaPagatore(admin, { masterId, targetTipo: p.target.tipo, targetId: p.target.id, nome: p.nome, iban: p.iban, origine: 'estratto', createdBy: userId })
+/** "Questo pagatore e' quel cliente" (risposta al "di chi e'?"), o "e' di questi profili": un cliente con due
+ *  anagrafiche che paga con un bonifico solo le ricariche di tutte e due (LA NUOVA POSTA S.N.C.: 1.000 € =
+ *  500 + 500). Il nome e l'IBAN restano fra i pagatori di ognuno, poi i bonifici sicuri si applicano da soli,
+ *  tutti quelli di quel pagatore nel periodo.
+ *  La scelta e' l'elenco intero: un profilo che aveva questo IBAN dall'estratto e ora non e' fra quelli scelti
+ *  non riceve piu' i suoi bonifici. Senza, scollegare un bonifico abbinato a due profili e riassegnarlo a uno
+ *  solo lo rimetteva su tutti e due. Quelli gia' abbinati restano come sono; i nomi scritti a mano restano. */
+export async function assegnaPagatore(admin: any, masterId: string, userId: string, p: { nome: string, iban: string | null, targets: Target[] }, periodo: { dal: string, al: string }) {
+  for (const t of p.targets) {
+    await ricordaPagatore(admin, { masterId, targetTipo: t.tipo, targetId: t.id, nome: p.nome, iban: p.iban, origine: 'estratto', createdBy: userId })
+  }
+  if (p.iban) {
+    const tenere = new Set(p.targets.map(t => `${t.tipo}:${t.id}`))
+    const { data: prima, error: e0 } = await admin.from('pagatori_bonifico').select('id,target_tipo,target_id')
+      .eq('master_id', masterId).eq('origine', 'estratto').eq('iban', p.iban)
+    if (e0) throw new Error(e0.message)
+    const via = (prima || []).filter((x: any) => !tenere.has(chiaveDi(x))).map((x: any) => x.id)
+    if (via.length) {
+      const { error: e1 } = await admin.from('pagatori_bonifico').delete().in('id', via).eq('master_id', masterId)
+      if (e1) throw new Error(e1.message)
+    }
+  }
   // I bonifici di questo pagatore scollegati a mano tornano liberi di abbinarsi: il master ha appena scelto.
   let q = admin.from('estratti_righe').update({ assegnato: null }).eq('master_id', masterId).eq('assegnato', 'libero')
     .gte('data', periodo.dal).lte('data', periodo.al)
   q = p.iban ? q.eq('iban', p.iban) : q.eq('nome', p.nome)
   const { error } = await q
   if (error) throw new Error(error.message)
-  return applicaSicuri(admin, masterId, periodo.dal, periodo.al)
+  const esito = await applicaSicuri(admin, masterId, periodo.dal, periodo.al)
+  // Cosa e' successo ai bonifici di QUESTO pagatore, per dirlo al master appena ha salvato.
+  let q2 = admin.from('estratti_righe').select('id,target_id').eq('master_id', masterId).gt('importo', 0)
+    .gte('data', periodo.dal).lte('data', periodo.al)
+  q2 = p.iban ? q2.eq('iban', p.iban) : q2.eq('nome', p.nome)
+  const { data: sue, error: e2 } = await q2
+  if (e2) throw new Error(e2.message)
+  const ids = (sue || []).map((x: any) => x.id)
+  const abb: any[] = []
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data, error: e3 } = await admin.from('abbinamenti_bonifici').select('riga_id').in('riga_id', ids.slice(i, i + 300))
+    if (e3) throw new Error(e3.message)
+    abb.push(...(data || []))
+  }
+  const legate = new Set(abb.map((a: any) => a.riga_id))
+  return { ...esito, pagatore: { bonifici: ids.length, conRicarica: legate.size, ricariche: abb.length,
+    senzaRicarica: (sue || []).filter((x: any) => x.target_id && !legate.has(x.id)).length } }
 }
 
 /** "Non e' un cliente" (un rimborso, un giroconto): i bonifici di quel pagatore escono dai conti dei clienti. */
@@ -229,6 +280,11 @@ export async function includiPagatore(admin: any, masterId: string, p: { nome: s
 export async function scollegaRiga(admin: any, masterId: string, rigaId: string) {
   const { data: abb, error } = await admin.from('abbinamenti_bonifici').select('id,ricarica_id,segnato_effettuato,segnato_arrivato').eq('riga_id', rigaId).eq('master_id', masterId)
   if (error) throw new Error(error.message)
+  // I clienti delle ricariche che pagava, prima di toglierle: con due profili non e' solo quello della riga.
+  const { data: ricPagate, error: e0 } = (abb || []).length
+    ? await admin.from('ricariche_check').select('target_tipo,target_id').in('id', abb!.map((a: any) => a.ricarica_id)).eq('master_id', masterId)
+    : { data: [], error: null }
+  if (e0) throw new Error(e0.message)
   for (const a of abb || []) {
     const torna: any = {}
     if (a.segnato_arrivato) torna.bonifico_arrivato_il = null
@@ -242,12 +298,36 @@ export async function scollegaRiga(admin: any, masterId: string, rigaId: string)
   // Il cliente era sbagliato? Se quell'IBAN gli era stato dato dall'estratto (un "di chi e'?" assegnato male) e
   // non gli resta nessun altro bonifico con quell'IBAN, l'IBAN si toglie dai suoi pagatori: altrimenti i
   // prossimi bonifici tornerebbero da lui. I nomi scritti a mano o nella ricarica restano.
-  if (prima?.iban && prima.target_id) {
-    const { count, error: e3 } = await admin.from('estratti_righe').select('id', { count: 'exact', head: true })
-      .eq('master_id', masterId).eq('iban', prima.iban).eq('target_tipo', prima.target_tipo).eq('target_id', prima.target_id)
-    if (!e3 && count === 0) {
+  // Vale per ogni profilo toccato: quello della riga e quelli delle ricariche che pagava. "Gli resta un
+  // bonifico" vuol dire un bonifico suo o uno che paga una sua ricarica: con due profili pagati insieme il
+  // bonifico va a uno solo dei due, e contando solo quelli l'altro perdeva l'IBAN al primo scollega.
+  if (prima?.iban) {
+    const toccati = new Set<string>([...(prima.target_id ? [chiaveDi(prima)] : []), ...(ricPagate || []).map((x: any) => chiaveDi(x))])
+    if (!toccati.size) return
+    // Se una lettura non riesce l'IBAN resta dov'e': lo scollega e' gia' fatto, e togliere un IBAN che serve
+    // farebbe perdere i prossimi bonifici di quel cliente senza che nessuno se ne accorga.
+    let ancora: Set<string>
+    try {
+      const altre = await fetchAllStretto(() => admin.from('estratti_righe').select('id,target_tipo,target_id')
+        .eq('master_id', masterId).eq('iban', prima.iban).neq('id', rigaId).order('id'))
+      ancora = new Set<string>(altre.filter((x: any) => x.target_id).map((x: any) => chiaveDi(x)))
+      const ids = altre.map((x: any) => x.id)
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data: a2, error: e4 } = await admin.from('abbinamenti_bonifici').select('ricarica_id').in('riga_id', ids.slice(i, i + 300))
+        if (e4) throw new Error(e4.message)
+        const ricIds = (a2 || []).map((x: any) => x.ricarica_id)
+        for (let j = 0; j < ricIds.length; j += 300) {
+          const { data: r2, error: e5 } = await admin.from('ricariche_check').select('target_tipo,target_id').in('id', ricIds.slice(j, j + 300))
+          if (e5) throw new Error(e5.message)
+          for (const x of r2 || []) ancora.add(chiaveDi(x))
+        }
+      }
+    } catch { return }
+    for (const k of toccati) {
+      if (ancora.has(k)) continue
+      const [tipo, id] = k.split(':')
       await admin.from('pagatori_bonifico').delete().eq('master_id', masterId).eq('origine', 'estratto')
-        .eq('target_tipo', prima.target_tipo).eq('target_id', prima.target_id).eq('iban', prima.iban)
+        .eq('target_tipo', tipo).eq('target_id', id).eq('iban', prima.iban)
     }
   }
 }
@@ -262,9 +342,20 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   const nomeDi = new Map(anag.map(a => [`${a.tipo}:${a.id}`, a.nome]))
   for (const r of ric) if (!nomeDi.has(`${r.target_tipo}:${r.target_id}`)) nomeDi.set(`${r.target_tipo}:${r.target_id}`, r.target_nome || '—')
   const nome = (t: string, id: string) => nomeDi.get(`${t}:${id}`) || '—'
+  const nomeK = (k: string) => nomeDi.get(k) || '—'
+  const perIban = clientiPerIban(pag as any)
   const ricPerRiga = new Map<string, any[]>()
   for (const r of ric) if (r.riga_id) { if (!ricPerRiga.has(r.riga_id)) ricPerRiga.set(r.riga_id, []); ricPerRiga.get(r.riga_id)!.push(r) }
+  // Il cliente di un bonifico come lo si legge: quelli delle ricariche che paga (due profili = "A + B"); senza
+  // ricarica, il suo cliente, o i suoi profili se l'IBAN li paga tutti ("A / B").
+  const clienteDi = (r: any) => {
+    const sue = ricPerRiga.get(r.id)
+    if (sue?.length) return [...new Set(sue.map((y: any) => nome(y.target_tipo, y.target_id)))].join(' + ')
+    return [...famigliaDi(r, perIban)].map(nomeK).join(' / ')
+  }
   const breve = (r: any) => ({ id: r.id, giorno: r.giorno, importo: r.importo, cliente: nome(r.target_tipo, r.target_id) })
+  // Nella tendina del "di chi e'?" i clienti hanno "<id>" o "m:<id>".
+  const perTendina = (k: string) => { const [tipo, id] = k.split(':'); return tipo === 'master' ? 'm:' + id : id }
   const riga = (r: any) => ({ id: r.id, data: r.data, nome: r.nome, causale: r.causale, iban: r.iban, importo: r.importo })
 
   const entrate = righe.filter(r => r.importo > 0), uscite = righe.filter(r => r.importo < 0)
@@ -277,14 +368,17 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
 
   // Raggruppate per pagatore: un clic sistema tutti i suoi bonifici.
   // Il master li assegna una volta per pagatore. `omonimi`: il nome corrisponde a piu' clienti.
-  type Gruppo = { chiave: string, nome: string, iban: string | null, n: number, totale: number, causali: string[], omonimi: string[], senzaRicariche: boolean, righe: any[] }
+  type Gruppo = { chiave: string, nome: string, iban: string | null, n: number, totale: number, causali: string[], omonimi: string[], senzaRicariche: boolean, noti: { target: string, nome: string }[], righe: any[] }
   const chiEe = () => {
     const m = new Map<string, Gruppo>()
     for (const r of libere) {
       // Gli scollegati a mano restano qui anche se il nome e' noto: li assegna il master.
       const p = proposte.get(r.id); if (!p || (p.esito !== 'ignoto' && r.assegnato !== 'libero')) continue
       const k = chiavePagatore(r)
-      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], omonimi: p.esito === 'ignoto' ? p.omonimi.map(t => nome(t.tipo, t.id)) : [], senzaRicariche: p.esito === 'ignoto' && !!p.senzaRicariche, righe: [] })
+      // `noti`: i profili a cui questo IBAN e' gia' salvato (uno scollegato da riassegnare): la tendina parte da
+      // loro, cosi' il master vede la scelta di prima e la cambia invece di aggiungerne una sopra.
+      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], omonimi: p.esito === 'ignoto' ? p.omonimi.map(t => nome(t.tipo, t.id)) : [], senzaRicariche: p.esito === 'ignoto' && !!p.senzaRicariche,
+        noti: r.iban ? [...(perIban.get(r.iban) || [])].map(t => ({ target: perTendina(t), nome: nomeK(t) })) : [], righe: [] })
       const gg = m.get(k)!
       gg.n++; gg.totale = r2(gg.totale + r.importo); gg.righe.push(riga(r))
       if (r.causale && !gg.causali.includes(r.causale) && gg.causali.length < 3) gg.causali.push(r.causale)
@@ -306,7 +400,22 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     return perCliente.get(k)!
   }
   for (const r of ric) if (r.giorno >= dal && r.giorno <= al) { const v = voce(r.target_tipo, r.target_id); v.ricaricato = r2(v.ricaricato + r.importo); v.ricariche++ }
-  for (const r of clienti) if (r.target_id) { const v = voce(r.target_tipo, r.target_id); v.pagato = r2(v.pagato + r.importo); v.bonifici++ }
+  // Il pagato va al cliente di ogni ricarica pagata: un bonifico per due profili (500 + 500) e' 500 a testa, non
+  // 1.000 all'uno e 0 all'altro. Senza ricarica va al cliente del bonifico. Quello che avanza (non dovrebbe: le
+  // ricariche abbinate sommano sempre l'importo) resta al cliente del bonifico, cosi' il totale non cambia.
+  for (const r of clienti) {
+    if (!r.target_id && !ricPerRiga.has(r.id)) continue
+    let resto = r.importo
+    const toccati = new Set<string>()
+    for (const y of ricPerRiga.get(r.id) || []) {
+      const v = voce(y.target_tipo, y.target_id); v.pagato = r2(v.pagato + y.importo); resto = r2(resto - y.importo)
+      if (!toccati.has(chiaveDi(y))) { toccati.add(chiaveDi(y)); v.bonifici++ }
+    }
+    if (Math.abs(resto) >= 0.005 && r.target_id) {
+      const v = voce(r.target_tipo, r.target_id); v.pagato = r2(v.pagato + resto)
+      if (!toccati.has(chiaveDi(r))) v.bonifici++
+    }
+  }
 
   const personalizzate = new Map(voci.map((v: any) => [v.controparte, v.voce]))
   const perVoce = new Map<string, { voce: string, n: number, totale: number, controparti: Set<string>, righe: any[] }>()
@@ -331,14 +440,16 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     periodo: { dal, al },
     totali: { entrate: somma(entrate), nEntrate: entrate.length, uscite: somma(uscite), nUscite: uscite.length },
     abbinati: { n: abbinati.length, totale: somma(abbinati), ricariche: abbinati.reduce((t, r) => t + (ricPerRiga.get(r.id)?.length || 0), 0),
-      righe: abbinati.map(r => ({ ...riga(r), cliente: nome(r.target_tipo, r.target_id), assegnato: r.assegnato, ricariche: ricPerRiga.get(r.id)!.map(breve) })) },
-    pagatiSenzaRicarica: { n: soloCliente.length, totale: somma(soloCliente), righe: soloCliente.map(r => ({ ...riga(r), cliente: nome(r.target_tipo, r.target_id) })) },
+      righe: abbinati.map(r => ({ ...riga(r), cliente: clienteDi(r), assegnato: r.assegnato, ricariche: ricPerRiga.get(r.id)!.map(breve) })) },
+    pagatiSenzaRicarica: { n: soloCliente.length, totale: somma(soloCliente), righe: soloCliente.map(r => ({ ...riga(r), cliente: clienteDi(r) })) },
     chiEe: chiEe(),
     esclusi: { n: clienti.filter(r => r.assegnato === 'escluso').length, totale: somma(clienti.filter(r => r.assegnato === 'escluso')),
       pagatori: [...esclusiPer.values()].sort((a, b) => b.totale - a.totale) },
     altreEntrate: { n: entrate.length - clienti.length, totale: somma(entrate.filter(r => !r.iban)) },
     ricaricheSenzaBonifico: { n: senzaBonifico.length, totale: somma(senzaBonifico), dopoIl: ultimoUtile,
-      righe: senzaBonifico.map(r => ({ ...breve(r), mittente: r.mittente, target: { tipo: r.target_tipo, id: r.target_id } })) },
+      // `aManoArrivata`: nella ricarica o nel Check Ricariche qualcuno l'ha segnata "arrivata", ma in banca non
+      // c'e': o il bonifico ha un nome che il portale non conosce, o non e' arrivato davvero.
+      righe: senzaBonifico.map(r => ({ ...breve(r), mittente: r.mittente, target: { tipo: r.target_tipo, id: r.target_id }, aManoArrivata: r.bonifico_arrivato_il ? giornoRoma(r.bonifico_arrivato_il) : null })) },
     ricaricheRecenti: { n: recenti.length, totale: somma(recenti) },
     altriMetodi: { n: altriNel.length, totale: somma(altriNel), righe: altriNel.map((r: any) => ({ ...breve(r), cliente: nome(r.target_tipo, r.target_id) !== '—' ? nome(r.target_tipo, r.target_id) : (r.target_nome || '—'), metodo: r.metodo })) },
     perCliente: [...perCliente.values()].map(v => ({ ...v, differenza: r2(v.pagato - v.ricaricato) }))
