@@ -69,7 +69,7 @@ export default function CheckRicariche() {
   const soglie = riep?.soglie || { no_bonifico: 3, no_arrivo: 4 }
 
   const badgeStato = (r: any) => {
-    if (r.stato === 'altro_metodo') return <span style={{ background: '#f3f4f6', color: '#374151', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>{METODO[r.metodo] || 'Altro pagamento'}</span>
+    if (r.stato === 'altro_metodo') return <span style={{ background: '#f3f4f6', color: '#374151', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap' }}>{METODO[r.metodo] || 'Altro pagamento'}</span>
     if (r.stato === 'arrivato') return <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>🟢 Arrivato</span>
     if (r.stato === 'effettuato') return <span style={{ background: '#dbeafe', color: '#1d4ed8', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>🔵 Bonifico fatto</span>
     return <span style={{ background: '#fef3c7', color: '#92400e', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>🟠 In attesa</span>
