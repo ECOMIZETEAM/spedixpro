@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
+import PagamentoRicarica, { type ValorePagamento } from '@/app/components/PagamentoRicarica'
+import PagatoriBonifico from '@/app/components/PagatoriBonifico'
 
 function fmtEuro(n: number) {
   return `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -203,6 +205,10 @@ export default function ClienteProfiloPage() {
   const [conferma, setConferma] = useState('')
   const [descrizione, setDescrizione] = useState('Accredito credito a scalare')
   const [bonificoFatto, setBonificoFatto] = useState(false)   // "bonifico gia' effettuato" per il Check Ricariche
+  // Come ha pagato e chi (lib/contabilita-banca): compare solo sui master dove la funzione e' accesa.
+  const [pagamento, setPagamento] = useState<ValorePagamento>({ metodo: 'bonifico', mittente: '' })
+  const [contabilita, setContabilita] = useState(false)
+  const [versionePagatori, setVersionePagatori] = useState(0)
   const [saving, setSaving] = useState(false)
   const [errore, setErrore] = useState<string | null>(null)
   const [successo, setSuccesso] = useState<string | null>(null)
@@ -276,7 +282,7 @@ export default function ClienteProfiloPage() {
 
   function apriRicarica() {
     setImporto(''); setConferma(''); setDescrizione('Accredito credito a scalare')
-    setBonificoFatto(false); setErrore(null); setShowRicarica(true)
+    setBonificoFatto(false); setPagamento({ metodo: 'bonifico', mittente: '' }); setErrore(null); setShowRicarica(true)
   }
 
   async function salvaRicarica() {
@@ -300,6 +306,7 @@ export default function ClienteProfiloPage() {
           descrizione: descrizione.trim(),
           importo: imp,
           bonificoEffettuato: imp > 0 ? bonificoFatto : false,
+          ...(contabilita && imp > 0 ? { metodo: pagamento.metodo, mittente: pagamento.mittente } : {}),
         }),
       })
       const data = await res.json()
@@ -308,6 +315,7 @@ export default function ClienteProfiloPage() {
       setSaving(false)
       caricaCliente()
       caricaMovimenti()
+      setVersionePagatori(v => v + 1)
       // Notifica verde in alto + scroll su per mostrarla
       setSuccesso('✓ Credito caricato con successo')
       if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -484,6 +492,8 @@ export default function ClienteProfiloPage() {
             </div>
           </div>
 
+          <PagatoriBonifico target={cliente?.id || id} versione={versionePagatori} />
+
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Ultime Spedizioni</div>
             {!spedizioni.length?(
@@ -531,6 +541,9 @@ export default function ClienteProfiloPage() {
               </div>
               <div style={{marginTop:'8px',fontSize:'11px',color:'#1a1a1a'}}>Suggerimento: scrivi <strong>200</strong> per accreditare, <strong>-200</strong> per addebitare/togliere credito.</div>
               {parseFloat((importo||'').replace(',','.')) > 0 && (
+                <PagamentoRicarica target={cliente?.id || id} valore={pagamento} onChange={setPagamento} onAttiva={setContabilita} />
+              )}
+              {parseFloat((importo||'').replace(',','.')) > 0 && (!contabilita || pagamento.metodo === 'bonifico') && (
                 <label style={{marginTop:'12px',display:'flex',alignItems:'flex-start',gap:'8px',fontSize:'12.5px',color:'#1a1a1a',cursor:'pointer',lineHeight:1.4}}>
                   <input type="checkbox" checked={bonificoFatto} onChange={e=>setBonificoFatto(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316',marginTop:'1px'}}/>
                   <span>Il bonifico è <b>già stato effettuato</b> — nel <b>Check Ricariche</b> parte come "bonifico fatto" (resta solo da confermare l'incasso). Se non lo spunti, resta "in attesa di bonifico".</span>

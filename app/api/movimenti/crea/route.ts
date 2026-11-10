@@ -2,22 +2,42 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { registraMovimento, TipoMovimento } from '@/lib/movimenti'
+import { contabilitaAttiva, metodoValido, pulisciNome, ricordaPagatore, type MetodoPagamento } from '@/lib/contabilita-banca'
 
 const TIPI_MANUALI: TipoMovimento[] = ['ricarica', 'reso', 'rettifica', 'rimborso']
 
 // CHECK RICARICHE: ogni ricarica MANUALE (tipo 'ricarica', importo positivo) lascia una riga di
 // controllo per monitorare il bonifico atteso (contabilita' + anti-truffa). Best-effort: non deve
 // mai far fallire la ricarica. Le ricariche Stripe/carta NON passano di qui, quindi restano fuori.
-async function tracciaRicarica(admin: any, d: { masterId: string; targetTipo: 'cliente' | 'master'; targetId: string; targetNome: string | null; importo: number; createdBy: string; bonificoEffettuato?: boolean }) {
+type Pagamento = { metodo: MetodoPagamento; mittente: string | null } | null
+
+// Come ha pagato la ricarica e chi ha fatto il bonifico (lib/contabilita-banca), per ritrovarla
+// sull'estratto conto. Solo per i master in prova: per gli altri la riga resta quella di sempre.
+function pagamentoDa(body: any, masterId: string): Pagamento {
+  if (!contabilitaAttiva(masterId)) return null
+  const metodo: MetodoPagamento = metodoValido(body?.metodo) ? body.metodo : 'bonifico'
+  return { metodo, mittente: metodo === 'bonifico' ? (pulisciNome(body?.mittente) || null) : null }
+}
+
+async function tracciaRicarica(admin: any, d: { masterId: string; targetTipo: 'cliente' | 'master'; targetId: string; targetNome: string | null; importo: number; createdBy: string; bonificoEffettuato?: boolean; pagamento?: Pagamento }) {
   try {
     // Se il master flagga "bonifico gia' effettuato" al momento della ricarica, la riga nasce gia'
     // a "bonifico effettuato" (resta solo da confermare l'incasso). Se non flagga, resta "in attesa".
+    // Pagata in contanti o con contrassegni compensati non e' un bonifico: niente "effettuato".
+    const bonifico = !d.pagamento || d.pagamento.metodo === 'bonifico'
     await admin.from('ricariche_check').insert({
       master_id: d.masterId, target_tipo: d.targetTipo, target_id: d.targetId,
       target_nome: d.targetNome, importo: Math.abs(d.importo), created_by: d.createdBy,
-      bonifico_effettuato_il: d.bonificoEffettuato ? new Date().toISOString() : null,
+      bonifico_effettuato_il: bonifico && d.bonificoEffettuato ? new Date().toISOString() : null,
+      ...(d.pagamento ? { metodo: d.pagamento.metodo, mittente: d.pagamento.mittente } : {}),
     })
   } catch (e) { console.error('[ricariche-check] tracciamento fallito', e) }
+  // Il nome scritto nella ricarica entra fra i pagatori del cliente: la prossima volta e' gia' proposto.
+  if (d.pagamento?.mittente) {
+    try {
+      await ricordaPagatore(admin, { masterId: d.masterId, targetTipo: d.targetTipo, targetId: d.targetId, nome: d.pagamento.mittente, origine: 'ricarica', createdBy: d.createdBy, usato: true })
+    } catch (e) { console.error('[pagatori] salvataggio fallito', e) }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -74,7 +94,7 @@ export async function POST(req: NextRequest) {
         riferimento: riferimento ? String(riferimento).trim() : null,
         importo, createdBy: user.id,
       })
-      if (tipo === 'ricarica' && importo > 0) await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'master', targetId: targetMasterId, targetNome: (sub as any)?.nome || null, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true })
+      if (tipo === 'ricarica' && importo > 0) await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'master', targetId: targetMasterId, targetNome: (sub as any)?.nome || null, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true, pagamento: pagamentoDa(body, utente.master_id) })
       return NextResponse.json({ ok: true, saldo })
     } catch (e: any) {
       return NextResponse.json({ error: e?.message || 'Errore ricarica sotto-master' }, { status: 500 })
@@ -107,7 +127,7 @@ export async function POST(req: NextRequest) {
             riferimento: riferimento ? String(riferimento).trim() : null,
             importo, createdBy: user.id,
           })
-          if (tipo === 'ricarica' && importo > 0) await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'master', targetId: clienteId, targetNome: (sub as any)?.nome || null, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true })
+          if (tipo === 'ricarica' && importo > 0) await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'master', targetId: clienteId, targetNome: (sub as any)?.nome || null, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true, pagamento: pagamentoDa(body, utente.master_id) })
           return NextResponse.json({ ok: true, saldo })
         } catch (e: any) {
           return NextResponse.json({ error: e?.message || 'Errore ricarica sotto-master' }, { status: 500 })
@@ -129,7 +149,7 @@ export async function POST(req: NextRequest) {
     })
     if (tipo === 'ricarica' && importo > 0) {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      await tracciaRicarica(createAdminSupabase(), { masterId: utente.master_id, targetTipo: 'cliente', targetId: clienteId, targetNome: (cli as any)?.ragione_sociale || null, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true })
+      await tracciaRicarica(createAdminSupabase(), { masterId: utente.master_id, targetTipo: 'cliente', targetId: clienteId, targetNome: (cli as any)?.ragione_sociale || null, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true, pagamento: pagamentoDa(body, utente.master_id) })
     }
     return NextResponse.json({ ok: true, saldo })
   } catch (e: any) {

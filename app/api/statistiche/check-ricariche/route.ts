@@ -23,7 +23,10 @@ function arricchisci(r: any) {
   const eff = r.bonifico_effettuato_il ? new Date(r.bonifico_effettuato_il).getTime() : null
   const arr = r.bonifico_arrivato_il ? new Date(r.bonifico_arrivato_il).getTime() : null
   const ric = r.ricaricato_il ? new Date(r.ricaricato_il).getTime() : ora
-  const stato = arr ? 'arrivato' : eff ? 'effettuato' : 'in_attesa'
+  // Pagata in contanti o con contrassegni compensati (lib/contabilita-banca): non e' un bonifico, non si
+  // aspetta niente in banca e non deve mai risultare "non ha pagato".
+  const altroMetodo = !!r.metodo && r.metodo !== 'bonifico'
+  const stato = altroMetodo ? 'altro_metodo' : arr ? 'arrivato' : eff ? 'effettuato' : 'in_attesa'
   const giorniDaRicarica = Math.floor((ora - ric) / MS_G)
   const giorniDaEffettuato = eff ? Math.floor((ora - eff) / MS_G) : null
   const alert_no_bonifico = stato === 'in_attesa' && giorniDaRicarica >= GIORNI_NO_BONIFICO
@@ -41,7 +44,7 @@ export async function GET(req: NextRequest) {
   // Badge menu: quanti ALERT attivi (righe aperte in allarme). Leggo solo le aperte.
   if (p.get('count')) {
     const { data } = await admin.from('ricariche_check')
-      .select('ricaricato_il,bonifico_effettuato_il,bonifico_arrivato_il')
+      .select('ricaricato_il,bonifico_effettuato_il,bonifico_arrivato_il,metodo')
       .eq('master_id', s.master_id).is('bonifico_arrivato_il', null).limit(3000)
     const n = (data || []).map(arricchisci).filter((r: any) => r.alert).length
     return NextResponse.json({ count: n })
@@ -57,13 +60,13 @@ export async function GET(req: NextRequest) {
 
   let righe = (data || []).map(arricchisci)
   const cerca = (p.get('q') || '').trim().toLowerCase()
-  if (cerca) righe = righe.filter((r: any) => (r.target_nome || '').toLowerCase().includes(cerca))
+  if (cerca) righe = righe.filter((r: any) => (r.target_nome || '').toLowerCase().includes(cerca) || (r.mittente || '').toLowerCase().includes(cerca))
   const filtro = p.get('stato')
   if (filtro === 'alert') righe = righe.filter((r: any) => r.alert)
   else if (filtro && ['in_attesa', 'effettuato', 'arrivato'].includes(filtro)) righe = righe.filter((r: any) => r.stato === filtro)
 
   const riepilogo = {
-    scoperto: righe.filter((r: any) => r.stato !== 'arrivato').reduce((t: number, r: any) => t + Number(r.importo || 0), 0),
+    scoperto: righe.filter((r: any) => r.stato !== 'arrivato' && r.stato !== 'altro_metodo').reduce((t: number, r: any) => t + Number(r.importo || 0), 0),
     n_in_attesa: righe.filter((r: any) => r.stato === 'in_attesa').length,
     n_effettuato: righe.filter((r: any) => r.stato === 'effettuato').length,
     n_alert: righe.filter((r: any) => r.alert).length,

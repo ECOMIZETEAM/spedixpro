@@ -13,6 +13,8 @@ const td: any = { padding: '9px 12px', fontSize: '12.5px', color: '#1a1a1a', bor
 const btn: any = { background: '#f97316', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }
 const btnSec: any = { background: '#fff', color: '#555', border: '1px solid #d5d5d5', borderRadius: '6px', padding: '6px 10px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }
 
+const METODO: Record<string, string> = { cod_compensati: '🔁 Contrassegni compensati', contanti: '💵 Contanti', altro: 'Altro pagamento' }
+
 const STATI: [string, string][] = [['', 'Tutti'], ['alert', '⚠ Solo alert'], ['in_attesa', 'In attesa bonifico'], ['effettuato', 'Bonifico effettuato'], ['arrivato', 'Arrivati']]
 
 export default function CheckRicariche() {
@@ -67,6 +69,7 @@ export default function CheckRicariche() {
   const soglie = riep?.soglie || { no_bonifico: 3, no_arrivo: 4 }
 
   const badgeStato = (r: any) => {
+    if (r.stato === 'altro_metodo') return <span style={{ background: '#f3f4f6', color: '#374151', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>{METODO[r.metodo] || 'Altro pagamento'}</span>
     if (r.stato === 'arrivato') return <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>🟢 Arrivato</span>
     if (r.stato === 'effettuato') return <span style={{ background: '#dbeafe', color: '#1d4ed8', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>🔵 Bonifico fatto</span>
     return <span style={{ background: '#fef3c7', color: '#92400e', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>🟠 In attesa</span>
@@ -140,11 +143,12 @@ export default function CheckRicariche() {
                       <span style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 700, color: r.target_tipo === 'master' ? '#7c3aed' : '#0891b2', background: r.target_tipo === 'master' ? '#f3e8ff' : '#ecfeff', padding: '1px 6px', borderRadius: '4px' }}>
                         {r.target_tipo === 'master' ? 'sotto-master' : 'cliente'}
                       </span>
+                      {r.mittente && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>bonifico da {r.mittente}</div>}
                     </td>
                     <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{eur(r.importo)}</td>
                     <td style={td}>{badgeStato(r)}</td>
                     <td style={td}>
-                      {r.stato === 'arrivato' ? <span style={{ color: '#9ca3af' }}>—</span> : (
+                      {r.stato === 'arrivato' || r.stato === 'altro_metodo' ? <span style={{ color: '#9ca3af' }}>—</span> : (
                         <span style={{ color: r.alert ? '#dc2626' : '#666', fontWeight: r.alert ? 700 : 400 }}>
                           {r.stato === 'in_attesa'
                             ? `${r.giorniDaRicarica}g dalla ricarica${r.alert_no_bonifico ? ' · non ha pagato!' : ''}`
