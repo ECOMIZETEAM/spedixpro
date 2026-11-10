@@ -126,7 +126,7 @@ export default function EstrattoConto() {
               <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', 'Ricariche pagate', '']} righe={r.abbinati.righe.map((x: any) => [
                 it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
                 x.ricariche.map((y: any) => `${it(y.giorno)} ${eur(y.importo)}`).join(' + '),
-                <button style={btnLink} disabled={!!occupato} onClick={async () => { if (await dialog.confirm({ title: 'Togliere questo abbinamento?', message: 'Il bonifico torna senza cliente e le ricariche tornano come erano prima nel Check Ricariche.', confirmText: 'Scollega', danger: true })) azione('sc' + x.id, { azione: 'scollega', riga_id: x.id }) }}>Scollega</button>,
+                <button style={btnLink} disabled={!!occupato} onClick={async () => { if (await dialog.confirm({ title: 'Togliere questo abbinamento?', message: 'Le ricariche tornano come erano prima nel Check Ricariche e il bonifico passa fra i «di chi è?»: lo riassegni tu.', confirmText: 'Scollega', danger: true })) azione('sc' + x.id, { azione: 'scollega', riga_id: x.id }) }}>Scollega</button>,
               ])} />
             </Blocco>
 

@@ -143,6 +143,12 @@ export async function applicaSicuri(admin: any, masterId: string, dal: string, a
  *  pagatori, poi i bonifici sicuri si applicano da soli, tutti quelli di quel pagatore nel periodo. */
 export async function assegnaPagatore(admin: any, masterId: string, userId: string, p: { nome: string, iban: string | null, target: Target }, periodo: { dal: string, al: string }) {
   await ricordaPagatore(admin, { masterId, targetTipo: p.target.tipo, targetId: p.target.id, nome: p.nome, iban: p.iban, origine: 'estratto', createdBy: userId })
+  // I bonifici di questo pagatore scollegati a mano tornano liberi di abbinarsi: il master ha appena scelto.
+  let q = admin.from('estratti_righe').update({ assegnato: null }).eq('master_id', masterId).eq('assegnato', 'libero')
+    .gte('data', periodo.dal).lte('data', periodo.al)
+  q = p.iban ? q.eq('iban', p.iban) : q.eq('nome', p.nome)
+  const { error } = await q
+  if (error) throw new Error(error.message)
   return applicaSicuri(admin, masterId, periodo.dal, periodo.al)
 }
 
@@ -154,7 +160,9 @@ export async function escludiPagatore(admin: any, masterId: string, p: { nome: s
   if (error) throw new Error(error.message)
 }
 
-/** Toglie un abbinamento: il bonifico torna senza cliente e le ricariche tornano come erano prima. */
+/** Toglie un abbinamento: le ricariche tornano come erano prima e il bonifico resta 'libero', cioe' fra i
+ *  "di chi e'?" finche' il master non sceglie: se tornasse senza stato, alla prossima apertura il nome
+ *  (ancora noto) lo riabbinerebbe da solo allo stesso cliente. */
 export async function scollegaRiga(admin: any, masterId: string, rigaId: string) {
   const { data: abb, error } = await admin.from('abbinamenti_bonifici').select('id,ricarica_id,segnato_effettuato,segnato_arrivato').eq('riga_id', rigaId).eq('master_id', masterId)
   if (error) throw new Error(error.message)
@@ -165,7 +173,7 @@ export async function scollegaRiga(admin: any, masterId: string, rigaId: string)
     if (Object.keys(torna).length) await admin.from('ricariche_check').update(torna).eq('id', a.ricarica_id).eq('master_id', masterId)
     await admin.from('abbinamenti_bonifici').delete().eq('id', a.id).eq('master_id', masterId)
   }
-  const { error: e2 } = await admin.from('estratti_righe').update({ target_tipo: null, target_id: null, assegnato: null }).eq('id', rigaId).eq('master_id', masterId)
+  const { error: e2 } = await admin.from('estratti_righe').update({ target_tipo: null, target_id: null, assegnato: 'libero' }).eq('id', rigaId).eq('master_id', masterId)
   if (e2) throw new Error(e2.message)
 }
 
@@ -187,7 +195,7 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   const entrate = righe.filter(r => r.importo > 0), uscite = righe.filter(r => r.importo < 0)
   const clienti = entrate.filter(r => r.iban)
   // Quelle ancora senza cliente (le sicure le ha gia' applicate applicaSicuri prima del resoconto)
-  const libere = clienti.filter(r => !r.target_id && !r.assegnato)
+  const libere = clienti.filter(r => !r.target_id && (!r.assegnato || r.assegnato === 'libero'))
   const aperte = ric.filter(r => !r.riga_id)
   const proposte = proponi(libere as Entrata[], aperte as RicaricaAperta[], pag as any, anag)
   const ricPerId = new Map(ric.map(r => [r.id, r]))
@@ -198,9 +206,10 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   const chiEe = () => {
     const m = new Map<string, Gruppo>()
     for (const r of libere) {
-      const p = proposte.get(r.id); if (!p || p.esito !== 'ignoto') continue
+      // Gli scollegati a mano restano qui anche se il nome e' noto: li assegna il master.
+      const p = proposte.get(r.id); if (!p || (p.esito !== 'ignoto' && r.assegnato !== 'libero')) continue
       const k = chiavePagatore(r)
-      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], omonimi: p.omonimi.map(t => nome(t.tipo, t.id)), righe: [] })
+      if (!m.has(k)) m.set(k, { chiave: k, nome: r.nome, iban: r.iban, n: 0, totale: 0, causali: [], omonimi: p.esito === 'ignoto' ? p.omonimi.map(t => nome(t.tipo, t.id)) : [], righe: [] })
       const gg = m.get(k)!
       gg.n++; gg.totale = r2(gg.totale + r.importo); gg.righe.push(riga(r))
       if (r.causale && !gg.causali.includes(r.causale) && gg.causali.length < 3) gg.causali.push(r.causale)

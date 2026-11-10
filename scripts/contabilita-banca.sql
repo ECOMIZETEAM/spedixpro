@@ -69,6 +69,7 @@ create index if not exists estratti_conto_master on public.estratti_conto (maste
 -- I movimenti. Due estratti che si sovrappongono non li contano due volte: la chiave (data, importo,
 -- saldo dopo, nome) e' unica per master. Un'entrata puo' avere il cliente che l'ha pagata: messo da solo
 -- ('auto', pagatore gia' noto) o dal master ('confermato'); 'escluso' = non e' un cliente.
+-- Applicato il 10/11/2026 (prove con Lorenzo).
 create table if not exists public.estratti_righe (
   id uuid primary key default gen_random_uuid(),
   master_id uuid not null references public.masters(id) on delete cascade,
@@ -82,7 +83,8 @@ create table if not exists public.estratti_righe (
   chiave text not null,
   target_tipo text check (target_tipo in ('cliente', 'master')),
   target_id uuid,
-  assegnato text check (assegnato in ('auto', 'confermato', 'escluso')),
+  -- 'libero' = scollegato a mano: resta fra i "di chi e'?" finche' il master non sceglie
+  assegnato text check (assegnato in ('auto', 'confermato', 'escluso', 'libero')),
   created_at timestamptz not null default now(),
   check ((target_id is null) = (target_tipo is null))
 );
