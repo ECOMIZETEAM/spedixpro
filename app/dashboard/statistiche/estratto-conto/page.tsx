@@ -63,6 +63,12 @@ export default function EstrattoConto() {
     } catch { setErrore('Errore di rete'); return false } finally { setOccupato('') }
   }
 
+  const scollega = async (x: any) => {
+    if (await dialog.confirm({ title: 'Togliere questo abbinamento?', message: 'Le ricariche tornano come erano prima nel Check Ricariche e il bonifico passa fra i «di chi è?»: lo riassegni tu. Se il cliente era sbagliato, il portale se lo dimentica per i prossimi bonifici.', confirmText: 'Scollega', danger: true })) {
+      await azione('sc' + x.id, { azione: 'scollega', riga_id: x.id })
+    }
+  }
+
   const escludi = async (g: any) => {
     if (await dialog.confirm({ title: `«${g.nome}» non è un cliente?`, message: 'I suoi bonifici escono dai conti dei clienti (un rimborso, un giroconto…), anche nei prossimi estratti.', confirmText: 'Non è un cliente' })) {
       await azione('esc' + g.chiave, { azione: 'escludi', nome: g.nome, iban: g.iban })
@@ -128,9 +134,19 @@ export default function EstrattoConto() {
               <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', 'Ricariche pagate', '']} righe={r.abbinati.righe.map((x: any) => [
                 it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
                 x.ricariche.map((y: any) => `${it(y.giorno)} ${eur(y.importo)}`).join(' + '),
-                <button style={btnLink} disabled={!!occupato} onClick={async () => { if (await dialog.confirm({ title: 'Togliere questo abbinamento?', message: 'Le ricariche tornano come erano prima nel Check Ricariche e il bonifico passa fra i «di chi è?»: lo riassegni tu.', confirmText: 'Scollega', danger: true })) azione('sc' + x.id, { azione: 'scollega', riga_id: x.id }) }}>Scollega</button>,
+                <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
               ])} />
             </Blocco>
+
+            {r.pagatiSenzaRicarica.n > 0 && (
+              <Blocco icona="⚠️" titolo={`${r.pagatiSenzaRicarica.n} bonifici di un cliente senza una ricarica che torni`} totale={r.pagatiSenzaRicarica.totale} aperto={aperti.psr} onApri={() => apri('psr')}
+                frase="Il pagatore è del cliente (nome o IBAN), ma nessuna sua ricarica ha lo stesso importo: per esempio ha pagato 500 € e la ricarica era di 400. Contano nel pagato del cliente; se la ricarica arriva dopo, si abbinano da soli. Se il cliente è sbagliato, scollegalo.">
+                <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', '']} righe={r.pagatiSenzaRicarica.righe.map((x: any) => [
+                  it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
+                  <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
+                ])} />
+              </Blocco>
+            )}
 
             <Blocco icona="❓" titolo={`${r.chiEe.length} pagatori: di chi sono questi bonifici?`} totale={r.chiEe.reduce((t: number, g: any) => t + g.totale, 0)} aperto={aperti.chi} onApri={() => apri('chi')}
               frase="Il nome di chi ha pagato non corrisponde a nessun cliente né a nessun nome salvato in «Chi paga i bonifici». Scegli il cliente una volta: il nome e l'IBAN restano salvati su di lui e da qui in poi i suoi bonifici si abbinano da soli.">
@@ -164,7 +180,7 @@ export default function EstrattoConto() {
             </Blocco>
 
             <Blocco icona="👥" titolo="Cliente per cliente: ricaricato e pagato" aperto={aperti.cli ?? true} onApri={() => apri('cli')}
-              frase={`Nel periodo: quanto gli avete ricaricato con bonifico e quanto ha pagato in banca. ${r.pagatiSenzaRicarica.n ? `${r.pagatiSenzaRicarica.n} bonifici (${eur(r.pagatiSenzaRicarica.totale)}) sono di un cliente ma non pagano una ricarica precisa: contano nel pagato.` : ''}`}
+              frase="Nel periodo: quanto gli avete ricaricato con bonifico e quanto ha pagato in banca (anche i bonifici senza una ricarica che torni)."
               azioni={<label style={{ fontSize: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}><input type="checkbox" checked={soloDiff} onChange={e => setSoloDiff(e.target.checked)} /> solo chi ha una differenza</label>}>
               <Tabella teste={['Cliente', 'Ricaricato', 'Pagato', 'Differenza']} destra={[1, 2, 3]} righe={r.perCliente.filter((x: any) => !soloDiff || Math.abs(x.differenza) >= 0.01).map((x: any) => [
                 x.nome, `${eur(x.ricaricato)} (${x.ricariche})`, `${eur(x.pagato)} (${x.bonifici})`,
@@ -192,9 +208,23 @@ export default function EstrattoConto() {
               ))}
             </Blocco>
 
+            {(r.altriMetodi.n > 0 || r.esclusi.n > 0) && (
+              <Blocco icona="↩" titolo="Fuori dai conti dei clienti" aperto={aperti.fuori} onApri={() => apri('fuori')}
+                frase={`Ricariche pagate in altro modo: ${r.altriMetodi.n} per ${eur(r.altriMetodi.totale)}, non si cercano in banca. Bonifici di chi non è un cliente: ${r.esclusi.n} per ${eur(r.esclusi.totale)}. Se ne hai segnato uno per sbaglio, rimettilo da qui.`}>
+                {r.esclusi.pagatori.length > 0 && <Tabella teste={['Non è un cliente', 'Bonifici', 'Importo', '']} destra={[2]} righe={r.esclusi.pagatori.map((g: any) => [
+                  <span>{g.nome}{g.iban ? <span style={{ display: 'block', fontSize: '11px', color: '#9ca3af' }}>IBAN {g.iban}</span> : null}</span>, g.n, eur(g.totale),
+                  <button style={btnLink} disabled={!!occupato} onClick={() => azione('inc' + (g.iban || g.nome), { azione: 'includi', nome: g.nome, iban: g.iban })}>Invece è un cliente</button>,
+                ])} />}
+                {r.altriMetodi.righe.length > 0 && <Tabella teste={['Ricaricata il', 'Cliente', 'Importo', 'Pagata con']} destra={[2]} righe={r.altriMetodi.righe.map((x: any) => [
+                  it(x.giorno), x.cliente, eur(x.importo),
+                  <select value={x.metodo} disabled={!!occupato} onChange={e => azione('m' + x.id, { azione: 'metodo', ricarica_id: x.id, metodo: e.target.value })} style={{ ...campo, width: 'auto', padding: '4px 6px', fontSize: '12px' }}>
+                    <option value="bonifico">Bonifico</option><option value="cod_compensati">Contrassegni compensati</option><option value="contanti">Contanti</option><option value="altro">Altro</option>
+                  </select>,
+                ])} />}
+              </Blocco>
+            )}
+
             <div style={{ fontSize: '12px', color: '#6b7280', margin: '4px 2px 20px' }}>
-              {r.altriMetodi.n > 0 && <>Ricariche pagate in altro modo (contanti, contrassegni compensati): {r.altriMetodi.n} per {eur(r.altriMetodi.totale)}, non si cercano in banca. </>}
-              {r.esclusi.n > 0 && <>Bonifici di chi non è un cliente: {r.esclusi.n} per {eur(r.esclusi.totale)}. </>}
               {r.altreEntrate.n > 0 && <>Altre entrate senza IBAN (rimborsi della carta): {r.altreEntrate.n} per {eur(r.altreEntrate.totale)}.</>}
             </div>
           </>

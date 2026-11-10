@@ -5,14 +5,14 @@ import { eDiscendente } from '@/lib/rete-masters'
 import { chiSei } from '@/lib/contabilita-accesso'
 import { metodoValido, pulisciIban, pulisciNome } from '@/lib/contabilita-banca'
 import { norma, type Target } from '@/lib/contabilita-abbina'
-import { assegnaPagatore, escludiPagatore, scollegaRiga } from '@/lib/contabilita-estratti'
+import { assegnaPagatore, escludiPagatore, includiPagatore, scollegaRiga } from '@/lib/contabilita-estratti'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 // LE AZIONI SULL'ESTRATTO CONTO (lib/contabilita-estratti), del titolare e dei suoi admin:
 //  - pagatore: "questo pagatore e' quel cliente" (conferma una proposta o risponde a "di chi e'?");
-//  - escludi: "non e' un cliente" (un rimborso, un giroconto);
+//  - escludi: "non e' un cliente" (un rimborso, un giroconto); includi: lo annulla;
 //  - scollega: toglie un abbinamento sbagliato;
 //  - metodo: una ricarica che non era un bonifico (es. contrassegni compensati) esce dall'attesa;
 //  - voce: il nome della voce per le uscite verso una controparte (es. "E.M EXPRESS LTD" → "Fornitore").
@@ -54,6 +54,13 @@ export async function POST(req: NextRequest) {
         if (!nome) return NextResponse.json({ error: 'Pagatore senza nome' }, { status: 400 })
         await escludiPagatore(admin, c.masterId, { nome, iban: pulisciIban(b?.iban) })
         await audit('estratto_escludi', nome)
+        return NextResponse.json({ ok: true })
+      }
+      case 'includi': {
+        const nome = pulisciNome(b?.nome)
+        if (!nome) return NextResponse.json({ error: 'Pagatore senza nome' }, { status: 400 })
+        await includiPagatore(admin, c.masterId, { nome, iban: pulisciIban(b?.iban) })
+        await audit('estratto_includi', nome)
         return NextResponse.json({ ok: true })
       }
       case 'scollega': {

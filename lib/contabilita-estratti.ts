@@ -15,9 +15,20 @@ const giornoRoma = (ts: string) => new Date(ts).toLocaleDateString('en-CA', { ti
 const chiavePagatore = (r: { iban: string | null, nome: string }) => r.iban || 'N:' + norma(r.nome)
 
 /** Un movimento e' sempre lo stesso anche se arriva in due estratti che si sovrappongono: il saldo dopo
- *  il movimento lo distingue da un altro bonifico uguale dello stesso giorno. */
-const chiaveRiga = (r: { data: string, importo: number, saldo: number, nome: string }) =>
+ *  il movimento lo distingue da un altro bonifico uguale dello stesso giorno. Non sempre: +100 da X, -100 a Y,
+ *  +100 da X lasciano lo stesso saldo, e il secondo bonifico sarebbe scartato come doppione. Per questo i
+ *  movimenti identici dello stesso file si numerano nell'ordine della banca (il primo resta senza numero,
+ *  cosi' le impronte gia' salvate non cambiano). Lo stesso giorno in due estratti ha lo stesso ordine. */
+const chiaveBase = (r: { data: string, importo: number, saldo: number, nome: string }) =>
   `${r.data}|${r.importo.toFixed(2)}|${r.saldo.toFixed(2)}|${norma(r.nome)}`
+export function chiaviRighe(righe: { data: string, importo: number, saldo: number, nome: string }[]): string[] {
+  const visti = new Map<string, number>()
+  return righe.map(r => {
+    const b = chiaveBase(r), n = (visti.get(b) || 0) + 1
+    visti.set(b, n)
+    return n === 1 ? b : `${b}#${n}`
+  })
+}
 
 /** Salva l'estratto e i suoi movimenti; quelli gia' caricati con un estratto precedente si saltano. */
 export async function salvaEstratto(admin: any, masterId: string, e: Estratto, nomeFile: string, userId: string) {
@@ -28,10 +39,11 @@ export async function salvaEstratto(admin: any, masterId: string, e: Estratto, n
   }).select('id').single()
   if (error) throw new Error(error.message)
   let nuove = 0
+  const chiavi = chiaviRighe(e.righe)
   for (let i = 0; i < e.righe.length; i += 500) {
-    const blocco = e.righe.slice(i, i + 500).map(r => ({
+    const blocco = e.righe.slice(i, i + 500).map((r, k) => ({
       master_id: masterId, estratto_id: est.id, data: r.data, nome: r.nome, causale: r.causale,
-      iban: pulisciIban(r.iban), importo: r.importo, saldo: r.saldo, chiave: chiaveRiga(r),
+      iban: pulisciIban(r.iban), importo: r.importo, saldo: r.saldo, chiave: chiavi[i + k],
     }))
     const { data, error: e2 } = await admin.from('estratti_righe')
       .upsert(blocco, { onConflict: 'master_id,chiave', ignoreDuplicates: true }).select('id')
@@ -202,6 +214,15 @@ export async function escludiPagatore(admin: any, masterId: string, p: { nome: s
   if (error) throw new Error(error.message)
 }
 
+/** Annulla "non e' un cliente": i bonifici di quel pagatore, in tutti i mesi, tornano a cercare il loro cliente
+ *  (da soli se il nome e' noto, altrimenti fra i "di chi e'?"). Un clic sbagliato non deve essere per sempre. */
+export async function includiPagatore(admin: any, masterId: string, p: { nome: string, iban: string | null }) {
+  let q = admin.from('estratti_righe').update({ assegnato: null }).eq('master_id', masterId).eq('assegnato', 'escluso')
+  q = p.iban ? q.eq('iban', p.iban) : q.eq('nome', p.nome)
+  const { error } = await q
+  if (error) throw new Error(error.message)
+}
+
 /** Toglie un abbinamento: le ricariche tornano come erano prima e il bonifico resta 'libero', cioe' fra i
  *  "di chi e'?" finche' il master non sceglie: se tornasse senza stato, alla prossima apertura il nome
  *  (ancora noto) lo riabbinerebbe da solo allo stesso cliente. */
@@ -215,8 +236,20 @@ export async function scollegaRiga(admin: any, masterId: string, rigaId: string)
     if (Object.keys(torna).length) await admin.from('ricariche_check').update(torna).eq('id', a.ricarica_id).eq('master_id', masterId)
     await admin.from('abbinamenti_bonifici').delete().eq('id', a.id).eq('master_id', masterId)
   }
+  const { data: prima } = await admin.from('estratti_righe').select('iban,target_tipo,target_id').eq('id', rigaId).eq('master_id', masterId).maybeSingle()
   const { error: e2 } = await admin.from('estratti_righe').update({ target_tipo: null, target_id: null, assegnato: 'libero' }).eq('id', rigaId).eq('master_id', masterId)
   if (e2) throw new Error(e2.message)
+  // Il cliente era sbagliato? Se quell'IBAN gli era stato dato dall'estratto (un "di chi e'?" assegnato male) e
+  // non gli resta nessun altro bonifico con quell'IBAN, l'IBAN si toglie dai suoi pagatori: altrimenti i
+  // prossimi bonifici tornerebbero da lui. I nomi scritti a mano o nella ricarica restano.
+  if (prima?.iban && prima.target_id) {
+    const { count, error: e3 } = await admin.from('estratti_righe').select('id', { count: 'exact', head: true })
+      .eq('master_id', masterId).eq('iban', prima.iban).eq('target_tipo', prima.target_tipo).eq('target_id', prima.target_id)
+    if (!e3 && count === 0) {
+      await admin.from('pagatori_bonifico').delete().eq('master_id', masterId).eq('origine', 'estratto')
+        .eq('target_tipo', prima.target_tipo).eq('target_id', prima.target_id).eq('iban', prima.iban)
+    }
+  }
 }
 
 /** Il racconto del periodo, a blocchi (come piace a Lorenzo: numero, frase, elenco da aprire). */
@@ -283,8 +316,16 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     const x = perVoce.get(v)!; x.n++; x.totale = r2(x.totale + r.importo); x.controparti.add(r.nome); x.righe.push(riga(r))
   }
   const somma = (l: any[]) => r2(l.reduce((t, r) => t + r.importo, 0))
-  const { data: altri } = await admin.from('ricariche_check').select('importo,metodo')
-    .eq('master_id', masterId).gte('ricaricato_il', dal).lte('ricaricato_il', al + 'T23:59:59').not('metodo', 'is', null).neq('metodo', 'bonifico')
+  const altri = await fetchAllStretto(() => admin.from('ricariche_check').select('id,importo,metodo,target_tipo,target_id,target_nome,ricaricato_il')
+    .eq('master_id', masterId).gte('ricaricato_il', spostaGiorni(dal, -1)).lte('ricaricato_il', spostaGiorni(al, 1)).not('metodo', 'is', null).neq('metodo', 'bonifico').order('ricaricato_il').order('id'))
+  const altriNel = altri.map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il) })).filter((r: any) => r.giorno >= dal && r.giorno <= al)
+  // "Non e' un cliente", per pagatore: da qui si annulla.
+  const esclusiPer = new Map<string, { nome: string, iban: string | null, n: number, totale: number }>()
+  for (const r of clienti.filter(x => x.assegnato === 'escluso')) {
+    const k = chiavePagatore(r)
+    if (!esclusiPer.has(k)) esclusiPer.set(k, { nome: r.nome, iban: r.iban, n: 0, totale: 0 })
+    const x = esclusiPer.get(k)!; x.n++; x.totale = r2(x.totale + r.importo)
+  }
 
   return {
     periodo: { dal, al },
@@ -293,12 +334,13 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
       righe: abbinati.map(r => ({ ...riga(r), cliente: nome(r.target_tipo, r.target_id), assegnato: r.assegnato, ricariche: ricPerRiga.get(r.id)!.map(breve) })) },
     pagatiSenzaRicarica: { n: soloCliente.length, totale: somma(soloCliente), righe: soloCliente.map(r => ({ ...riga(r), cliente: nome(r.target_tipo, r.target_id) })) },
     chiEe: chiEe(),
-    esclusi: { n: clienti.filter(r => r.assegnato === 'escluso').length, totale: somma(clienti.filter(r => r.assegnato === 'escluso')) },
+    esclusi: { n: clienti.filter(r => r.assegnato === 'escluso').length, totale: somma(clienti.filter(r => r.assegnato === 'escluso')),
+      pagatori: [...esclusiPer.values()].sort((a, b) => b.totale - a.totale) },
     altreEntrate: { n: entrate.length - clienti.length, totale: somma(entrate.filter(r => !r.iban)) },
     ricaricheSenzaBonifico: { n: senzaBonifico.length, totale: somma(senzaBonifico), dopoIl: ultimoUtile,
       righe: senzaBonifico.map(r => ({ ...breve(r), mittente: r.mittente, target: { tipo: r.target_tipo, id: r.target_id } })) },
     ricaricheRecenti: { n: recenti.length, totale: somma(recenti) },
-    altriMetodi: { n: (altri || []).length, totale: r2((altri || []).reduce((t: number, r: any) => t + Number(r.importo), 0)) },
+    altriMetodi: { n: altriNel.length, totale: somma(altriNel), righe: altriNel.map((r: any) => ({ ...breve(r), cliente: nome(r.target_tipo, r.target_id) !== '—' ? nome(r.target_tipo, r.target_id) : (r.target_nome || '—'), metodo: r.metodo })) },
     perCliente: [...perCliente.values()].map(v => ({ ...v, differenza: r2(v.pagato - v.ricaricato) }))
       .sort((a, b) => Math.abs(b.differenza) - Math.abs(a.differenza)),
     uscite: [...perVoce.values()].map(v => ({ voce: v.voce, n: v.n, totale: v.totale, controparti: [...v.controparti].slice(0, 5), righe: v.righe }))
