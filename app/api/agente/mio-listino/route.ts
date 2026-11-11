@@ -34,7 +34,7 @@ export async function GET() {
   for (const a of (aggCorr || [])) { const fv = parseFloat((a as any)?.fattore_volume); if ((a as any)?.corriere_id && fv > 0) fattorePerCorr.set((a as any).corriere_id, fv) }
 
   const { data: fasce } = await db.from('listini_clienti_fasce')
-    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome),corrieri(nome_contratto,attivo,master_id)')
+    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome,multicollo),corrieri(nome_contratto,attivo,master_id)')
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
 
   // MOSTRA i contratti in pausa col FLAG (come il master, non come il cliente): l'agente vede il
@@ -59,12 +59,22 @@ export async function GET() {
         fattore: fattorePerCorr.get(cid) || defFattore,
         zoneSet: new Set<string>(),
         fasce: new Map<string, any>(),
+        // Le zone MULTICOLLO hanno la loro griglia (scheda Multicollo): non si mescolano col collo singolo.
+        zoneMC: new Set<string>(),
+        fasceMC: new Map<string, any>(),
         pausa: pausaCatena || pausaPropria,
         pausaMotivo: pausaCatena ? 'catena' : (pausaPropria ? 'propria' : null),
       })
     }
     const e = perCorr.get(cid)
     const zonaNome = (f as any).zone?.nome || '—'
+    if ((f as any).zone?.multicollo) {
+      e.zoneMC.add(zonaNome)
+      const kmc = (f as any).tipo + '|' + (f as any).peso_max
+      if (!e.fasceMC.has(kmc)) e.fasceMC.set(kmc, { peso_max: Number((f as any).peso_max), tipo: (f as any).tipo, fuel: Number((f as any).fuel) || 0, prezzi: {} as Record<string, number> })
+      e.fasceMC.get(kmc).prezzi[zonaNome] = Number((f as any).prezzo)
+      continue
+    }
     e.zoneSet.add(zonaNome)
     const key = (f as any).tipo + '|' + (f as any).peso_max
     if (!e.fasce.has(key)) e.fasce.set(key, { peso_max: Number((f as any).peso_max), tipo: (f as any).tipo, fuel: Number((f as any).fuel) || 0, prezzi: {} as Record<string, number> })
@@ -92,8 +102,8 @@ export async function GET() {
       peso_min: d?.peso_min !== '' && d?.peso_min != null ? Number(d.peso_min) : null,
       peso_max: d?.peso_max !== '' && d?.peso_max != null ? Number(d.peso_max) : null,
     }
-    // La tabella multicollo: chi paga deve poterla leggere come il resto del listino.
-    if ((s as any).tipo === 'multicollo_tabella') (row as any).tabella = d
+    // Localita' remota / partenza remota del multicollo: chi paga deve poterle leggere come il resto.
+    if ((s as any).tipo === 'multicollo_supplementi') (row as any).dati = d
     if (!supplPerCorr.has(cid)) supplPerCorr.set(cid, [])
     supplPerCorr.get(cid)!.push(row)
   }
@@ -106,16 +116,6 @@ export async function GET() {
   }
 
   const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
-  // Colonne della tabella multicollo (aree del contratto del detentore), solo dove la tabella c'e'.
-  const colonneMC = new Map<string, any[]>()
-  {
-    const conTabella = Array.from(supplPerCorr.entries()).filter(([, righe]) => righe.some((r: any) => r.tipo === 'multicollo_tabella')).map(([cid]) => cid)
-    if (conTabella.length) {
-      const { createAdminSupabase: _adm } = await import('@/lib/supabase-admin')
-      const { colonneDelContratto } = await import('@/lib/multicollo-tabella')
-      for (const cid of conTabella) colonneMC.set(cid, await colonneDelContratto(_adm(), cid))
-    }
-  }
   const corrieri = Array.from(perCorr.entries())
     .sort((a, b) => ((a[1].pausa ? 1 : 0) - (b[1].pausa ? 1 : 0)) || a[1].nome_contratto.localeCompare(b[1].nome_contratto))
     .map(([cid, c]) => {
@@ -128,6 +128,7 @@ export async function GET() {
         fattore: c.fattore,
         zone: Array.from(c.zoneSet).sort(ordZona as any),
         fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),
+        multicollo: c.zoneMC.size ? { zone: Array.from(c.zoneMC).sort(), fasce: Array.from(c.fasceMC.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max) } : null,
         supplementi: {
           assicurazione: perTipo('assicurazione').sort(ordScaglioni),
           contrassegno: perTipo('contrassegno').sort(ordScaglioni),
@@ -135,7 +136,7 @@ export async function GET() {
           giacenza: [...perTipo('giacenza'), ...perTipo('giacenza_apertura')],
           ritiro: perTipo('ritiro'),
           sponda: perTipo('sponda'),
-          minimo_collo: [...perTipo('minimo_collo'), ...perTipo('multicollo_tabella').map((r: any) => ({ ...r, colonne: colonneMC.get(cid) || [] }))],
+          minimo_collo: [...perTipo('minimo_collo'), ...perTipo('multicollo_supplementi')],
         },
       }
     })

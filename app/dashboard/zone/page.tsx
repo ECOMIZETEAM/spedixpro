@@ -15,8 +15,8 @@ export default function ZonePage() {
   const [modalCopia, setModalCopia] = useState<any>(null)   // corriere di origine da cui copiare le zone
   const [modalCopiaDa, setModalCopiaDa] = useState<any>(null)   // corriere DESTINAZIONE (vuoto): scelgo da dove copiare
   const [copiando, setCopiando] = useState(false)
-  const [formNuova, setFormNuova] = useState({nome:'',descrizione:'',con_fuel:false})
-  const [formMod, setFormMod] = useState({nome:'',descrizione:'',con_fuel:false})
+  const [formNuova, setFormNuova] = useState({nome:'',descrizione:'',con_fuel:false,multicollo:false})
+  const [formMod, setFormMod] = useState({nome:'',descrizione:'',con_fuel:false,multicollo:false})
   const [regioni, setRegioni] = useState<any[]>([])
   const [formRegione, setFormRegione] = useState({paese:'IT',provincia:'',cap:'*',citta:'*'})
   const [savingReg, setSavingReg] = useState(false)
@@ -56,7 +56,7 @@ export default function ZonePage() {
     const d = await res.json().catch(()=>({}))
     setSaving(false)
     if(!res.ok || d?.error){ await dialog.alert({ title: 'Errore', message: d?.error || 'Errore durante il salvataggio della zona.' }); return }
-    setFormNuova({nome:'',descrizione:'',con_fuel:false}); setModalNuovaCorr(null); load()
+    setFormNuova({nome:'',descrizione:'',con_fuel:false,multicollo:false}); setModalNuovaCorr(null); load()
   }
 
   async function salvaMod() {
@@ -207,7 +207,8 @@ export default function ZonePage() {
       )}
 
       {corrieri.filter((c:any)=>brandKey(c)===brand).map((c:any)=>{
-        const zoneC = zone.filter(z=>z.corriere_id===c.id)
+        // Prima le zone del collo singolo, poi quelle multicollo (hanno la loro scheda nel listino).
+        const zoneC = zone.filter(z=>z.corriere_id===c.id).sort((a:any,b:any)=>(a.multicollo?1:0)-(b.multicollo?1:0))
         return (
           <div key={c.id} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginBottom:'20px'}}>
             <div style={{padding:'16px'}}>
@@ -220,7 +221,7 @@ export default function ZonePage() {
                 <span style={{fontSize:'16px',fontWeight:'700',color:'#1a1a1a'}}>{c?.nome_contratto}</span>
               </div>
               <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
-                <button onClick={()=>{setFormNuova({nome:'',descrizione:'',con_fuel:false});setModalNuovaCorr(c.id)}} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>+Aggiungi zona</button>
+                <button onClick={()=>{setFormNuova({nome:'',descrizione:'',con_fuel:false,multicollo:false});setModalNuovaCorr(c.id)}} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>+Aggiungi zona</button>
                 {zoneC.length>0 && <button onClick={()=>setModalCopia(c)} style={{padding:'6px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#2563eb',fontWeight:'600'}}>⧉ Copia zone su altro corriere</button>}
                 {/* Contratto VUOTO: non ci sono righe-zona (quindi nessuna freccia Importa/Esporta) → qui si
                     copiano le zone DA un altro corriere gia' configurato (zone + CAP), in un clic. */}
@@ -241,11 +242,12 @@ export default function ZonePage() {
                         <td style={{padding:'10px 12px',fontWeight:'600',color:'#f97316'}}>{z.nome}</td>
                         <td style={{padding:'10px 12px'}}>
                           {z.con_fuel&&<span style={{background:'#f97316',color:'#fff',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>Fuel</span>}
+                          {z.multicollo&&<span title="Zona del multicollo: si prezza nella scheda Multicollo del listino" style={{background:'#2563eb',color:'#fff',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700',marginLeft:z.con_fuel?'4px':0}}>Multicollo</span>}
                         </td>
                         <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}} title={riepilogoRegioni(z)}>{riepilogoRegioni(z)}</td>
                         <td style={{padding:'10px 12px'}}>
                           <div style={{display:'flex',gap:'4px'}}>
-                            <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
+                            <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false,multicollo:!!z.multicollo});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
                             <button onClick={()=>esporta(z)} title="Esporta zona (XLSX)" style={ibtn('#fff','#1a1a1a','#d1d5db')}>⬇</button>
                             <label title="Importa regioni (XLSX spedisci.online)" style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:importing===z.id?'wait':'pointer',opacity:importing===z.id?0.5:1}}>
                               {importing===z.id?'…':'⬆'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!!importing} style={{display:'none'}} onChange={async e=>{
@@ -280,6 +282,8 @@ export default function ZonePage() {
               <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Nome</label><input value={formNuova.nome} onChange={e=>setFormNuova(f=>({...f,nome:e.target.value}))} style={inp} placeholder="es. SARDEGNA"/></div>
               <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label><textarea value={formNuova.descrizione} onChange={e=>setFormNuova(f=>({...f,descrizione:e.target.value}))} rows={4} style={{...inp,resize:'vertical' as const}} placeholder="opzionale"/></div>
               <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formNuova.con_fuel} onChange={e=>setFormNuova(f=>({...f,con_fuel:e.target.checked}))} id="fn"/><label htmlFor="fn" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Applica supplemento Fuel</label></div>
+              <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formNuova.multicollo} onChange={e=>setFormNuova(f=>({...f,multicollo:e.target.checked}))} id="fnmc"/><label htmlFor="fnmc" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Zona multicollo</label></div>
+              <div style={{fontSize:'11.5px',color:'#666',margin:'-10px 0 16px 24px',lineHeight:1.5}}>Si prezza nella scheda <b>Multicollo</b> del listino (2 o più colli, sul peso totale) e non vale mai per il collo singolo. Qui un CAP più corto vale come inizio del codice: <b>DE · 66</b> = tutti i codici tedeschi che iniziano per 66.</div>
               <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
                 <button onClick={()=>setModalNuovaCorr(null)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>Annulla</button>
                 <button onClick={salvaZona} disabled={saving} style={{padding:'8px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>Aggiungi</button>
@@ -300,6 +304,8 @@ export default function ZonePage() {
               <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Nome</label><input value={formMod.nome} onChange={e=>setFormMod(f=>({...f,nome:e.target.value}))} style={inp}/></div>
               <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label><textarea value={formMod.descrizione} onChange={e=>setFormMod(f=>({...f,descrizione:e.target.value}))} rows={5} style={{...inp,resize:'vertical' as const}}/></div>
               <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formMod.con_fuel} onChange={e=>setFormMod(f=>({...f,con_fuel:e.target.checked}))} id="fm"/><label htmlFor="fm" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Applica supplemento Fuel</label></div>
+              <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formMod.multicollo} onChange={e=>setFormMod(f=>({...f,multicollo:e.target.checked}))} id="fmmc"/><label htmlFor="fmmc" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Zona multicollo</label></div>
+              <div style={{fontSize:'11.5px',color:'#666',margin:'-10px 0 16px 24px',lineHeight:1.5}}>Si prezza nella scheda <b>Multicollo</b> del listino (2 o più colli, sul peso totale) e non vale mai per il collo singolo. Qui un CAP più corto vale come inizio del codice: <b>DE · 66</b> = tutti i codici tedeschi che iniziano per 66.</div>
               <div style={{marginBottom:'8px',paddingTop:'12px',borderTop:'1px solid #e5e7eb'}}>
                 <label style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',display:'block',marginBottom:'8px'}}>Regioni (Paese / Provincia / CAP / Città)</label>
                 <div style={{maxHeight:'180px',overflowY:'auto' as const,marginBottom:'10px',border:'1px solid #e8e8e8',borderRadius:'6px'}}>

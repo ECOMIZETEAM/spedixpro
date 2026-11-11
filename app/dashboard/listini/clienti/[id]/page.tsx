@@ -4,7 +4,7 @@ import { fattoreVolumeCorriere } from '@/lib/pricing'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereConSupplementi } from '@/lib/supplementi-corriere'
 import ListinoEditor from './ListinoEditor'
-import { leggiTabellaMulticollo, colonneDelContratto, type TabellaMulticollo } from '@/lib/multicollo-tabella'
+import { leggiSupplementiMulticollo, type SupplementiMulticollo } from '@/lib/multicollo-zone'
 
 export default async function ModificaListinoPage({
   params, searchParams
@@ -69,7 +69,7 @@ export default async function ModificaListinoPage({
     .map((c:any) => ({ ...c, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
     .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
   const corriereSelezionato = corrieri?.find((c:any) => c.id === corriereQuery) || corrieri?.[0]
-  const { data: zone } = await supabase.from('zone').select('id,nome').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')
+  const { data: zone } = await supabase.from('zone').select('id,nome,multicollo,su_mittente').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')
   const { data: fasceEsistenti } = await supabase.from('listini_clienti_fasce').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'').order('peso_max')
   const { data: supplementiEsistenti } = await supabase.from('listini_clienti_supplementi').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'')
   const { data: clientiAssegnati } = await supabase.from('clienti').select('id,ragione_sociale,email').eq('listino_cliente_id', id)
@@ -86,8 +86,9 @@ export default async function ModificaListinoPage({
   const costiSupplMaster: Record<string, { valore: number; perc: number }> = {}
   // Il mio NOLO per fascia, col fuel: e' la base su cui si pagano giacenze e accessori a percentuale.
   const costiNoloMaster: Record<string, number> = {}
-  // La mia tabella multicollo per lo stesso contratto (dal Listino Corrieri): il costo sotto ogni casella.
-  let costoTabellaMC: TabellaMulticollo | null = null
+  // I miei supplementi multicollo (localita' remota / partenza remota) per lo stesso contratto: il costo
+  // sotto ogni riga. Le fasce multicollo stanno in costiMaster come tutte le altre (per zona).
+  let costoSupplMC: SupplementiMulticollo | null = null
   if (corriereSelezionato?.id && utente?.master_id) {
     const { data: listiniCorr } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente.master_id)
     const idsCorr = (listiniCorr || []).map((l: any) => l.id)
@@ -120,7 +121,7 @@ export default async function ModificaListinoPage({
         const v = (s as any).tipo === 'accessorio' ? (Number(d?.prezzo ?? (s as any).valore ?? 0) || 0) : (Number((s as any).valore) || 0)
         costiSupplMaster[k] = { valore: v, perc: Number(d?.perc) || 0 }
       }
-      costoTabellaMC = leggiTabellaMulticollo(suppCosto || [])
+      costoSupplMC = leggiSupplementiMulticollo(suppCosto || [])
     }
   }
 
@@ -132,7 +133,6 @@ export default async function ModificaListinoPage({
     ? await fattoreVolumeCorriere(supabase, utente.master_id, corriereSelezionato.id)
     : 5000
   const conSupplementi = await corriereConSupplementi(createAdminSupabase(), corriereSelezionato?.id)
-  const multicolloColonne = await colonneDelContratto(createAdminSupabase(), corriereSelezionato?.id)
 
   return (
     <>
@@ -157,8 +157,7 @@ export default async function ModificaListinoPage({
       costiSupplMaster={costiSupplMaster}
       costiNoloMaster={costiNoloMaster}
       conSupplementi={conSupplementi}
-      multicolloColonne={multicolloColonne}
-      costoTabellaMC={costoTabellaMC}
+      costoSupplMC={costoSupplMC}
       tipoListino="cliente"
     />
     </>

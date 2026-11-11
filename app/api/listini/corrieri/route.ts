@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
 import { TIPO_MINIMO_COLLO, minimoACollo } from '@/lib/pricing'
-import { TIPO_MULTICOLLO_TABELLA, leggiTabellaMulticollo, normalizzaTabella, colonneDelContratto } from '@/lib/multicollo-tabella'
+import { TIPO_MULTICOLLO_SUPPLEMENTI, leggiSupplementiMulticollo, normalizzaSupplementiMulticollo } from '@/lib/multicollo-zone'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -146,14 +146,12 @@ export async function GET(req: NextRequest) {
 
   // I supplementi del corriere (fuori misura…) si mostrano solo sui contratti dove sono accesi.
   const supplementiCorriere = await corriereConSupplementi(_admin, corriereSelezionato?.id)
-  // Le colonne della tabella multicollo (aree del contratto del detentore). [] = il contratto non l'ha.
-  const multicolloColonne = await colonneDelContratto(_admin, corriereSelezionato?.id)
 
   return NextResponse.json({
     listino: listinoOut, corrieri, corrieriDisponibili,
     corriereSelezionatoId: corriereSelezionato?.id || '',
     corriereEreditato: !!corriereSelezionato?.ereditato,
-    fasce, supplementi, supplementiCorriere, multicolloColonne,
+    fasce, supplementi, supplementiCorriere,
   })
 }
 
@@ -215,9 +213,9 @@ export async function POST(req: NextRequest) {
   // Stessa cosa per il minimo a collo: una pagina aperta prima che la voce esistesse la cancellerebbe.
   const { data: minimoCollPrima } = await supabase.from('listini_corrieri_supplementi')
     .select('tipo,valore').in('listino_id', masterListinoIds).eq('corriere_id', corriereId).eq('tipo', TIPO_MINIMO_COLLO)
-  // E per la tabella multicollo, per la stessa ragione.
-  const { data: tabellaMCPrima } = await supabase.from('listini_corrieri_supplementi')
-    .select('tipo,descrizione').in('listino_id', masterListinoIds).eq('corriere_id', corriereId).eq('tipo', TIPO_MULTICOLLO_TABELLA)
+  // E per localita' remota / partenza remota del multicollo, per la stessa ragione.
+  const { data: supplMCPrima } = await supabase.from('listini_corrieri_supplementi')
+    .select('tipo,descrizione').in('listino_id', masterListinoIds).eq('corriere_id', corriereId).eq('tipo', TIPO_MULTICOLLO_SUPPLEMENTI)
   await supabase.from('listini_corrieri_fasce').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
   await supabase.from('listini_corrieri_supplementi').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
 
@@ -288,13 +286,13 @@ export async function POST(req: NextRequest) {
   if (minimoCollo > 0) {
     righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: TIPO_MINIMO_COLLO, nome: 'Minimo a collo', valore: minimoCollo, tipo_calcolo: 'per_collo' })
   }
-  // TABELLA MULTICOLLO (lib/multicollo-tabella): null = tolta; non mandata = resta quella di prima.
-  // Una tabella che non si legge non si salva (meglio nessuna tabella che un prezzo inventato).
-  const tabellaMC = supplementi?.multicollo_tabella !== undefined
-    ? (supplementi.multicollo_tabella ? normalizzaTabella(supplementi.multicollo_tabella) : null)
-    : leggiTabellaMulticollo(tabellaMCPrima || [])
-  if (tabellaMC) {
-    righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: TIPO_MULTICOLLO_TABELLA, nome: 'Tabella multicollo', valore: 0, tipo_calcolo: 'tabella', descrizione: JSON.stringify(tabellaMC) })
+  // LOCALITA' REMOTA / PARTENZA REMOTA del multicollo (lib/multicollo-zone): null = tolti; non mandati =
+  // restano quelli di prima. Le fasce multicollo arrivano con le altre fasce (sono fasce su zone multicollo).
+  const supplMC = supplementi?.multicollo_supplementi !== undefined
+    ? normalizzaSupplementiMulticollo(supplementi.multicollo_supplementi)
+    : leggiSupplementiMulticollo(supplMCPrima || [])
+  if (supplMC) {
+    righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: TIPO_MULTICOLLO_SUPPLEMENTI, nome: 'Supplementi multicollo', valore: 0, tipo_calcolo: 'al_kg', descrizione: JSON.stringify(supplMC) })
   }
   const { createAdminSupabase: _adminSuppl } = await import('@/lib/supabase-admin')
   if (Array.isArray(supplementi?.supplementiCorriere) && await corriereConSupplementi(_adminSuppl(), corriereId)) {

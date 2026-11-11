@@ -20,7 +20,7 @@ export async function leggiGrigliaListino(admin: any, listinoId: string) {
   if (!listinoId) return { corrieri: [] as any[] }
   const [{ data: lcc }, { data: fasce }, { data: supp }] = await Promise.all([
     admin.from('listini_clienti_corrieri').select('corriere_id, corrieri(nome_contratto)').eq('listino_id', listinoId),
-    admin.from('listini_clienti_fasce').select('corriere_id, peso_max, prezzo, tipo, zona_id, fuel, zone(nome)').eq('listino_id', listinoId).order('peso_max'),
+    admin.from('listini_clienti_fasce').select('corriere_id, peso_max, prezzo, tipo, zona_id, fuel, zone(nome,multicollo)').eq('listino_id', listinoId).order('peso_max'),
     admin.from('listini_clienti_supplementi').select('corriere_id, tipo, descrizione, valore, tipo_calcolo, nome').eq('listino_id', listinoId),
   ])
 
@@ -40,6 +40,10 @@ export async function leggiGrigliaListino(admin: any, listinoId: string) {
   const idxFascia = new Map<string, number>()   // "cid|key" -> index in c.fasce
 
   for (const f of (fasce || [])) {
+
+    // Le zone multicollo (fasce sul peso totale, lib/multicollo-zone) non stanno nella griglia del preventivo.
+
+    if ((f as any).zone?.multicollo) continue
     const c = getCorr(f.corriere_id)
     const fpct = Number((f as any).fuel) || 0
     if (fpct > c.fuel) c.fuel = fpct   // rappresentativo: il fuel del corriere (di norma uniforme)

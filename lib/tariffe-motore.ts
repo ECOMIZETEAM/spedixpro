@@ -21,8 +21,8 @@ import { EMAIL_PER_CORRIERE,
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
-import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti, TIPO_MINIMO_COLLO, minimoACollo, noloMulticollo, regoleMulticollo, noloTabellaMulticollo, type RegolaMulticollo } from '@/lib/pricing'
-import { TIPO_MULTICOLLO_TABELLA } from '@/lib/multicollo-tabella'
+import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti, TIPO_MINIMO_COLLO, minimoACollo, noloMulticollo, regoleMulticollo, noloMulticolloZone, type RegolaMulticollo } from '@/lib/pricing'
+import { TIPO_MULTICOLLO_SUPPLEMENTI } from '@/lib/multicollo-zone'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -321,7 +321,7 @@ export async function calcolaTariffeCliente(
   // solo se piena. Tiebreaker `id` per una paginazione stabile (peso_max non è univoco).
   const buildFasce = () => adminDb
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome,su_mittente)')
+    .select('*, zone(id,nome,su_mittente,multicollo)')
     .eq('listino_id', cliente.listino_cliente_id)
     .order('peso_max', { ascending: true }).order('id', { ascending: true })
   const { data: fasce0, error: errFasce } = await buildFasce().range(0, 999)
@@ -346,6 +346,10 @@ export async function calcolaTariffeCliente(
     console.error('[TARIFFE] lettura fasce fallita', cliente.listino_cliente_id, errFasce.message)
     return { errore: 'Errore tecnico nel calcolo delle tariffe: riprova tra poco. Se persiste contatta l\'assistenza (il listino non c\'entra).', stato: 500 }
   }
+  // Le fasce delle ZONE MULTICOLLO non sono prezzi del collo singolo: fuori da tutto il match qui sotto.
+  // Le usa solo il multicollo (noloMulticolloZone), per contratto.
+  const fasceMCtutte = (fasce || []).filter((f: any) => (f.zone as any)?.multicollo)
+  fasce = (fasce || []).filter((f: any) => !(f.zone as any)?.multicollo)
   if (!fasce?.length) {
     return { errore: 'Listino vuoto — configura le fasce prezzi', stato: 400 }
   }
@@ -449,13 +453,13 @@ export async function calcolaTariffeCliente(
   // MINIMO A COLLO del listino del cliente e regola del contratto (lib/pricing → noloMulticollo): la
   // stessa regola dell'addebito. Solo col multicollo: per un collo solo non si legge niente in piu'.
   const minimoCollo = new Map<string, number>()
-  const supplMC = new Map<string, any[]>()   // minimo a collo e tabella multicollo, per contratto
+  const supplMC = new Map<string, any[]>()   // minimo a collo e supplementi multicollo, per contratto
   let regoleMC = new Map<string, RegolaMulticollo>()
   if (tuttiColli.length > 1) {
     const idsMC = Array.from(fascePerCorriere.keys())
     const [{ data: supMC }, regole] = await Promise.all([
       supabase.from('listini_clienti_supplementi').select('corriere_id,tipo,valore,descrizione')
-        .eq('listino_id', cliente.listino_cliente_id).in('tipo', [TIPO_MINIMO_COLLO, TIPO_MULTICOLLO_TABELLA]).in('corriere_id', idsMC),
+        .eq('listino_id', cliente.listino_cliente_id).in('tipo', [TIPO_MINIMO_COLLO, TIPO_MULTICOLLO_SUPPLEMENTI]).in('corriere_id', idsMC),
       regoleMulticollo(idsMC),
     ])
     for (const s of (supMC || []) as any[]) {
@@ -527,12 +531,13 @@ export async function calcolaTariffeCliente(
     const _prs = settsC?.peso_reale_soglia
     const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)
     const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate(settsC, tuttiColli)) || _usaRealeSoglia) ? pesoReale : pesoFatturatoC
-    // TABELLA MULTICOLLO del listino del cliente (lib/pricing → noloTabellaMulticollo, la stessa del
-    // costo e dell'addebito): se c'e', il nolo viene da li' e la fascia del collo singolo non conta.
-    const tabMC = tuttiColli.length > 1 ? await noloTabellaMulticollo(adminDb, {
+    // MULTICOLLO A ZONE del listino del cliente (lib/pricing → noloMulticolloZone, lo stesso del costo e
+    // dell'addebito): se ci sono fasce multicollo, il nolo viene da li' e la fascia del collo singolo non conta.
+    const tabMC = tuttiColli.length > 1 ? await noloMulticolloZone(adminDb, {
+      fasceMC: fasceMCtutte.filter((f: any) => f.corriere_id === corriereId),
       suppl: supplMC.get(corriereId) || [], regola: regoleMC.get(corriereId), packages: tuttiColli, paese: paeseDest, cap: capDest,
       divisore: fattorePerCorr.get(corriereId) || fattore, zonaDest: (fasceDelCorriere[0]?.zone as any)?.nome, corriereId,
-      fasce: fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
+      fasceTutte: fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
       mitt: { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' }, dest: { cap: capDest, provincia, paese: paeseDest },
     }) : null
     if (tabMC && !tabMC.esito) { esclusiQuota++; ultimoErroreQuota = 'multicollo non prezzato per questo corriere'; continue }
@@ -555,7 +560,7 @@ export async function calcolaTariffeCliente(
     const minimoVince = !esitoTab && noloMC > Number(fasciaGiusta.prezzo)
     // Sponda e peso fatturato usano il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico).
     const nolo = noloMC
-    const fuelPct = Number((fasciaGiusta as any).fuel) || 0
+    const fuelPct = esitoTab ? esitoTab.fuelPct : (Number((fasciaGiusta as any).fuel) || 0)
     const costoFuel = nolo * fuelPct / 100
     const sponda = calcolaSponda(corriereId, pesoPerFascia)
     // Supplemento ORIGINE (zona mittente disagiato) di QUESTO corriere. 0 se non configurato.

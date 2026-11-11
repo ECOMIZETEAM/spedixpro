@@ -216,7 +216,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   //    il padre aggiunge/toglie un CAP (es. una zona disagiata) la modifica PROPAGA a valle e non
   //    resta solo sul padre. (Era il bug: i CAP si copiavano solo alla PRIMA creazione della zona,
   //    quindi le aggiunte successive non scendevano -> a valle si prezzava la zona sbagliata.)
-  const { data: zoneSrc } = zonaIds.length ? await admin.from('zone').select('id,nome,descrizione,con_fuel,su_mittente,corriere_id').in('id', zonaIds) : { data: [] }
+  const { data: zoneSrc } = zonaIds.length ? await admin.from('zone').select('id,nome,descrizione,con_fuel,su_mittente,multicollo,corriere_id').in('id', zonaIds) : { data: [] }
   // CAP del padre: UNA query per TUTTE le zone (prima era una query PER ZONA: con 78 zone erano 78
   // round-trip solo per leggere). L'embed annidato non si usa perche' si fermerebbe a 1000 righe.
   const capSrcPerZona = new Map<string, any[]>()
@@ -259,13 +259,14 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     const key = `${subCorr}|${(z.nome || '').trim().toLowerCase()}`
     let subZid: string | undefined = mappaZonaMio.get(key) as string | undefined
     if (!subZid) {
-      const { data: nuovaZ } = await admin.from('zone').insert({ master_id: subMasterId, corriere_id: subCorr, nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false, su_mittente: !!(z as any).su_mittente }).select('id').single()
+      const { data: nuovaZ } = await admin.from('zone').insert({ master_id: subMasterId, corriere_id: subCorr, nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false, su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo }).select('id').single()
       subZid = (nuovaZ as any)?.id
       if (subZid) mappaZonaMio.set(key, subZid)
     } else {
       // Zona già presente sul sub: riallineo il flag su_mittente (partenza) al proprietario, altrimenti
       // una zona diventata "di partenza" resterebbe destinazione sul figlio e prezzerebbe male.
-      await admin.from('zone').update({ su_mittente: !!(z as any).su_mittente }).eq('id', subZid)
+      // Lo stesso per il segno multicollo (lib/multicollo-zone).
+      await admin.from('zone').update({ su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo }).eq('id', subZid)
     }
     if (subZid) {
       const zid = subZid

@@ -12,7 +12,7 @@
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
 import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
-import { leggiAreeMulticollo, leggiTabellaMulticollo, noloDaTabella, TIPO_MULTICOLLO_TABELLA, type AreeMulticollo, type TabellaMulticollo } from '@/lib/multicollo-tabella'
+import { leggiSupplementiMulticollo, noloMulticolloDaFasce, pesoMulticolloFornitore, zonaMulticolloDi, TIPO_MULTICOLLO_SUPPLEMENTI, type EsitoMulticollo } from '@/lib/multicollo-zone'
 
 const ZONE_MAP: Record<string, string> = {
   CA:'Sardegna',CI:'Sardegna',VS:'Sardegna',NU:'Sardegna',OG:'Sardegna',OT:'Sardegna',OR:'Sardegna',SS:'Sardegna',SU:'Sardegna',
@@ -422,9 +422,7 @@ export function supplPresenteMax(suppl: any[], tipo: string, pesoReale?: number 
 // Un collo solo non passa mai di qui: per il monocollo non cambia niente, nemmeno una lettura.
 export const TIPO_MINIMO_COLLO = 'minimo_collo'
 
-// `aree`: la geografia del multicollo del fornitore (vedi lib/multicollo-tabella). null = il contratto non
-// ha la tabella multicollo e vale solo il minimo a collo, come prima.
-export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[]; aree?: AreeMulticollo | null }
+export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[] }
 
 // Il valore della voce in un elenco di supplementi (gia' filtrato per listino e contratto). 0 = non
 // prezzata. Con due righe (un contratto salvato in due listini dello stesso master, succede) vince la
@@ -463,29 +461,38 @@ export async function regoleMulticollo(corriereIds: string[]): Promise<Map<strin
   for (const r of (righe || []) as any[]) {
     const s = settPerDet.get(r.contratto_id || r.id) || {}
     const esclusi = Array.isArray(s.multicollo_paesi_esclusi) ? s.multicollo_paesi_esclusi.map((x: any) => String(x).toUpperCase().trim()) : []
-    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi, aree: leggiAreeMulticollo(s) })
+    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi })
   }
   return out
 }
 
-// LA TABELLA MULTICOLLO DI UN LIVELLO (vedi lib/multicollo-tabella): una funzione sola per il costo del
+// IL MULTICOLLO A ZONE DI UN LIVELLO (vedi lib/multicollo-zone): una funzione sola per il costo del
 // listino corriere, il prezzo del listino di vendita e il preventivo, cosi' non possono dare tre conti.
-// `null` = la tabella non si applica (un collo solo, contratto senza aree, listino senza tabella, paese
-// escluso): il chiamante fa esattamente quello che faceva prima. `{ esito: null }` = si applica ma quella
-// spedizione su questo livello non ha prezzo: il chiamante esclude il contratto.
-export async function noloTabellaMulticollo(supabase: any, p: {
-  suppl: any[]; regola: RegolaMulticollo | undefined; packages: any[]; paese?: string; cap?: string
-  divisore: number; zonaDest?: string | null; corriereId: string; fasce: any[]
+// `null` = non si applica (un collo solo, nessuna fascia multicollo in questo listino per il contratto,
+// paese escluso): il chiamante fa esattamente quello che faceva prima. `{ esito: null }` = si applica ma
+// quella spedizione su questo livello non ha prezzo: il chiamante esclude il contratto.
+// La zona si cerca fra TUTTE le zone multicollo del contratto, anche quelle senza prezzo in questo listino:
+// se la destinazione cade in una zona piu' precisa non prezzata (Germania sud) non deve finire sul "*" della
+// zona larga (Germania): resta senza prezzo, come le zone esclusive del collo singolo.
+export async function noloMulticolloZone(supabase: any, p: {
+  fasceMC: any[]; suppl: any[]; regola: RegolaMulticollo | undefined; packages: any[]; paese?: string; cap?: string
+  divisore: number; zonaDest?: string | null; corriereId: string; fasceTutte: any[]
   mitt?: { cap?: string; provincia?: string; paese?: string }; dest?: { cap?: string; provincia?: string; paese?: string }
-}): Promise<{ esito: ReturnType<typeof noloDaTabella> } | null> {
-  if (!((p.packages || []).length > 1) || !p.regola?.aree) return null
+}): Promise<{ esito: EsitoMulticollo | null } | null> {
+  if (!((p.packages || []).length > 1) || !(p.fasceMC || []).length) return null
   const paese = String(p.paese || 'IT').toUpperCase().trim()
-  if (p.regola.paesiEsclusi.includes(paese)) return null
-  const tabella: TabellaMulticollo | null = leggiTabellaMulticollo(p.suppl)
-  if (!tabella) return null
-  const nomiMitt = await nomiZoneMittente(supabase, p.fasce, p.mitt, p.dest, [p.corriereId])
-  const zonaMitt = nomiMitt.find(n => tabella.partenza[n]) ?? nomiMitt[0] ?? null
-  return { esito: noloDaTabella({ tabella, aree: p.regola.aree, paese, cap: p.cap, packages: p.packages, divisore: p.divisore, minimoCollo: minimoACollo(p.suppl), zonaDest: p.zonaDest, zonaMitt }) }
+  if (p.regola?.paesiEsclusi.includes(paese)) return null
+  const { data: zoneMC } = await supabase.from('zone').select('id').eq('corriere_id', p.corriereId).eq('multicollo', true)
+  const ids = (zoneMC || []).map((z: any) => z.id)
+  if (!ids.length) return { esito: null }
+  const { data: righe } = await supabase.from('zone_cap').select('zona_id,paese,cap').in('zona_id', ids).eq('paese', paese)
+  const zonaId = zonaMulticolloDi(righe || [], paese, p.cap)
+  const fasceZona = zonaId ? p.fasceMC.filter((f: any) => (f.zona_id ?? (f.zone as any)?.id) === zonaId) : []
+  if (!fasceZona.length) return { esito: null }
+  const supplementi = leggiSupplementiMulticollo(p.suppl)
+  const nomiMitt = await nomiZoneMittente(supabase, p.fasceTutte, p.mitt, p.dest, [p.corriereId])
+  const zonaMitt = nomiMitt.find(n => supplementi?.partenza?.[n]) ?? nomiMitt[0] ?? null
+  return { esito: noloMulticolloDaFasce({ fasceZona, zonaId: zonaId!, T: pesoMulticolloFornitore(p.packages, p.divisore), colli: p.packages.length, minimoCollo: minimoACollo(p.suppl), supplementi, zonaDest: p.zonaDest, zonaMitt }) }
 }
 
 export type RisultatoPrezzo = {
@@ -605,16 +612,21 @@ export async function calcolaPrezzoListino(
 
   // fetchAll: un listino cliente può superare le 1000 fasce (PostgREST tronca a 1000/query) → i corrieri
   // "in coda" sparivano dal calcolo. Tiebreaker `id` per paginazione stabile (peso_max non è univoco).
-  const fasce = await fetchAll(() => supabase
+  const fasceLette = await fetchAll(() => supabase
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome,su_mittente)')
+    .select('*, zone(id,nome,su_mittente,multicollo)')
     .eq('listino_id', listinoId)
     .order('peso_max', { ascending: true }).order('id', { ascending: true }))
 
-  if (!fasce?.length) return null
+  if (!fasceLette?.length) return null
   // Il contratto si legge una volta, non una per fascia (vedi attaccaCorrieri). Lettura fallita =
   // come fasce non lette: prima un errore sulla relazione incorporata faceva fallire tutta la query.
-  if (!(await attaccaCorrieri(supabase, fasce, 'id,tipo,nome_contratto,settings'))) return null
+  if (!(await attaccaCorrieri(supabase, fasceLette, 'id,tipo,nome_contratto,settings'))) return null
+  // Le fasce delle ZONE MULTICOLLO non sono prezzi del collo singolo: fuori da tutto il calcolo qui sotto
+  // (come le zone di partenza dal match di destinazione). Le usa solo il multicollo (noloMulticolloZone).
+  const fasce = (fasceLette as any[]).filter((f: any) => !(f.zone as any)?.multicollo)
+  const fasceMCdelListino = (fasceLette as any[]).filter((f: any) => (f.zone as any)?.multicollo)
+  if (!fasce.length) return null
 
   // 1) Match via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
   //    Mappa zona->corriere: i tier si applicano PER CORRIERE (il CAP esatto di un corriere non
@@ -693,9 +705,9 @@ export async function calcolaPrezzoListino(
   }
   if (!fascePerCorriere.size) return null
 
-  // MINIMO A COLLO e TABELLA MULTICOLLO (vedi noloMulticollo, noloTabellaMulticollo): solo col multicollo,
-  // il monocollo non legge niente in piu'. Letti PRIMA dell'origine: con la tabella la partenza remota
-  // si paga al kg dentro il nolo, e la fascia d'origine del collo singolo non deve escludere il contratto.
+  // MINIMO A COLLO e MULTICOLLO A ZONE (vedi noloMulticollo, noloMulticolloZone): solo col multicollo,
+  // il monocollo non legge niente in piu'. Letti PRIMA dell'origine: con le fasce multicollo la partenza
+  // remota si paga al kg dentro il nolo, e la fascia d'origine del collo singolo non deve escludere.
   const colli = packages.length
   const minimoPerCorr = new Map<string, number>()
   const supplMCPerCorr = new Map<string, any[]>()
@@ -704,7 +716,7 @@ export async function calcolaPrezzoListino(
     const idsC = Array.from(fascePerCorriere.keys())
     const [{ data: supM }, regole] = await Promise.all([
       supabase.from('listini_clienti_supplementi').select('corriere_id,tipo,valore,descrizione')
-        .eq('listino_id', listinoId).in('tipo', [TIPO_MINIMO_COLLO, TIPO_MULTICOLLO_TABELLA]).in('corriere_id', idsC),
+        .eq('listino_id', listinoId).in('tipo', [TIPO_MINIMO_COLLO, TIPO_MULTICOLLO_SUPPLEMENTI]).in('corriere_id', idsC),
       regoleMulticollo(idsC),
     ])
     for (const s of (supM || []) as any[]) {
@@ -715,14 +727,14 @@ export async function calcolaPrezzoListino(
     regolaPerCorr = regole
   }
   const paeseL = (params.paese || 'IT').toUpperCase().trim()
-  const usaTabella = (cId: string) => colli > 1 && !!regolaPerCorr.get(cId)?.aree && !regolaPerCorr.get(cId)!.paesiEsclusi.includes(paeseL)
-    && !!leggiTabellaMulticollo(supplMCPerCorr.get(cId) || [])
+  const fasceMCdi = (cId: string) => fasceMCdelListino.filter((f: any) => f.corriere_id === cId)
+  const usaTabella = (cId: string) => colli > 1 && !regolaPerCorr.get(cId)?.paesiEsclusi.includes(paeseL) && fasceMCdi(cId).length > 0
 
   // REGOLA ORIGINE ("non hai il prezzo? non usi e non vendi", Lorenzo 28/9): un corriere il cui
   // MITTENTE cade in una SUA zona su_mittente NON prezzata va ESCLUSO (come la disagiata destinazione
   // senza fascia). Si valuta PER-CORRIERE prima di scegliere il migliore; il valore (0/supplemento)
   // si riusa per il corriere scelto. Bypass nei ricalcoli rettifiche (zonaForzata), che non escludono.
-  // Con la tabella multicollo l'origine la decide la tabella (0 qui).
+  // Con le fasce multicollo l'origine si paga al kg dentro il nolo (0 qui).
   const mittByCorr = new Map<string, number>()
   for (const cId of Array.from(fascePerCorriere.keys())) {
     if (usaTabella(cId)) { mittByCorr.set(cId, 0); continue }
@@ -752,18 +764,18 @@ export async function calcolaPrezzoListino(
     : Array.from(fascePerCorriere.entries())
 
   for (const [cId, fasceDelCorriere] of entries) {
-    // TABELLA MULTICOLLO: il nolo viene da li', col peso del fornitore; la fascia del collo singolo non
-    // serve (e oltre l'ultima non si escluderebbe a torto). Nei ricalcoli (zonaForzata) una spedizione
-    // senza prezzo in tabella torna alla regola di prima.
+    // MULTICOLLO A ZONE: il nolo viene dalle fasce multicollo, col peso del fornitore; la fascia del collo
+    // singolo non serve (e oltre l'ultima non si escluderebbe a torto). Nei ricalcoli (zonaForzata) una
+    // spedizione senza prezzo multicollo torna alla regola di prima.
     if (usaTabella(cId)) {
-      const tab = await noloTabellaMulticollo(supabase, {
-        suppl: supplMCPerCorr.get(cId) || [], regola: regolaPerCorr.get(cId), packages, paese: params.paese, cap: params.cap,
+      const tab = await noloMulticolloZone(supabase, {
+        fasceMC: fasceMCdi(cId), suppl: supplMCPerCorr.get(cId) || [], regola: regolaPerCorr.get(cId), packages, paese: params.paese, cap: params.cap,
         divisore: fattore, zonaDest: (fasceDelCorriere[0]?.zone as any)?.nome, corriereId: cId,
-        fasce: fasce.filter((f: any) => (f.corrieri as any)?.id === cId),
+        fasceTutte: fasce.filter((f: any) => (f.corrieri as any)?.id === cId),
         mitt: { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese }, dest: { cap: params.cap, provincia, paese: params.paese },
       })
       if (tab?.esito) {
-        const prezzoT = tab.esito.nolo * (1 + (Number((fasceDelCorriere[0] as any)?.fuel) || 0) / 100)
+        const prezzoT = tab.esito.nolo * (1 + tab.esito.fuelPct / 100)
         if (isFinite(prezzoT) && (!miglior || prezzoT < miglior.prezzo)) miglior = { prezzo: prezzoT, corriereId: cId, pesoMax: tab.esito.fasciaFinoA, pesoTabella: tab.esito.pesoTotale }
         continue
       }
@@ -939,13 +951,17 @@ export async function calcolaPrezzoCorriereDettaglio(
     if (pesoSuReale(_sett, packages, pesoReale, soloPesoReale)) pesoFatturato = pesoReale
   }
 
-  const { data: fasce } = await supabase
+  const { data: fasceLette } = await supabase
     .from('listini_corrieri_fasce')
-    .select('*, zone(id,nome,su_mittente)')
+    .select('*, zone(id,nome,su_mittente,multicollo)')
     .in('listino_id', listinoIds)
     .eq('corriere_id', corriereId)
     .order('peso_max', { ascending: true })
-  if (!fasce?.length) return null
+  // Le fasce delle ZONE MULTICOLLO non sono prezzi del collo singolo: fuori da tutto il match qui sotto.
+  // Le usa solo il multicollo (noloMulticolloZone).
+  const fasce = ((fasceLette || []) as any[]).filter((f: any) => !(f.zone as any)?.multicollo)
+  const fasceMC = ((fasceLette || []) as any[]).filter((f: any) => (f.zone as any)?.multicollo)
+  if (!fasce.length) return null
 
   // Le zone MITTENTE (su_mittente) non c'entrano con la destinazione: i loro CAP sono di PARTENZA.
   // Vanno tenute fuori dal match destinazione, altrimenti una spedizione DIRETTA a un CAP che sta
@@ -988,7 +1004,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // ORDINE per id: con supplementi duplicati (piu' listini corrieri per lo stesso contratto) gli
   // scaglioni con lo STESSO valore_max restavano nell'ordine casuale del database -> la commissione
   // contrassegno/assicurazione poteva cambiare tra una chiamata e l'altra. Ora la scelta e' stabile.
-  // Col multicollo si leggono PRIMA della fascia (servono alla tabella); col collo singolo nello stesso
+  // Col multicollo si leggono PRIMA della fascia (servono al multicollo); col collo singolo nello stesso
   // punto di sempre, dopo la fascia: se la fascia manca non si fa nemmeno questa lettura.
   const leggiSuppl = async () => (await supabase
     .from('listini_corrieri_supplementi')
@@ -998,15 +1014,15 @@ export async function calcolaPrezzoCorriereDettaglio(
     .order('id', { ascending: true })).data as any[] | null
   let suppl: any[] | null = packages.length > 1 ? await leggiSuppl() : null
 
-  // MULTICOLLO: la regola del contratto (minimo a collo, paesi esclusi, aree della tabella) e, se il
-  // listino ha la TABELLA MULTICOLLO, il nolo da li' (vedi noloTabellaMulticollo). Con la tabella il peso
-  // e' quello del fornitore e la partenza remota e' gia' dentro il nolo: niente fascia del collo singolo,
-  // niente supplemento d'origine a fasce. Nei ricalcoli delle rettifiche (zonaForzata) una spedizione
-  // senza prezzo in tabella torna alla regola di prima invece di restare senza prezzo.
+  // MULTICOLLO: la regola del contratto (minimo a collo, paesi esclusi) e, se il listino ha FASCE
+  // MULTICOLLO, il nolo da li' (vedi noloMulticolloZone). Col multicollo a zone il peso e' quello del
+  // fornitore e la partenza remota e' gia' dentro il nolo: niente fascia del collo singolo, niente
+  // supplemento d'origine a fasce. Nei ricalcoli delle rettifiche (zonaForzata) una spedizione senza
+  // prezzo multicollo torna alla regola di prima invece di restare senza prezzo.
   const regolaMC = packages.length > 1 ? (await regoleMulticollo([corriereId])).get(corriereId) : undefined
-  const tabMC = packages.length > 1 ? await noloTabellaMulticollo(supabase, {
-    suppl: suppl || [], regola: regolaMC, packages, paese: params.paese, cap: params.cap, divisore: fattore,
-    zonaDest: (fasceZona[0] as any)?.zone?.nome, corriereId, fasce,
+  const tabMC = packages.length > 1 ? await noloMulticolloZone(supabase, {
+    fasceMC, suppl: suppl || [], regola: regolaMC, packages, paese: params.paese, cap: params.cap, divisore: fattore,
+    zonaDest: (fasceZona[0] as any)?.zone?.nome, corriereId, fasceTutte: fasce,
     mitt: { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese }, dest: { cap: params.cap, provincia, paese: params.paese },
   }) : null
   if (tabMC && !tabMC.esito && !params.zonaForzata) return null
@@ -1017,7 +1033,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   let fuelPct = 0
   if (conTabella) {
     prezzo = tabMC!.esito!.nolo
-    fuelPct = Number((fasceZona[0] as any)?.fuel) || 0
+    fuelPct = tabMC!.esito!.fuelPct
     pesoFatturato = tabMC!.esito!.pesoTotale
     trovata = true
   } else
@@ -1049,7 +1065,7 @@ export async function calcolaPrezzoCorriereDettaglio(
 
   // MINIMO A COLLO (vedi noloMulticollo): sullo stesso piano della fascia, prima del fuel. Solo col
   // multicollo; nei ricalcoli delle rettifiche (zonaForzata) non si esclude, come per l'origine.
-  // Con la tabella il minimo e' gia' dentro il nolo.
+  // Col multicollo a zone il minimo e' gia' dentro il nolo.
   if (packages.length > 1 && !conTabella) {
     const n = noloMulticollo(prezzo, packages.length, minimoACollo(suppl || []), regolaMC, params.paese)
     if (n === null && !params.zonaForzata) return null
@@ -1086,7 +1102,7 @@ export async function calcolaPrezzoCorriereDettaglio(
 
   // SUPPLEMENTO ORIGINE: se il pacco PARTE da una zona mittente disagiata di questo corriere.
   // Esce dalle STESSE fasce già caricate (quelle marcate su_mittente). 0 se non configurato.
-  // Con la tabella multicollo la partenza remota e' gia' nel nolo (al kg, come il fornitore): 0 qui.
+  // Col multicollo a zone la partenza remota e' gia' nel nolo (al kg, come il fornitore): 0 qui.
   const mittRaw = conTabella ? 0 : await supplementoMittente(
     supabase, fasce,
     { cap: params.mittCap, provincia: params.mittProvincia, paese: params.mittPaese },
@@ -1218,7 +1234,7 @@ async function creaCalcolatoreCorriereBase(
     // fetchAll: le fasce possono superare le 1000 righe (limite PostgREST) — prima venivano TRONCATE
     // e il fallback prezzava con fasce incomplete (margine sbagliato oltre le prime 1000).
     listinoIds.length
-      ? fetchAll(() => supabase.from('listini_corrieri_fasce').select('listino_id,corriere_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome)').in('listino_id', listinoIds).order('id', { ascending: true }))
+      ? fetchAll(() => supabase.from('listini_corrieri_fasce').select('listino_id,corriere_id,peso_max,prezzo,tipo,zona_id,fuel,zone(id,nome,multicollo)').in('listino_id', listinoIds).order('id', { ascending: true }))
       : Promise.resolve([] as any[]),
     listinoIds.length
       ? supabase.from('listini_corrieri_supplementi').select('listino_id,corriere_id,tipo,valore,tipo_calcolo,descrizione').in('listino_id', listinoIds)
@@ -1243,6 +1259,9 @@ async function creaCalcolatoreCorriereBase(
   // mentre l'addebito li prezzava giusti. Elenco e report dicevano una cifra, i movimenti un'altra.
   const fascePerCorriere = new Map<string, any[]>()
   for (const f of fasce || []) {
+    // Le zone multicollo non sono destinazioni del collo singolo: qui non devono agganciare niente
+    // (hanno righe "tutto il paese" che vincerebbero sulla zona vera). L'elenco mostra un ripiego.
+    if ((f as any).zone?.multicollo) continue
     if (!fascePerCorriere.has(f.corriere_id)) fascePerCorriere.set(f.corriere_id, [])
     fascePerCorriere.get(f.corriere_id)!.push(f)
   }
@@ -1253,7 +1272,7 @@ async function creaCalcolatoreCorriereBase(
     supplPerCorriere.get(s.corriere_id)!.push(s)
   }
 
-  const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
+  const zonaIds = Array.from(new Set((fasce || []).filter((f: any) => !f.zone?.multicollo).map((f: any) => f.zone?.id).filter(Boolean)))
   // ORDINE FISSO, o le pagine si accavallano. A blocchi da 1000 senza ordine il database non
   // garantisce che pagina 2 riprenda dove finisce pagina 1: su SEMPLICE SPEDIRE (21.158 CAP di zona)
   // tre letture di fila davano 16.737, 16.737 e 17.737 righe diverse — il resto doppioni. I CAP
@@ -1365,7 +1384,7 @@ async function creaCalcolatoreListinoClienteBase(
     supabase.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', listinoId),
     // fetchAll: oltre 1000 fasce venivano TRONCATE (limite PostgREST) → prezzi fallback incompleti.
     fetchAll(() => supabase
-      .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome)')
+      .from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel,zone(id,nome,multicollo)')
       .eq('listino_id', listinoId).order('id', { ascending: true })),
   ])
   const listino = (listinoRes as any).data
@@ -1377,6 +1396,9 @@ async function creaCalcolatoreListinoClienteBase(
 
   const fascePerCorriere = new Map<string, any[]>()
   for (const f of fasce || []) {
+    // Le zone multicollo non sono destinazioni del collo singolo: qui non devono agganciare niente
+    // (hanno righe "tutto il paese" che vincerebbero sulla zona vera). L'elenco mostra un ripiego.
+    if ((f as any).zone?.multicollo) continue
     if (!fascePerCorriere.has(f.corriere_id)) fascePerCorriere.set(f.corriere_id, [])
     fascePerCorriere.get(f.corriere_id)!.push(f)
   }
@@ -1399,7 +1421,7 @@ async function creaCalcolatoreListinoClienteBase(
   const settPerCorrL = new Map<string, any>()
   for (const c of (corrSettL || [])) settPerCorrL.set(c.id, (c as any).settings || {})
 
-  const zonaIds = Array.from(new Set((fasce || []).map((f: any) => f.zone?.id).filter(Boolean)))
+  const zonaIds = Array.from(new Set((fasce || []).filter((f: any) => !f.zone?.multicollo).map((f: any) => f.zone?.id).filter(Boolean)))
   // Ordine fisso per le pagine: stesso guasto del calcolatore del costo, qui sopra.
   const zc: any[] = zonaIds.length
     ? await fetchAll(() => zoneCapMirate(

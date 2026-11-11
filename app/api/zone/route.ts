@@ -20,11 +20,13 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const body = await req.json()
-  const { nome, descrizione, con_fuel, corriereId } = body
+  const { nome, descrizione, con_fuel, corriereId, multicollo } = body
   const { data, error } = await supabase.from('zone').insert({
     master_id: utente?.master_id,
     corriere_id: corriereId,
     nome, descrizione, con_fuel: con_fuel || false,
+    // Zona del multicollo (lib/multicollo-zone): prezzata nella scheda Multicollo, mai per il collo singolo.
+    multicollo: multicollo === true,
   }).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json(data)

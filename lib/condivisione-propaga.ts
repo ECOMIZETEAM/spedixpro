@@ -51,7 +51,7 @@ export async function propagaCosto(admin: any, p: { corriereVenditore: string; c
 
   // ── ZONE: TUTTE quelle del corriere del venditore → zone del compratore sul suo corriere. ──────────
   const { data: zoneSrc } = await admin.from('zone')
-    .select('id,nome,descrizione,con_fuel,su_mittente').eq('corriere_id', corriereVenditore)
+    .select('id,nome,descrizione,con_fuel,su_mittente,multicollo').eq('corriere_id', corriereVenditore)
   const zonaIds = (zoneSrc || []).map((z: any) => z.id)
 
   const capSrcPerZona = new Map<string, any[]>()
@@ -88,12 +88,12 @@ export async function propagaCosto(admin: any, p: { corriereVenditore: string; c
     if (!subZid) {
       const { data: nuovaZ } = await admin.from('zone').insert({
         master_id: masterAcquirente, corriere_id: corriereAcquirente,
-        nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false, su_mittente: !!(z as any).su_mittente,
+        nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false, su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo,
       }).select('id').single()
       subZid = (nuovaZ as any)?.id
       if (subZid) mappaZonaMio.set(key, subZid)
     } else {
-      await admin.from('zone').update({ su_mittente: !!(z as any).su_mittente, con_fuel: z.con_fuel || false }).eq('id', subZid)
+      await admin.from('zone').update({ su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo, con_fuel: z.con_fuel || false }).eq('id', subZid)
     }
     if (subZid) {
       const zid = subZid

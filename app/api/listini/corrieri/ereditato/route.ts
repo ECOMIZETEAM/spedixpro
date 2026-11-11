@@ -23,7 +23,7 @@ export async function GET(_req: NextRequest) {
 
   const listinoId = m.parent_listino_id
   const [{ data: fasce }, { data: suppl }, { data: listino }] = await Promise.all([
-    admin.from('listini_clienti_fasce').select('corriere_id,peso_max,prezzo,tipo,zona_id,zone(nome),corrieri(nome_contratto)').eq('listino_id', listinoId).order('peso_max'),
+    admin.from('listini_clienti_fasce').select('corriere_id,peso_max,prezzo,tipo,zona_id,zone(nome,multicollo),corrieri(nome_contratto)').eq('listino_id', listinoId).order('peso_max'),
     admin.from('listini_clienti_supplementi').select('corriere_id,tipo,nome,valore,descrizione').eq('listino_id', listinoId).in('tipo', ['contrassegno', 'assicurazione', 'giacenza', 'giacenza_apertura', 'accessorio']),
     admin.from('listini_clienti').select('nome').eq('id', listinoId).maybeSingle(),
   ])
@@ -33,7 +33,8 @@ export async function GET(_req: NextRequest) {
   for (const f of (fasce || [])) {
     const cid = f.corriere_id || 'na'
     const cnome = (f as any).corrieri?.nome_contratto || 'Corriere'
-    const znome = (f as any).zone?.nome || 'Italia'
+    // Le zone multicollo si prezzano sul peso totale della spedizione: si dice, accanto al nome.
+    const znome = ((f as any).zone?.nome || 'Italia') + ((f as any).zone?.multicollo ? ' — multicollo' : '')
     if (!corrieri[cid]) corrieri[cid] = { corriere: cnome, zone: {} }
     if (!corrieri[cid].zone[znome]) corrieri[cid].zone[znome] = []
     corrieri[cid].zone[znome].push({ peso_max: Number(f.peso_max), prezzo: Number(f.prezzo), tipo: f.tipo })

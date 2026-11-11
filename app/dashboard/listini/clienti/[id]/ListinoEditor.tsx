@@ -8,8 +8,8 @@ import CodiceContratto from '@/app/components/CodiceContratto'
 import { peggioreSuNolo, type Nolo } from '@/lib/sotto-costo-formule'
 import { vociSupplementoDa, type VoceSupplemento } from '@/lib/supplementi-corriere'
 import TabellaSupplementiCorriere from '@/app/components/TabellaSupplementiCorriere'
-import TabellaMulticollo from '@/app/components/TabellaMulticollo'
-import { leggiTabellaMulticollo, caselleSottoCosto, type ColonnaMulticollo, type TabellaMulticollo as TabMC } from '@/lib/multicollo-tabella'
+import SupplementiMulticollo from '@/app/components/SupplementiMulticollo'
+import { leggiSupplementiMulticollo, supplementiSottoCosto, type SupplementiMulticollo as SupplMC } from '@/lib/multicollo-zone'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -61,8 +61,7 @@ interface Props {
   // Il contratto ha i supplementi del corriere (fuori misura…) accesi: lib/supplementi-corriere.
   conSupplementi?: boolean
   // Tabella multicollo: colonne (aree del contratto) e il mio costo per lo stesso contratto. [] / null = niente tabella.
-  multicolloColonne?: ColonnaMulticollo[]
-  costoTabellaMC?: TabMC | null
+  costoSupplMC?: SupplMC | null   // localita' remota / partenza remota del multicollo nel mio costo
 }
 
 const fattori = [
@@ -161,7 +160,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi, multicolloColonne = [], costoTabellaMC = null }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi, costoSupplMC = null }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
@@ -193,6 +192,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   }, [costiMaster])
   const guardiaCosti = !isCorriere && zoneMasterPossiede.size > 0
   const zonaBloccata = (zid: string) => guardiaCosti && !zoneMasterPossiede.has(zid)
+  // Zone del collo singolo e zone MULTICOLLO (Gestione Zone, segno "multicollo"): le seconde hanno la loro
+  // scheda e le loro fasce, sul peso totale della spedizione (lib/multicollo-zone).
+  const zoneMono = useMemo(() => zone.filter((z: any) => !z.multicollo), [zone])
+  const zoneMC = useMemo(() => zone.filter((z: any) => z.multicollo), [zone])
+  const idsZoneMC = new Set<string>(zoneMC.map((z: any) => z.id))
   // BOZZA in corso: se vai a vedere un altro listino e poi torni la ritrovi (navigazione);
   // se invece RICARICHI la pagina (reload) riparte pulita dai dati salvati.
   // La bozza vale SOLO se il listino sul server e' ancora quello di quando l'hai lasciata. La bozza si
@@ -225,7 +229,19 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [nome, setNome] = useState<string>(bozza?.nome ?? (listino.nome ?? ''))
   const [fattore, setFattore] = useState<number>(bozza?.fattore ?? (Number(fattoreCorriere ?? listino.fattore_volume) || 5000))
   const [soloPesoReale, setSoloPesoReale] = useState<boolean>(bozza?.soloPesoReale ?? !!(listino as any).solo_peso_reale)
-  const [fasce, setFasce] = useState<Fascia[]>(() => bozza?.fasce ?? buildFasceInit(fasceEsistenti))
+  const [fasce, setFasce] = useState<Fascia[]>(() => bozza?.fasce ?? buildFasceInit((fasceEsistenti || []).filter((f: any) => !idsZoneMC.has(f.zona_id))))
+  // Fasce MULTICOLLO: se il listino non ne ha ancora, si parte dalle fasce del mio costo (stesse soglie).
+  const [fasceMC, setFasceMC] = useState<Fascia[]>(() => {
+    if (bozza?.fasceMC) return bozza.fasceMC
+    const mie = (fasceEsistenti || []).filter((f: any) => idsZoneMC.has(f.zona_id))
+    if (mie.length) return buildFasceInit(mie)
+    const soglie = new Map<string, Fascia>()
+    for (const k of Object.keys(costiMaster || {})) {
+      const [tipo, peso, zid] = k.split('|')
+      if (idsZoneMC.has(zid) && !soglie.has(`${tipo}|${peso}`)) soglie.set(`${tipo}|${peso}`, { tipo: tipo as TipoFascia, peso: Number(peso), prezzi: {}, fuel: '' })
+    }
+    return Array.from(soglie.values()).sort((a, b) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso - b.peso)
+  })
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   // Logo del master per il circuito interno (stesso marchio dell'etichetta); se manca, restano le iniziali.
@@ -429,10 +445,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     if (bozza?.minimoCollo != null) return bozza.minimoCollo
     return Math.max(0, ...(supplementiEsistenti||[]).filter(s => s.tipo === 'minimo_collo').map(s => Number(s.valore) || 0))
   })
-  // Tabella multicollo (lib/multicollo-tabella). undefined nella bozza = quella del server.
-  const [tabellaMC, setTabellaMC] = useState<TabMC | null>(() => {
-    if (bozza && bozza.tabellaMC !== undefined) return bozza.tabellaMC
-    return leggiTabellaMulticollo(supplementiEsistenti || [])
+  // Localita' remota / partenza remota del multicollo (lib/multicollo-zone). undefined nella bozza = del server.
+  const [supplMC, setSupplMC] = useState<SupplMC | null>(() => {
+    if (bozza && bozza.supplMC !== undefined) return bozza.supplMC
+    return leggiSupplementiMulticollo(supplementiEsistenti || [])
   })
 
   // Salva la bozza in sessionStorage ad ogni modifica (persiste tra le navigazioni), con l'impronta del
@@ -443,17 +459,21 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     primoGiro.current = false
     if (cambiata && !modificata) setModificata(true)
     try {
-      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, tabellaMC }))
+      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, fasceMC, supplMC }))
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, tabellaMC])
+  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, fasceMC, supplMC])
 
-  function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
-  function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
-  function rimuoviFascia(idx: number) { setFasce(prev => prev.filter((_,i) => i !== idx)) }
-  function aggiornaTipo(idx: number, tipo: TipoFascia) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, tipo} : f)) }
-  function aggiornaPeso(idx: number, raw: string) { const peso = parseFloat(raw); setFasce(prev => prev.map((f,i) => i===idx ? {...f, peso: isNaN(peso)?0:peso} : f)) }
-  function aggiornaPrezzo(idx: number, zonaId: string, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, prezzi:{...f.prezzi,[zonaId]:raw}} : f)) }
+  // Le stesse operazioni per le due griglie (Pesi / Zone e Multicollo): cambia solo l'elenco su cui lavorano.
+  type SetFasce = (f: (prev: Fascia[]) => Fascia[]) => void
+  const opFasce = (set: SetFasce) => ({
+    aggiungi: () => set(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]),
+    fuel: (idx: number, raw: string) => set(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)),
+    rimuovi: (idx: number) => set(prev => prev.filter((_,i) => i !== idx)),
+    tipo: (idx: number, tipo: TipoFascia) => set(prev => prev.map((f,i) => i===idx ? {...f, tipo} : f)),
+    peso: (idx: number, raw: string) => { const peso = parseFloat(raw); set(prev => prev.map((f,i) => i===idx ? {...f, peso: isNaN(peso)?0:peso} : f)) },
+    prezzo: (idx: number, zonaId: string, raw: string) => set(prev => prev.map((f,i) => i===idx ? {...f, prezzi:{...f.prezzi,[zonaId]:raw}} : f)),
+  })
 
   function setRigaAssic(i: number, k: keyof RigaSuppl, v: string) { setRigheAssic(prev => prev.map((r,idx) => idx===i ? {...r,[k]:v} : r)) }
   function setRigaContr(i: number, k: keyof RigaSuppl, v: string) { setRigheContr(prev => prev.map((r,idx) => idx===i ? {...r,[k]:v} : r)) }
@@ -465,7 +485,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           nome, corriere_id: corriereId, fattore_volume: fattore, solo_peso_reale: soloPesoReale,
-          fasce: fasce.map(f => ({...f, prezzi: Object.fromEntries(Object.entries(f.prezzi).map(([k,v]) => [k, parseFloat(v)||0]))})),
+          fasce: [...fasce, ...(zoneMC.length ? fasceMC : [])].map(f => ({...f, prezzi: Object.fromEntries(Object.entries(f.prezzi).map(([k,v]) => [k, parseFloat(v)||0]))})),
           supplementi: {
             assicurazione: righeAssic,
             contrassegno: righeContr,
@@ -474,7 +494,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
             sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
             minimo_collo: minimoCollo,
-            ...(multicolloColonne.length ? { multicollo_tabella: tabellaMC } : {}),
+            ...(zoneMC.length ? { multicollo_supplementi: supplMC } : {}),
             ...(conSupplementi ? { supplementiCorriere } : {}),
           }
         })
@@ -514,7 +534,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   // se il cliente paga sempre il nolo intero (Wave, 15/10).
   const noliEditor = useMemo(() => {
     const out: Nolo[] = []
-    for (const f of fasce) for (const z of zone) {
+    for (const [lista, zz] of [[fasce, zoneMono], [fasceMC, zoneMC]] as [Fascia[], any[]][]) for (const f of lista) for (const z of zz) {
       if (zonaBloccata(z.id)) continue
       const p = parseFloat((f as any).prezzi[z.id] ?? '')
       const c = costiNoloMaster?.[`${(f as any).tipo}|${(f as any).peso}|${z.id}`]
@@ -522,7 +542,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       out.push({ cliente: Math.round(p * (1 + (parseFloat((f as any).fuel ?? '') || 0) / 100) * 100) / 100, costo: c, etichetta: `${z.nome} fino a ${(f as any).peso} kg` })
     }
     return out
-  }, [fasce, zone, costiNoloMaster, guardiaCosti, zoneMasterPossiede])
+  }, [fasce, fasceMC, zoneMono, zoneMC, costiNoloMaster, guardiaCosti, zoneMasterPossiede])
   const servizioSotto = (tipo: 'giacenza' | 'accessorio', s: { nome: string; prezzo: any; perc: any }) => {
     const cost = costiSupplMaster?.[`${tipo}|${String(s.nome || '').toLowerCase().trim()}`] || null
     const p = cost ? peggioreSuNolo({ valore: Number(s.prezzo) || 0, perc: Number(s.perc) || 0 }, cost, noliEditor) : null
@@ -535,7 +555,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     ? <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px',fontWeight:400}}>paghi {eurE(g.cost.valore)} € + {g.cost.perc}% del nolo: perdi fino a {eurE(-g.p.differenza)} € ({g.p.etichetta})</div>
     : null
   // Pallino rosso sui tab: quel tab ha almeno una riga sotto costo?
-  const qualcheFasciaSotto = fasce.some(f => zone.some(z => { const costo = costiMaster?.[`${(f as any).tipo}|${(f as any).peso}|${z.id}`]; const p = parseFloat((f as any).prezzi[z.id] ?? ''); return !zonaBloccata(z.id) && costo != null && p > 0 && p < costo }))
+  const fasciaSotto = (lista: Fascia[], zz: any[]) => lista.some(f => zz.some(z => { const costo = costiMaster?.[`${(f as any).tipo}|${(f as any).peso}|${z.id}`]; const p = parseFloat((f as any).prezzi[z.id] ?? ''); return !zonaBloccata(z.id) && costo != null && p > 0 && p < costo }))
+  const qualcheFasciaSotto = fasciaSotto(fasce, zoneMono)
   const supplementoSotto = conSupplementi && supplementiCorriere.some(v => { const c = costiSupplMaster?.[`supplemento_corriere|${v.nome.toLowerCase()}`]?.valore || 0; return c > 0 && (Number(v.prezzo) || 0) < c - 0.005 })
   const qualcheGiacenzaSotto = aperturaSotto || supplementoSotto || giacenzeServizi.some((s: any) => servizioSotto('giacenza', s).sotto)
   const qualcheAccessorioSotto = serviziAccessori.some((s: any) => servizioSotto('accessorio', s).sotto)
@@ -543,8 +564,129 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   // quel contratto semplicemente non si vende (lo dice la nota sotto il campo).
   const costoMinimoCollo = costiSupplMaster?.['minimo_collo|minimo a collo']?.valore || 0
   const minimoCollSotto = costoMinimoCollo > 0 && (Number(minimoCollo) || 0) > 0 && (Number(minimoCollo) || 0) < costoMinimoCollo - 0.005
-  const tabellaMCSotto = multicolloColonne.length > 0 && caselleSottoCosto(tabellaMC, costoTabellaMC).length > 0
-  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto, extra: minimoCollSotto || tabellaMCSotto }
+  // Multicollo: fasce sulle zone multicollo, minimo a collo e localita' remota / partenza remota.
+  const multicolloSotto = zoneMC.length > 0 && (fasciaSotto(fasceMC, zoneMC) || minimoCollSotto || supplementiSottoCosto(supplMC, costoSupplMC).length > 0)
+  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, multicollo: multicolloSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto, extra: !zoneMC.length && minimoCollSotto }
+
+  // Il minimo a collo: nella scheda Multicollo sui contratti con zone multicollo, in Extra sugli altri.
+  const bloccoMinimo = (<>
+          <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'28px 0 4px'}}>Multicollo: minimo a collo</div>
+          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Con due o più colli la spedizione costa almeno <b>numero di colli × minimo</b>; se la fascia sul peso totale è più cara, vale la fascia. Es: minimo 9,00 € → 4 colli da 5 kg = 4 × 9,00 = 36,00 €, anche se la fascia dei 20 kg costa 16,00 €.</div>
+          <div style={{display:'flex',gap:'12px',alignItems:'flex-end',flexWrap:'wrap' as const}}>
+            <div>
+              <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Minimo per collo (€)</label>
+              <NumInput value={minimoCollo} onChange={setMinimoCollo} style={{...inp,width:'120px',textAlign:'right' as const,...(minimoCollSotto?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
+            </div>
+            {costoMinimoCollo > 0 && <span style={{fontSize:'12px',color: minimoCollSotto ? '#dc2626' : '#666',paddingBottom:'8px'}}>il tuo costo: {eurE(costoMinimoCollo)} € a collo</span>}
+          </div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>
+            {costoMinimoCollo > 0
+              ? <>Il contratto ha un minimo a collo: finché questo campo è vuoto, il multicollo su questo contratto <b>non è disponibile</b> per chi usa questo listino.</>
+              : <>Lascia 0 se il contratto non ha un minimo a collo.</>}
+          </div>
+  </>)
+
+  // LA GRIGLIA PESI / ZONE: una sola, per il collo singolo e per il multicollo (stessa grafica, stesse
+  // regole: costo sotto la casella, rosso sotto costo, zone non disponibili). Cambiano fasce e colonne.
+  const grigliaPesi = (lista: Fascia[], set: SetFasce, zoneLista: any[], piede: string) => { const op = opFasce(set); return (
+        <div>
+          {(() => {
+            // Riepilogo sotto costo: senza questo un prezzo sbagliato passa inosservato e ci si
+            // accorge della perdita solo mesi dopo, guardando i margini a spedizioni gia' fatte.
+            if (!costiMaster) return null
+            let n = 0
+            for (const f of lista) for (const z of zoneLista) {
+              const c = costiMaster[`${f.tipo}|${f.peso}|${z.id}`]
+              const p = parseFloat(f.prezzi[z.id] ?? '')
+              if (c != null && p > 0 && p < c) n++
+            }
+            if (!n) return null
+            return (
+              <div style={{margin:'12px 16px 0',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'10px 14px',fontSize:'13px',color:'#b91c1c'}}>
+                ⚠️ <b>{n} {n===1?'prezzo è':'prezzi sono'} sotto il tuo costo</b> — {n===1?'la casella è evidenziata':'le caselle sono evidenziate'} in rosso, con il costo indicato sotto. Puoi salvare lo stesso, ma su {n===1?'quella tratta':'quelle tratte'} ci rimetti.
+              </div>
+            )
+          })()}
+          {(() => {
+            // Zone che il master NON possiede: non prezzabili (casella bloccata). Spiega perché, così
+            // non sembra un errore. Senza questo nascevano prezzi "orfani" bloccati a valle.
+            if (!guardiaCosti) return null
+            const bloccate = zoneLista.filter(z => zonaBloccata(z.id))
+            if (!bloccate.length) return null
+            return (
+              <div style={{margin:'12px 16px 0',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',fontSize:'13px',color:'#4b5563'}}>
+                🔒 <b>{bloccate.length===1?'1 zona non è disponibile':`${bloccate.length} zone non sono disponibili`}</b> — non hai un costo per {bloccate.length===1?'questa zona':'queste zone'} su questo corriere, quindi non {bloccate.length===1?'la puoi':'le puoi'} prezzare: {bloccate.map(z=>z.nome).join(', ')}. Per attivarla, chiedi al tuo master.
+              </div>
+            )
+          })()}
+          <div style={{overflowX:'auto' as const}}>
+            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+              <thead>
+                <tr style={{background:'#fafafa'}}>
+                  <th style={{padding:'9px 12px',textAlign:'left' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',minWidth:'230px'}}>Peso (kg)</th>
+                  {zoneLista.map(z=>{ const bl = zonaBloccata(z.id); return (
+                    <th key={z.id} style={{padding:'9px 10px',textAlign:'center' as const,fontWeight:'600',color:bl?'#9ca3af':'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>
+                      {z.nome} €{bl && <div style={{fontSize:'9px',fontWeight:500,color:'#9ca3af'}}>non disponibile</div>}
+                    </th>
+                  )})}
+                  <th style={{padding:'9px 8px',textAlign:'center' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>Fuel %</th>
+                  <th style={{padding:'9px 8px',borderBottom:'1px solid #d1d5db',width:'32px'}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((fascia, idx) => (
+                  <tr key={idx} style={{borderBottom:'1px solid #e5e7eb',background:idx%2===0?'#fff':'#fafafa'}}>
+                    <td style={{padding:'6px 10px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                        <select value={fascia.tipo} onChange={e=>op.tipo(idx,e.target.value as TipoFascia)} style={{...inp,fontSize:'12px',width:'130px'}}>
+                          <option value="fino_a">Fino a:</option>
+                          <option value="oltre">Oltre X ogni</option>
+                          <option value="piccola">Piccola (box S)</option>
+                          <option value="media">Media (box M)</option>
+                          <option value="grande">Grande (box L)</option>
+                        </select>
+                        {isTaglia(fascia.tipo) ? (
+                          <span style={{fontSize:'11px',color:'#999',fontStyle:'italic'}}>a taglia box</span>
+                        ) : (<>
+                        <input type="number" value={fascia.peso===0?'':String(fascia.peso)} onChange={e=>op.peso(idx,e.target.value)} placeholder="0" min="0" step="0.5" style={{...inp,width:'65px',textAlign:'center' as const}}/>
+                        <span style={{fontSize:'12px',color:'#666'}}>kg</span>
+                        </>)}
+                      </div>
+                    </td>
+                    {zoneLista.map(z=>{
+                      const bloccata = zonaBloccata(z.id)
+                      const costo = costiMaster?.[`${fascia.tipo}|${fascia.peso}|${z.id}`]
+                      const prezzo = parseFloat(fascia.prezzi[z.id] ?? '')
+                      const sottoCosto = !bloccata && costo != null && prezzo > 0 && prezzo < costo
+                      return (
+                      <td key={z.id} style={{padding:'6px 6px',textAlign:'center' as const}}>
+                        <input type="number" value={fascia.prezzi[z.id]??''} disabled={bloccata}
+                          onChange={e=>{ if (!bloccata) op.prezzo(idx,z.id,e.target.value) }} placeholder={bloccata?'—':'0.00'} min="0" step="0.01"
+                          title={bloccata ? `Non possiedi il costo per «${z.nome}» su questo corriere: non puoi venderla. Chiedi al tuo master di attivare questa zona.` : (sottoCosto ? `Sotto costo: il tuo costo per ${z.nome} a questa fascia e' ${costo!.toFixed(2)} €` : (costo != null ? `Tuo costo: ${costo.toFixed(2)} €` : undefined))}
+                          style={{...inp,width:'72px',textAlign:'right' as const,
+                            ...(bloccata ? {background:'#f3f4f6',color:'#9ca3af',borderColor:'#e5e7eb',cursor:'not-allowed'} : {}),
+                            ...(sottoCosto ? {borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700} : {})}}/>
+                        {sottoCosto && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px',whiteSpace:'nowrap' as const}}>costo {costo!.toFixed(2)}</div>}
+                        {bloccata && <div style={{fontSize:'10px',color:'#9ca3af',marginTop:'2px',whiteSpace:'nowrap' as const}}>non disp.</div>}
+                      </td>
+                    )})}
+                    <td style={{padding:'6px 6px',textAlign:'center' as const}}>
+                      <input type="number" value={fascia.fuel??''} onChange={e=>op.fuel(idx,e.target.value)} placeholder="0" min="0" step="0.01" style={{...inp,width:'60px',textAlign:'right' as const}}/>
+                    </td>
+                    <td style={{padding:'6px 8px',textAlign:'center' as const}}>
+                      <button onClick={()=>op.rimuovi(idx)} style={{width:'22px',height:'22px',borderRadius:'50%',background:'#fef2f2',border:'1px solid #fecaca',color:'#dc2626',cursor:'pointer',fontSize:'14px',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>−</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:'10px 16px',borderTop:'1px solid #e5e7eb',display:'flex',gap:'16px',alignItems:'center'}}>
+            <button onClick={op.aggiungi} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer',padding:0}}>+ Aggiungi fascia</button>
+            <span style={{fontSize:'11px',color:'#999'}}>{piede}</span>
+          </div>
+        </div>
+  ) }
 
   // Corpo dell'editor del contratto aperto (dentro la tendina)
   const editorContratto = (
@@ -579,7 +721,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
 
       {/* Tabs */}
       <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const}}>
-        {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
+        {[['pesi','Pesi / Zone'],...(zoneMC.length?[['multicollo','Multicollo']]:[]),['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
           <button key={k} style={tabStyle(k)} onClick={()=>setTab(k)}>
             {l}{tabSotto[k] && <span title="Ci sono righe sotto costo in questa scheda" style={{marginLeft:6,display:'inline-block',width:8,height:8,borderRadius:'50%',background:'#dc2626',verticalAlign:'middle'}} />}
           </button>
@@ -587,102 +729,20 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       </div>
 
       {/* PESI / ZONE */}
-      {tab==='pesi' && (
+      {tab==='pesi' && grigliaPesi(fasce, setFasce, zoneMono, 'Usa "Oltre X ogni" per i pesi oltre l\'ultima fascia (copre anche i 1000 kg).')}
+
+      {/* MULTICOLLO: stessa griglia, sulle zone multicollo del contratto; il prezzo e' sul PESO TOTALE della
+          spedizione (lib/multicollo-zone). Sotto: minimo a collo, localita' remota, partenza remota. */}
+      {tab==='multicollo' && (
         <div>
-          {(() => {
-            // Riepilogo sotto costo: senza questo un prezzo sbagliato passa inosservato e ci si
-            // accorge della perdita solo mesi dopo, guardando i margini a spedizioni gia' fatte.
-            if (!costiMaster) return null
-            let n = 0
-            for (const f of fasce) for (const z of zone) {
-              const c = costiMaster[`${f.tipo}|${f.peso}|${z.id}`]
-              const p = parseFloat(f.prezzi[z.id] ?? '')
-              if (c != null && p > 0 && p < c) n++
-            }
-            if (!n) return null
-            return (
-              <div style={{margin:'12px 16px 0',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'10px 14px',fontSize:'13px',color:'#b91c1c'}}>
-                ⚠️ <b>{n} {n===1?'prezzo è':'prezzi sono'} sotto il tuo costo</b> — {n===1?'la casella è evidenziata':'le caselle sono evidenziate'} in rosso, con il costo indicato sotto. Puoi salvare lo stesso, ma su {n===1?'quella tratta':'quelle tratte'} ci rimetti.
-              </div>
-            )
-          })()}
-          {(() => {
-            // Zone che il master NON possiede: non prezzabili (casella bloccata). Spiega perché, così
-            // non sembra un errore. Senza questo nascevano prezzi "orfani" bloccati a valle.
-            if (!guardiaCosti) return null
-            const bloccate = zone.filter(z => zonaBloccata(z.id))
-            if (!bloccate.length) return null
-            return (
-              <div style={{margin:'12px 16px 0',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'10px 14px',fontSize:'13px',color:'#4b5563'}}>
-                🔒 <b>{bloccate.length===1?'1 zona non è disponibile':`${bloccate.length} zone non sono disponibili`}</b> — non hai un costo per {bloccate.length===1?'questa zona':'queste zone'} su questo corriere, quindi non {bloccate.length===1?'la puoi':'le puoi'} prezzare: {bloccate.map(z=>z.nome).join(', ')}. Per attivarla, chiedi al tuo master.
-              </div>
-            )
-          })()}
-          <div style={{overflowX:'auto' as const}}>
-            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
-              <thead>
-                <tr style={{background:'#fafafa'}}>
-                  <th style={{padding:'9px 12px',textAlign:'left' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',minWidth:'230px'}}>Peso (kg)</th>
-                  {zone.map(z=>{ const bl = zonaBloccata(z.id); return (
-                    <th key={z.id} style={{padding:'9px 10px',textAlign:'center' as const,fontWeight:'600',color:bl?'#9ca3af':'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>
-                      {z.nome} €{bl && <div style={{fontSize:'9px',fontWeight:500,color:'#9ca3af'}}>non disponibile</div>}
-                    </th>
-                  )})}
-                  <th style={{padding:'9px 8px',textAlign:'center' as const,fontWeight:'600',color:'#1a1a1a',fontSize:'11.5px',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>Fuel %</th>
-                  <th style={{padding:'9px 8px',borderBottom:'1px solid #d1d5db',width:'32px'}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {fasce.map((fascia, idx) => (
-                  <tr key={idx} style={{borderBottom:'1px solid #e5e7eb',background:idx%2===0?'#fff':'#fafafa'}}>
-                    <td style={{padding:'6px 10px'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-                        <select value={fascia.tipo} onChange={e=>aggiornaTipo(idx,e.target.value as TipoFascia)} style={{...inp,fontSize:'12px',width:'130px'}}>
-                          <option value="fino_a">Fino a:</option>
-                          <option value="oltre">Oltre X ogni</option>
-                          <option value="piccola">Piccola (box S)</option>
-                          <option value="media">Media (box M)</option>
-                          <option value="grande">Grande (box L)</option>
-                        </select>
-                        {isTaglia(fascia.tipo) ? (
-                          <span style={{fontSize:'11px',color:'#999',fontStyle:'italic'}}>a taglia box</span>
-                        ) : (<>
-                        <input type="number" value={fascia.peso===0?'':String(fascia.peso)} onChange={e=>aggiornaPeso(idx,e.target.value)} placeholder="0" min="0" step="0.5" style={{...inp,width:'65px',textAlign:'center' as const}}/>
-                        <span style={{fontSize:'12px',color:'#666'}}>kg</span>
-                        </>)}
-                      </div>
-                    </td>
-                    {zone.map(z=>{
-                      const bloccata = zonaBloccata(z.id)
-                      const costo = costiMaster?.[`${fascia.tipo}|${fascia.peso}|${z.id}`]
-                      const prezzo = parseFloat(fascia.prezzi[z.id] ?? '')
-                      const sottoCosto = !bloccata && costo != null && prezzo > 0 && prezzo < costo
-                      return (
-                      <td key={z.id} style={{padding:'6px 6px',textAlign:'center' as const}}>
-                        <input type="number" value={fascia.prezzi[z.id]??''} disabled={bloccata}
-                          onChange={e=>{ if (!bloccata) aggiornaPrezzo(idx,z.id,e.target.value) }} placeholder={bloccata?'—':'0.00'} min="0" step="0.01"
-                          title={bloccata ? `Non possiedi il costo per «${z.nome}» su questo corriere: non puoi venderla. Chiedi al tuo master di attivare questa zona.` : (sottoCosto ? `Sotto costo: il tuo costo per ${z.nome} a questa fascia e' ${costo!.toFixed(2)} €` : (costo != null ? `Tuo costo: ${costo.toFixed(2)} €` : undefined))}
-                          style={{...inp,width:'72px',textAlign:'right' as const,
-                            ...(bloccata ? {background:'#f3f4f6',color:'#9ca3af',borderColor:'#e5e7eb',cursor:'not-allowed'} : {}),
-                            ...(sottoCosto ? {borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700} : {})}}/>
-                        {sottoCosto && <div style={{fontSize:'10px',color:'#dc2626',marginTop:'2px',whiteSpace:'nowrap' as const}}>costo {costo!.toFixed(2)}</div>}
-                        {bloccata && <div style={{fontSize:'10px',color:'#9ca3af',marginTop:'2px',whiteSpace:'nowrap' as const}}>non disp.</div>}
-                      </td>
-                    )})}
-                    <td style={{padding:'6px 6px',textAlign:'center' as const}}>
-                      <input type="number" value={fascia.fuel??''} onChange={e=>aggiornaFuel(idx,e.target.value)} placeholder="0" min="0" step="0.01" style={{...inp,width:'60px',textAlign:'right' as const}}/>
-                    </td>
-                    <td style={{padding:'6px 8px',textAlign:'center' as const}}>
-                      <button onClick={()=>rimuoviFascia(idx)} style={{width:'22px',height:'22px',borderRadius:'50%',background:'#fef2f2',border:'1px solid #fecaca',color:'#dc2626',cursor:'pointer',fontSize:'14px',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>−</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{margin:'12px 16px 0',padding:'10px 14px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'8px',fontSize:'12.5px',color:'#4b5563',lineHeight:1.5}}>
+            Con <b>due o più colli</b> il prezzo è il più alto fra <b>colli × minimo per collo</b> e la fascia della <b>zona multicollo</b> sul <b>peso totale</b> della spedizione, più località remota e partenza remota. Il peso totale si conta collo per collo: misure al centimetro in su, volume, il più alto fra peso e volume arrotondato a mezzo chilo in su, poi la somma. Il collo singolo resta su <b>Pesi / Zone</b>. Una casella vuota = in quella zona e a quel peso il multicollo non si vende.
           </div>
-          <div style={{padding:'10px 16px',borderTop:'1px solid #e5e7eb',display:'flex',gap:'16px',alignItems:'center'}}>
-            <button onClick={aggiungiFascia} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer',padding:0}}>+ Aggiungi fascia</button>
-            <span style={{fontSize:'11px',color:'#999'}}>Usa "Oltre X ogni" per i pesi oltre l'ultima fascia (copre anche i 1000 kg).</span>
+          {grigliaPesi(fasceMC, setFasceMC, zoneMC, 'Fasce sul peso totale della spedizione. Usa "Oltre X ogni" per i pesi oltre l\'ultima fascia.')}
+          <div style={{padding:'0 16px 18px'}}>
+            {bloccoMinimo}
+            <SupplementiMulticollo chi="cliente" valore={supplMC} onChange={setSupplMC} costo={costoSupplMC}
+              zoneRemote={zoneMono.filter((z:any)=>!z.su_mittente).map((z:any)=>z.nome)} zonePartenza={zoneMono.filter((z:any)=>z.su_mittente).map((z:any)=>z.nome)} />
           </div>
         </div>
       )}
@@ -865,21 +925,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
 
-          <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'28px 0 4px'}}>Multicollo: minimo a collo</div>
-          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Con due o più colli la spedizione costa almeno <b>numero di colli × minimo</b>; se la fascia sul peso totale è più cara, vale la fascia. Es: minimo 9,00 € → 4 colli da 5 kg = 4 × 9,00 = 36,00 €, anche se la fascia dei 20 kg costa 16,00 €.</div>
-          <div style={{display:'flex',gap:'12px',alignItems:'flex-end',flexWrap:'wrap' as const}}>
-            <div>
-              <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Minimo per collo (€)</label>
-              <NumInput value={minimoCollo} onChange={setMinimoCollo} style={{...inp,width:'120px',textAlign:'right' as const,...(minimoCollSotto?{borderColor:'#dc2626',background:'#fef2f2',color:'#b91c1c',fontWeight:700}:{})}} placeholder="0"/>
-            </div>
-            {costoMinimoCollo > 0 && <span style={{fontSize:'12px',color: minimoCollSotto ? '#dc2626' : '#666',paddingBottom:'8px'}}>il tuo costo: {eurE(costoMinimoCollo)} € a collo</span>}
-          </div>
-          <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>
-            {costoMinimoCollo > 0
-              ? <>Il contratto ha un minimo a collo: finché questo campo è vuoto, il multicollo su questo contratto <b>non è disponibile</b> per chi usa questo listino.</>
-              : <>Lascia 0 se il contratto non ha un minimo a collo.</>}
-          </div>
-          {multicolloColonne.length > 0 && <TabellaMulticollo chi="cliente" colonne={multicolloColonne} valore={tabellaMC} onChange={setTabellaMC} costo={costoTabellaMC} />}
+          {!zoneMC.length && bloccoMinimo}
         </div>
       )}
     </div>

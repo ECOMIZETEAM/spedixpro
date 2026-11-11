@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
   // Zone di origine con le loro regioni
   const { data: zoneOrigine } = await supabase.from('zone')
-    .select('id,nome,descrizione,con_fuel, zone_cap(paese,provincia,cap,citta)')
+    .select('id,nome,descrizione,con_fuel,su_mittente,multicollo, zone_cap(paese,provincia,cap,citta)')
     .eq('master_id', masterId).eq('corriere_id', fromCorriereId)
   if (!zoneOrigine?.length) return NextResponse.json({ error: 'Il corriere di origine non ha zone da copiare' }, { status: 400 })
 
@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
     if (nomiEsistenti.has((z.nome || '').trim().toLowerCase())) { saltate++; continue }
     const { data: nuova, error } = await supabase.from('zone').insert({
       master_id: masterId, corriere_id: toCorriereId, nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false,
+      su_mittente: !!z.su_mittente, multicollo: !!z.multicollo,
     }).select('id').single()
     if (error || !nuova) continue
     const caps = (z as any).zone_cap || []
