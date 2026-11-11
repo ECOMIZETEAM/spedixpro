@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
@@ -152,15 +152,6 @@ export async function POST(req: NextRequest) {
   // non sovrascrivere in_transito/consegnata). Così in elenco si distinguono dalle etichette appena
   // create nella stessa giornata (che restano "in lavorazione").
   await db.from('spedizioni').update({ stato: 'spedita' }).in('id', spedIdsValidi).eq('stato', 'in_lavorazione')
-  // Notifica i MARKETPLACE (eBay/Shopify/Woo/PrestaShop/TikTok/Temu): tracking + stato "spedito".
-  // Prima lo faceva SOLO la creazione distinta lato CLIENTE: creando la distinta dal MASTER gli ordini
-  // marketplace non venivano mai sincronizzati (es. eBay restava "da spedire"). Uso admin per poter
-  // leggere/aggiornare gli ordini dei clienti della rete. Best-effort: non blocca la distinta.
-  try {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace')
-    await fulfillMarketplace(createAdminSupabase(), spedIdsValidi)
-  } catch {}
   // Chiusura borderò/distinta lato corriere (best-effort): Spedisci.online e SpediamoPro (bordereau).
   // Client ADMIN, non `db`: quando la distinta e' del proprio master, `db` e' il client dell'utente,
   // che non puo' piu' leggere le credenziali del contratto — e senza quelle la chiusura al corriere
@@ -179,5 +170,20 @@ export async function POST(req: NextRequest) {
   // Distinta MISTA (vettore): la chiusura per-contratto. Le 4 sopra fanno skip (corriere_id null); questa
   // fa skip sulle mono-contratto. Cosi' vale sia il caso normale sia il merge, senza rami separati.
   try { const { chiudiDistintaMista } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMista(_dbChiusura, distinta.id) } catch {}
+  // Notifica i MARKETPLACE (eBay/Shopify/Woo/PrestaShop/TikTok/Temu): tracking + stato "spedito".
+  // Prima lo faceva SOLO la creazione distinta lato CLIENTE: creando la distinta dal MASTER gli ordini
+  // marketplace non venivano mai sincronizzati (es. eBay restava "da spedire"). Uso admin per poter
+  // leggere/aggiornare gli ordini dei clienti della rete. Best-effort: non blocca la distinta.
+  // DOPO la chiusura al corriere e a risposta data. Dal 10/11/2026 e' qui che parte l'evasione vera (prima
+  // gli ordini erano gia' evasi all'etichetta e questa chiamata li saltava), e una distinta con 164 ordini
+  // dei negozi (4/11/2026) chiede minuti di chiamate ai negozi. Messa prima, come era, se la funzione
+  // finiva il tempo la distinta non arrivava al corriere: niente ritiro. Quello che non finisce qui lo
+  // riprende il recupero ogni 20 minuti (app/api/integrazioni/fulfill-retry).
+  after(async () => {
+    try {
+      const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace')
+      await fulfillMarketplace(_dbChiusura, spedIdsValidi)
+    } catch (e: any) { console.error('[DISTINTE][EVASIONE NEGOZI] master', distinta.id, e?.message) }
+  })
   return NextResponse.json({ success: true, distintaId: distinta.id, numero: numeroDistinta })
 }

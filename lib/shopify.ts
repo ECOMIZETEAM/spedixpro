@@ -537,9 +537,13 @@ const MUTATION_RIAPRI_FO = `mutation($id: ID!){ fulfillmentOrderOpen(id:$id){ fu
 const NOTA_IN_CORSO = 'Spedizione creata con MoovExpress: il tracking arriva alla chiusura della distinta.'
 const azioniFo = (f: any): string[] => ((f?.supportedActions) || []).map((x: any) => String(x?.action || ''))
 
-export async function segnaInCorsoShopify(db: any, spedizioneIds: string[]) {
+export async function segnaInCorsoShopify(db: any, spedizioneIds: string[], opz: { scadenza?: number } = {}) {
   const righe = await righeDaEvadere(db, spedizioneIds, 'shopify')
   for (const { ordine } of righe) {
+    // Il recupero ogni 20 minuti ci passa tutte le righe ancora senza esito: se Shopify non offrisse
+    // REPORT_PROGRESS su molti ordini, rileggerli tutti a ogni giro toglierebbe il tempo alle evasioni
+    // vere della sera. Oltre la scadenza si lascia al giro dopo: «In corso» e' un di piu', l'evasione no.
+    if (opz.scadenza && Date.now() > opz.scadenza) break
     // Solo chi non ha ancora un esito che conta. Gia' in corso, evaso, trattenuto sul negozio ('attesa'),
     // in un magazzino esterno o annullato sul negozio: non si tocca. 'annullato' ed 'errore' sono del giro
     // di prima (una spedizione annullata, un'evasione fallita): questa e' una spedizione nuova.

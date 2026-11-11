@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
@@ -49,10 +49,6 @@ export async function POST(req: NextRequest) {
   // in_transito/consegnata). Così si distinguono in elenco dalle etichette create dopo.
   await adminAggancio.from('spedizioni').update({ stato: 'spedita' }).in('id', validIds).eq('cliente_id', clienteId).eq('stato', 'in_lavorazione')
   if (errUpd) return NextResponse.json({ error: 'Errore aggancio spedizioni' }, { status: 500 })
-  // Distinta chiusa: rimanda il tracking ai marketplace collegati (best-effort). UNICA porta:
-  // fulfillMarketplace applica la guardia "mai evadere col numero provvisorio" per TUTTE le piattaforme.
-  let fulfillEsiti: any[] = []
-  try { fulfillEsiti = await fulfillMarketplace(supabase, validIds) } catch {}
   // Chiusura borderò su spedisci.online (best-effort, solo corrieri tipo spedisci)
   // Client ADMIN: la chiusura al corriere legge le credenziali del contratto, che con il token di
   // un utente non sono piu' leggibili (e non devono esserlo). Il perimetro l'ha gia' deciso questa
@@ -70,5 +66,16 @@ export async function POST(req: NextRequest) {
   // queste due porte sono rimaste "In attesa" per sempre (lib/distinte-chiusura).
   try { const { chiudiDistintaMoovexpress } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMoovexpress(_adminChiusura, distinta.id) } catch {}
   try { const { chiudiDistintaSenzaManifest } = await import('@/lib/distinte-chiusura'); await chiudiDistintaSenzaManifest(_adminChiusura, distinta.id) } catch {}
-  return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length }, fulfill: fulfillEsiti })
+  // Distinta chiusa: evasione degli ordini sui negozi collegati (best-effort). UNICA porta:
+  // fulfillMarketplace applica le guardie per TUTTE le piattaforme.
+  // DOPO la chiusura al corriere e a risposta data. Dal 10/11/2026 e' qui che parte l'evasione vera (prima
+  // gli ordini erano gia' evasi all'etichetta e questa chiamata li saltava), e una distinta con 164 ordini
+  // dei negozi (4/11/2026) chiede minuti di chiamate ai negozi. Messa prima, come era, se la funzione
+  // finiva il tempo la distinta non arrivava al corriere: niente ritiro. Quello che non finisce qui lo
+  // riprende il recupero ogni 20 minuti (app/api/integrazioni/fulfill-retry).
+  after(async () => {
+    try { await fulfillMarketplace(createAdminSupabase(), validIds) }
+    catch (e: any) { console.error('[DISTINTE][EVASIONE NEGOZI] cliente', distinta.id, e?.message) }
+  })
+  return NextResponse.json({ ok: true, distintaId: distinta.id, numero: distinta.numero, totali: { colli: totaleColli, peso: totalePeso, spedizioni: validIds.length } })
 }

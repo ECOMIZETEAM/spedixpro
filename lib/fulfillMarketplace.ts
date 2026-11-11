@@ -13,11 +13,13 @@ import { STATI_SPEDIZIONE_IN_ANNULLO, inDistinta } from '@/lib/evasione-ordini'
 // quindi si può chiamare più volte (alla creazione distinta E, in futuro, altrove) senza doppioni.
 // Usato dalla creazione distinta lato CLIENTE, lato MASTER e dalla chiusura automatica, così eBay &
 // co. vengono SEMPRE marcati come spediti col tracking, a prescindere da chi crea la distinta.
+// `opz.scadenzaInCorso`: oltre quest'ora non si tenta piu' di segnare «In corso» (segnaInCorsoShopify);
+// la passa il recupero, perche' quei tentativi non tolgano tempo alle evasioni vere.
 // `opz.tentatiAmazon`: chi lo passa (il cron fulfill-retry) ci trova gli ordini Amazon davvero
 // mandati ad Amazon — l'unica evasione con un limite di tempo, quindi l'unica che puo' lasciarne
 // indietro senza averli tentati. `opz.scadenzaAmazon`: quel limite, unico per chi chiama piu'
 // volte nello stesso giro. Gli altri chiamanti non li passano e non cambia niente.
-export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: { tentatiAmazon?: Set<string>; scadenzaAmazon?: number } = {}): Promise<any[]> {
+export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: { tentatiAmazon?: Set<string>; scadenzaAmazon?: number; scadenzaInCorso?: number } = {}): Promise<any[]> {
   let esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
 
@@ -65,7 +67,7 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: 
       return null
     }
   }
-  if (inAttesa.length) await passa('shopify in corso', () => segnaInCorsoShopify(adm, inAttesa))
+  if (inAttesa.length) await passa('shopify in corso', () => segnaInCorsoShopify(adm, inAttesa, { scadenza: opz.scadenzaInCorso }))
   if (!pronti.length) return esiti
   esiti = (await passa('shopify', () => fulfillSpedizioniShopify(adm, pronti))) || []
   await passa('woocommerce', () => fulfillSpedizioniWoo(adm, pronti))

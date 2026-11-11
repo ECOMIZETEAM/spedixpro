@@ -9,6 +9,9 @@ export const dynamic = 'force-dynamic'
 // 300 come annullamenti-cron e sync-cron: dopo le evasioni il giro annulla su Shopify le evasioni delle
 // spedizioni annullate (seconda fase, sotto), e una chiamata lenta non deve far scadere la funzione.
 export const maxDuration = 300
+// Oltre questo non si comincia un altro blocco di evasioni: il resto del giro (tentativi, ripescaggio,
+// annullo su Shopify fino a 240 secondi) deve trovare tempo prima di maxDuration.
+const TEMPO_EVASIONI_MS = 150_000
 
 // RIEVASIONE DEGLI ORDINI MARKETPLACE RIMASTI INDIETRO.
 //
@@ -85,6 +88,7 @@ export async function GET(req: NextRequest) {
   let ok = 0
   let esauriti = 0
   let recuperati = 0
+  let rimandate = 0
   if (spedIds.length) {
     // Quali spedizioni hanno la LDV DEFINITIVA (verranno davvero tentate). Le PROVVISORIE non sono
     // fallimenti: aspettano solo la LDV vera (SpediamoPro/Poste async, anche 18h+), quindi NON devono
@@ -116,15 +120,26 @@ export async function GET(req: NextRequest) {
     // supererebbero la durata massima della funzione e lascerebbero a meta' la contabilita' sotto.
     const tentatiAmazon = new Set<string>()
     const scadenzaAmazon = Date.now() + 30000
-    for (let i = 0; i < spedIds.length; i += 200) {
-      esiti.push(...await fulfillMarketplace(admin, spedIds.slice(i, i + 200), { tentatiAmazon, scadenzaAmazon }))
+    //
+    // E SOLO FINCHE' C'E' TEMPO. Dal 10/11/2026 l'evasione parte alla distinta, e la sera, chiuse le
+    // distinte, qui arrivano centinaia di evasioni vere tutte insieme (prima erano gia' fatte
+    // all'etichetta, sparse nel giorno). Senza limite la funzione arrivava a maxDuration a meta' giro e
+    // saltavano i tentativi, il ripescaggio dei negozi tornati sani e l'annullo su Shopify qui sotto.
+    // Quello che resta lo prende il giro dopo, dai piu' vecchi; i tentativi si contano solo su cio' che
+    // e' stato davvero tentato.
+    const tentateSped = new Set<string>()
+    for (let i = 0; i < spedIds.length; i += 50) {
+      if (Date.now() - avvio > TEMPO_EVASIONI_MS) { rimandate = spedIds.length - i; break }
+      const blocco = spedIds.slice(i, i + 50)
+      esiti.push(...await fulfillMarketplace(admin, blocco, { tentatiAmazon, scadenzaAmazon, scadenzaInCorso: avvio + 60_000 }))
+      for (const id of blocco) tentateSped.add(String(id))
     }
     ok = esiti.filter((e: any) => e?.stato === 'ok').length
 
     // Incremento il contatore SOLO per gli ordini PRONTI (davvero tentati) che DOPO il giro sono ancora
     // non-'ok': quelli sono fallimenti veri. Rileggo lo stato per non incrementare chi e' appena andato a
     // buon fine. Al raggiungimento del cap l'ordine esce dai retry (resta 'errore', ricreabile a mano).
-    const prontiCand = candidati.filter((o: any) => prontiSet.has(o.spedizione_id))
+    const prontiCand = candidati.filter((o: any) => prontiSet.has(o.spedizione_id) && tentateSped.has(String(o.spedizione_id)))
     // Store che in QUESTO giro hanno avuto almeno un ordine 'ok': la scrittura sullo store e' passata,
     // cioe' la chiave/il negozio ora funziona. Serve sotto per riesumare il pregresso al tetto.
     const shopsSani = new Set<string>()
@@ -203,7 +218,7 @@ export async function GET(req: NextRequest) {
     annulli = { errore: String(e?.message || e).slice(0, 200) }
   }
 
-  return NextResponse.json({ ok: true, candidate: spedIds.length, esiti: esiti.length, evase_ok: ok, esauriti, recuperati, annulli })
+  return NextResponse.json({ ok: true, candidate: spedIds.length, esiti: esiti.length, evase_ok: ok, rimandate, esauriti, recuperati, annulli })
 }
 
 // ORDINI AMAZON UNITI IN UN PACCO. Viaggiano nel pacco del capofila e non hanno una spedizione loro,
