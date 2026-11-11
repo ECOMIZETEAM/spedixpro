@@ -1,4 +1,4 @@
-import { fulfillSpedizioniShopify, segnaInCorsoShopify } from '@/lib/shopify'
+import { fulfillSpedizioniShopify } from '@/lib/shopify'
 import { fulfillSpedizioniWoo } from '@/lib/wooFulfill'
 import { fulfillSpedizioniPrestashop } from '@/lib/prestashopFulfill'
 import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
@@ -13,13 +13,11 @@ import { STATI_SPEDIZIONE_IN_ANNULLO, inDistinta } from '@/lib/evasione-ordini'
 // quindi si può chiamare più volte (alla creazione distinta E, in futuro, altrove) senza doppioni.
 // Usato dalla creazione distinta lato CLIENTE, lato MASTER e dalla chiusura automatica, così eBay &
 // co. vengono SEMPRE marcati come spediti col tracking, a prescindere da chi crea la distinta.
-// `opz.scadenzaInCorso`: oltre quest'ora non si tenta piu' di segnare «In corso» (segnaInCorsoShopify);
-// la passa il recupero, perche' quei tentativi non tolgano tempo alle evasioni vere.
 // `opz.tentatiAmazon`: chi lo passa (il cron fulfill-retry) ci trova gli ordini Amazon davvero
 // mandati ad Amazon — l'unica evasione con un limite di tempo, quindi l'unica che puo' lasciarne
 // indietro senza averli tentati. `opz.scadenzaAmazon`: quel limite, unico per chi chiama piu'
 // volte nello stesso giro. Gli altri chiamanti non li passano e non cambia niente.
-export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: { tentatiAmazon?: Set<string>; scadenzaAmazon?: number; scadenzaInCorso?: number } = {}): Promise<any[]> {
+export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: { tentatiAmazon?: Set<string>; scadenzaAmazon?: number } = {}): Promise<any[]> {
   let esiti: any[] = []
   if (!spedizioneIds?.length) return esiti
 
@@ -38,15 +36,14 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: 
   // tutte e sette le piattaforme, con la lista degli stati scritta in un posto solo (lib/evasione-ordini).
   const { ldvProvvisoria } = await import('@/lib/numero-spedizione')
   //
-  // E SI EVADE SOLO DOPO LA DISTINTA (inDistinta, lib/evasione-ordini). Quelle che la aspettano su Shopify
-  // si segnano «In corso»; le riprende il recupero ogni 20 minuti, senza consumare tentativi.
+  // E SI EVADE SOLO DOPO LA DISTINTA (inDistinta, lib/evasione-ordini). Quelle che la aspettano restano non
+  // evase sul negozio; le riprende il recupero ogni 20 minuti, senza consumare tentativi.
   const { data: sped } = await db.from('spedizioni').select('id,tracking_number,stato,distinta_id').in('id', spedizioneIds)
   const valide = (sped || [])
     .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number))
     .filter((s: any) => !STATI_SPEDIZIONE_IN_ANNULLO.includes(String(s.stato || '')))
   const pronti = valide.filter((s: any) => inDistinta(s)).map((s: any) => s.id)
-  const inAttesa = valide.filter((s: any) => !inDistinta(s)).map((s: any) => s.id)
-  if (!pronti.length && !inAttesa.length) return esiti
+  if (!pronti.length) return esiti
 
   // DA QUI IN POI SI USA IL CLIENT ADMIN.
   //
@@ -67,8 +64,6 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: 
       return null
     }
   }
-  if (inAttesa.length) await passa('shopify in corso', () => segnaInCorsoShopify(adm, inAttesa, { scadenza: opz.scadenzaInCorso }))
-  if (!pronti.length) return esiti
   esiti = (await passa('shopify', () => fulfillSpedizioniShopify(adm, pronti))) || []
   await passa('woocommerce', () => fulfillSpedizioniWoo(adm, pronti))
   await passa('prestashop', () => fulfillSpedizioniPrestashop(adm, pronti))

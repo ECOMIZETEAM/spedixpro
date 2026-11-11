@@ -379,7 +379,7 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
         annullateOra = true
       }
       // UN ORDINE «IN CORSO» SI EVADE COME UNO APERTO. Mentre aspettava la distinta l'abbiamo segnato in
-      // corso (segnaInCorsoShopify, qui sotto). Se un fulfillment order in corso non offre l'evasione ma
+      // corso (solo l'11/11/2026, vedi ORDINI SEGNATI «IN CORSO» qui sotto). Se un fulfillment order in corso non offre l'evasione ma
       // offre la riapertura, lo si riapre prima (fulfillmentOrderOpen): altrimenti finiva in «nessun
       // fulfillment order da evadere» proprio alla chiusura della distinta.
       const inCorsoBloccati = ((ord?.fulfillmentOrders?.edges) || []).map((e: any) => e.node)
@@ -518,63 +518,17 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
   return esiti
 }
 
-// ── «IN CORSO» IN ATTESA DELLA DISTINTA ─────────────────────────────────────────────────────────
+// ── ORDINI SEGNATI «IN CORSO» L'11/11/2026 ──────────────────────────────────────────────────────
 //
-// Dal 10/11/2026 l'evasione col tracking parte alla chiusura della distinta (inDistinta in
-// lib/evasione-ordini). Fra l'etichetta e la distinta l'ordine su Shopify non puo' restare «Non evaso»
-// mentre da noi e' spedito: e' esattamente la bocciatura 2.1.4 di settembre (il revisore ha spedito e su
-// Shopify non e' cambiato niente). Lo si segna «In corso» con fulfillmentOrderReportProgress, l'azione che
-// Shopify prevede per chi sta preparando l'ordine: niente email al compratore, nessun tracking.
-// Solo sui fulfillment order che lo permettono (supportedActions REPORT_PROGRESS) e ancora aperti: uno gia'
-// in corso l'ha messo cosi' qualcun altro, uno trattenuto o in un magazzino esterno non e' nostro.
-// La riga diventa 'in_corso' solo se almeno uno e' stato segnato da noi: e' la traccia che l'annullo usa
-// per riaprire l'ordine se la spedizione si annulla prima della distinta (esitoAnnulloOrdine).
-// Best-effort: se non riesce, al giro dopo (fulfill-retry, ogni 20 minuti) si riprova.
+// L'11/11/2026, dalle 11:18 per circa un'ora, le spedizioni in attesa della distinta segnavano l'ordine
+// Shopify «In corso» (fulfillmentOrderReportProgress, riga 'in_corso'). Lorenzo l'ha tolto: l'ordine resta
+// «Non evaso» finche' non si chiude la distinta, e basta. Restano le due cose che servono a quegli ordini:
+// l'evasione alla distinta riapre il fulfillment order se Shopify non lo lascia evadere in corso
+// (fulfillSpedizioniShopify) e l'annullo prima della distinta lo riapre (esitoAnnulloOrdine, ramo i).
+// Passati i 10 giorni del recupero (dal 22/11/2026) non ce ne sono piu', e questo con il ramo i si toglie.
 const QUERY_FO_ORDINE = `query($id: ID!){ order(id:$id){ cancelledAt fulfillmentOrders(first:50){ edges{ node{ id status supportedActions{ action } } } } } }`
-const MUTATION_IN_CORSO = `mutation($id: ID!, $r: FulfillmentOrderReportProgressInput){ fulfillmentOrderReportProgress(id:$id, progressReport:$r){ fulfillmentOrder{ id status } userErrors{ field message code } } }`
 const MUTATION_RIAPRI_FO = `mutation($id: ID!){ fulfillmentOrderOpen(id:$id){ fulfillmentOrder{ id status } userErrors{ field message } } }`
-// La legge il negoziante nella cronologia dell'ordine sull'admin, non il compratore.
-const NOTA_IN_CORSO = 'Spedizione creata con MoovExpress: il tracking arriva alla chiusura della distinta.'
 const azioniFo = (f: any): string[] => ((f?.supportedActions) || []).map((x: any) => String(x?.action || ''))
-
-export async function segnaInCorsoShopify(db: any, spedizioneIds: string[], opz: { scadenza?: number } = {}) {
-  const righe = await righeDaEvadere(db, spedizioneIds, 'shopify')
-  for (const { ordine } of righe) {
-    // Il recupero ogni 20 minuti ci passa tutte le righe ancora senza esito: se Shopify non offrisse
-    // REPORT_PROGRESS su molti ordini, rileggerli tutti a ogni giro toglierebbe il tempo alle evasioni
-    // vere della sera. Oltre la scadenza si lascia al giro dopo: «In corso» e' un di piu', l'evasione no.
-    if (opz.scadenza && Date.now() > opz.scadenza) break
-    // Solo chi non ha ancora un esito che conta. Gia' in corso, evaso, trattenuto sul negozio ('attesa'),
-    // in un magazzino esterno o annullato sul negozio: non si tocca. 'annullato' ed 'errore' sono del giro
-    // di prima (una spedizione annullata, un'evasione fallita): questa e' una spedizione nuova.
-    if (!['', 'annullato', 'errore'].includes(String(ordine.fulfillment_stato || ''))) continue
-    try {
-      const integr = await integrazioneDellaRiga(db, ordine)
-      const shop = (integr?.credenziali as any)?.shop
-      if (!integr || !shop) continue
-      const tk = await getValidShopifyToken(integr, db)
-      if (tk.error || !tk.token) continue
-      const ord = ((await shopifyGraphQL(shop, tk.token, QUERY_FO_ORDINE, { id: `gid://shopify/Order/${ordine.ordine_esterno_id}` })) as any)?.order
-      if (!ord || ord.cancelledAt) continue
-      const aperti = ((ord.fulfillmentOrders?.edges) || []).map((e: any) => e.node)
-        .filter((f: any) => String(f?.status || '') === 'OPEN' && azioniFo(f).includes('REPORT_PROGRESS'))
-      let segnati = 0
-      for (const f of aperti) {
-        const r = await shopifyGraphQL(shop, tk.token, MUTATION_IN_CORSO, { id: f.id, r: { reasonNotes: NOTA_IN_CORSO } })
-        const errs = ((r as any)?.fulfillmentOrderReportProgress?.userErrors) || []
-        if (errs.length) console.error('[SHOPIFY][IN CORSO] rifiutato', ordine.numero_ordine, errs.map((x: any) => x?.code || x?.message).join('; ').slice(0, 200))
-        else segnati++
-      }
-      if (!segnati) continue
-      // Mai sopra un esito scritto nel frattempo (l'evasione, se la distinta si e' chiusa intanto).
-      await db.from('ordini_ecommerce')
-        .update({ fulfillment_stato: ESITO_IN_CORSO, fulfillment_errore: null, fulfillment_tentativi: 0 })
-        .eq('id', ordine.id).or('fulfillment_stato.is.null,fulfillment_stato.in.(annullato,errore)')
-    } catch (e: any) {
-      console.error('[SHOPIFY][IN CORSO]', ordine.numero_ordine, String(e?.message || e).slice(0, 200))
-    }
-  }
-}
 
 // ── LE EVASIONI DELLE SPEDIZIONI ANNULLATE ──────────────────────────────────────────────────────
 //
@@ -1007,7 +961,7 @@ async function esitoAnnulloOrdine(db: any, o: OrdineDaRiconciliare, simula: bool
       return definitivo(`la spedizione ${quali || 'collegata'} è di nuovo attiva: evasione lasciata, l'ordine va ricollegato`, { stato: 'spedito' })
     }
     // i: L'ORDINE «IN CORSO» SI RIAPRE. La spedizione si e' annullata prima della distinta: un'evasione da
-    // togliere non c'e', ma l'ordine l'avevamo segnato in corso noi (segnaInCorsoShopify, riga 'in_corso').
+    // togliere non c'e', ma l'ordine l'avevamo segnato in corso noi (riga 'in_corso', solo l'11/11/2026).
     // Lasciato cosi', sul negozio restava «In corso» un ordine che da noi e' tornato da spedire.
     let riaperti = 0
     if (o.righe.some((r: any) => r.fulfillment_stato === ESITO_IN_CORSO)) {

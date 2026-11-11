@@ -105,9 +105,9 @@ export async function POST(req: NextRequest) {
   // SUBITO SUL NEGOZIO, non al prossimo giro.
   //
   // DAL 10/11/2026 QUI NON SI EVADE PIU': l'evasione col tracking parte alla chiusura della distinta
-  // (lib/evasione-ordini, inDistinta). Questa spinta ora segna l'ordine Shopify «In corso»
-  // (segnaInCorsoShopify), cosi' chi spedisce e guarda Shopify vede subito che l'ordine si muove; le altre
-  // piattaforme aspettano la distinta. Il resto del commento racconta perche' la spinta sta qui.
+  // (lib/evasione-ordini, inDistinta). Questa spinta evade solo una spedizione gia' in distinta (raro);
+  // le altre aspettano la distinta, su tutte le piattaforme. Il resto del commento racconta perche' la
+  // spinta sta qui.
   //
   // Finora il tracking tornava allo store SOLO alla creazione della distinta o col recupero ogni 20
   // minuti. Funzionava, ma in differita: chi spedisce dall'app guarda Shopify e vede ancora

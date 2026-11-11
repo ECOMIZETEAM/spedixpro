@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
     for (let i = 0; i < spedIds.length; i += 50) {
       if (Date.now() - avvio > TEMPO_EVASIONI_MS) { rimandate = spedIds.length - i; break }
       const blocco = spedIds.slice(i, i + 50)
-      esiti.push(...await fulfillMarketplace(admin, blocco, { tentatiAmazon, scadenzaAmazon, scadenzaInCorso: avvio + 60_000 }))
+      esiti.push(...await fulfillMarketplace(admin, blocco, { tentatiAmazon, scadenzaAmazon }))
       for (const id of blocco) tentateSped.add(String(id))
     }
     ok = esiti.filter((e: any) => e?.stato === 'ok').length
