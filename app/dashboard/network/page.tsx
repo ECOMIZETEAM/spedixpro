@@ -49,6 +49,7 @@ export default function NetworkRicevutiPage() {
   const { blocchi, proprie } = (() => {
     const m = new Map<string, any>()
     const proprie: any[] = []
+    const chiaveBlocco = (r: any) => r.blocco || ((r.masters?.nome || '—') + '|' + (r.invio_giorno || new Date(r.created_at).toLocaleDateString('it-IT')))
     for (const r of (dati.rettifiche || [])) {
       // LE TUE SPEDIZIONI PROPRIE (senza cliente, spedite da te) ancora da decidere NON vanno coi
       // blocchi da propagare: sotto di te non c'è nessuno, sono già a tuo carico. Sezione a parte,
@@ -56,8 +57,8 @@ export default function NetworkRicevutiPage() {
       if (r.propria && !r.propagazione) { proprie.push(r); continue }
       const giorno = r.invio_giorno || new Date(r.created_at).toLocaleDateString('it-IT')
       const da = r.masters?.nome || '—'
-      const k = r.blocco || (da + '|' + giorno)
-      if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, primo: Infinity, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [], parziale: false })
+      const k = chiaveBlocco(r)
+      if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, primo: Infinity, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [], parziale: false, proprie: [], totaleProprie: 0 })
       const b = m.get(k)
       const t = Number(r.addebitata_ts) || new Date(r.created_at).getTime()
       b.ts = Math.max(b.ts, t)          // ultimo addebito del blocco: serve all'ordinamento
@@ -68,6 +69,17 @@ export default function NetworkRicevutiPage() {
       // Il totale che conta è quello del DA DECIDERE, non di tutto il blocco: 578 già decise + 2 nuove
       // mostravano "580 · €1957" accanto a "Accetta (2)" — sembrava un errore. Ora il blocco grida i 2.
       if (!r.propagazione) { b.daDecidere.push(r.id); b.totaleDaDecidere += addebito }
+    }
+    // MA FANNO PARTE DELLO STESSO ADDEBITO. L'11/11/2026 MULTIEXPRESS ha addebitato a Ecomize Solution 392 righe
+    // per 517,55 €; una (1,04 €) era una spedizione di Ecomize stessa, finita nel riquadro delle proprie, e il
+    // blocco diceva 391 righe per 516,51: di nuovo un totale diverso da quello del mittente. Le proprie restano
+    // nel loro riquadro (e fuori da «Carica»), ma il blocco le conta e dice dove sono.
+    for (const r of proprie) {
+      const b = m.get(chiaveBlocco(r))
+      if (!b) continue   // addebito fatto solo di spedizioni proprie: c'è già il loro riquadro
+      const t = Number(r.addebitata_ts) || new Date(r.created_at).getTime()
+      b.ts = Math.max(b.ts, t); b.primo = Math.min(b.primo, t)
+      b.proprie.push(r); b.totaleProprie += (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)
     }
     // ORDINE come i contrassegni: prima i blocchi con rettifiche ANCORA DA DECIDERE (le NUOVE), poi per
     // DATA vera decrescente. Prima si ordinava per la STRINGA "GG/MM/AAAA" → ordinava per giorno del mese
@@ -104,7 +116,8 @@ export default function NetworkRicevutiPage() {
   // misura) prima di decidere. Sono gia' addebitate: scaricarle non cambia niente.
   async function scaricaBlocco(b: any) {
     const { utils, writeFile } = await import('xlsx')
-    const righe = b.righe.map((r: any) => {
+    // Anche le tue spedizioni proprie dello stesso addebito: il file deve tornare col totale del mittente.
+    const righe = [...b.righe, ...(b.proprie || [])].map((r: any) => {
       const vol = Number(r.peso_volume_reale) || 0, reale = Number(r.peso_reale) || 0
       return {
         'LDV': r.numero_spedizione,
@@ -115,7 +128,7 @@ export default function NetworkRicevutiPage() {
         'Costo dopo (€)': Number(r.costo_finale) || 0,
         'Addebito (€)': Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100,
         'di cui supplementi (€)': Number(r.fuori_sagoma) || 0,
-        'Stato': r.propagazione === 'propagata' ? 'Caricata' : r.propagazione === 'assorbita' ? 'Assorbita' : r.propagazione === 'annullata' ? 'Annullata' : 'Da decidere',
+        'Stato': r.propria && !r.propagazione ? 'Tua spedizione (già a tuo carico)' : r.propagazione === 'propagata' ? 'Caricata' : r.propagazione === 'assorbita' ? 'Assorbita' : r.propagazione === 'annullata' ? 'Annullata' : 'Da decidere',
       }
     })
     const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Rettifiche')
@@ -351,7 +364,10 @@ export default function NetworkRicevutiPage() {
                             da confrontare col mittente. Su un blocco a meta' (il giorno piu' vecchio dello storico,
                             vedi lib/network-invii) il totale intero non si scrive: sarebbe sbagliato. */}
                         Addebitate il {b.giorno}{orarioBlocco(b)}
-                        {b.parziale ? '' : ` · ${b.righe.length} ${b.righe.length === 1 ? 'riga' : 'righe'} per € ${Math.abs(b.totale).toFixed(2)}`}
+                        {b.parziale ? '' : ` · ${b.righe.length + b.proprie.length} ${b.righe.length + b.proprie.length === 1 ? 'riga' : 'righe'} per € ${Math.abs(b.totale + b.totaleProprie).toFixed(2)}`}
+                        {b.proprie.length === 0 ? '' : b.proprie.length === 1
+                          ? ` — 1 è una tua spedizione (€ ${Math.abs(b.totaleProprie).toFixed(2)}), la trovi in «Tue spedizioni proprie»`
+                          : ` — ${b.proprie.length} sono tue spedizioni (€ ${Math.abs(b.totaleProprie).toFixed(2)}), le trovi in «Tue spedizioni proprie»`}
                         {' '}· già scalate dal tuo credito.
                         {b.daDecidere.length
                           ? (b.righe.length > b.daDecidere.length ? ` Le altre ${b.righe.length - b.daDecidere.length} le hai già decise.` : '') + ' Caricandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi addebitarle.'
