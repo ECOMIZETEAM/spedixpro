@@ -1,5 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
+import TabellaMulticollo from '@/app/components/TabellaMulticollo'
+import { normalizzaTabella } from '@/lib/multicollo-tabella'
 
 const eur = (x: number) => Number(x) > 0 ? '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const pct = (x: number) => Number(x) > 0 ? Number(x).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%' : '—'
@@ -239,15 +241,21 @@ const tdL = { ...td, textAlign: 'left' as const, fontWeight: 600 as const, color
 
 // MINIMO A COLLO (multicollo): la stessa regola del motore (lib/pricing → noloMulticollo), a parole.
 function MinimoCollo({ righe }: { righe: any[] }) {
-  const v = Math.max(0, ...righe.map((r: any) => Number(r.prezzo) || 0))
-  if (!(v > 0)) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessun minimo a collo su questo corriere: il multicollo si paga con la fascia del peso totale.</div>
+  const v = Math.max(0, ...righe.filter((r: any) => r.tipo !== 'multicollo_tabella').map((r: any) => Number(r.prezzo) || 0))
+  const tab = righe.find((r: any) => r.tipo === 'multicollo_tabella' && r.tabella)
+  const tabella = tab ? normalizzaTabella(tab.tabella) : null
   return (
     <div style={{ fontSize: '12.5px', color: '#1a1a1a' }}>
-      <div style={{ marginBottom: '8px' }}>Con due o più colli: almeno <b>{eur(v)} per collo</b>.</div>
-      <div style={{ fontSize: '12px', color: '#666' }}>
-        Si paga il maggiore fra la fascia del peso totale e il numero di colli × {eur(v)}.
-        Esempio: 3 colli da 2 kg pagano almeno 3 × {eur(v)} = <b>{eur(3 * v)}</b>, anche se la fascia dei 6 kg costa meno.
-      </div>
+      {v > 0
+        ? <>
+            <div style={{ marginBottom: '8px' }}>Con due o più colli: almeno <b>{eur(v)} per collo</b>.</div>
+            {!tabella && <div style={{ fontSize: '12px', color: '#666' }}>
+              Si paga il maggiore fra la fascia del peso totale e il numero di colli × {eur(v)}.
+              Esempio: 3 colli da 2 kg pagano almeno 3 × {eur(v)} = <b>{eur(3 * v)}</b>, anche se la fascia dei 6 kg costa meno.
+            </div>}
+          </>
+        : <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessun minimo a collo su questo corriere{tabella ? '.' : ': il multicollo si paga con la fascia del peso totale.'}</div>}
+      {tabella && <TabellaMulticollo chi="vista" colonne={tab.colonne || []} valore={tabella} sola />}
     </div>
   )
 }

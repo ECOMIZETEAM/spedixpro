@@ -4,6 +4,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
 import { TIPO_MINIMO_COLLO, minimoACollo } from '@/lib/pricing'
+import { TIPO_MULTICOLLO_TABELLA, leggiTabellaMulticollo, normalizzaTabella } from '@/lib/multicollo-tabella'
 
 // La propagazione a cascata tocca decine di sotto-master: col default (15s) la funzione veniva
 // TRONCATA a meta' -> propagazione parziale e prezzi disallineati a valle, in silenzio.
@@ -195,6 +196,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
         ? Number(supplementi.minimo_collo) || 0
         : minimoACollo(_supplOld || [])
       if (minimo > 0) righeSupplementi.push({ listino_id: id, corriere_id, tipo: TIPO_MINIMO_COLLO, nome: 'Minimo a collo', valore: minimo, tipo_calcolo: 'per_collo' })
+      // TABELLA MULTICOLLO (lib/multicollo-tabella): null = tolta, non mandata = resta quella di prima.
+      // Come il minimo, nessun default dal costo: chi vende decide (anche con "Copia dal costo" nell'editor).
+      const tabella = supplementi.multicollo_tabella !== undefined
+        ? (supplementi.multicollo_tabella ? normalizzaTabella(supplementi.multicollo_tabella) : null)
+        : leggiTabellaMulticollo(_supplOld || [])
+      if (tabella) righeSupplementi.push({ listino_id: id, corriere_id, tipo: TIPO_MULTICOLLO_TABELLA, nome: 'Tabella multicollo', valore: 0, tipo_calcolo: 'tabella', descrizione: JSON.stringify(tabella) })
     }
 
     // Supplementi del corriere (fuori misura…): dalla pagina se li manda, altrimenti restano quelli di

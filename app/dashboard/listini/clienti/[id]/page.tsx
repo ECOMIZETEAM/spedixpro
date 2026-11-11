@@ -4,6 +4,7 @@ import { fattoreVolumeCorriere } from '@/lib/pricing'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereConSupplementi } from '@/lib/supplementi-corriere'
 import ListinoEditor from './ListinoEditor'
+import { leggiTabellaMulticollo, colonneDelContratto, type TabellaMulticollo } from '@/lib/multicollo-tabella'
 
 export default async function ModificaListinoPage({
   params, searchParams
@@ -85,6 +86,8 @@ export default async function ModificaListinoPage({
   const costiSupplMaster: Record<string, { valore: number; perc: number }> = {}
   // Il mio NOLO per fascia, col fuel: e' la base su cui si pagano giacenze e accessori a percentuale.
   const costiNoloMaster: Record<string, number> = {}
+  // La mia tabella multicollo per lo stesso contratto (dal Listino Corrieri): il costo sotto ogni casella.
+  let costoTabellaMC: TabellaMulticollo | null = null
   if (corriereSelezionato?.id && utente?.master_id) {
     const { data: listiniCorr } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente.master_id)
     const idsCorr = (listiniCorr || []).map((l: any) => l.id)
@@ -117,6 +120,7 @@ export default async function ModificaListinoPage({
         const v = (s as any).tipo === 'accessorio' ? (Number(d?.prezzo ?? (s as any).valore ?? 0) || 0) : (Number((s as any).valore) || 0)
         costiSupplMaster[k] = { valore: v, perc: Number(d?.perc) || 0 }
       }
+      costoTabellaMC = leggiTabellaMulticollo(suppCosto || [])
     }
   }
 
@@ -128,6 +132,7 @@ export default async function ModificaListinoPage({
     ? await fattoreVolumeCorriere(supabase, utente.master_id, corriereSelezionato.id)
     : 5000
   const conSupplementi = await corriereConSupplementi(createAdminSupabase(), corriereSelezionato?.id)
+  const multicolloColonne = await colonneDelContratto(createAdminSupabase(), corriereSelezionato?.id)
 
   return (
     <>
@@ -152,6 +157,8 @@ export default async function ModificaListinoPage({
       costiSupplMaster={costiSupplMaster}
       costiNoloMaster={costiNoloMaster}
       conSupplementi={conSupplementi}
+      multicolloColonne={multicolloColonne}
+      costoTabellaMC={costoTabellaMC}
       tipoListino="cliente"
     />
     </>

@@ -17,6 +17,7 @@
 
 import { parseScaglioniSupp, scaglioniPerPeso, supplPresenteMax, commissioneSupp, type ScaglioneSupp } from '@/lib/pricing'
 import { chiaveServizioGiacenza, predefinitoGiacenzaCliente, peggioreSuNolo, type Nolo } from '@/lib/sotto-costo-formule'
+import { leggiTabellaMulticollo, caselleSottoCosto, TIPO_MULTICOLLO_TABELLA } from '@/lib/multicollo-tabella'
 
 export type RigaSottoCosto = {
   chiave: string
@@ -261,12 +262,41 @@ export async function rilevaSottoCosto(admin: any, masterId: string): Promise<Ri
       }
     }
 
+    // ── TABELLA MULTICOLLO (lib/multicollo-tabella): casella per casella contro la mia tabella, con la
+    // stessa funzione dell'editor. Una riga sola per tabella, con la casella peggiore. SENZA
+    // supplemento_id: "Adegua" non deve toccarla (riscriverebbe la descrizione, cioe' la tabella):
+    // la si corregge dall'editor, con "Copia dal costo + ricarico".
+    {
+      const tC = leggiTabellaMulticollo(costo), tV = leggiTabellaMulticollo(cli)
+      const sotto = caselleSottoCosto(tV, tC)
+      if (tV && tC && sotto.length) {
+        let peggio: { d: number; v: number; c: number; dove: string } | null = null
+        for (const k of sotto) {
+          const [area, cosa] = k.split('|')
+          let v = 0, c = 0, dove = ''
+          if (area === 'remota' || area === 'partenza') { v = tV[area][cosa]?.minimo || 0; c = tC[area][cosa]?.minimo || 0; dove = `${area === 'remota' ? 'localita\' remota' : 'partenza remota'} ${cosa}` }
+          else if (cosa === 'oltre') { v = r4(tV.oltre[area] || 0); c = r4(tC.oltre[area] || 0); dove = `area ${area}, oltre l'ultima fascia (€/kg)` }
+          else {
+            const kg = Number(cosa), i = tV.fasce.findIndex(f => Math.abs(f - kg) < 1e-9), j = tC.fasce.findIndex(f => kg <= f + 1e-9)
+            v = tV.aree[area]?.[i] ?? 0; c = (j >= 0 ? tC.aree[area]?.[j] : null) ?? 0; dove = `area ${area} fino a ${kg} kg`
+          }
+          if (!peggio || v - c < peggio.d) peggio = { d: v - c, v, c, dove }
+        }
+        const sRow = cli.find((x: any) => x.tipo === TIPO_MULTICOLLO_TABELLA)
+        righe.push({
+          ...base(listinoId, corriereId), zona: 'multicollo', tipo: 'supplemento', chiave: `mc:${sRow?.id || listinoId + '|' + corriereId}`,
+          descrizione: `Tabella multicollo: ${sotto.length} ${sotto.length === 1 ? 'casella' : 'caselle'} sotto costo, la peggiore ${peggio!.dove} — si corregge dall'editor (Copia dal costo + ricarico)`,
+          prezzo_cliente: r2(peggio!.v), costo_tuo: r2(peggio!.c), differenza: r2(peggio!.d),
+        })
+      }
+    }
+
     // ── ALTRI (ritiro, minimo a collo…): come prima, fisso contro fisso e percentuale contro percentuale.
     // Il minimo a collo che MANCA, sui contratti che lo richiedono (settings del detentore), non e' una
     // perdita: senza la voce il multicollo non si vende (lib/pricing → noloMulticollo). Si segnala solo
     // quello scritto sotto costo.
     for (const s of cli) {
-      if (['giacenza', 'giacenza_apertura', 'contrassegno', 'assicurazione', 'accessorio', 'sponda'].includes(s.tipo)) continue
+      if (['giacenza', 'giacenza_apertura', 'contrassegno', 'assicurazione', 'accessorio', 'sponda', TIPO_MULTICOLLO_TABELLA].includes(s.tipo)) continue
       const c = costo.find((x: any) => x.tipo === s.tipo && String(x.nome || '').toLowerCase().trim() === String(s.nome || '').toLowerCase().trim())
       if (!c) continue
       const v = Number(s.valore) || 0, p = percDi(s.descrizione), cv = Number(c.valore) || 0, cp = percDi(c.descrizione)

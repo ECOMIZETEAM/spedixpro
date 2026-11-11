@@ -92,6 +92,8 @@ export async function GET() {
       peso_min: d?.peso_min !== '' && d?.peso_min != null ? Number(d.peso_min) : null,
       peso_max: d?.peso_max !== '' && d?.peso_max != null ? Number(d.peso_max) : null,
     }
+    // La tabella multicollo: chi paga deve poterla leggere come il resto del listino.
+    if ((s as any).tipo === 'multicollo_tabella') (row as any).tabella = d
     if (!supplPerCorr.has(cid)) supplPerCorr.set(cid, [])
     supplPerCorr.get(cid)!.push(row)
   }
@@ -104,6 +106,16 @@ export async function GET() {
   }
 
   const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
+  // Colonne della tabella multicollo (aree del contratto del detentore), solo dove la tabella c'e'.
+  const colonneMC = new Map<string, any[]>()
+  {
+    const conTabella = Array.from(supplPerCorr.entries()).filter(([, righe]) => righe.some((r: any) => r.tipo === 'multicollo_tabella')).map(([cid]) => cid)
+    if (conTabella.length) {
+      const { createAdminSupabase: _adm } = await import('@/lib/supabase-admin')
+      const { colonneDelContratto } = await import('@/lib/multicollo-tabella')
+      for (const cid of conTabella) colonneMC.set(cid, await colonneDelContratto(_adm(), cid))
+    }
+  }
   const corrieri = Array.from(perCorr.entries())
     .sort((a, b) => ((a[1].pausa ? 1 : 0) - (b[1].pausa ? 1 : 0)) || a[1].nome_contratto.localeCompare(b[1].nome_contratto))
     .map(([cid, c]) => {
@@ -123,7 +135,7 @@ export async function GET() {
           giacenza: [...perTipo('giacenza'), ...perTipo('giacenza_apertura')],
           ritiro: perTipo('ritiro'),
           sponda: perTipo('sponda'),
-          minimo_collo: perTipo('minimo_collo'),
+          minimo_collo: [...perTipo('minimo_collo'), ...perTipo('multicollo_tabella').map((r: any) => ({ ...r, colonne: colonneMC.get(cid) || [] }))],
         },
       }
     })

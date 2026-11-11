@@ -8,6 +8,8 @@ import CodiceContratto from '@/app/components/CodiceContratto'
 import { peggioreSuNolo, type Nolo } from '@/lib/sotto-costo-formule'
 import { vociSupplementoDa, type VoceSupplemento } from '@/lib/supplementi-corriere'
 import TabellaSupplementiCorriere from '@/app/components/TabellaSupplementiCorriere'
+import TabellaMulticollo from '@/app/components/TabellaMulticollo'
+import { leggiTabellaMulticollo, caselleSottoCosto, type ColonnaMulticollo, type TabellaMulticollo as TabMC } from '@/lib/multicollo-tabella'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -58,6 +60,9 @@ interface Props {
   costiNoloMaster?: Record<string, number>
   // Il contratto ha i supplementi del corriere (fuori misura…) accesi: lib/supplementi-corriere.
   conSupplementi?: boolean
+  // Tabella multicollo: colonne (aree del contratto) e il mio costo per lo stesso contratto. [] / null = niente tabella.
+  multicolloColonne?: ColonnaMulticollo[]
+  costoTabellaMC?: TabMC | null
 }
 
 const fattori = [
@@ -156,7 +161,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi, multicolloColonne = [], costoTabellaMC = null }: Props) {
   const isCorriere = tipoListino === 'corriere'
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
@@ -424,6 +429,11 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     if (bozza?.minimoCollo != null) return bozza.minimoCollo
     return Math.max(0, ...(supplementiEsistenti||[]).filter(s => s.tipo === 'minimo_collo').map(s => Number(s.valore) || 0))
   })
+  // Tabella multicollo (lib/multicollo-tabella). undefined nella bozza = quella del server.
+  const [tabellaMC, setTabellaMC] = useState<TabMC | null>(() => {
+    if (bozza && bozza.tabellaMC !== undefined) return bozza.tabellaMC
+    return leggiTabellaMulticollo(supplementiEsistenti || [])
+  })
 
   // Salva la bozza in sessionStorage ad ogni modifica (persiste tra le navigazioni), con l'impronta del
   // listino del server da cui e' partita.
@@ -433,10 +443,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     primoGiro.current = false
     if (cambiata && !modificata) setModificata(true)
     try {
-      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo }))
+      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, tabellaMC }))
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo])
+  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, tabellaMC])
 
   function aggiungiFascia() { setFasce(prev => [...prev, { tipo:'fino_a', peso:0, prezzi:{}, fuel:'' }]) }
   function aggiornaFuel(idx: number, raw: string) { setFasce(prev => prev.map((f,i) => i===idx ? {...f, fuel: raw} : f)) }
@@ -464,6 +474,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
             sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
             minimo_collo: minimoCollo,
+            ...(multicolloColonne.length ? { multicollo_tabella: tabellaMC } : {}),
             ...(conSupplementi ? { supplementiCorriere } : {}),
           }
         })
@@ -532,7 +543,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   // quel contratto semplicemente non si vende (lo dice la nota sotto il campo).
   const costoMinimoCollo = costiSupplMaster?.['minimo_collo|minimo a collo']?.valore || 0
   const minimoCollSotto = costoMinimoCollo > 0 && (Number(minimoCollo) || 0) > 0 && (Number(minimoCollo) || 0) < costoMinimoCollo - 0.005
-  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto, extra: minimoCollSotto }
+  const tabellaMCSotto = multicolloColonne.length > 0 && caselleSottoCosto(tabellaMC, costoTabellaMC).length > 0
+  const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto, extra: minimoCollSotto || tabellaMCSotto }
 
   // Corpo dell'editor del contratto aperto (dentro la tendina)
   const editorContratto = (
@@ -867,6 +879,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
               ? <>Il contratto ha un minimo a collo: finché questo campo è vuoto, il multicollo su questo contratto <b>non è disponibile</b> per chi usa questo listino.</>
               : <>Lascia 0 se il contratto non ha un minimo a collo.</>}
           </div>
+          {multicolloColonne.length > 0 && <TabellaMulticollo chi="cliente" colonne={multicolloColonne} valore={tabellaMC} onChange={setTabellaMC} costo={costoTabellaMC} />}
         </div>
       )}
     </div>

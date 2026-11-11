@@ -5,6 +5,8 @@ import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkup
 import CodiceContratto from '@/app/components/CodiceContratto'
 import { vociSupplementoDa, type VoceSupplemento } from '@/lib/supplementi-corriere'
 import TabellaSupplementiCorriere from '@/app/components/TabellaSupplementiCorriere'
+import TabellaMulticollo from '@/app/components/TabellaMulticollo'
+import { leggiTabellaMulticollo, type ColonnaMulticollo, type TabellaMulticollo as TabMC } from '@/lib/multicollo-tabella'
 
 const inp = {padding:'6px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const inpFull = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',textAlign:'right' as const,boxSizing:'border-box' as const}
@@ -147,6 +149,9 @@ export default function ListinoCorrierePage() {
   const [spondaPrezzoKg, setSpondaPrezzoKg] = useState(0)
   // Minimo a collo (multicollo): euro per collo, 0 = non prezzato (lib/pricing → noloMulticollo).
   const [minimoCollo, setMinimoCollo] = useState(0)
+  // Tabella multicollo (lib/multicollo-tabella): solo sui contratti che hanno le aree (colonne non vuote).
+  const [tabellaMC, setTabellaMC] = useState<TabMC | null>(null)
+  const [colonneMC, setColonneMC] = useState<ColonnaMulticollo[]>([])
 
   // ── Duplica il COSTO di questo contratto in un LISTINO CLIENTE (nuovo o esistente) + maggiorazione ──
   const [dupOpen, setDupOpen] = useState(false)
@@ -226,6 +231,8 @@ export default function ListinoCorrierePage() {
     setSpondaSoglia(spondaDescr?.soglia_kg ? Number(spondaDescr.soglia_kg)||150 : 150)
     setSpondaPrezzoKg(spondaRiga ? Number(spondaRiga.valore)||0 : 0)
     setMinimoCollo(Math.max(0, ...(data.supplementi||[]).filter((s:any) => s.tipo === 'minimo_collo').map((s:any) => Number(s.valore)||0)))
+    setTabellaMC(leggiTabellaMulticollo(data.supplementi||[]))
+    setColonneMC(Array.isArray(data.multicolloColonne) ? data.multicolloColonne : [])
     setLoading(false); setPronto(true)
   }
 
@@ -292,6 +299,8 @@ export default function ListinoCorrierePage() {
       ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
       sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
       minimo_collo: minimoCollo,
+      // Solo dove il contratto ha le aree: altrove non si manda e il server lascia com'era.
+      ...(colonneMC.length ? { multicollo_tabella: tabellaMC } : {}),
       ...(conSupplementi ? { supplementiCorriere } : {}),
     }
 
@@ -587,6 +596,7 @@ export default function ListinoCorrierePage() {
             <input type="number" step="0.01" value={minimoCollo||''} onChange={e=>setMinimoCollo(parseFloat(e.target.value)||0)} disabled={soloLetturaCorriere} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/>
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 se il contratto non ha un minimo a collo. Se il corriere lo richiede e non è prezzato, il multicollo su questo contratto non è disponibile.</div>
+          {colonneMC.length > 0 && <TabellaMulticollo chi="corriere" colonne={colonneMC} valore={tabellaMC} onChange={setTabellaMC} sola={soloLetturaCorriere} />}
         </div>
       )}
     </div>

@@ -92,6 +92,9 @@ export async function POST(req: NextRequest) {
     } else if (r.tipo === 'supplemento' && r.supplemento_id) {
       const { data: s } = await admin.from('listini_clienti_supplementi').select('id,tipo,valore,descrizione,nome').eq('id', r.supplemento_id).maybeSingle()
       if (!s) { saltate++; continue }
+      // La tabella multicollo sta tutta nella descrizione: riscriverla qui la cancellerebbe. Non si adegua
+      // mai da qui (lib/sotto-costo la segnala senza supplemento_id: questa e' la seconda serratura).
+      if ((s as any).tipo === 'multicollo_tabella') { saltate++; continue }
       let d: any = {}; try { d = JSON.parse((s as any).descrizione || '{}') || {} } catch { /* non JSON */ }
       let agg: any, prima: number, dopo: number, primaP = 0, dopoP = 0
       if (s.tipo === 'contrassegno' || s.tipo === 'assicurazione') {
