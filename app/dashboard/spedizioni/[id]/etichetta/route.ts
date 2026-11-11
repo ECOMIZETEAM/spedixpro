@@ -29,13 +29,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   let et = await leggiEtichettaCompleta(admin, sped as any, { resaSda })
 
   // Ripiego on-demand: l'etichetta GLS può non essere pronta subito dopo la creazione (GLS la genera con
-  // un attimo di ritardo), e quella di un PONTE fra reti si chiede al venditore. Se manca, la si prende
-  // ORA e la si salva — così il tasto non resta "non disponibile" per un problema di sola tempistica.
-  // master_id letto a parte: nella select sopra accenderebbe la riscrittura del mittente in leggiEtichettaCompleta.
-  if (!et) {
+  // un attimo di ritardo), anche solo per qualche collo, e quella di un PONTE fra reti si chiede al
+  // venditore. Se manca, o mancano dei colli, la si prende ORA e la si salva — così il tasto non resta
+  // "non disponibile", e il pacco non parte con un'etichetta in meno, per un problema di sola tempistica.
+  {
     const { recuperaEtichettaMancante } = await import('@/lib/etichette')
-    const { data: m } = await admin.from('spedizioni').select('master_id').eq('id', id).maybeSingle()
-    et = await recuperaEtichettaMancante(admin, { id, ...(sped as any), master_id: m?.master_id || null })
+    et = await recuperaEtichettaMancante(admin, { id, ...(sped as any) }, et)
   }
 
   if (!et) {

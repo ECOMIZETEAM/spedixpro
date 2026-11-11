@@ -50,14 +50,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (riletta) s = riletta
     et = await leggiEtichettaCompleta(admin, s as any, { resaSda })
   }
-  // ETICHETTA NON SALVATA ALLA CREAZIONE (GLS che la genera in ritardo, o un ponte): la si riprende ora.
-  // E' anche la porta da cui passa la catena della condivisione: senza, la riga del compratore restava
-  // senza etichetta per sempre (lib/etichette, recuperaEtichettaMancante).
-  // master_id letto a parte: in leggiEtichettaCompleta accende la riscrittura del mittente, che qui non va toccata.
-  if (!et) {
-    const { data: m } = await admin.from('spedizioni').select('master_id').eq('id', id).maybeSingle()
-    et = await recuperaEtichettaMancante(admin, { ...(s as any), master_id: m?.master_id || null })
-  }
+  // ETICHETTA NON SALVATA ALLA CREAZIONE (GLS che la genera in ritardo, o un ponte), o MULTICOLLO GLS
+  // con dei colli senza: la si riprende ora (lib/etichette, recuperaEtichettaMancante; senza un caso GLS
+  // torna quella letta). E' anche la porta da cui passa la catena della condivisione: senza, la riga del
+  // compratore restava senza etichetta, o con un collo in meno, per sempre.
+  et = await recuperaEtichettaMancante(admin, s as any, et)
   if (!et) {
     // ANCORA NON PRONTA: 503 con Retry-After, non 404. Il 404 diceva "non esiste", e chi lo riceveva
     // non riprovava: lo salvava come se fosse l'etichetta. Il corpo resta JSON, come ogni errore.

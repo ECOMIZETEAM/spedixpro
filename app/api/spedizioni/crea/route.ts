@@ -2120,18 +2120,22 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       const mittenteGls = (await stampaMittenteSpedizione(adminCrea, corriereRecord).catch(() => false))
         ? { nome: body.shipFrom?.name, destinatario: body.shipTo?.name } : null
 
-      // Etichette: una PER COLLO (GetPdfBySped NumeroCollo 1..N; col vuoto non torna nulla).
-      // L'etichetta "della spedizione" è l'unione (una pagina per collo, come easyparcel).
-      let etichettePerCollo: string[] = []
+      // Etichette: una PER COLLO (GetPdfBySped NumeroCollo 1..N; col vuoto non torna nulla), allineate ai
+      // colli (null = GLS non l'aveva ancora pronta). L'etichetta "della spedizione" è l'unione (una
+      // pagina per collo, come easyparcel).
+      let etichettePerCollo: (string | null)[] = []
       let etichettaUrl: string | null = null
+      let colliSenzaEtichetta = ris.numeroColli
       try {
         const et = await etichetteGls(credGls, numeroBare, ris.numeroColli, { bda, mittente: mittenteGls })
-        etichettePerCollo = et.etichette.map(b => `data:application/pdf;base64,${b}`)
+        etichettePerCollo = et.perCollo.map(b => (b ? `data:application/pdf;base64,${b}` : null))
+        colliSenzaEtichetta = et.mancanti.length
         if (et.etichette.length) {
           const { unisciEtichette } = await import('@/lib/easyparcel')
           const merged = await unisciEtichette(et.etichette)
-          etichettaUrl = merged ? `data:application/pdf;base64,${merged}` : (etichettePerCollo[0] || null)
+          etichettaUrl = `data:application/pdf;base64,${merged || et.etichette[0]}`
         }
+        if (et.mancanti.length) console.error('[CREA][GLS] colli senza etichetta alla creazione:', numeroFinale, et.mancanti.join(','), 'di', ris.numeroColli)
       } catch (e) { console.error('[CREA][GLS] etichette:', e) }
 
       const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
@@ -2206,23 +2210,19 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         })
       } catch (e) { console.error('[CREA][GLS] cascata catena:', e) }
 
-      // Etichette non pronte al volo? Le si riprende in background (rete di sicurezza), per collo.
-      if (inserted?.id && !etichettaUrl) {
-        const spedIdBg = inserted.id
-        const numColliBg = ris.numeroColli
-        const colliBase = colliDettaglio
+      // Etichette non pronte al volo, o pronte solo per alcuni colli? Le si riprende in background (rete
+      // di sicurezza), solo per i colli che mancano. Prima si riprovava solo se non ce n'era NESSUNA: un
+      // multicollo con un collo non pronto restava con un'etichetta in meno, e cosi' partiva il pacco.
+      // Stessa funzione della stampa (lib/gls, recuperaEtichettaGlsSalvando), con attese piu' lunghe.
+      if (inserted?.id && (!etichettaUrl || colliSenzaEtichetta > 0)) {
+        const spedBg = {
+          id: inserted.id, corriere_id: corriereRecord.id, colli: ris.numeroColli, colli_dettaglio: colliDettaglio, etichetta_url: etichettaUrl,
+          raw_response: { _gls: true, numero: numeroBare, ...(parcelGls ? { parcel: true, bda } : {}) },
+        }
         after(async () => {
           try {
-            const { etichetteGls } = await import('@/lib/gls')
-            const { unisciEtichette } = await import('@/lib/easyparcel')
-            const et = await etichetteGls(credGls, numeroBare, numColliBg, { bda, mittente: mittenteGls })
-            if (et.etichette.length) {
-              const merged = await unisciEtichette(et.etichette)
-              const upd: any = {}
-              if (merged) upd.etichetta_url = `data:application/pdf;base64,${merged}`
-              upd.colli_dettaglio = colliBase.map((c: any, i: number) => ({ ...c, etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : (c.etichetta_url || null) }))
-              await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
-            }
+            const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+            await recuperaEtichettaGlsSalvando(adminCrea, spedBg, { riprove: [5000, 20000] })
           } catch (e) { console.error('[CREA][GLS] recupero etichette background:', e) }
         })
       }

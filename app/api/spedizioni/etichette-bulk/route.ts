@@ -113,10 +113,20 @@ export async function POST(req: NextRequest) {
     // Stesso ripiego per i PONTI fra reti: la riga del compratore si fa ridare l'etichetta dal venditore
     // (lib/etichette, recuperaEtichettaMancante). Il 10/11/2026 28 GLS di un cliente di QUICK sono uscite
     // "non disponibile" due volte di fila, col pacco gia' creato su GLS.
-    if (!sorgenti.length && ((s as any).raw_response?._gls || (s as any).raw_response?._moovexpress)) {
+    // MULTICOLLO con dei colli senza etichetta (GLS non li aveva pronti alla creazione): stessa strada, con
+    // l'etichetta letta come termine di paragone — la funzione la sostituisce solo se ne trova una con piu'
+    // colli, e senza un caso GLS la rende com'e'. Il pacco non deve partire con un'etichetta in meno.
+    const _rawEt = (s as any).raw_response || {}
+    if (_rawEt._gls || _rawEt._moovexpress) {
       const { recuperaEtichettaMancante } = await import('@/lib/etichette')
-      const et = await recuperaEtichettaMancante(admin, s as any)
-      if (et?.mime === 'application/pdf') sorgenti.push({ bytes: new Uint8Array(et.buffer) })
+      if (!sorgenti.length) {
+        const et = await recuperaEtichettaMancante(admin, s as any)
+        if (et?.mime === 'application/pdf') sorgenti.push({ bytes: new Uint8Array(et.buffer) })
+      } else if (Number((s as any).colli) > 1 && !contrattoSdaExpressL(_corr)) {
+        const attuale = await leggiEtichettaCompleta(admin, s as any)
+        const et = await recuperaEtichettaMancante(admin, s as any, attuale)
+        if (et && et !== attuale && et.mime === 'application/pdf') sorgenti = [{ bytes: new Uint8Array(et.buffer) }]
+      }
     }
 
     // RIPIEGO DVA: la spedizione e' ancora ferma sul numero provvisorio, quindi l'etichetta non c'e'

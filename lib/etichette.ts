@@ -353,27 +353,53 @@ async function leggiEtichettaGrezza(
 // venditore, che a sua volta, se manca anche a lui, la riprende dal corriere con questa stessa funzione.
 //
 // Un posto solo per le porte che stampano: dettaglio, elenco (singola e in blocco) e API. Mai bloccante.
+//
+// MULTICOLLO GLS CON COLLI SENZA ETICHETTA (11/11/2026): `attuale` e' quella gia' letta. Se c'e' ma ha
+// meno pagine dei colli — GLS ne fa una per collo — si riprendono i colli che mancano (lib/gls,
+// recuperaEtichettaGlsSalvando); prima qui si entrava solo senza nessuna etichetta, e un multicollo con
+// un collo non pronto alla creazione restava cosi' per sempre: il pacco partiva con un'etichetta in meno.
+// Vale anche per i PONTI che finiscono su un GLS: la riga del compratore ha il PDF che il venditore le
+// ha dato alla creazione, e lo si richiede (il venditore, a sua volta, riprende i colli da GLS). Gli altri
+// corrieri non si toccano: il conto delle pagine per collo vale solo per GLS. Torna sempre la migliore
+// fra le due, quindi le porte possono chiamarla sempre: senza un caso GLS torna subito `attuale`.
 export async function recuperaEtichettaMancante(
   admin: any,
-  sped: { id: string; corriere_id?: string | null; master_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any },
+  sped: { id: string; corriere_id?: string | null; master_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any; etichetta_url?: string | null; etichetta_path?: string | null },
+  attuale: EtichettaLetta | null = null,
 ): Promise<EtichettaLetta | null> {
   const raw = (sped?.raw_response || {}) as any
+  if (!raw._gls && !raw._moovexpress) return attuale
+  const nColli = Math.max(1, Math.round(Number(sped?.colli) || 1))
+  let pagineAttuale = 0
+  if (attuale) {
+    if (nColli <= 1 || attuale.mime !== 'application/pdf') return attuale
+    if (raw._moovexpress && !(await ponteFinisceSuGls(admin, raw))) return attuale
+    pagineAttuale = await pagineDi(attuale.buffer)
+    if (pagineAttuale >= nColli) return attuale
+  }
   try {
     if (raw._gls) {
       const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
       const buf = await recuperaEtichettaGlsSalvando(admin, sped)
-      return buf?.length ? { buffer: buf, mime: 'application/pdf', ext: 'pdf' } : null
+      return buf?.length ? { buffer: buf, mime: 'application/pdf', ext: 'pdf' } : attuale
     }
-    if (raw._moovexpress && raw.label_url && sped.master_id && sped.corriere_id) {
+    if (raw._moovexpress && raw.label_url && sped.corriere_id) {
+      // master_id letto qui e non dalle porte: nella loro select accenderebbe la riscrittura del
+      // mittente in leggiEtichettaCompleta.
+      let masterId = sped.master_id || null
+      if (!masterId) { const { data: m } = await admin.from('spedizioni').select('master_id').eq('id', sped.id).maybeSingle(); masterId = m?.master_id || null }
+      if (!masterId) return attuale
       const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
-      if (corr?.tipo !== 'moovexpress') return null
+      if (corr?.tipo !== 'moovexpress') return attuale
       // La chiave e' quella con cui la riga e' stata creata (app/api/spedizioni/crea, ramo moovexpress).
       const { risolviChiaveDispatch } = await import('@/lib/condivisione-catena')
-      const cred = await risolviChiaveDispatch(admin, sped.master_id, corr.nome_contratto)
-      if (!cred) return null
+      const cred = await risolviChiaveDispatch(admin, masterId, corr.nome_contratto)
+      if (!cred) return attuale
       const { etichettaMoovexpress } = await import('@/lib/moovexpress')
       const lab = await etichettaMoovexpress(cred as any, String(raw.label_url))
-      if (!lab.buffer.length) return null
+      if (!lab.buffer.length) return attuale
+      // Con un'etichetta gia' salvata, si sostituisce solo se quella del venditore ha piu' colli.
+      if (attuale && (lab.mime !== 'application/pdf' || (await pagineDi(lab.buffer)) <= pagineAttuale)) return attuale
       // Salvata come alla creazione: sulla spedizione e su ogni collo (una LDV, un file per tutto il pacco).
       const dataUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}`
       const colli = Array.isArray(sped.colli_dettaglio) ? (sped.colli_dettaglio as any[]) : null
@@ -387,7 +413,30 @@ export async function recuperaEtichettaMancante(
   } catch (e: any) {
     console.error('[ETICHETTE] recupero etichetta mancante', sped?.id, e?.message)
   }
-  return null
+  return attuale
+}
+
+async function pagineDi(buf: Buffer): Promise<number> {
+  try {
+    const { PDFDocument } = await import('pdf-lib')
+    return (await PDFDocument.load(new Uint8Array(buf), { ignoreEncryption: true })).getPageCount()
+  } catch { return 0 }
+}
+
+// Il ponte arriva a un GLS? Si scende di venditore in venditore (le gambe stanno nello stesso database)
+// finche' non si trova la riga del corriere vero. Pochi salti al massimo: oggi le catene ne hanno 1-2.
+async function ponteFinisceSuGls(admin: any, raw: any): Promise<boolean> {
+  let idVenditore = raw?.venditore_spedizione_id ? String(raw.venditore_spedizione_id) : ''
+  for (let salto = 0; idVenditore && salto < 4; salto++) {
+    const { data } = await admin.from('spedizioni')
+      .select('gls:raw_response->>_gls, ponte:raw_response->>_moovexpress, venditore:raw_response->>venditore_spedizione_id')
+      .eq('id', idVenditore).maybeSingle()
+    if (!data) return false
+    if (String((data as any).gls) === 'true') return true
+    if (String((data as any).ponte) !== 'true') return false
+    idVenditore = (data as any).venditore ? String((data as any).venditore) : ''
+  }
+  return false
 }
 
 // ARCHIVIA UN LOTTO: prende le righe che hanno ancora il PDF dentro, lo mette su Storage e scrive

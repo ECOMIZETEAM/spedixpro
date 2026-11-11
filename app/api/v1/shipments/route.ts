@@ -415,6 +415,9 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   // porta invece salvava solo il primo collo -> chi stampa da API riceveva una etichetta sola su un
   // pacco da N colli. Resta null sul mono-collo e su spediamopro (che gia' consegna il PDF unito).
   let colliDettaglio: any[] | null = null
+  // GLS: quante etichette di collo mancano alla creazione (GLS genera i PDF con un attimo di ritardo).
+  // Se ne manca anche una sola, dopo l'insert si riprendono in background (vedi sotto l'insert).
+  let glsColliSenzaEtichetta = 0
   // Il locker InPost scelto: InPost lo riceve cosi' com'e', qui serve solo a dirlo nella risposta.
   let puntoInpostScelto: string | null = null
 
@@ -884,23 +887,32 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       }
       // Un'etichetta per collo, unite in una per la spedizione. Mittente stampato: dove il contratto lo
       // chiede ci va quello vero e non l'intestatario del conto GLS (lib/etichetta-mittente).
+      // Allineate ai colli (null = GLS non l'aveva ancora pronta): prima si scrivevano sui colli per
+      // indice quelle arrivate, e col collo 2 non pronto l'etichetta del 3 finiva sul 2.
+      let glsPerCollo: (string | null)[] = []
+      glsColliSenzaEtichetta = risGls.numeroColli
       try {
         const { stampaMittenteSpedizione } = await import('@/lib/etichetta-mittente')
         const mittenteGls = (await stampaMittenteSpedizione(admin, corriere as any).catch(() => false))
           ? { nome: body.shipFrom?.name, destinatario: body.shipTo?.name } : null
         const et = await etichetteGls(credGls, risGls.numeroSpedizione, risGls.numeroColli, { bda, mittente: mittenteGls })
+        glsPerCollo = et.perCollo
+        glsColliSenzaEtichetta = et.mancanti.length
         if (et.etichette.length) {
           const { unisciEtichette } = await import('@/lib/easyparcel')
           const merged = await unisciEtichette(et.etichette)
           etichettaUrl = `data:application/pdf;base64,${merged || et.etichette[0]}`
-          if (packages.length > 1) {
-            colliDettaglio = packages.map((p: any, i: number) => ({
-              numero: i + 1, lunghezza: p?.length || null, larghezza: p?.width || null, altezza: p?.height || null, peso: p?.weight || null,
-              etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : null,
-            }))
-          }
         }
+        if (et.mancanti.length) console.error('[V1][GLS] colli senza etichetta alla creazione:', numero, et.mancanti.join(','), 'di', risGls.numeroColli)
       } catch (e) { console.error('[V1][GLS] etichette:', (e as any)?.message) }
+      // Il dettaglio colli c'e' sempre sul multicollo, anche coi colli ancora senza etichetta: e' li' che
+      // il recupero (in background qui sotto, o alla stampa) aggiunge quelle che mancano.
+      if (packages.length > 1) {
+        colliDettaglio = packages.map((p: any, i: number) => ({
+          numero: i + 1, lunghezza: p?.length || null, larghezza: p?.width || null, altezza: p?.height || null, peso: p?.weight || null,
+          etichetta_url: glsPerCollo[i] ? `data:application/pdf;base64,${glsPerCollo[i]}` : null,
+        }))
+      }
     } catch (e: any) {
       console.error('[V1][GLS]', e?.message)
       return errore(erroreCorrierePulito(e?.message))
@@ -1015,6 +1027,20 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     if (annullata) return errore('Spedizione non registrata e annullata sul corriere: riprova.', 500)
   }
   if (insErr) { console.error('[V1][INSERT]', numero, insErr.message); return NextResponse.json({ error: `Spedizione creata sul corriere (${numero}) ma non registrata: contatta l'assistenza indicando il numero ${numero}`, tracking: numero }, { status: 500 }) }
+
+  // GLS: etichette non pronte alla creazione, anche di un collo solo → si riprendono in background, come
+  // nel portale (lib/gls, recuperaEtichettaGlsSalvando: aggiunge solo quelle dei colli che mancano).
+  // Prima questa porta non riprovava mai: il 10/11/2026 28 GLS del ponte di Wave sono nate senza
+  // etichetta e sono rimaste cosi' fino alla stampa.
+  if (corriere.tipo === 'gls' && inserted?.id && raw?._gls && (!etichettaUrl || glsColliSenzaEtichetta > 0)) {
+    const spedBg = { id: inserted.id, corriere_id: corriere.id, colli: packages.length, colli_dettaglio: colliDettaglio, etichetta_url: etichettaUrl, raw_response: raw }
+    after(async () => {
+      try {
+        const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+        await recuperaEtichettaGlsSalvando(admin, spedBg, { riprove: [5000, 20000] })
+      } catch (e) { console.error('[V1][GLS] recupero etichette background:', (e as any)?.message) }
+    })
+  }
 
   // EMAIL BRAND MoovExpress a mittente e destinatario (in background, best-effort):
   // al provider e' andata solo l'email schermo; ai clienti finali scriviamo noi.

@@ -407,32 +407,50 @@ export async function etichettaGls(
   return { pdfBase64: null, errore: faultString(soap) || 'Etichetta non disponibile' }
 }
 
-// Etichette di TUTTI i colli (uno per collo: GetPdfBySped NumeroCollo 1..N). Torna il base64 per
-// collo nell'ordine (indice 0 = collo 1). Best-effort: salta i colli che non tornano.
+// Etichette di TUTTI i colli (uno per collo: GetPdfBySped NumeroCollo 1..N).
+// `perCollo` e' ALLINEATO ai colli (indice 0 = collo 1, null = non ancora pronta); `etichette` sono solo
+// quelle arrivate, nell'ordine dei colli, da unire in un PDF; `mancanti` i numeri dei colli senza.
+// Allineato perche' prima c'era solo la lista di quelle arrivate e chi la scriveva sui colli usava
+// l'indice: col collo 2 non pronto, l'etichetta del 3 finiva sul collo 2 e il 3 restava senza.
+// RIPROVE: GLS genera il PDF con un attimo di ritardo dopo AddParcel, e non per forza per tutti i colli
+// insieme. Chi aveva almeno un'etichetta non riprovava piu': un multicollo poteva restare con un collo
+// senza etichetta, e il pacco partire con un'etichetta in meno (Quick, 11/11/2026: "3 pacchi, 2
+// etichette"). Dopo ogni attesa di `riprove` (ms) si richiedono SOLO i colli che mancano.
 // `mittente`: SOLO dove il contratto lo chiede (lib/etichetta-mittente), il nome dell'intestatario del
 // conto GLS stampato in alto si sostituisce col mittente della spedizione. E' qui perche' da qui passa
 // OGNI etichetta GLS: creazione, ripresa in background e recupero all'apertura.
 export async function etichetteGls(
   cred: CredenzialiGls, numeroSpedizione: string, numeroColli: number,
-  opts?: { bda?: string; tipoPorto?: string; mittente?: { nome?: string | null; destinatario?: string | null } | null }
-): Promise<{ etichette: string[]; errore: string | null }> {
+  opts?: { bda?: string; tipoPorto?: string; mittente?: { nome?: string | null; destinatario?: string | null } | null; riprove?: number[] }
+): Promise<{ etichette: string[]; perCollo: (string | null)[]; mancanti: number[]; errore: string | null }> {
   const n = Math.max(1, Math.round(numeroColli || 1))
-  const { mittente, ...optsGls } = opts || {}
-  const etichette: string[] = []
-  for (let i = 1; i <= n; i++) {
+  const { mittente, riprove = [1500], ...optsGls } = opts || {}
+  const perCollo: (string | null)[] = Array.from({ length: n }, () => null)
+  const prendi = async (i: number) => {
     try {
-      const et = await etichettaGls(cred, numeroSpedizione, { ...optsGls, numeroCollo: String(i) })
-      if (et.pdfBase64) {
-        let pdf = et.pdfBase64
-        if (mittente?.nome) {
+      const et = await etichettaGls(cred, numeroSpedizione, { ...optsGls, numeroCollo: String(i + 1) })
+      if (!et.pdfBase64) return
+      let pdf = et.pdfBase64
+      if (mittente?.nome) {
+        // La sostituzione del mittente non deve far sparire un'etichetta vera: se non riesce, quella di GLS.
+        try {
           const { mittenteEtichettaGls } = await import('@/lib/etichetta-gls')
           pdf = await mittenteEtichettaGls(pdf, mittente)
-        }
-        etichette.push(pdf)
+        } catch { pdf = et.pdfBase64 }
       }
-    } catch { /* la riprende il recupero in background */ }
+      perCollo[i] = pdf
+    } catch { /* la si riprova dopo l'attesa, o la riprende il recupero */ }
   }
-  return { etichette, errore: etichette.length ? null : 'nessuna etichetta disponibile' }
+  for (let i = 0; i < n; i++) await prendi(i)
+  for (const attesa of riprove) {
+    const daRiprovare = perCollo.flatMap((p, i) => (p ? [] : [i]))
+    if (!daRiprovare.length) break
+    await new Promise(r => setTimeout(r, attesa))
+    for (const i of daRiprovare) await prendi(i)
+  }
+  const etichette = perCollo.filter((p): p is string => !!p)
+  const mancanti = perCollo.flatMap((p, i) => (p ? [] : [i + 1]))
+  return { etichette, perCollo, mancanti, errore: etichette.length ? null : 'nessuna etichetta disponibile' }
 }
 
 // Annulla una spedizione GLS (DeleteSped). Torna true se l'annullo è confermato.
@@ -646,9 +664,16 @@ export async function chiudiGiornataGls(supabase: any, distintaId: string) {
 // sempre — non essendoci, per GLS, il ripiego on-demand che invece hanno DVA e SpediamoPro. Questo lo
 // aggiunge: quando manca, la si scarica ORA e la si salva (etichetta_url + per-collo), come fa la crea.
 // Torna il PDF (unito se multicollo) o null. `admin` deve avere il service role (legge le credenziali).
+//
+// MULTICOLLO A META': serve anche quando l'etichetta c'e' ma mancano dei colli (lo decide
+// lib/etichette, recuperaEtichettaMancante). Le etichette gia' salvate NON si toccano — il cliente puo'
+// averle gia' stampate — e si aggiungono solo quelle dei colli che non l'avevano. Si salva solo se GLS
+// ne ha date di nuove; altrimenti torna null e resta quella che c'era. Usata anche dopo la creazione,
+// in background, con `riprove` piu' lunghe (app/api/spedizioni/crea e app/api/v1/shipments, ramo GLS).
 export async function recuperaEtichettaGlsSalvando(
   admin: any,
-  sped: { id: string; corriere_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any }
+  sped: { id: string; corriere_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any; etichetta_url?: string | null; etichetta_path?: string | null },
+  opz: { riprove?: number[] } = {}
 ): Promise<Buffer | null> {
   const raw = (sped?.raw_response || {}) as any
   if (!raw._gls || !sped?.corriere_id || !sped?.id) return null
@@ -671,31 +696,50 @@ export async function recuperaEtichettaGlsSalvando(
   } catch { /* senza mittente si serve l'etichetta di GLS com'e' */ }
   // Sul Parcel l'etichetta si e' presa (prova del 14/10/2026) passando anche il riferimento Bda, che
   // la creazione salva in raw_response.bda solo per le Parcel: le nazionali restano come prima.
-  const et = await etichetteGls(cred, numeroBare, nColli, { ...(raw.parcel && raw.bda ? { bda: String(raw.bda) } : {}), mittente })
+  const et = await etichetteGls(cred, numeroBare, nColli, { ...(raw.parcel && raw.bda ? { bda: String(raw.bda) } : {}), mittente, ...(opz.riprove ? { riprove: opz.riprove } : {}) })
   if (!et.etichette.length) return null
 
-  // Unione multicollo (una pagina per collo), come alla creazione; mono-collo = diretta.
-  let b64unico = et.etichette[0]
-  if (et.etichette.length > 1) {
+  const { scomponiDataUrl, scaricaEtichetta } = await import('@/lib/etichette')
+  const leggiPdf = async (url?: string | null, path?: string | null): Promise<string | null> => {
+    if (path) { const d = await scaricaEtichetta(admin, path); if (d?.mime === 'application/pdf' && d.buffer.length) return d.buffer.toString('base64') }
+    const d = scomponiDataUrl(url); if (d?.mime === 'application/pdf' && d.buffer.length) return d.buffer.toString('base64')
+    return null
+  }
+  const unisci = async (pezzi: string[]): Promise<string> => {
+    if (pezzi.length === 1) return pezzi[0]
     try {
       const { unisciEtichette } = await import('@/lib/easyparcel')
-      b64unico = (await unisciEtichette(et.etichette)) || et.etichette[0]
-    } catch { /* ripiega sul primo collo */ }
+      return (await unisciEtichette(pezzi)) || pezzi[0]
+    } catch { return pezzi[0] }
   }
-  const etichettaUrl = `data:application/pdf;base64,${b64unico}`
 
-  // Salva l'etichetta unica + quelle per-collo (se colli_dettaglio è presente), così le prossime
-  // aperture la trovano già pronta e non richiamano GLS.
-  const colli = Array.isArray(sped.colli_dettaglio) ? (sped.colli_dettaglio as any[]) : null
-  const nuoviColli = colli && colli.length
-    ? colli.map((c: any, i: number) => ({ ...c, etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : (c.etichetta_url || null) }))
-    : null
+  const colli = Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length ? (sped.colli_dettaglio as any[]) : null
+  if (colli) {
+    // Per collo: prima quella gia' salvata, poi la nuova di GLS. Si contano solo quelle che si leggono.
+    const salvate = await Promise.all(colli.map((c: any) => leggiPdf(c?.etichetta_url, c?.etichetta_path)))
+    const aggiunte = colli.map((_c: any, i: number) => (!salvate[i] && et.perCollo[i] ? et.perCollo[i] : null))
+    if (!aggiunte.some(Boolean)) return null   // GLS non ne ha date di nuove: resta quella che c'era
+    const finali = colli.map((_c: any, i: number) => salvate[i] || aggiunte[i]).filter((p): p is string => !!p)
+    const b64unico = await unisci(finali)
+    const nuoviColli = colli.map((c: any, i: number) => (aggiunte[i] ? { ...c, etichetta_url: `data:application/pdf;base64,${aggiunte[i]}` } : c))
+    try {
+      await admin.from('spedizioni').update({ etichetta_url: `data:application/pdf;base64,${b64unico}`, colli_dettaglio: nuoviColli }).eq('id', sped.id)
+    } catch { /* il salvataggio è best-effort: l'importante è restituire il PDF adesso */ }
+    return Buffer.from(b64unico, 'base64')
+  }
+
+  // Senza dettaglio colli: si confronta con l'etichetta della spedizione, contando le pagine (GLS ne fa
+  // una per collo). Si sostituisce solo se quella nuova ha piu' colli.
+  const b64unico = await unisci(et.etichette)
+  const prima = await leggiPdf(sped.etichetta_url, sped.etichetta_path)
+  if (prima) {
+    let pagine = 0
+    try { const { PDFDocument } = await import('pdf-lib'); pagine = (await PDFDocument.load(Buffer.from(prima, 'base64'), { ignoreEncryption: true })).getPageCount() } catch { /* illeggibile: si sostituisce */ }
+    if (pagine >= et.etichette.length) return null
+  }
   try {
-    await admin.from('spedizioni').update({
-      etichetta_url: etichettaUrl, ...(nuoviColli ? { colli_dettaglio: nuoviColli } : {}),
-    }).eq('id', sped.id)
+    await admin.from('spedizioni').update({ etichetta_url: `data:application/pdf;base64,${b64unico}` }).eq('id', sped.id)
   } catch { /* il salvataggio è best-effort: l'importante è restituire il PDF adesso */ }
-
   return Buffer.from(b64unico, 'base64')
 }
 

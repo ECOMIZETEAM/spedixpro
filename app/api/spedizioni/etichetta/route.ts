@@ -88,7 +88,15 @@ export async function GET(req: NextRequest) {
     const { formatoStampaUtente, applicaFormatoEtichetta, resaSdaAdatta } = await import('@/lib/formato-etichetta')
     const _adminFmt = _admL()
     // Resa pulita SDA EXPRESS L solo se il modo di stampare di chi stampa la regge (vedi resaSdaAdatta).
-    const et = await leggiEtichettaCompleta(_adminFmt, sped as any, { resaSda: () => resaSdaAdatta(_adminFmt, utente as any) })
+    let et = await leggiEtichettaCompleta(_adminFmt, sped as any, { resaSda: () => resaSdaAdatta(_adminFmt, utente as any) })
+    // Ripiego on-demand per GLS (PDF generato in ritardo, anche solo per qualche collo) e per i PONTI fra
+    // reti (l'etichetta si chiede al venditore): se manca, o mancano dei colli, la si prende ORA e la si
+    // salva (lib/etichette). Poi esce come le altre, col riepilogo e col formato di stampa di chi stampa:
+    // quando stava in un blocco a parte, l'etichetta ripresa usciva senza il formato scelto.
+    {
+      const { recuperaEtichettaMancante } = await import('@/lib/etichette')
+      et = await recuperaEtichettaMancante(_adminFmt, { id, ...(sped as any) }, et)
+    }
     if (et) {
       let out = et.mime === 'application/pdf' ? await conRiepilogo(et.buffer) : et.buffer
       // FORMATO DI STAMPA scelto da chi stampa (cliente→suo, master→suo). Solo sui PDF; ZPL/immagini
@@ -97,21 +105,6 @@ export async function GET(req: NextRequest) {
         const fmt = await formatoStampaUtente(_adminFmt, utente as any)
         if (fmt) out = Buffer.from(await applicaFormatoEtichetta(out, fmt))
       }
-      return new NextResponse(new Uint8Array(out), { status: 200, headers: {
-        'Content-Type': et.mime,
-        'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${et.ext}"`,
-        'Cache-Control': 'private, max-age=600',
-      } })
-    }
-  }
-
-  // Ripiego on-demand per GLS (PDF generato in ritardo) e per i PONTI fra reti (l'etichetta si chiede al
-  // venditore): se manca, la si prende ORA e la si salva, come per DVA/SpediamoPro qui sotto (lib/etichette).
-  {
-    const { recuperaEtichettaMancante } = await import('@/lib/etichette')
-    const et = await recuperaEtichettaMancante(createAdminSupabase(), { id, ...(sped as any) })
-    if (et) {
-      const out = et.mime === 'application/pdf' ? await conRiepilogo(et.buffer) : et.buffer
       return new NextResponse(new Uint8Array(out), { status: 200, headers: {
         'Content-Type': et.mime,
         'Content-Disposition': `attachment; filename="etichetta-${sped.numero || id}.${et.ext}"`,
