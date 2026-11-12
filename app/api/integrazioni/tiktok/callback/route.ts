@@ -54,7 +54,10 @@ export async function GET(req: NextRequest) {
   try {
     negozi = negoziDaShops(await tiktokGetShops(tokens.access_token))
   } catch (e: any) {
-    console.error('[TIKTOK][CALLBACK] recupero negozio', e?.message || e)
+    // Con gli ambiti che TikTok dice di aver concesso (granted_scopes della risposta di token/get, niente
+    // token): il 12/11/2026 il primo negozio di prova si fermava qui con un 401 «not been granted any access
+    // scope required by this endpoint», e senza questa riga non si poteva sapere quale ambito mancasse.
+    console.error('[TIKTOK][CALLBACK] recupero negozio', e?.message || e, '| ambiti concessi:', JSON.stringify(tokens.granted_scopes ?? null), '| regione:', tokens.seller_base_region ?? null)
     return errore('tiktok_negozio')
   }
   if (!negozi.length) {
