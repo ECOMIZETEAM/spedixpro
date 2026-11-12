@@ -92,7 +92,8 @@ export async function GET(req: NextRequest) {
         }
       }
       // SPEDISCI: nessun annullo via API (contratto non nostro) → coda manuale al DETENTORE.
-      if (corr?.tipo === 'spedisci') {
+      // DIELLE uguale: l'annullo lo fa il fornitore su richiesta del detentore (lib/annullaSpedizione).
+      if (corr?.tipo === 'spedisci' || corr?.tipo === 'dielle') {
         const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
         await admin.from('spedizioni').update({
           stato: 'annullamento_manuale', annullamento_owner_id: ownerId, annullamento_errore: null,

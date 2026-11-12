@@ -165,21 +165,48 @@ export async function etichettaDielle(c: DielleCred, ldv: string, formato: 'pdf'
 export function mapStatoDielle(testo: string): string | null {
   const s = (testo || '').toLowerCase().trim()
   if (!s) return null
-  if (testoIndicaReso(s)) return 'reso_mittente'
+  if (testoIndicaReso(s) || RESA_DA_UFFICIO.test(s)) return 'reso_mittente'
   if ((s.includes('consegnat') || s.includes('delivered')) && !s.includes('non consegnat')) {
     // Deposito/punto di ritiro: il destinatario deve ancora ritirare, non è consegna a domicilio.
     if (/ufficio postale|punto di giacenza|fermo deposito|fermoposta|punto di ritiro|locker|punto di consegna|fermopoint/.test(s)) return 'in_consegna'
     return 'consegnata'
   }
-  if (s.includes('giacenz')) return 'in_giacenza'
+  // Poste scrive anche "IN GIAC." abbreviato ("INCOMPLETA - IN GIAC.", "MANOMESSA - IN GIAC."): il pacco è
+  // fermo in giacenza, e il cliente va avvisato come per "IN GIACENZA".
+  if (s.includes('giacenz') || /\bgiac\b/.test(s)) return 'in_giacenza'
   // Consegna fallita PRIMA di "in consegna": un tentativo andato male non è un giro in corso.
-  if (/non andata a buon fine|consegna non riuscita|non consegnat|mancata consegna|tentata consegna|tentativo di consegna|destinatario assente|\bassente\b/.test(s)) return 'non_consegnato'
-  if (s.includes('in consegna') || s.includes('in distribuzione') || s.includes('distribuzione') || s.includes('out for delivery')) return 'in_consegna'
+  // Le frasi Poste dei PDB (12/11): "DESTINATARIO SCONOSCIUTO", "MANCATO PAGAMENTO" (contrassegno non
+  // pagato), "CAUSA FORZA MAGGIORE", "SMARRIMENTO", "DANNEGGIATA" — finivano nel vuoto e il pacco restava
+  // "in consegna" mentre era fermo o perso.
+  if (/non andata a buon fine|consegna non riuscita|non consegnat|mancata consegna|tentata consegna|tentativo di consegna|destinatario assente|\bassente\b|sconosciut|mancato pagamento|forza maggiore|smarri|danneggiat|manomess/.test(s)) return 'non_consegnato'
+  // "DISPONIBILE PRESSO L'UP": il pacco aspetta il destinatario all'ufficio postale (come GLS).
+  if (s.includes('in consegna') || s.includes('in distribuzione') || s.includes('distribuzione') || s.includes('out for delivery') || s.includes('disponibile presso')) return 'in_consegna'
   if (/svincol/.test(s)) return 'in_transito'   // svincolata: dopo la giacenza torna a viaggiare
-  if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('partit') || s.includes('viaggio') || s.includes('smistament') || s.includes('in filiale') || s.includes('presso filiale')) return 'in_transito'
-  if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('picked') || s.includes('lavorazione') || s.includes('prelevat')) return 'spedita'
+  if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('partit') || s.includes('viaggio') || s.includes('smistament') || s.includes('in filiale') || s.includes('presso filiale') || s.includes('avviamento')) return 'in_transito'
+  if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('picked') || s.includes('lavorazione') || s.includes('prelevat') || s.includes('affidat')) return 'spedita'
   if (s.includes('rifiut') || s.includes('respint') || s.includes('exception') || s.includes('anomal') || s.includes('problema') || s.includes('indirizzo errato') || s.includes('indirizzo insufficiente') || s.includes('fallit') || s.includes('mancata')) return 'non_consegnato'
   return null
+}
+
+// "RESA DA UP PER FINE GIACENZA": l'ufficio postale rimanda indietro il pacco non ritirato. È un ritorno al
+// mittente anche se non lo dice con quelle parole (tratta 1UW0MPB063831/1, che il portale chiama "RM - …").
+const RESA_DA_UFFICIO = /\bresa da (up|ufficio)\b|\bresa per fine giacenza\b/
+
+// Dopo uno svincolo il pacco continua su una TRATTA nuova: stessa LDV con "/1", "/2"… in fondo, che
+// trackingStatus restituisce DENTRO la risposta della LDV madre (trackingStatus sulla "/1" da sola risponde
+// "ldv non trovata"). Visto il 12/11 su 38 tratte del conto LOGIXIA (PTI e anche una UPS). La tratta è:
+//  - una RICONSEGNA al destinatario ("DISPOSIZIONE SVINCOLO: RICONSEGNA NUOVA DESTINAZIONE", poi
+//    "CONSEGNATA DA UFI AL CLIENTE"): i suoi eventi continuano la storia normale;
+//  - oppure il RITORNO al mittente ("RITORNO AL MITTENTE", "RESA DA UP PER FINE GIACENZA"), che il portale
+//    mostra come "RM - …" e che si chiude con una "CONSEGNATA" che è la consegna AL MITTENTE.
+// Prima del 12/11 si leggeva solo la madre: un pacco tornato indietro restava per sempre "non consegnato"
+// o "in giacenza" e il reso non si addebitava mai.
+function trattaDiRitorno(testi: string[]): boolean {
+  return testi.some(t => { const s = t.toLowerCase(); return testoIndicaReso(s) || RESA_DA_UFFICIO.test(s) })
+}
+function numeroTratta(ldvTratta: string): number {
+  const n = Number(ldvTratta.slice(ldvTratta.lastIndexOf('/') + 1))
+  return Number.isFinite(n) ? n : 0
 }
 
 // Tracking (/extracking/trackingStatus — NB: sotto la ROOT, non /ws). Verificato su staging il 24/9:
@@ -197,16 +224,28 @@ export async function trackingDielle(
   const lista: any[] = Array.isArray(j?.response) ? j.response : []
   // La LDV madre: quella col numero uguale a quello cercato (o, in mancanza, la prima con eventi).
   const madre = lista.find(t => String(t?.ldv || '') === String(ldv)) || lista.find(t => Array.isArray(t?.stati_tracking) && t.stati_tracking.length) || lista[0]
-  const righe: any[] = Array.isArray(madre?.stati_tracking) ? madre.stati_tracking : []
   const stati: string[] = []
   const eventi: { data: string; descrizione: string; luogo: string }[] = []
-  for (const ev of righe) {
-    const testo = String(ev?.stato || '').trim()
-    if (testo) stati.push(testo)
-    const d = String(ev?.data || '').trim()
-    const ora = String(ev?.ora || '').trim()
-    const descr = testo || String(ev?.note || '').trim()
-    if (d && descr) eventi.push({ data: ora ? `${d} ${ora}` : d, descrizione: descr, luogo: String(ev?.filiale || '').trim() })
+  const leggi = (righe: any[], ritorno: boolean) => {
+    for (const ev of righe) {
+      let testo = String(ev?.stato || '').trim()
+      // Sulla tratta di ritorno ogni evento è del viaggio verso il mittente: lo dico nel testo, così la
+      // "CONSEGNATA" finale si legge come reso (mapStatoDielle) e la cronologia lo mostra chiaro.
+      if (testo && ritorno && !trattaDiRitorno([testo])) testo = `Ritorno al mittente - ${testo}`
+      if (testo) stati.push(testo)
+      const d = String(ev?.data || '').trim()
+      const ora = String(ev?.ora || '').trim()
+      const descr = testo || String(ev?.note || '').trim()
+      if (d && descr) eventi.push({ data: ora ? `${d} ${ora}` : d, descrizione: descr, luogo: String(ev?.filiale || '').trim() })
+    }
+  }
+  leggi(Array.isArray(madre?.stati_tracking) ? madre.stati_tracking : [], false)
+  const tratte = lista
+    .filter(t => t !== madre && String(t?.ldv || '').startsWith(`${ldv}/`) && Array.isArray(t?.stati_tracking))
+    .sort((a, b) => numeroTratta(String(a.ldv)) - numeroTratta(String(b.ldv)))
+  for (const t of tratte) {
+    const righe: any[] = t.stati_tracking
+    leggi(righe, trattaDiRitorno(righe.map(ev => String(ev?.stato || '').trim()).filter(Boolean)))
   }
   const consegnata = stati.some(str => mapStatoDielle(str) === 'consegnata')
   return { stati, consegnata, eventi }

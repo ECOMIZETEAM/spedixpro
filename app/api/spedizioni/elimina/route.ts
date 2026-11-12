@@ -103,6 +103,19 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: la spedizione è in cancellazione. Verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
+  // ── DIELLE: nessun annullo via API e il portale del fornitore non lascia eliminare (lib/annullaSpedizione).
+  //    Coda manuale del DETENTORE SUBITO, non fra 48 ore: intanto il detentore conferma sul portale del
+  //    fornitore le spedizioni del giorno e il pacco partirebbe. Il rimborso parte quando lui conferma.
+  if (corr?.tipo === 'dielle') {
+    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const { error: manErr } = await admin.from('spedizioni').update({
+      stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
+      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
+    }).eq('id', spedizioneId)
+    if (manErr) return NextResponse.json({ error: manErr.message }, { status: 400 })
+    return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: la spedizione è in cancellazione. Verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
+  }
+
   // ── CONTRATTI DVA: ora il corriere HA una richiesta di storno (richiesta-storno), asincrona. La
   //    chiediamo SUBITO. Se DVA la ammette, la spedizione va in 'storno_richiesto' e il credito NON si
   //    storna ancora: si rimborsa solo quando DVA conferma la cancellazione (cron storno-dva-cron, che

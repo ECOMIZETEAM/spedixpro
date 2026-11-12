@@ -161,6 +161,16 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: true }
   }
 
+  // DIELLE: non c'e' un annullo via API (la guida non ne ha) e dal loro portale l'utente del detentore non
+  // puo' eliminare nemmeno le spedizioni appena create ("Spedizione NON Eliminabile", provato il 12/11 sul
+  // conto di LOGIXIA): la cancellazione la fa il fornitore su richiesta. Qui NON si puo' dire ok: senza
+  // questo ramo si cadeva nell'`ok: true` qui sotto e si rimborsavano cliente e catena per un pacco che
+  // partiva lo stesso. Le porte (elimina, API v1, cron) la mandano nella coda manuale del detentore, che
+  // conferma quando il fornitore l'ha cancellata; solo allora parte il rimborso.
+  if (corr.tipo === 'dielle') {
+    return { ok: false, reason: 'questo corriere non consente l\'annullo automatico: lo richiede il detentore del contratto' }
+  }
+
   return { ok: true }
 }
 
