@@ -2807,6 +2807,8 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       clientId: cred.clientId, secretId: cred.secretId,
       costCenterCode: cred.costCenterCode || settingsPo.cost_center_code,
       ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope,
+      // Utente e password del web service KSync: con questi la lettera si crea direttamente su KSync (lib/ksync).
+      wsUtente: cred.wsUtente, wsPassword: cred.wsPassword, wsHost: cred.wsHost,
     }
     const productPo = String(settingsPo.product || '').trim()
     if (!productPo) {
@@ -2859,10 +2861,11 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       })
       const numeroFinale = ris.ldv
 
-      // Etichetta: scaricata dal downloadURL della create e salvata (il token può scadere).
+      // Etichetta: KSync diretto la manda nella risposta; col ponte si scarica dal downloadURL della create.
+      // In entrambi i casi si salva subito (il token del ponte può scadere).
       let etichettaUrl: string | null = null
       try {
-        const lab = await etichettaKsync(credPo, ris.downloadUrl, 'pdf')
+        const lab = ris.pdf?.length ? { bytes: ris.pdf } : await etichettaKsync(credPo, ris.downloadUrl, 'pdf')
         if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}`
       } catch (e) { console.error('[CREA][POSTE] etichetta:', (e as any)?.message) }
 
@@ -2892,7 +2895,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         tracking_number: numeroFinale,
         etichetta_url: etichettaUrl,
         colli_dettaglio: colliDettaglio,
-        raw_response: { _ksync: true, ldv: numeroFinale, downloadUrl: ris.downloadUrl, ambiente: credPo.ambiente },
+        raw_response: { _ksync: true, ldv: numeroFinale, downloadUrl: ris.downloadUrl, ambiente: credPo.ambiente, ...(ris.raw?.diretto ? { diretto: true, uuid: ris.raw.uuid } : {}) },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,

@@ -765,7 +765,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     // POSTE Delivery Business diretto via KSync/ParcelPilot: diretto (costoCorrente=0). Il prodotto è nel
     // `product` (settings). Etichetta dal downloadURL. Niente annullo via API (come gli altri Poste).
     const settingsPo = (corriere as any)?.settings || {}
-    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode || settingsPo.cost_center_code, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope }
+    // wsUtente/wsPassword: con questi la lettera si crea direttamente sul web service di KSync (lib/ksync).
+    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode || settingsPo.cost_center_code, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope, wsUtente: cred.wsUtente, wsPassword: cred.wsPassword, wsHost: cred.wsHost }
     const productPo = String(settingsPo.product || '').trim()
     if (!productPo) return errore('Contratto non configurato correttamente')
     try {
@@ -788,8 +789,9 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       })
       numero = risPo.ldv
       costoCorrente = 0
-      try { const lab = await etichettaKsync(credPo, risPo.downloadUrl, 'pdf'); if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}` } catch (e) { console.error('[V1][POSTE] etichetta:', (e as any)?.message) }
-      raw = { _ksync: true, ldv: numero, downloadUrl: risPo.downloadUrl, ambiente: credPo.ambiente }
+      // KSync diretto manda l'etichetta nella risposta; col ponte si scarica dal downloadURL.
+      try { const lab = risPo.pdf?.length ? { bytes: risPo.pdf } : await etichettaKsync(credPo, risPo.downloadUrl, 'pdf'); if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}` } catch (e) { console.error('[V1][POSTE] etichetta:', (e as any)?.message) }
+      raw = { _ksync: true, ldv: numero, downloadUrl: risPo.downloadUrl, ambiente: credPo.ambiente, ...(risPo.raw?.diretto ? { diretto: true, uuid: risPo.raw.uuid } : {}) }
     } catch (e: any) {
       console.error('[V1][POSTE]', e?.message)
       return errore(erroreCorrierePulito(e?.message))

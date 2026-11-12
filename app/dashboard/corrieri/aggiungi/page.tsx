@@ -92,6 +92,10 @@ async function salvaCorriere(formData: FormData) {
     credenziali.costCenterCode = formData.get('costCenterCode') as string || ''
     credenziali.ambiente = (formData.get('ambiente') as string) === 'prod' ? 'prod' : 'demo'
     credenziali.baseUrl = formData.get('baseUrl') as string || ''
+    // Utente e password del web service di KSync: se ci sono, la lettera si crea direttamente su KSync
+    // invece che dal ponte (lib/ksync.ts, creaKsyncDiretto). Il ponte si e' fermato l'11/11/2026.
+    credenziali.wsUtente = ((formData.get('wsUtente') as string) || '').trim()
+    credenziali.wsPassword = formData.get('wsPassword') as string || ''
     settings.product = formData.get('product') as string || ''
     settings.codice_contrassegno = formData.get('codice_contrassegno') as string || ''
     settings.modalita_pagamento_cod = formData.get('modalita_pagamento_cod') as string || ''
@@ -286,6 +290,8 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['codice_contrassegno','Codice servizio contrassegno','es. APT000918','text',true],
       ['modalita_pagamento_cod','Modalità pagamento contrassegno','es. CON','text',true],
       ['codice_assicurazione','Codice servizio assicurazione','opzionale','text',true],
+      ['wsUtente','Utente web service','se compilato, le lettere di vettura si creano direttamente','text',true],
+      ['wsPassword','Password web service','••••••••','password',true],
       ['baseUrl','URL server (override)','solo se diverso dal default','text',true],
     ],
   },

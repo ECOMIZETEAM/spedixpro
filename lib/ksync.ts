@@ -36,7 +36,15 @@ export type KsyncCred = {
   ambiente?: 'prod' | 'demo'   // default 'prod'
   baseUrl?: string             // override esplicito dell'host (se ParcelPilot ne dà uno diverso)
   scope?: string               // scope OAuth, se richiesto
+  // KSYNC DIRETTO (web service SOAP di KSync, senza il ponte di CT Solution). Se il contratto ha utente e
+  // password KSync, la lettera di vettura si crea da qui. Vedi creaKsyncDiretto.
+  wsUtente?: string
+  wsPassword?: string
+  wsHost?: string              // default https://ksync.guttadauro.it/KIPOINT_20 (produzione, dal manuale)
 }
+
+// Il contratto parla direttamente con KSync? Basta che abbia utente e password del web service.
+export const ksyncDiretto = (c: KsyncCred) => !!(String(c.wsUtente || '').trim() && String(c.wsPassword || ''))
 
 function base(c: KsyncCred): string {
   if (c.baseUrl) return c.baseUrl.replace(/\/+$/, '')
@@ -172,8 +180,114 @@ export type KsyncInput = {
   codiceAssicurazione?: string     // servizio assicurazione (settings.codice_assicurazione), se presente
 }
 
-// Crea la LDV (/waybill/create). Torna l'LDV (waybills[0].code) e il downloadURL dell'etichetta.
-export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: string; downloadUrl: string; raw: any }> {
+// ── KSYNC DIRETTO (web service SOAP) ──────────────────────────────────────────
+// PERCHE': l'11/11/2026 dalle 17:30 il ponte di CT Solution (ksyncwrapper.parcelpilot.it) ha cominciato a
+// rifiutare ogni creazione con «Lettera di vettura: Ordinante : campo obbligatorio.», e dalla mattina del
+// 12/11 non si avviava piu' («HTTP Error 500.30 - ASP.NET Core app failed to start»): SDA EXPRESS L ferma
+// per tutti i clienti. Il ponte non fa che girare le richieste a KSync, che invece funzionava (le lettere
+// fatte a mano dal portale uscivano). KSync ha un suo web service ufficiale ("Manuale Operativo WS KSync"
+// v2.0, agosto 2026, nella Knowledge base del portale): provato il 12/11 con l'utente del portale, prima
+// in sola lettura (tracking) e poi con una lettera vera di prova, 282343J074953, uscita al primo colpo.
+//
+// Come funziona (manuale §5-7): POST SOAP a gt_btc_ldv_soap con utente, password, company "001" e il
+// tracciato XML della lettera, escapato dentro <XMLData>. Torna, sempre escapato dentro <return>,
+// BackEndStatus (OK/KO: KO = KSync non l'ha nemmeno presa in carico), Status (true/false: false = SDA
+// l'ha rifiutata, i motivi in <message>), la LDV e l'etichetta in base64. «Ordinante» non e' un campo del
+// tracciato: KSync lo ricava dall'utente con cui si entra.
+//
+// L'etichetta arriva come A4 con tre copie uguali (e una pagina in piu' col contrassegno, la "copia
+// amministrativa"): la si salva cosi' com'e', ed e' lib/etichetta-sda.ts a ricavarne la resa.
+const HOST_WS = 'https://ksync.guttadauro.it/KIPOINT_20'
+const escXml = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+const unescXml = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+const tagXml = (t: string, v: unknown) => { const s = String(v ?? ''); return s === '' ? `<${t}/>` : `<${t}>${escXml(s)}</${t}>` }
+const primoTag = (xml: string, t: string) => { const m = xml.match(new RegExp(`<${t}>([\\s\\S]*?)</${t}>`)); return m ? m[1] : null }
+const tuttiTag = (xml: string, t: string) => [...xml.matchAll(new RegExp(`<${t}>([\\s\\S]*?)</${t}>`, 'g'))].map(m => m[1])
+// Il tracciato KSync ha campi di 50 caratteri (C*50, manuale §6): oltre, si taglia qui invece di farsi
+// rifiutare la lettera. L'email no: tagliata sarebbe sbagliata, quindi se e' troppo lunga si omette.
+const c50 = (v?: string) => pulisciPoste(v).slice(0, 50)
+// Data di spedizione: gg/mm/aaaa, ora italiana (il server gira in UTC: dopo mezzanotte sarebbe ieri, e
+// KSync rifiuta una data passata).
+const dataKsync = (iso?: string) => new Date(iso || Date.now()).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' })
+// Misure e peso: KSync li vuole tutti valorizzati (N*10,2). Come col ponte, una misura mancante vale 1.
+const numKsync = (v: unknown) => { const n = Number(v) || 0; return (n > 0 ? n : 1).toFixed(2) }
+
+function personaKsync(r: KsyncRecapito) {
+  const email = emailPoste(r.email)
+  return tagXml('cap', String(r.cap || '').trim().slice(0, 5)) + tagXml('codNazione', 'ITA') + tagXml('email', email.length <= 50 ? email : '')
+    + tagXml('indirizzo', c50([r.indirizzo, r.civico].filter(Boolean).join(' '))) + tagXml('intestatario', c50(r.ragioneSociale))
+    + tagXml('localita', c50(r.citta)) + tagXml('provincia', String(r.provincia || '').toUpperCase().trim().slice(0, 5))
+    + tagXml('referente', c50(r.referente)) + tagXml('telefono', telPdb(r.telefono || r.cellulare)) + tagXml('tipoAnagrafica', 'S')
+}
+
+// Il tracciato della lettera (manuale §6), negli stessi tag e nello stesso ordine degli esempi.
+function tracciatoKsync(dati: KsyncInput, conEmail: boolean): string {
+  const senzaEmail = (r: KsyncRecapito) => (conEmail ? r : { ...r, email: '' })
+  let accessori = ''
+  if (Number(dati.contrassegno) > 0) {
+    // CON contanti, ABM assegno bancario, ACM assegno circolare: gli stessi codici di lib/contrassegno-modalita.
+    accessori += `<contrassegno>${tagXml('codTipoPagamento', dati.modalitaPagamentoCod || 'CON')}${tagXml('contrassegnoValore', (Number(dati.contrassegno) || 0).toFixed(2))}</contrassegno>`
+  }
+  // Assicurazione: solo se il contratto la prevede (codiceAssicurazione), come col ponte. KSync la vuole
+  // a fasce (AS01-AS04) o "in percentuale" sul valore dichiarato: il ponte mandava il solo importo,
+  // quindi l'equivalente e' la percentuale sul valore.
+  if (Number(dati.assicurata) > 0 && dati.codiceAssicurazione) {
+    accessori += `<assicurataPercentuale>${tagXml('assicurataValore', (Number(dati.assicurata) || 0).toFixed(2))}</assicurataPercentuale>`
+  }
+  const colli = dati.colli.map(p => `<element>${tagXml('altezza', numKsync(p.altezza))}${tagXml('larghezza', numKsync(p.larghezza))}${tagXml('peso', numKsync(p.peso))}${tagXml('profondita', numKsync(p.profondita))}</element>`).join('')
+  return '<?xml version="1.0" encoding="UTF-8"?><root>'
+    // Formati di KSync: A4, A3, ZPL. Il "1011" del ponte qui non esiste: si chiede l'A4.
+    + tagXml('formatoStampa', dati.printFormat === 'ZPL' ? 'ZPL' : 'A4')
+    + '<ldv><datiSpedizione>' + (accessori ? `<accessori>${accessori}</accessori>` : '<accessori/>')
+    // S09 = EXTRA LARGE, l'unico prodotto del manuale (il product del ponte, APT000901, qui non vale).
+    + tagXml('codiceServizio', /^S\d{2}$/.test(String(dati.product || '')) ? dati.product : 'S09')
+    + '<datiGenerali>' + tagXml('contenuto', c50(dati.contenuto)) + tagXml('dataSpedizione', dataKsync(dati.shipmentDate))
+    + tagXml('note', pulisciPoste(dati.note).slice(0, 255)) + tagXml('numRifInterno', c50(dati.clientReferenceId)) + '</datiGenerali>'
+    + `<sezioneColli><colli>${colli}</colli></sezioneColli></datiSpedizione>`
+    + `<destinatario>${personaKsync(senzaEmail(dati.destinatario))}</destinatario><mittente>${personaKsync(senzaEmail(dati.mittente))}</mittente>`
+    + '</ldv></root>'
+}
+
+async function creaKsyncDiretto(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: string; downloadUrl: string; raw: any; pdf?: Buffer }> {
+  const host = String(c.wsHost || HOST_WS).replace(/\/+$/, '')
+  const invia = async (conEmail: boolean) => {
+    const body = '<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>'
+      + '<gt_btc_ldv_soap_Run xmlns="http://gt_btc_ldv_soap.ws.localhost/">'
+      + tagXml('m_UserName', String(c.wsUtente || '').trim()) + tagXml('m_Password', c.wsPassword) + tagXml('m_Company', '001')
+      + tagXml('XMLData', tracciatoKsync(dati, conEmail)) + '<UUID></UUID>'
+      + '</gt_btc_ldv_soap_Run></soap:Body></soap:Envelope>'
+    let r: Response
+    try {
+      r = await fetch(`${host}/servlet/gt_btc_ldv_soap`, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '""' }, body })
+    } catch (e: any) { throw new Error('KSync non raggiungibile: ' + (e?.message || 'rete')) }
+    const testo = await r.text()
+    const ret = primoTag(testo, 'return')
+    const xml = ret != null ? unescXml(ret) : ''
+    let errore: string | null = null
+    if (!r.ok || ret == null) errore = unescXml(primoTag(testo, 'faultstring') || '') || `KSync: errore ${r.status}`
+    else if (String(primoTag(xml, 'BackEndStatus') || '').trim().toUpperCase() !== 'OK') errore = unescXml(primoTag(xml, 'BackEndMessage') || '') || 'KSync: lettera non presa in carico'
+    else if (String(primoTag(xml, 'Status') || '').trim().toLowerCase() !== 'true') errore = tuttiTag(xml, 'message').map(m => unescXml(m).trim()).filter(Boolean).join(' - ') || 'KSync: LDV non emessa'
+    const ldv = String(primoTag(xml, 'Ldv') || '').trim()
+    if (!errore && !ldv) errore = 'KSync: LDV non emessa'
+    return { errore, xml, ldv }
+  }
+  let r = await invia(true)
+  // Come col ponte: se Poste boccia SOLO l'email, si riprova una volta senza (la prima non ha emesso
+  // nessuna lettera, quindi niente doppione). L'email e' un di piu', la consegna no.
+  if (r.errore && /mail/i.test(r.errore) && (emailPoste(dati.mittente.email) || emailPoste(dati.destinatario.email))) r = await invia(false)
+  if (r.errore) throw new Error(r.errore)
+  const b64 = String(primoTag(r.xml, 'PDFBase64') || '').replace(/\s+/g, '')
+  // In raw niente etichetta (e' grande, sta gia' in pdf) e niente credenziali: LDV, colli, UUID della transazione.
+  return {
+    ldv: r.ldv, downloadUrl: '', pdf: b64 ? Buffer.from(b64, 'base64') : undefined,
+    raw: { diretto: true, ldv: r.ldv, uuid: String(primoTag(r.xml, 'UUID') || '').trim() || null, colli: tuttiTag(r.xml, 'sticker').map(s => s.trim()) },
+  }
+}
+
+// Crea la LDV. Col web service diretto di KSync se il contratto ne ha le credenziali (torna anche il PDF);
+// altrimenti col ponte (/waybill/create), che torna l'LDV (waybills[0].code) e il downloadURL dell'etichetta.
+export async function creaKsync(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: string; downloadUrl: string; raw: any; pdf?: Buffer }> {
+  if (ksyncDiretto(c)) return creaKsyncDiretto(c, dati)
   const declared = dati.colli.map(p => ({ weight: grammi(p.peso), height: cm(p.altezza), length: cm(p.profondita), width: cm(p.larghezza) }))
   // Servizi accessori: SOLO se valorizzati (PDB rifiuta i campi COD vuoti — stessa trappola di Dielle).
   const services: Record<string, any> = {}

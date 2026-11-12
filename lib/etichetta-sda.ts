@@ -3,6 +3,8 @@
 // PERCHE': la 1011 che torna da Poste e' ruotata e con i campi accavallati (logo sopra il legale,
 // "Peso(kg)COLLIHxLxP" attaccati...). Non e' usabile cosi'. La ri-rendiamo nel layout PULITO che
 // e' stato approvato (lo stesso di un'etichetta Poste Delivery Business "bella", 14,82x10,52cm).
+// Dal 12/11/2026 le lettere si creano direttamente su KSync, che manda un A4 con tre copie per pagina:
+// su un rotolo da 10 cm non si stampa, e la resa ne prende la copia in alto (trovaCodiciA4).
 //
 // REGOLA CHE NON SI NEGOZIA: i CODICI (2 barcode Code128 + 2 DataMatrix) restano ESATTAMENTE quelli
 // che manda SDA. Non li rigeneriamo: li COPIAMO dall'originale (pdf-lib embedPage, lossless) e li
@@ -42,6 +44,20 @@ export type DatiEtichettaSda = {
 }
 
 type Bbox = { x: number; y: number; w: number; h: number }
+// I codici di una pagina sorgente. Sull'A4 di KSync il DataMatrix piccolo non c'e' (dmP null) e il
+// barcode del CAP e' gia' verticale (capVerticale): nella 1011 entrambi i barcode sono orizzontali.
+type Codici = { dmG: Bbox; dmP: Bbox | null; bcLDV: Bbox; bcCAP: Bbox; capVerticale?: boolean }
+
+// Le due impaginazioni che la resa sa leggere. La 1011 (288x315, una pagina per collo) arrivava dal
+// ponte di CT Solution fino all'11/11/2026; dal 12/11 le lettere si creano direttamente su KSync, che
+// manda un A4 (595x842) con TRE copie uguali per pagina, una pagina per collo, e col contrassegno una
+// pagina in piu' (la "copia amministrativa" del primo collo). Era lo stesso A4 che arrivava fino all'8/10.
+const misura = (p: { width: number; height: number }, w: number, h: number) => Math.abs(p.width - w) < 1.5 && Math.abs(p.height - h) < 1.5
+const e1011 = (p: { width: number; height: number }) => misura(p, 288, 315)
+const eA4 = (p: { width: number; height: number }) => misura(p, 595, 842)
+// Sull'A4 si legge solo la copia IN ALTO: le altre due sono identiche. Il suo riquadro va da y~561 in su.
+const A4_COPIA_ALTA = 842 * 2 / 3
+const DM_A4 = 80
 
 async function caricaPdfjs(bytes: Buffer) {
   const mod: any = await import('pdfjs-dist/legacy/build/pdf.js')
@@ -52,8 +68,37 @@ async function caricaPdfjs(bytes: Buffer) {
 
 // Trova i 4 codici in UNA pagina come IMMAGINI, classificandoli per FORMA (robusto alle posizioni):
 // quadrate = DataMatrix (grande/piccolo per dimensione), larghe = barcode (LDV/CAP per area).
-async function trovaCodici(page: any, OPS: any): Promise<{ dmG: Bbox; dmP: Bbox; bcLDV: Bbox; bcCAP: Bbox } | null> {
+async function trovaCodici(page: any, OPS: any): Promise<Codici | null> {
   const vp = page.getViewport({ scale: 1 })
+  const imgs = await immaginiPagina(page, OPS)
+  if (!imgs) return null
+  const W = vp.width, H = vp.height
+  const cand = imgs.filter(o => !(o.w > W * 0.8 && o.h > H * 0.8)) // scarta lo sfondo pieno-pagina
+  const square = cand.filter(o => Math.abs(o.w - o.h) / Math.max(o.w, o.h) < 0.2).sort((a, b) => b.w - a.w)
+  const wide = cand.filter(o => o.w / o.h > 1.4).sort((a, b) => (b.w * b.h) - (a.w * a.h))
+  // La 1011 ha ESATTAMENTE due DataMatrix e due barcode (137/137 pagine vere, 13/10). Un'immagine in piu'
+  // o in meno e' un'altra impaginazione: presi per forma, i codici finirebbero nel riquadro sbagliato.
+  if (square.length !== 2 || wide.length !== 2) return null
+  const [dmG, dmP] = square, [bcLDV, bcCAP] = wide
+  return { dmG, dmP, bcLDV, bcCAP }
+}
+
+// A4 di KSync: nella copia in alto ci sono il barcode della LDV (orizzontale, 180x80), quello del CAP
+// (verticale, 48x88), un solo DataMatrix (100x100), il logo e, col contrassegno, un timbro. Qui la forma
+// non basta (logo e timbro sono larghi come un barcode): si riconoscono per MISURA, una per tipo. Se
+// manca o avanza un codice e' un'impaginazione che non conosciamo → null, resta l'originale.
+async function trovaCodiciA4(page: any, OPS: any): Promise<Codici | null> {
+  const imgs = await immaginiPagina(page, OPS)
+  if (!imgs) return null
+  const alte = imgs.filter(o => o.y >= A4_COPIA_ALTA)
+  const di = (w: number, h: number) => alte.filter(o => Math.abs(o.w - w) < 4 && Math.abs(o.h - h) < 4)
+  const ldv = di(180, 80), cap = di(48, 88), dm = di(100, 100)
+  if (ldv.length !== 1 || cap.length !== 1 || dm.length !== 1) return null
+  return { dmG: dm[0], dmP: null, bcLDV: ldv[0], bcCAP: cap[0], capVerticale: true }
+}
+
+// Posizione e misura (in punti) di ogni immagine disegnata sulla pagina.
+async function immaginiPagina(page: any, OPS: any): Promise<Bbox[] | null> {
   const ol = await page.getOperatorList()
   const nm = (v: number) => Object.keys(OPS).find(k => OPS[k] === v)
   let ctm = [1, 0, 0, 1, 0, 0]
@@ -72,15 +117,7 @@ async function trovaCodici(page: any, OPS: any): Promise<{ dmG: Bbox; dmP: Bbox;
     else if (f === 'transform') ctm = mul(ctm, a)
     else if (f === 'paintImageXObject') imgs.push({ x: ctm[4], y: ctm[5], w: Math.abs(ctm[0]), h: Math.abs(ctm[3]) })
   }
-  const W = vp.width, H = vp.height
-  const cand = imgs.filter(o => !(o.w > W * 0.8 && o.h > H * 0.8)) // scarta lo sfondo pieno-pagina
-  const square = cand.filter(o => Math.abs(o.w - o.h) / Math.max(o.w, o.h) < 0.2).sort((a, b) => b.w - a.w)
-  const wide = cand.filter(o => o.w / o.h > 1.4).sort((a, b) => (b.w * b.h) - (a.w * a.h))
-  // La 1011 ha ESATTAMENTE due DataMatrix e due barcode (137/137 pagine vere, 13/10). Un'immagine in piu'
-  // o in meno e' un'altra impaginazione: presi per forma, i codici finirebbero nel riquadro sbagliato.
-  if (square.length !== 2 || wide.length !== 2) return null
-  const [dmG, dmP] = square, [bcLDV, bcCAP] = wide
-  return { dmG, dmP, bcLDV, bcCAP }
+  return imgs
 }
 
 // Legge dal TESTO della pagina i campi che Poste ha registrato per quel collo (LDV, peso, misure,
@@ -125,8 +162,46 @@ async function datiPerCollo(page: any, base: DatiEtichettaSda, i: number, N: num
   return { ...base, riquadro, contrassegno, prodottoCod, ldv: ldvP || base.ldv, peso: pesoP || base.peso, hxlxp, colli: N === 1 ? '1' : `${i}/${N}` }
 }
 
+// Come datiPerCollo, ma sull'A4 di KSync (copia in alto). Qui ogni valore sta sulla STESSA riga della sua
+// voce, a destra ("PESO (KG):" "1,00", "COLLI:" "2/3", "importo in euro:" "112.0"); le misure sono una
+// voce sola "L.15 H.10 P.20" (L larghezza, H altezza, P profondita'); la LDV del collo e' il testo sotto
+// il suo barcode (sui colli 2+ e' lunga, es. "224JMF6SD382224J002096"). Torna anche il numero del collo:
+// la pagina della copia amministrativa ripete il primo e va saltata. null se COLLI non si legge.
+async function datiPerColloA4(page: any, base: DatiEtichettaSda, bcLDV: Bbox): Promise<{ collo: number; totale: number; dati: DatiEtichettaSda } | null> {
+  const tc = await page.getTextContent()
+  const items = (tc.items as any[]).filter(x => x.str && x.str.trim() && x.transform[5] >= A4_COPIA_ALTA)
+  const testo = (x: any) => String(x.str).trim()
+  const aDestra = (voceRe: RegExp, valRe: RegExp): string | null => {
+    const v = items.find(x => voceRe.test(testo(x))); if (!v) return null
+    const c = items.filter(x => x !== v && x.transform[4] > v.transform[4] && Math.abs(x.transform[5] - v.transform[5]) < 2.5 && valRe.test(testo(x)))
+      .sort((a, b) => a.transform[4] - b.transform[4])
+    return c[0] ? testo(c[0]) : null
+  }
+  const colli = aDestra(/^COLLI:?$/i, /^\d+\/\d+$/)
+  if (!colli) return null
+  const [collo, totale] = colli.split('/').map(Number)
+  if (!(collo >= 1 && totale >= collo)) return null
+  const giro = items.map(x => testo(x).match(/^(GIRO|CAP)\s*(\d{1,5})$/i)).find(Boolean)
+  const riquadro: [string, string] = giro ? [giro[1].toUpperCase(), giro[2]] : base.riquadro
+  const ldvP = items.find(x => /^[0-9A-Z]{10,}$/.test(testo(x)) && x.transform[4] >= bcLDV.x - 2 && x.transform[4] <= bcLDV.x + bcLDV.w
+    && x.transform[5] < bcLDV.y && x.transform[5] > bcLDV.y - 20)
+  const pesoP = aDestra(/^PESO \(KG\):?$/i, /^\d+[.,]\d+$/)
+  const dim = items.map(x => testo(x).match(/^L\.(\d+(?:[.,]\d+)?)\s+H\.(\d+(?:[.,]\d+)?)\s+P\.(\d+(?:[.,]\d+)?)$/i)).find(Boolean)
+  const hxlxp = dim ? `${dim[2]}x${dim[1]}x${dim[3]}` : base.hxlxp // nel layout: altezza x larghezza x lunghezza
+  const importo = aDestra(/^importo in euro:?$/i, /^\d+([.,]\d+)?$/)
+  const lettere = aDestra(/^importo in lettere:?$/i, /\/\d{2}$/)
+  const pagamento = aDestra(/^pagamento:?$/i, /[A-Za-z]/)
+  const contrassegno = importo && lettere && pagamento
+    ? { importo: Number(importo.replace(',', '.')).toFixed(2).replace('.', ','), lettere, pagamento } : null
+  const prodottoCod = items.some(x => /Extra Large\s*[–-]?\s*CONTRASSEGNO/i.test(testo(x)))
+  return {
+    collo, totale,
+    dati: { ...base, riquadro, contrassegno, prodottoCod, ldv: ldvP ? testo(ldvP) : base.ldv, peso: pesoP || base.peso, hxlxp, colli: totale === 1 ? '1' : `${collo}/${totale}` },
+  }
+}
+
 // Disegna UNA pagina etichetta in `out`, copiando i codici dalla pagina sorgente `srcPage`.
-async function disegnaPagina(out: any, srcPage: any, codici: { dmG: Bbox; dmP: Bbox; bcLDV: Bbox; bcCAP: Bbox }, dati: DatiEtichettaSda, bold: any, reg: any, logo: any) {
+async function disegnaPagina(out: any, srcPage: any, codici: Codici, dati: DatiEtichettaSda, bold: any, reg: any, logo: any) {
   const page = out.addPage([420, 298.1])
   const T = (x: number, y: number, s: number, f: any, t: string, color = rgb(0, 0, 0)) => page.drawText(t || '', { x, y, size: s, font: f, color })
   const fit = (x: number, y: number, s: number, f: any, t: string, maxW: number) => {
@@ -152,8 +227,8 @@ async function disegnaPagina(out: any, srcPage: any, codici: { dmG: Bbox; dmP: B
   // quattro embedPage separati l'etichetta pesava 2,7MB contro i 606KB dell'originale, moltiplicati
   // per ogni etichetta della stampa in blocco.
   const box = (o: Bbox) => ({ left: o.x, bottom: o.y, right: o.x + o.w, top: o.y + o.h })
-  const [eLDV, eCAP, eDmG, eDmP] = await out.embedPages([srcPage, srcPage, srcPage, srcPage],
-    [box(codici.bcLDV), box(codici.bcCAP), box(codici.dmG), box(codici.dmP)])
+  const daCopiare = [codici.bcLDV, codici.bcCAP, codici.dmG, ...(codici.dmP ? [codici.dmP] : [])]
+  const [eLDV, eCAP, eDmG, eDmP] = await out.embedPages(daCopiare.map(() => srcPage), daCopiare.map(box))
   // barcode: dall'orizzontale del 1011 al verticale del layout → ruoto 90° (ancoraggio in basso-dx).
   // Le LARGHEZZE sono quelle MISURATE sull'ufficiale: LDV 70 (barre fino a x89,5), CAP 42,5 (fino a
   // x386,5). Allargarle fa invadere il numero verticale a lato (bug visto il 9/10 su 282224J037233).
@@ -162,10 +237,24 @@ async function disegnaPagina(out: any, srcPage: any, codici: { dmG: Bbox; dmP: B
   // scendeva a 0,19mm, e il CAP (95pt) da 87,1. Il collo 1 (126,1pt) resta a 150,7 come approvato.
   const barcodeVerticale = (e: any, sx: number, sy: number, slotW: number, slotH: number) =>
     page.drawPage(e, { x: sx + slotW, y: sy, width: slotH, height: slotW, rotate: degrees(90) })
-  barcodeVerticale(eLDV, 19.5, 20.7, 70.0, Math.max(150.7, codici.bcLDV.w))
-  barcodeVerticale(eCAP, 344.0, 25.2, 42.5, Math.max(87.1, codici.bcCAP.w))
-  page.drawPage(eDmG, { x: 320.2, y: 208.6, width: 72.7, height: 72.7 })
-  page.drawPage(eDmP, { x: 285.7, y: 253.2, width: 28.5, height: 28.5 })
+  // Sull'A4 di KSync la LDV dei colli 2+ (22 caratteri) sta negli stessi 180pt della LDV corta, e il CAP
+  // in 88pt: barre da 0,23mm, sotto i 2 punti della termica. Lunghezza minima = quella che da' 0,25mm a
+  // barra a un Code128 B di quel testo ((caratteri+3)*11+2 moduli), cioe' quella della 1011.
+  const MODULO = 0.25 / 25.4 * 72
+  const lungMinima = (t: string) => (codici.capVerticale ? ((String(t).length + 3) * 11 + 2) * MODULO : 0)
+  barcodeVerticale(eLDV, 19.5, 20.7, 70.0, Math.max(150.7, codici.bcLDV.w, lungMinima(dati.ldv)))
+  // Il CAP dell'A4 e' gia' verticale: si copia com'e', senza ruotarlo.
+  if (codici.capVerticale) page.drawPage(eCAP, { x: 344.0, y: 25.2, width: 42.5, height: Math.max(87.1, codici.bcCAP.h, lungMinima(dati.capCode)) })
+  else barcodeVerticale(eCAP, 344.0, 25.2, 42.5, Math.max(87.1, codici.bcCAP.w))
+  // Il DataMatrix dell'A4 di KSync e' un'immagine con 3,77 pixel per modulo (moduli larghi 3 o 4 pixel,
+  // non come la 1011 nata a punti interi): lo si stampa a 80pt invece di 72,7, per dare margine al
+  // lettore. Prova 12/11 col modello termico (render, riduzione per area, soglia, zxing) a 185-215 dpi:
+  // 7 colli su 7 letti, come le 1011 di ieri. Sta tra il bordo alto del riquadro (y 204,7) e il margine;
+  // la casella del DataMatrix piccolo, che l'A4 non ha, resta vuota.
+  if (codici.capVerticale) page.drawPage(eDmG, { x: 314.0, y: 207.0, width: DM_A4, height: DM_A4 })
+  else page.drawPage(eDmG, { x: 320.2, y: 208.6, width: 72.7, height: 72.7 })
+  // L'A4 di KSync non ha il DataMatrix piccolo (contiene solo la LDV, gia' nel grande e nel barcode).
+  if (eDmP) page.drawPage(eDmP, { x: 285.7, y: 253.2, width: 28.5, height: 28.5 })
 
   // testo (coordinate baseline esatte del riferimento). Nel riquadro nero l'instradamento di Poste: il
   // CAP alle coordinate del riferimento, il GIRO (parola piu' larga, meno cifre) centrato nel riquadro.
@@ -207,26 +296,49 @@ export async function riscriviEtichettaSdaExpressL(buffer: Buffer, dati: DatiEti
   try {
     const srcDoc = await PDFDocument.load(new Uint8Array(buffer))
     const N = srcDoc.getPageCount()
-    // SOLO la 1011 di Poste (288x315): e' l'unica impaginazione su cui i riquadri sono stati misurati.
-    // - Fino all'8/10 Poste mandava un A4 con tre copie per pagina: presi per forma, nel riquadro del CAP
-    //   finiva una seconda copia del barcode della LDV (revisione 13/10, 282224J034051).
+    // SOLO le impaginazioni misurate: la 1011 (288x315) e l'A4 di KSync (595x842), tutte le pagine uguali.
+    // - L'A4 fino all'8/10 veniva preso per forma come la 1011: nel riquadro del CAP finiva una seconda
+    //   copia del barcode della LDV (revisione 13/10, 282224J034051). Ora ha la sua lettura (trovaCodiciA4).
     // - La NOSTRA resa (420x298,1) riletta e riscritta perdeva tutti i codici a barre (provato il 13/10):
     //   succede se un'etichetta servita viene salvata e poi riletta, come fa la catena della condivisione.
-    if (!srcDoc.getPages().every(p => { const { width, height } = p.getSize(); return Math.abs(width - 288) < 1 && Math.abs(height - 315) < 1 })) {
-      console.info('[RESA-SDA] originale: pagina non 1011', dati.ldv)
+    const misure = srcDoc.getPages().map(p => p.getSize())
+    const formato = misure.every(e1011) ? '1011' : misure.every(eA4) ? 'A4' : null
+    if (!formato) {
+      console.info('[RESA-SDA] originale: impaginazione non riconosciuta', dati.ldv)
       return buffer
     }
     const { pdfjs, doc } = await caricaPdfjs(buffer); docPdfjs = doc
     const OPS = pdfjs.OPS
     // Prima raccolgo codici + dati di OGNI pagina: se anche una non e' riconosciuta, mollo e torna
     // l'ORIGINALE (mai un multicollo meta' bello e meta' no, ne' un collo senza codici).
-    const pagine: Array<{ src: any; codici: any; datiPag: DatiEtichettaSda }> = []
-    for (let i = 0; i < N; i++) {
-      const pj = await doc.getPage(i + 1)
-      const codici = await trovaCodici(pj, OPS)
-      if (!codici) { console.info('[RESA-SDA] originale: codici non riconosciuti', dati.ldv, 'pagina', i + 1); return buffer }
-      const datiPag = await datiPerCollo(pj, dati, i + 1, N)
-      pagine.push({ src: srcDoc.getPage(i), codici, datiPag })
+    const pagine: Array<{ src: any; codici: Codici; datiPag: DatiEtichettaSda }> = []
+    if (formato === '1011') {
+      for (let i = 0; i < N; i++) {
+        const pj = await doc.getPage(i + 1)
+        const codici = await trovaCodici(pj, OPS)
+        if (!codici) { console.info('[RESA-SDA] originale: codici non riconosciuti', dati.ldv, 'pagina', i + 1); return buffer }
+        const datiPag = await datiPerCollo(pj, dati, i + 1, N)
+        pagine.push({ src: srcDoc.getPage(i), codici, datiPag })
+      }
+    } else {
+      // A4: una pagina per collo, nell'ordine; la copia amministrativa del contrassegno ripete un collo
+      // gia' visto e si salta. Alla fine ogni collo da 1 a N deve esserci, una volta sola.
+      const perCollo = new Map<number, { src: any; codici: Codici; datiPag: DatiEtichettaSda }>()
+      let totale = 0
+      for (let i = 0; i < N; i++) {
+        const pj = await doc.getPage(i + 1)
+        const codici = await trovaCodiciA4(pj, OPS)
+        if (!codici) { console.info('[RESA-SDA] originale: codici A4 non riconosciuti', dati.ldv, 'pagina', i + 1); return buffer }
+        const letti = await datiPerColloA4(pj, dati, codici.bcLDV)
+        if (!letti || (totale && letti.totale !== totale)) { console.info('[RESA-SDA] originale: colli A4 non letti', dati.ldv, 'pagina', i + 1); return buffer }
+        totale = letti.totale
+        if (!perCollo.has(letti.collo)) perCollo.set(letti.collo, { src: srcDoc.getPage(i), codici, datiPag: letti.dati })
+      }
+      for (let k = 1; k <= totale; k++) {
+        const p = perCollo.get(k)
+        if (!p) { console.info('[RESA-SDA] originale: manca il collo', k, 'di', totale, dati.ldv); return buffer }
+        pagine.push(p)
+      }
     }
     // Mai un contrassegno senza importo scritto: Poste lo stampa sul primo collo (sugli altri solo
     // "CONTRASSEGNO" accanto al prodotto). Se la riga lo dice e il primo collo non lo porta, la 1011.
