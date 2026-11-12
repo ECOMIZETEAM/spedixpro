@@ -1033,13 +1033,14 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     inserted = r.data; insErr = r.error
   }
   // PONTE: se la riga non si scrive, le gambe sotto si annullano adesso con lo storno, e il credito torna,
-  // a chi integra e a ogni salto sopra (che riceve un 400). Solo se il pacco risulta davvero senza la
-  // spedizione di chi l'ha chiesta: altrimenti resta la risposta di sempre, qui sotto.
+  // a chi integra e a ogni salto sopra (che riceve un 400). Solo se l'annullo e' riuscito davvero: con le
+  // gambe ancora vive un nuovo tentativo comprerebbe una seconda LDV, quindi resta la risposta di sempre,
+  // qui sotto, col numero.
   if (insErr && corriere.tipo === 'moovexpress' && numero) {
     const { annullaPaccoOrfano } = await import('@/lib/ponte-orfane')
     const chiuso = await annullaPaccoOrfano(admin, numero).catch(() => null)
-    console.error('[V1][MOOVEXPRESS][INSERT]', numero, insErr.message, chiuso ? `gambe: ${chiuso.esito}` : 'pacco non verificato: nessun annullo')
-    if (chiuso) return errore(MSG_PONTE_NON_REGISTRATA, 400)
+    console.error('[V1][MOOVEXPRESS][INSERT]', numero, insErr.message, chiuso ? `gambe: ${chiuso.esito}${chiuso.motivo ? ' (' + chiuso.motivo + ')' : ''}` : 'pacco non verificato: nessun annullo')
+    if (chiuso?.esito === 'annullata') return errore(MSG_PONTE_NON_REGISTRATA, 400)
   }
   // Qui NON si storna: il pacco dal corriere esiste gia' e va pagato. Il messaggio del database
   // (tabelle, colonne, vincoli) non esce: descrive la nostra struttura interna a chi si integra.

@@ -3382,11 +3382,15 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       if (!testa.id) {
         console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, testa.errore)
         // Le gambe del pacco si annullano adesso, con lo storno a ogni livello, e il credito del cliente torna.
-        // Solo se il pacco risulta davvero senza la spedizione del cliente: se non si riesce a leggerlo non si
-        // tocca niente, e restano la sentinella e il giro delle prenotazioni scadute.
+        // Il credito torna e il cliente legge «riprova» SOLO se l'annullo e' riuscito. Se le gambe restano vive
+        // (contratto senza annullo automatico, GLS che rifiuta, errore a meta', pacco gia' partito), un nuovo
+        // tentativo comprerebbe una seconda LDV e la prima resterebbe pagata dai master per sempre: in quel caso
+        // resta il messaggio col numero, cosi' il caso arriva a una persona, e il credito lo libera il giro delle
+        // prenotazioni scadute. Se il pacco non si riesce a leggere non si tocca niente.
         const { annullaPaccoOrfano } = await import('@/lib/ponte-orfane')
         const chiuso = await annullaPaccoOrfano(adminCrea, numeroFinale).catch(() => null)
-        if (chiuso) {
+        console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, chiuso ? `gambe: ${chiuso.esito}${chiuso.motivo ? ' (' + chiuso.motivo + ')' : ''}` : 'pacco non verificato: nessun annullo')
+        if (chiuso?.esito === 'annullata') {
           await stornaPrenotazione()
           return NextResponse.json({ error: MSG_PONTE_NON_REGISTRATA }, { status: 400 })
         }
