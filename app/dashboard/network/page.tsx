@@ -25,16 +25,18 @@ export default function NetworkRicevutiPage() {
   const [accettando, setAccettando] = useState<string>('')
   const [apertoBlocco, setApertoBlocco] = useState<string>('')
   const [avanz, setAvanz] = useState<{k:string,fatti:number,totale:number,da:number}|null>(null)
-  // I MIEI clienti col listino troppo basso (recuperi bloccati perché il peso ripesato supera
-  // l'ultima fascia e manca la regola "oltre"). Solo miei, in casa mia. Appare solo se ce ne sono.
-  const [daAlzare, setDaAlzare] = useState<{clienti:any[],totaleRecuperi:number,totaleImporto:number}>({clienti:[],totaleRecuperi:0,totaleImporto:0})
-  const [apriAlzare, setApriAlzare] = useState(false)
+  // COSA DEVI FARE (/api/network/da-fare, lib/network-da-fare): le rettifiche da decidere che «Carica» non puo' girare,
+  // raggruppate per cosa sistemare (listino di un cliente troppo corto, misure mancanti…), e accanto a ogni riga il suo
+  // motivo. Si calcola a ogni apertura e resta finche' non e' sistemato: il messaggio dopo «Carica» spariva al «Carica»
+  // successivo, e il 12/11/2026 Ecomize Solution non ha mai letto quello di 3UW1UHA334029.
+  const [daFare, setDaFare] = useState<{azioni:any[],righe:Record<string,string>,pronte:number,totaleRighe:number,totaleEuro:number}>({azioni:[],righe:{},pronte:0,totaleRighe:0,totaleEuro:0})
+  const [tutteAzioni, setTutteAzioni] = useState(false)
 
   async function carica() {
     setLoading(true)
     const d = await fetch('/api/network/ricevuti').then(r=>r.json()).catch(()=>null)
     if (d && !d.error) setDati(d)
-    fetch('/api/network/listini-da-alzare').then(r=>r.json()).then(x=>{ if (x && !x.error) setDaAlzare(x) }).catch(()=>{})
+    fetch('/api/network/da-fare').then(r=>r.json()).then(x=>{ if (x && !x.error) setDaFare(x) }).catch(()=>{})
     setLoading(false)
   }
   useEffect(()=>{ carica() }, [])
@@ -193,10 +195,12 @@ export default function NetworkRicevutiPage() {
         // TUTTE, non solo le prime 30: oltre il taglio "sparivano" e sembravano perse. Cap alto + conteggio.
         // Il motivo è per RIGA (il listino non copre quel peso/zona, misure mancanti, catena incompleta):
         // non si mette più un consiglio unico "alza la fascia" a tappeto, che era sbagliato per metà dei casi.
-        const CAP = 100
+        // Il motivo di ognuna resta anche nel riquadro «Cosa devi fare», che non sparisce al «Carica» dopo: qui se ne
+        // mostrano le prime, la' ci sono tutte, raggruppate per cosa sistemare.
+        const CAP = 10
         const elenco = dettaglio.slice(0, CAP).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
         const extra = dettaglio.length > CAP ? `\n• … e altre ${dettaglio.length - CAP}` : ''
-        parti.push(`⚠️ ${nonProp} non girate — il motivo di ognuna (dove dice "aggiungi la fascia", alzala sul listino del cliente e ripremi Carica):\n• ${elenco}${extra}`)
+        parti.push(`⚠️ ${nonProp} non girate. Le trovi tutte nel riquadro «Cosa devi fare» qui sotto, con cosa sistemare; resta lì finché non passano:\n• ${elenco}${extra}`)
       }
       if (inAttesa) parti.push(`⏳ ${inAttesa} in attesa che il livello sopra le confermi: NON sono perse — riprova quando saranno confermate.`)
       if (!create && !nonProp && !inAttesa && !scart) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
@@ -271,43 +275,46 @@ export default function NetworkRicevutiPage() {
           {tab==='rettifiche' && (
             (blocchi.length===0 && proprie.length===0) ? <div style={{padding:'32px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna rettifica ricevuta</div> :
             <div>
-              {/* LISTINI DA ALZARE: appare solo se HO clienti col listino troppo basso che bloccano
-                  recuperi. Per-master (i miei clienti). Dice chi, fin dove arriva, il peso che serve,
-                  e quanto sblocco. Alzo quel listino e riaccetto. Sparisce quando è tutto a posto. */}
-              {daAlzare.clienti.length > 0 && (
-                <div style={{borderTop:'1px solid #f0f0f0',background:'#fffbeb',padding:'14px 16px'}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
-                    <div>
-                      <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
-                        🔧 {daAlzare.clienti.length} {daAlzare.clienti.length===1?'cliente':'clienti'} col listino da alzare · <span style={{color:'#dc2626'}}>€ {Math.abs(daAlzare.totaleImporto).toFixed(2)}</span> bloccati
-                      </div>
-                      <div style={{fontSize:'12px',color:'#8a5a2b',marginTop:'3px',maxWidth:'680px'}}>
-                        Questi tuoi clienti hanno spedito colli più pesanti dell'ultima fascia del loro listino: il recupero non passa finché non alzi la fascia. Alza il listino del cliente, poi ripremi <strong>Carica</strong>.
-                      </div>
+              {/* COSA DEVI FARE: appare solo se c'e' qualcosa da sistemare perche' le rettifiche scendano. Una riga per cosa da
+                  fare (per cliente o sotto-master e contratto), col peso che serve e gli euro fermi; dal listino di un tuo
+                  cliente si va dritti alla sua pagina. Resta finche' non e' sistemato. */}
+              {(daFare.azioni.length > 0 || daFare.pronte > 0) && (
+                <div style={{borderTop:'1px solid #f0f0f0',background:'#fef2f2',padding:'14px 16px'}}>
+                  {daFare.azioni.length > 0 && <>
+                    <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
+                      ⚠ Cosa devi fare · {daFare.totaleRighe} {daFare.totaleRighe===1?'rettifica ferma':'rettifiche ferme'} · <span style={{color:'#dc2626'}}>€ {daFare.totaleEuro.toFixed(2)}</span>
                     </div>
-                    <button onClick={()=>setApriAlzare(v=>!v)}
-                      style={{background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
-                      {apriAlzare?'Nascondi':'Vedi quali'}
-                    </button>
-                  </div>
-                  {apriAlzare && (
-                    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc',marginTop:'10px'}}>
-                      <thead><tr style={{background:'#f9fafb'}}>
-                        <th style={th}>Cliente</th><th style={th}>Corriere</th><th style={th}>Arriva a</th><th style={th}>Serve</th><th style={th}>Recuperi</th><th style={th}>Bloccato</th>
-                      </tr></thead>
-                      <tbody>
-                        {daAlzare.clienti.map((c:any,i:number)=>(
-                          <tr key={i}>
-                            <td style={{...td,fontWeight:600}}>{c.cliente}</td>
-                            <td style={td}>{c.corriere}</td>
-                            <td style={td}>{c.fasciaMax} kg</td>
-                            <td style={{...td,fontWeight:700,color:'#ea580c'}}>{c.pesoMassimo} kg</td>
-                            <td style={td}>{c.recuperi}</td>
-                            <td style={{...td,fontWeight:700,color:'#dc2626'}}>€ {c.importo.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <div style={{fontSize:'12px',color:'#7f1d1d',marginTop:'3px',maxWidth:'720px'}}>
+                      Queste rettifiche non si possono girare a chi sta sotto finché non sistemi quello che c'è scritto. Te le hanno già scalate: finché restano qui sono a tuo carico.
+                    </div>
+                    <div style={{marginTop:'10px',display:'flex',flexDirection:'column',gap:'6px'}}>
+                      {(tutteAzioni ? daFare.azioni : daFare.azioni.slice(0, 6)).map((g:any,i:number)=>(
+                        <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',background:'#fff',border:'1px solid #fecaca',borderRadius:'8px',padding:'9px 12px'}}>
+                          <div style={{fontSize:'13px',color:'#1a1a1a',maxWidth:'760px'}}>
+                            {g.testo}
+                            <div style={{fontSize:'11.5px',color:'#8a8a8a',marginTop:'2px'}}>
+                              {g.righe} {g.righe===1?'rettifica':'rettifiche'} · € {g.euro.toFixed(2)} · {g.esempi.join(', ')}{g.righe>g.esempi.length?'…':''}
+                            </div>
+                          </div>
+                          {g.link && (
+                            <a href={g.link} style={{background:ACCENT,color:'#fff',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' as const}}>
+                              Apri il listino
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {daFare.azioni.length > 6 && (
+                      <button onClick={()=>setTutteAzioni(v=>!v)}
+                        style={{marginTop:'8px',background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'5px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                        {tutteAzioni ? 'Mostra meno' : `Mostra tutte (${daFare.azioni.length})`}
+                      </button>
+                    )}
+                  </>}
+                  {daFare.pronte > 0 && (
+                    <div style={{marginTop:daFare.azioni.length?'10px':0,fontSize:'13px',color:'#166534',fontWeight:600}}>
+                      ✓ {daFare.pronte} {daFare.pronte===1?'rettifica adesso passa':'rettifiche adesso passano'}: il listino è stato sistemato. Ripremi «Carica» sul {daFare.pronte===1?'suo blocco':'loro blocco'}.
+                    </div>
                   )}
                 </div>
               )}
@@ -356,7 +363,9 @@ export default function NetworkRicevutiPage() {
                     <div>
                       <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
                         Da {b.da} · {b.daDecidere.length > 0
-                          ? <><span style={{color:ACCENT}}>{b.daDecidere.length} da caricare</span> · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totaleDaDecidere).toFixed(2)}</span></>
+                          ? <><span style={{color:ACCENT}}>{b.daDecidere.length} da caricare</span> · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totaleDaDecidere).toFixed(2)}</span>
+                            {(() => { const n = b.daDecidere.filter((id:string)=>daFare.righe[id]).length
+                              return n ? <span style={{color:'#dc2626'}}> · ⚠ {n} {n===1?'ferma':'ferme'}: vedi «Cosa devi fare»</span> : null })()}</>
                           : <>{b.righe.length} rettifiche · € {Math.abs(b.totale).toFixed(2)} · <span style={{color:'#999'}}>già decise</span></>}
                       </div>
                       <div style={{fontSize:'12px',color:'#8a8a8a',marginTop:'3px'}}>
@@ -447,7 +456,10 @@ export default function NetworkRicevutiPage() {
                                 // diceva che il costo era rimasto a lui.
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#f3f4f6',color:'#4b5563'}}>✕ Annullata — addebito restituito</span>
                               ) : (
-                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fef3c7',color:'#92400e'}}>Da decidere</span>
+                                <>
+                                  <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fef3c7',color:'#92400e'}}>Da decidere</span>
+                                  {daFare.righe[r.id] && <span style={{display:'block',fontSize:'11px',fontWeight:600,color:'#dc2626',marginTop:'3px'}}>⚠ {daFare.righe[r.id]}</span>}
+                                </>
                               )}
                             </td>
                           </tr>

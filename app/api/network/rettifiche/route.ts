@@ -4,6 +4,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
+import { controllaListiniClienti, daSistemareDaMotivo, type DaSistemare } from '@/lib/network-da-fare'
 
 // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena: su un blocco intero sono
 // centinaia di viaggi al database.
@@ -99,6 +100,8 @@ export async function POST(req: NextRequest) {
 
   if (decisione !== 'propagata') {
     await adminDb.from('rettifiche').update({ propagazione: decisione }).in('id', righe.map((r: any) => r.id))
+    // Decisa: il promemoria di «Cosa devi fare» non serve piu'.
+    await scriviDaSistemare(adminDb, mio, [], new Map(), righe.map((r: any) => r.id))
     return NextResponse.json({ ok: true, assorbite: righe.length, inAttesaSopra: attesaLdv.length })
   }
 
@@ -113,6 +116,15 @@ export async function POST(req: NextRequest) {
   const idFatte: string[] = []      // figlia creata (o già esistente) → 'propagata'
   const idAzzerate: string[] = []   // differenza a zero → 'assorbita'. Tutte le ALTRE saltate NON
                                     // vengono più marcate: restano propagazione=null e ritentabili.
+  // IL MOTIVO RESTA SCRITTO SULLA RIGA (rettifiche.da_sistemare), non solo nel messaggio di risposta. Il 12/11/2026
+  // Ecomize Solution ha caricato 849 righe a blocchi in un'ora: il motivo di 3UW1UHA334029 (listino della cliente fermo
+  // a 5 kg, pacco ripesato 19,85) e' comparso in un messaggio che il «Carica» dopo ha sostituito. Ora la pagina lo
+  // rilegge da qui (riquadro «Cosa devi fare», lib/network-da-fare) finche' la riga non passa.
+  const motivi = new Map<string, DaSistemare>()
+  const salta = (r: any, perche: string, extra: Parameters<typeof daSistemareDaMotivo>[1] = {}) => {
+    saltate.push({ ldv: r.numero_spedizione, perche })
+    motivi.set(r.id, daSistemareDaMotivo(perche, extra))
+  }
 
   // ── TUTTE LE RIGHE IN UN COLPO SOLO ──
   //
@@ -127,10 +139,10 @@ export async function POST(req: NextRequest) {
       // Senza le misure si potrebbe riprezzare col solo peso, ma il supplemento lo fa il VOLUME:
       // meta' delle righe uscirebbe negativa, cioe' un rimborso al posto di un addebito. Meglio
       // dirlo che tirare a indovinare su dei soldi.
-      saltate.push({ ldv: r.numero_spedizione, perche: 'senza le misure ripesate: caricata prima che venissero conservate' })
+      salta(r, 'senza le misure ripesate: caricata prima che venissero conservate')
       return false
     }
-    if (!r.spedizione_id) { saltate.push({ ldv: r.numero_spedizione, perche: 'spedizione non collegata' }); return false }
+    if (!r.spedizione_id) { salta(r, 'spedizione non collegata'); return false }
     return true
   })
   // Si riusa lo STESSO motore del caricamento del file: ricostruisce la catena, legge dai
@@ -152,8 +164,8 @@ export async function POST(req: NextRequest) {
     const r = lavorabili[iRiga]
     const colli = r.colli_ripesati as any[]
     const esito = esiti[iRiga]
-    if (!esito?.trovata) { saltate.push({ ldv: r.numero_spedizione, perche: esito?.motivo || 'spedizione non trovata' }); continue }
-    if (esito.catenaCompleta === false) { saltate.push({ ldv: r.numero_spedizione, perche: 'catena dei listini incompleta' }); continue }
+    if (!esito?.trovata) { salta(r, esito?.motivo || 'spedizione non trovata'); continue }
+    if (esito.catenaCompleta === false) { salta(r, 'catena dei listini incompleta'); continue }
 
     // A CHI: il mio figlio DIRETTO, quello subito prima di me nella catena. Se sotto di me non c'e'
     // nessun master, il destinatario e' il cliente. "Non sono nella catena" (indice -1) non e' "sono
@@ -161,7 +173,7 @@ export async function POST(req: NextRequest) {
     // cliente finale di un ramo che non e' mio.
     const cat = esito.catenaDalBasso || []
     const idx = cat.indexOf(mio)
-    if (idx < 0) { saltate.push({ ldv: r.numero_spedizione, perche: 'non sei nella catena di questa spedizione' }); continue }
+    if (idx < 0) { salta(r, 'non sei nella catena di questa spedizione'); continue }
     const figlio = idx > 0 ? cat[idx - 1] : null
     const liv = figlio
       ? esito.livelli.find(l => l.masterId === figlio)
@@ -169,7 +181,7 @@ export async function POST(req: NextRequest) {
     const fs = Number(r.fuori_sagoma) || 0
     // Senza il livello del figlio non c'e' nulla su cui costruire la figlia (ne' costo ne' il cliente
     // destinatario): resta da decidere, ritentabile.
-    if (!liv) { saltate.push({ ldv: r.numero_spedizione, perche: 'catena/listino del livello sotto non ricostruito: riprova quando sara\' disponibile' }); continue }
+    if (!liv) { salta(r, 'catena/listino del livello sotto non ricostruito: riprova quando sara\' disponibile', { master_id: figlio }); continue }
     // SOLO RECUPERI, MAI RIMBORSI: la RIPESATURA si gira solo se il listino del figlio prezza il collo
     // (dovuto non null) e c'e' qualcosa da recuperare (differenza >= 0.01). Il FUORI SAGOMA invece e'
     // un importo FISSO che per regola scende INVARIATO a prescindere dal listino: se c'e', la figlia
@@ -199,7 +211,13 @@ export async function POST(req: NextRequest) {
         // (visto il 12/09/2026 su BRILLITALIA, Epos Caffè, FEDEL FARMA).
         const pesoFatt = Math.max(Number(esito.pesoDopo) || 0, Number(volumiDelLivello(esito, liv).peso_volume_reale) || 0)
         const quanto = pesoFatt ? pesoFatt.toFixed(1).replace('.', ',') + ' kg' : 'questo peso'
-        saltate.push({ ldv: r.numero_spedizione, perche: `il listino di ${liv.chi || 'questo cliente'} si ferma prima di ${quanto}: il collo ripesato lo supera (o la sua zona non è prevista) → alza l'ultima fascia sul suo listino e ripremi Accetta, passerà.` })
+        // Il motore lascia il dovuto vuoto anche quando il listino del cliente non prezza contrassegno o assicurazione su
+        // quel contratto (lib/ripesature-calcolo): li' «alza l'ultima fascia» manderebbe a cercare un problema che non c'e'.
+        const accessori = /contrassegno|assicurazione/i.test(String((esito as any).motivo || ''))
+        salta(r, accessori
+          ? `il listino di ${liv.chi || 'questo cliente'} non prezza contrassegno o assicurazione su questo contratto → aggiungi il prezzo sul suo listino e ripremi Carica.`
+          : `il listino di ${liv.chi || 'questo cliente'} si ferma prima di ${quanto}: il collo ripesato lo supera (o la sua zona non è prevista) → alza l'ultima fascia sul suo listino e ripremi Carica, passerà.`,
+          { chi: liv.chi || null, cliente_id: figlio ? null : (liv.clienteId || null), master_id: figlio, serve: pesoFatt || null })
         continue
       }
       // Il listino del figlio prezza il collo (differenza != null) ma riprezzando esce <= 0: stesso
@@ -254,7 +272,7 @@ export async function POST(req: NextRequest) {
         // 23505 = l'indice unico ha respinto una seconda propagazione della stessa riga. Voluto.
         if (!error) { create++; if (riga._aZero) aZero++; idFatte.push(r.id) }
         else if (error.code === '23505') { saltate.push({ ldv: r.numero_spedizione, perche: 'gia\' propagata' }); idFatte.push(r.id) }
-        else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); saltate.push({ ldv: r.numero_spedizione, perche: 'non riuscita' }) }
+        else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); salta(r, 'non riuscita') }
       }
     }))
   }
@@ -268,6 +286,7 @@ export async function POST(req: NextRequest) {
   // A BLOCCHI: con migliaia di id un solo .in() diventa una richiesta enorme e il database la rifiuta.
   for (let i = 0; i < idFatte.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', idFatte.slice(i, i + 500))
   for (let i = 0; i < idAzzerate.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'assorbita' }).in('id', idAzzerate.slice(i, i + 500))
+  await scriviDaSistemare(adminDb, mio, lavorabili, motivi, [...idFatte, ...idAzzerate])
 
   const ritentabili = righe.length - idFatte.length - idAzzerate.length
   return NextResponse.json({
@@ -279,4 +298,34 @@ export async function POST(req: NextRequest) {
     scartate,
     inAttesaSopra: attesaLdv.length, dettaglioAttesaSopra: attesaLdv.slice(0, 100),
   })
+}
+
+// Scrive sulle righe non girate il loro motivo (rettifiche.da_sistemare) e lo toglie da quelle decise. Non muove soldi e
+// non cambia lo stato: se la scrittura non riesce si perde solo il promemoria, il «Carica» e' gia' fatto.
+async function scriviDaSistemare(adminDb: any, mio: string, lavorabili: any[], motivi: Map<string, DaSistemare>, decise: string[]) {
+  try {
+    // Per un cliente col listino corto il riquadro dice anche fin dove arriva il listino e in che zona: lo stesso controllo
+    // di «Cosa devi fare», cosi' la frase sulla riga e quella del riquadro sono la stessa.
+    const daRivedere = lavorabili.filter((r: any) => { const m = motivi.get(r.id); return !!m && !!m.cliente_id && m.codice === 'listino_corto' })
+    if (daRivedere.length) {
+      const piu = await controllaListiniClienti(createAdminSupabaseConMemoria(), mio, daRivedere)
+      for (const [id, m] of piu) motivi.set(id, m)
+    }
+    const quando = new Date().toISOString()
+    const gruppi = new Map<string, string[]>()
+    for (const [id, m] of motivi) {
+      const k = JSON.stringify({ ...m, quando })
+      if (!gruppi.has(k)) gruppi.set(k, [])
+      gruppi.get(k)!.push(id)
+    }
+    for (const [k, ids] of gruppi) {
+      for (let i = 0; i < ids.length; i += 500) {
+        const { error } = await adminDb.from('rettifiche').update({ da_sistemare: JSON.parse(k) }).in('id', ids.slice(i, i + 500)).eq('target_master_id', mio)
+        if (error) { console.error('[NETWORK] da_sistemare:', error.message); return }
+      }
+    }
+    for (let i = 0; i < decise.length; i += 500) {
+      await adminDb.from('rettifiche').update({ da_sistemare: null }).in('id', decise.slice(i, i + 500)).not('da_sistemare', 'is', null)
+    }
+  } catch (e: any) { console.error('[NETWORK] da_sistemare:', e?.message) }
 }
