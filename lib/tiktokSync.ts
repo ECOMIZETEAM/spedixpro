@@ -1,5 +1,7 @@
 import { getValidTiktokToken, tiktokRequest } from '@/lib/tiktok'
 import { contaStatiSincronizzati } from '@/lib/shopifySync'
+import { siglaProvincia, SIGLE_IT } from '@/lib/province-it'
+import { CAP_PROVINCIA } from '@/lib/provincia-da-cap'
 
 // Sincronizza gli ordini TikTok Shop da spedire (AWAITING_SHIPMENT) in ordini_ecommerce.
 export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ letti: number; importati: number; spediti: number; daSpedire: number }> {
@@ -60,20 +62,32 @@ export async function sincronizzaOrdiniTiktok(db: any, integr: any): Promise<{ l
   let importati = 0
   for (const o of dettagli) {
     const addr = o.recipient_address || {}
-    // district_info: array {address_level_name, address_name} (region/state/city/district)
-    const parti = (addr.district_info || []).reduce((acc: any, d: any) => {
-      const lvl = (d.address_level_name || '').toLowerCase()
-      if (lvl.includes('state') || lvl.includes('province') || lvl.includes('region')) acc.provincia = d.address_name
-      else if (lvl.includes('city')) acc.citta = d.address_name
-      return acc
-    }, {})
+    // L'INDIRIZZO COME LO DESCRIVE LA GUIDA (Get Order Detail, recipient_address). Fino al 12/11/2026 la via era
+    // full_address, che e' l'indirizzo COMPLETO, con citta' e CAP dentro: sull'etichetta la riga della via li
+    // avrebbe ripetuti, oltre i limiti di lunghezza di alcuni corrieri. La via sta in address_line1/2. Citta' e
+    // provincia stanno in district_info, un livello per voce (L0 paese, poi L1, L2…): la provincia la si cercava
+    // anche fra le REGIONI («Lazio»). Ora si prende il livello provincia (sigla da iso_code o dal nome) e, per
+    // l'Italia, se non e' una sigla valida la si ricava dal CAP, come per gli ordini Amazon (lib/amazonSync).
+    const livelli: any[] = Array.isArray(addr.district_info) ? addr.district_info : []
+    const perNome = (re: RegExp) => livelli.find(d => re.test(String(d?.address_level_name || '')))
+    const perLivello = (l: string) => livelli.find(d => String(d?.address_level || '').toUpperCase() === l)
+    const cap = String(addr.postal_code || addr.zipcode || '').trim()
+    const paese = String(addr.region_code || 'IT').trim().toUpperCase()
+    const livProvincia = perNome(/provinc|county/i) || (paese === 'IT' ? perLivello('L2') : null)
+    let provincia = String(livProvincia?.iso_code || livProvincia?.address_name || '').replace(/^[A-Z]{2}-/, '').trim()
+    if (paese === 'IT') {
+      const s = siglaProvincia(provincia)
+      const dalNome = siglaProvincia(String(livProvincia?.address_name || ''))
+      provincia = SIGLE_IT.has(s) ? s : SIGLE_IT.has(dalNome) ? dalNome : (CAP_PROVINCIA.get(cap) || '')
+    }
+    const livCitta = perNome(/city|town|munic|comune|citt/i) || (paese === 'IT' ? perLivello('L3') : null)
     const destinatario = {
       nome: addr.name || '',
-      indirizzo: addr.full_address || addr.address_detail || addr.address_line1 || '',
-      citta: parti.citta || addr.city || '',
-      provincia: parti.provincia || '',
-      cap: addr.postal_code || addr.zipcode || '',
-      paese: addr.region_code || 'IT',
+      indirizzo: [addr.address_line1, addr.address_line2].filter(Boolean).join(' ') || addr.address_detail || addr.full_address || '',
+      citta: livCitta?.address_name || addr.post_town || addr.city || '',
+      provincia,
+      cap,
+      paese,
       // TikTok maschera l'email del compratore (non la espone): placeholder valido per non far fallire
       // l'etichetta dei corrieri con email obbligatoria. Il tracking al cliente lo fa il nostro sistema.
       email: addr.email || 'noreply@moovexpress.com',

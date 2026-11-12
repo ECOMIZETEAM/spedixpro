@@ -32,11 +32,11 @@ const PLATFORMS: { id: string; nome: string; attivo: boolean; colore: string; do
   { id: 'wix',         nome: 'Wix',          attivo: false, colore: '#000000', dominio: 'wix.com' },
   { id: 'bigcommerce', nome: 'BigCommerce',  attivo: false, colore: '#121118', dominio: 'bigcommerce.com' },
   { id: 'squarespace', nome: 'Squarespace',  attivo: false, colore: '#000000', dominio: 'squarespace.com' },
-  // Temu/TikTok disattivati (non collegabili da qui). Il 26/08/2026 il motivo era il cron, che non li
-  // importava; il ramo c'e' dal 31/08. TikTok resta spento finche' import ed evasione non sono provati su un
-  // negozio vero: fino al 4/11/2026 nessuna delle chiamate dell'evasione era quella della guida. Chi installa
-  // l'app dall'App Store di TikTok si collega comunque, da /api/integrazioni/tiktok/collega.
-  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: false, colore: '#000000', dominio: 'tiktokshop.com' },
+  // TikTok Shop collegabile dal 12/11/2026: app pubblicata sull'App Store di TikTok (10/11), collegamento e
+  // sincronizzazione provati su un negozio di sviluppo. Gli ordini spediti dal venditore e l'evasione si
+  // provano col primo venditore vero (decisione di Lorenzo): il negozio di sviluppo crea solo ordini spediti
+  // da TikTok. Temu resta spento: profilo partner respinto, nessuna app.
+  { id: 'tiktok',      nome: 'TikTok Shop',  attivo: true,  colore: '#000000', dominio: 'tiktokshop.com' },
   { id: 'temu',        nome: 'Temu',         attivo: false, colore: '#fb7701', dominio: 'temu.com' },
   { id: 'storeden',    nome: 'Storeden',     attivo: false, colore: '#e2001a', dominio: 'storeden.com' },
   { id: 'manomano',    nome: 'ManoMano',     attivo: false, colore: '#00817d', dominio: 'manomano.com' },

@@ -86,10 +86,16 @@ export async function evadiOrdineTiktok(o: {
   // Match sul brand. Se non c'è, NON si usa il primo provider a caso (darebbe al compratore l'URL di
   // tracking di un corriere SBAGLIATO): si cerca un generico ("other/altro"), altrimenti l'ordine resta
   // in errore e si ritenta al giro dopo — meglio ritentare che marcare un vettore errato.
-  const match = brand ? providers.find((p: any) => { const n = (p.name || '').toLowerCase(); return n && (n.includes(brand) || brand.includes(n)) }) : null
+  // I corrieri che TikTok accetta in Italia per la spedizione del venditore erano 8 al 12/11/2026 (Spedisci.Online,
+  // Paack, Liccardi, Amazon Shipping, Poste Italiane, GLS, Amazon Logistics, BRT Bartolini), senza nessun
+  // «Altro»: SDA, UPS, DHL, FedEx e InPost non ci sono. SDA si dichiara come Poste Italiane, del cui gruppo fa
+  // parte (decisione di Lorenzo, 12/11/2026); per gli altri l'ordine resta in errore e il venditore lo segna
+  // spedito a mano dal Seller Center.
+  const comeSuTiktok = brand === 'sda' ? 'poste' : brand
+  const match = comeSuTiktok ? providers.find((p: any) => { const n = (p.name || '').toLowerCase(); return n && (n.includes(comeSuTiktok) || comeSuTiktok.includes(n)) }) : null
   const generico = providers.find((p: any) => /\bother\b|general|altro/i.test(p.name || ''))
   const providerId = match?.id || generico?.id
-  if (!providerId) return { ok: false, errore: `corriere ${brand || 'sconosciuto'} non fra quelli ammessi da TikTok per l'ordine` }
+  if (!providerId) return { ok: false, errore: `corriere ${brand || 'sconosciuto'} non accettato da TikTok: segnare spedito a mano dal Seller Center` }
   const spedizione = { tracking_number: tracking, shipping_provider_id: String(providerId) }
 
   const righeOrdine = (ord.line_items || []).map((li: any) => li?.id).filter(Boolean)
