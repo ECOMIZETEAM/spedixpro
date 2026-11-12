@@ -2700,6 +2700,10 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         numeroOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        // Dogana fuori UE e locker InPost: i controlli stanno in lib/dielle (preparaInsSpedDielle).
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
+        codiceLocker: String(body.inpostPointId || body.pointId || '').trim() || undefined,
       })
       const numeroFinale = ris.ldv
 
@@ -2794,7 +2798,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     } catch (err: any) {
       console.error('[CREA][DIELLE]', err?.message)
       await stornaPrenotazione()
-      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+      return NextResponse.json({ error: err?.dielle ? err.message : erroreCorrierePulito(err?.message) }, { status: 400 })
     }
   }
 

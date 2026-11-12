@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import { testoIndicaReso, prioritaStato } from '@/lib/spedisci'
+import { isExtraUe } from '@/lib/paesi-ue'
 
 /* Provider DIELLE / TWS Software (documentazione.twssoftware.it/documentation/dielle/api).
  *
@@ -64,12 +65,45 @@ async function chiama(c: DielleCred, path: string, data: unknown, radice = false
   return { ok: r.ok, status: r.status, j }
 }
 
-// Nazione: la doc vuole ISO 3166-1 alpha-3 (ITA, non IT). Mappa i casi comuni; se già 3 lettere, passa.
-const ISO3: Record<string, string> = { IT: 'ITA', FR: 'FRA', DE: 'DEU', ES: 'ESP', GB: 'GBR', US: 'USA', CH: 'CHE', AT: 'AUT', BE: 'BEL', NL: 'NLD', PT: 'PRT', SM: 'SMR', VA: 'VAT' }
-function nazione(v: string | undefined): string {
-  const s = String(v || 'IT').toUpperCase().trim()
-  return s.length === 3 ? s : (ISO3[s] || 'ITA')
+// Nazione: la doc vuole ISO 3166-1 alpha-3 (ITA, non IT). Tabella COMPLETA: fino al 12/11 c'erano 13
+// paesi e tutti gli altri diventavano "ITA" in silenzio — una spedizione per la Polonia partiva
+// dichiarata Italia. Un codice che non conosciamo ferma la spedizione con un errore, non la indovina.
+const ISO3: Record<string, string> = {
+  AD: 'AND', AE: 'ARE', AF: 'AFG', AG: 'ATG', AI: 'AIA', AL: 'ALB', AM: 'ARM', AO: 'AGO', AQ: 'ATA', AR: 'ARG',
+  AS: 'ASM', AT: 'AUT', AU: 'AUS', AW: 'ABW', AX: 'ALA', AZ: 'AZE', BA: 'BIH', BB: 'BRB', BD: 'BGD', BE: 'BEL',
+  BF: 'BFA', BG: 'BGR', BH: 'BHR', BI: 'BDI', BJ: 'BEN', BL: 'BLM', BM: 'BMU', BN: 'BRN', BO: 'BOL', BQ: 'BES',
+  BR: 'BRA', BS: 'BHS', BT: 'BTN', BV: 'BVT', BW: 'BWA', BY: 'BLR', BZ: 'BLZ', CA: 'CAN', CC: 'CCK', CD: 'COD',
+  CF: 'CAF', CG: 'COG', CH: 'CHE', CI: 'CIV', CK: 'COK', CL: 'CHL', CM: 'CMR', CN: 'CHN', CO: 'COL', CR: 'CRI',
+  CU: 'CUB', CV: 'CPV', CW: 'CUW', CX: 'CXR', CY: 'CYP', CZ: 'CZE', DE: 'DEU', DJ: 'DJI', DK: 'DNK', DM: 'DMA',
+  DO: 'DOM', DZ: 'DZA', EC: 'ECU', EE: 'EST', EG: 'EGY', EH: 'ESH', ER: 'ERI', ES: 'ESP', ET: 'ETH', FI: 'FIN',
+  FJ: 'FJI', FK: 'FLK', FM: 'FSM', FO: 'FRO', FR: 'FRA', GA: 'GAB', GB: 'GBR', GD: 'GRD', GE: 'GEO', GF: 'GUF',
+  GG: 'GGY', GH: 'GHA', GI: 'GIB', GL: 'GRL', GM: 'GMB', GN: 'GIN', GP: 'GLP', GQ: 'GNQ', GR: 'GRC', GS: 'SGS',
+  GT: 'GTM', GU: 'GUM', GW: 'GNB', GY: 'GUY', HK: 'HKG', HM: 'HMD', HN: 'HND', HR: 'HRV', HT: 'HTI', HU: 'HUN',
+  ID: 'IDN', IE: 'IRL', IL: 'ISR', IM: 'IMN', IN: 'IND', IO: 'IOT', IQ: 'IRQ', IR: 'IRN', IS: 'ISL', IT: 'ITA',
+  JE: 'JEY', JM: 'JAM', JO: 'JOR', JP: 'JPN', KE: 'KEN', KG: 'KGZ', KH: 'KHM', KI: 'KIR', KM: 'COM', KN: 'KNA',
+  KP: 'PRK', KR: 'KOR', KW: 'KWT', KY: 'CYM', KZ: 'KAZ', LA: 'LAO', LB: 'LBN', LC: 'LCA', LI: 'LIE', LK: 'LKA',
+  LR: 'LBR', LS: 'LSO', LT: 'LTU', LU: 'LUX', LV: 'LVA', LY: 'LBY', MA: 'MAR', MC: 'MCO', MD: 'MDA', ME: 'MNE',
+  MF: 'MAF', MG: 'MDG', MH: 'MHL', MK: 'MKD', ML: 'MLI', MM: 'MMR', MN: 'MNG', MO: 'MAC', MP: 'MNP', MQ: 'MTQ',
+  MR: 'MRT', MS: 'MSR', MT: 'MLT', MU: 'MUS', MV: 'MDV', MW: 'MWI', MX: 'MEX', MY: 'MYS', MZ: 'MOZ', NA: 'NAM',
+  NC: 'NCL', NE: 'NER', NF: 'NFK', NG: 'NGA', NI: 'NIC', NL: 'NLD', NO: 'NOR', NP: 'NPL', NR: 'NRU', NU: 'NIU',
+  NZ: 'NZL', OM: 'OMN', PA: 'PAN', PE: 'PER', PF: 'PYF', PG: 'PNG', PH: 'PHL', PK: 'PAK', PL: 'POL', PM: 'SPM',
+  PN: 'PCN', PR: 'PRI', PS: 'PSE', PT: 'PRT', PW: 'PLW', PY: 'PRY', QA: 'QAT', RE: 'REU', RO: 'ROU', RS: 'SRB',
+  RU: 'RUS', RW: 'RWA', SA: 'SAU', SB: 'SLB', SC: 'SYC', SD: 'SDN', SE: 'SWE', SG: 'SGP', SH: 'SHN', SI: 'SVN',
+  SJ: 'SJM', SK: 'SVK', SL: 'SLE', SM: 'SMR', SN: 'SEN', SO: 'SOM', SR: 'SUR', SS: 'SSD', ST: 'STP', SV: 'SLV',
+  SX: 'SXM', SY: 'SYR', SZ: 'SWZ', TC: 'TCA', TD: 'TCD', TF: 'ATF', TG: 'TGO', TH: 'THA', TJ: 'TJK', TK: 'TKL',
+  TL: 'TLS', TM: 'TKM', TN: 'TUN', TO: 'TON', TR: 'TUR', TT: 'TTO', TV: 'TUV', TW: 'TWN', TZ: 'TZA', UA: 'UKR',
+  UG: 'UGA', UM: 'UMI', US: 'USA', UY: 'URY', UZ: 'UZB', VA: 'VAT', VC: 'VCT', VE: 'VEN', VG: 'VGB', VI: 'VIR',
+  VN: 'VNM', VU: 'VUT', WF: 'WLF', WS: 'WSM', XK: 'XKX', YE: 'YEM', YT: 'MYT', ZA: 'ZAF', ZM: 'ZMB', ZW: 'ZWE',
 }
+const ISO3_NOTI = new Set(Object.values(ISO3))
+export function nazioneDielle(v: string | undefined): string {
+  const s = String(v || 'IT').toUpperCase().trim()
+  if (s.length === 3 && ISO3_NOTI.has(s)) return s
+  const t = ISO3[s]
+  if (!t) throw avviso(`Paese "${s}" non riconosciuto: indica il codice del paese a due lettere (es. DE, FR, CH).`)
+  return t
+}
+const nazione = nazioneDielle
 
 export type DielleRecapito = {
   ragione_sociale: string
@@ -100,6 +134,12 @@ export type DielleSpedInput = {
   tipoPagamento?: string
   assicurata?: number
   note?: string
+  // Fuori UE la dogana vuole contenuto e valore della merce (export della guida, obbligatorio extra-CEE).
+  contenuto?: string
+  valoreMerce?: number
+  // InPost Locker: codice del locker (la guida lo chiama codice_poste, nel destinatario). Provato il 12/11:
+  // ITAVE040879D → creata; un LOCKER SENZA codice Dielle lo accetta lo stesso, quindi lo fermiamo noi.
+  codiceLocker?: string
 }
 
 const oggiYmd = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}` }
@@ -111,9 +151,55 @@ const recapito = (r: DielleRecapito) => ({
   nazione: nazione(r.nazione), referente: r.referente || '', email: r.email || '', telefono: r.telefono || '',
 })
 
-// Crea la spedizione (/insSped → torna `ldv`). Lancia Error con errorMessage se il provider dà errore.
-export async function creaSpedizioneDielle(c: DielleCred, dati: DielleSpedInput): Promise<{ ldv: string; raw: any }> {
+// I servizi InPost dentro Dielle (codici provati il 12/11): InPost vuole nome e cognome separati e li prende dal
+// `referente` (senza: errore 113), più email e telefono di mittente E destinatario.
+const SERVIZI_INPOST = new Set(['LOCKER', 'HOMEDELIVERY'])
+const ISO2_DA_ISO3: Record<string, string> = Object.fromEntries(Object.entries(ISO3).map(([a, b]) => [b, a]))
+const cifre = (t?: string) => String(t || '').replace(/\D/g, '')
+// I NOSTRI controlli escono al cliente così come sono (flag `dielle`, come `ecosmos` in lib/ecosmos):
+// erroreCorrierePulito è fatto per i testi dei fornitori e li stravolgeva ("serve l'email del
+// destinatario" diventava "Indirizzo non valido: controlla nome, indirizzo, città…").
+const avviso = (testo: string): Error => Object.assign(new Error(testo), { dielle: true })
+
+// Il corpo di /insSped, con i controlli che il fornitore non fa o fa con errori poco chiari. Separata dalla
+// chiamata così si può verificare senza creare spedizioni. Lancia Error col messaggio per il cliente.
+export function preparaInsSpedDielle(dati: DielleSpedInput): any {
   const pesoTot = dati.colli.reduce((s, p) => s + (Number(p.peso) || 0), 0)
+  const servizio = String(dati.servizio || '').trim().toUpperCase()
+  const inpost = SERVIZI_INPOST.has(servizio)
+  const nazDest = nazione(dati.destinatario.nazione)
+  const estero = nazDest !== 'ITA'
+  const mitt: DielleRecapito = { ...dati.mittente }
+  const dest: DielleRecapito = { ...dati.destinatario }
+  // REFERENTE sempre: DHL lo vuole anche in Italia (senza, il 12/11 DHL Espresso Avellino→Roma rispondeva
+  // "Errore nella richiesta di XML"; col referente è passata), la guida lo vuole per l'estero e InPost ci
+  // prende nome e cognome. Se il modulo non lo ha, è il nome di mittente/destinatario.
+  mitt.referente = (mitt.referente || mitt.ragione_sociale || '').trim()
+  dest.referente = (dest.referente || dest.ragione_sociale || '').trim()
+  // ESTERO: la guida vuole anche il telefono di entrambi (la prova verso la Germania del 12/11 è passata
+  // così, senza dati doganali). INPOST: telefono ed email.
+  if (estero || inpost) {
+    if (cifre(mitt.telefono).length < 6) throw avviso(`Per ${inpost ? 'InPost' : 'le spedizioni all\'estero'} serve il telefono del mittente.`)
+    if (cifre(dest.telefono).length < 6) throw avviso(`Per ${inpost ? 'InPost' : 'le spedizioni all\'estero'} serve il telefono del destinatario.`)
+  }
+  if (inpost) {
+    if (!String(mitt.email || '').includes('@')) throw avviso('Per InPost serve l\'email del mittente.')
+    if (!String(dest.email || '').includes('@')) throw avviso('Per InPost serve l\'email del destinatario.')
+    if (servizio === 'LOCKER' && !String(dati.codiceLocker || '').trim()) throw avviso('Per la consegna in un locker InPost va indicato il locker del destinatario.')
+  }
+  // FUORI UE: dogana. Il valore col PUNTO ("50.00"): con la virgola, come i pesi, il fornitore risponde
+  // "formato valore spedizione non corretto" (provato il 12/11 verso la Svizzera).
+  // Gli oneri doganali li paga il DESTINATARIO ('D'): con 'M' li fatturerebbe il fornitore
+  // al detentore del contratto, e nessuno li riaddebiterebbe al cliente.
+  let exportData: any = null
+  if (estero && isExtraUe(ISO2_DA_ISO3[nazDest])) {
+    const contenuto = String(dati.contenuto || '').trim()
+    const valore = Number(dati.valoreMerce || 0)
+    if (!contenuto) throw avviso('Per le spedizioni fuori dall\'Unione Europea serve il contenuto della merce (dogana).')
+    if (!(valore > 0)) throw avviso('Per le spedizioni fuori dall\'Unione Europea serve il valore della merce (dogana).')
+    exportData = { valuta: 'EUR', contenuto: contenuto.slice(0, 100), tipoContenuto: contenuto.slice(0, 100), valoreSpedizione: valore.toFixed(2), addebitoOneri: 'D', tipoImballo: 'BOX' }
+  }
+
   // OPZIONI solo se valorizzate: Dielle rifiuta i campi vuoti (verificato — un `importoContrassegno`/
   // `tipoPagamento` vuoto dà errorCode 119 "metodo di pagamento e importo devono essere entrambi
   // valorizzati per spedizioni in contrassegno", anche senza contrassegno). E se c'è il contrassegno,
@@ -124,19 +210,28 @@ export async function creaSpedizioneDielle(c: DielleCred, dati: DielleSpedInput)
   if (dati.codiceServizio) opzioni.codiceServizio = dati.codiceServizio
   if (dati.accessorioCrono) opzioni.accessorio_crono = dati.accessorioCrono
 
+  const destinatario: any = recapito(dest)
+  if (servizio === 'LOCKER' && dati.codiceLocker) destinatario.codice_poste = String(dati.codiceLocker).trim()
   const data: any = {
     tipoSpedizione: dati.tipoSpedizione || 'Standard',
     servizio: dati.servizio,
     dataSpedizione: dati.dataSpedizione || oggiYmd(),
-    mittente: recapito(dati.mittente),
-    destinatario: recapito(dati.destinatario),
+    mittente: recapito(mitt),
+    destinatario,
     numerocolli: String(dati.colli.length),
     pesocolli: due(pesoTot),
     colli: dati.colli.map(p => ({ altezza: String(p.altezza ?? ''), larghezza: String(p.larghezza ?? ''), profondita: String(p.profondita ?? ''), peso: due(p.peso) })),
   }
   if (dati.numeroOrdine) data.numeroOrdine = dati.numeroOrdine
   if (Object.keys(opzioni).length) data.opzioni = opzioni
+  if (exportData) data.export = exportData
   if (dati.note) data.note = dati.note
+  return data
+}
+
+// Crea la spedizione (/insSped → torna `ldv`). Lancia Error con errorMessage se il provider dà errore.
+export async function creaSpedizioneDielle(c: DielleCred, dati: DielleSpedInput): Promise<{ ldv: string; raw: any }> {
+  const data = preparaInsSpedDielle(dati)
   const { ok, status, j } = await chiama(c, 'insSped', data)
   if (!ok) throw new Error(j?.errorMessage || j?.error || `Dielle: errore ${status}`)
   if (j?.errorCode || !j?.ldv) throw new Error(j?.errorMessage || 'Dielle: creazione non riuscita')

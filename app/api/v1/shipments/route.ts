@@ -720,6 +720,10 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         numeroOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        // Dogana fuori UE e locker InPost: i controlli stanno in lib/dielle (preparaInsSpedDielle).
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        valoreMerce: Number(body.valoreMerce ?? body.declaredValue ?? 0) || undefined,
+        codiceLocker: String(body.inpostPointId || body.pointId || '').trim() || undefined,
       })
       numero = risDl.ldv
       costoCorrente = 0
@@ -727,7 +731,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       raw = { _dielle: true, ldv: numero, ambiente: credDl.ambiente }
     } catch (e: any) {
       console.error('[V1][DIELLE]', e?.message)
-      return errore(erroreCorrierePulito(e?.message))
+      return errore(e?.dielle ? e.message : erroreCorrierePulito(e?.message))
     }
   } else if (corriere.tipo === 'ecosmos') {
     // ECOSMOS (corriere elettrico di Roma): diretto, contratto proprio del master (lib/ecosmos.ts). Una LDV
