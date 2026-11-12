@@ -50,6 +50,13 @@ create index if not exists idx_accessi_falliti_email_quando on public.accessi_fa
 alter table public.accessi_falliti enable row level security;
 revoke all on public.accessi_falliti from public, anon, authenticated;
 
+-- Le tre tabelle le usa SOLO il servizio interno (accessi, "entra come", pagina del codice): i permessi
+-- si scrivono qui, non si lasciano ai permessi di default. Sul ramo di prova il 12/11 le tabelle nuove
+-- nascevano senza lettura e scrittura per service_role, e "entra come" falliva ("permission denied").
+grant select on public.sicurezza_impostazioni to service_role;
+grant select, insert, delete on public.sessioni_entra_come to service_role;
+grant select, insert, delete on public.accessi_falliti to service_role;
+
 -- 4. La sessione di chi fa la richiesta puo' leggere e scrivere?
 create or replace function public.sessione_verificata()
  returns boolean
