@@ -19,7 +19,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 // Il sanificatore dei messaggi del corriere ora sta in lib/errore-corriere.ts: lo usano anche
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
-import { erroreCorrierePulito } from '@/lib/errore-corriere'
+import { erroreCorrierePulito, MSG_PONTE_NON_REGISTRATA } from '@/lib/errore-corriere'
 import { stampaMittenteSpedizione } from '@/lib/etichetta-mittente'
 // Con quale citta' si prezza e quanto paga il cliente: due decisioni che stavano scritte qui dentro
 // e che ora condivide l'anteprima dei prezzi (import e ordini dei negozi). Una regola, due porte.
@@ -3289,8 +3289,8 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     // prezzo W. È un provider a COSTO ESTERNO come Spedisci.online: costoCorrente = W (NON 0 come i diretti),
     // così la cascata lo usa come base e ci marca sopra il ricarico del compratore. A più salti funziona da
     // sé: il venditore può essere a sua volta un compratore, e ogni livello addebita col W del livello sotto.
-    // ATTENZIONE: niente annullo via API al volo (lo gestisce il ciclo di vita a webhook) → su insertError si
-    // risponde col numero, come gli altri provider senza annullo.
+    // Se la riga non si scrive dopo che la LDV e' nata, si riprova e poi si annullano le gambe con lo storno
+    // e il credito torna (lib/ponte-testa, lib/ponte-orfane): vedi sotto, al momento dell'insert.
     // CONDIVISIONE: la chiave di dispatch NON è quella del ponte dell'ORIGINANTE (può essere una COPIA colata
     // giù per l'albero = fuga credenziale), ma quella del PRIMO detentore-CODICE risalendo la catena
     // (risolviChiaveDispatch, via corrieri_condivisi). Verificato sui dati: per i ponti attivi è la STESSA
@@ -3347,7 +3347,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
           etichetta_url: etichettaUrl,   // una LDV, un PDF per l'intera spedizione
         }))
 
-      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+      const rigaTesta = {
         master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
         numero: numeroFinale,
         mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
@@ -3373,15 +3373,29 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
         note: body.notes || null, contenuto: body.contenuto || null,
         rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
-      }).select('id').single()
-
-      if (insertError) {
-        console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, insertError.message)
+      }
+      // La LDV dal venditore c'e' gia': se la riga non si scrive si riprova, e se proprio non va si chiude
+      // subito (lib/ponte-testa, regola di Lorenzo del 12/11/2026).
+      const { scriviTestaPonte } = await import('@/lib/ponte-testa')
+      const testa = await scriviTestaPonte(adminCrea, () => supabase.from('spedizioni').insert(rigaTesta).select('id').single(), numeroFinale, scadenzaPonte)
+      if (testa.adottata) console.warn('[CREA][MOOVEXPRESS][INSERT] riga gia\' scritta dal primo tentativo, adottata', numeroFinale)
+      if (!testa.id) {
+        console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, testa.errore)
+        // Le gambe del pacco si annullano adesso, con lo storno a ogni livello, e il credito del cliente torna.
+        // Solo se il pacco risulta davvero senza la spedizione del cliente: se non si riesce a leggerlo non si
+        // tocca niente, e restano la sentinella e il giro delle prenotazioni scadute.
+        const { annullaPaccoOrfano } = await import('@/lib/ponte-orfane')
+        const chiuso = await annullaPaccoOrfano(adminCrea, numeroFinale).catch(() => null)
+        if (chiuso) {
+          await stornaPrenotazione()
+          return NextResponse.json({ error: MSG_PONTE_NON_REGISTRATA }, { status: 400 })
+        }
         return NextResponse.json({
           error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale}.`,
           numero: numeroFinale,
         }, { status: 500 })
       }
+      const inserted = { id: testa.id }
 
       await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
       try {

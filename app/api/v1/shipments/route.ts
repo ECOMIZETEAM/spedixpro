@@ -6,7 +6,7 @@ import { registraMovimento, descrizioneSpedizione } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
 import { inviaWebhook } from '@/lib/webhooks'
-import { erroreCorrierePulito, MSG_TENTATIVO_IN_ANNULLO, MSG_PONTE_NON_CONCLUSO } from '@/lib/errore-corriere'
+import { erroreCorrierePulito, MSG_TENTATIVO_IN_ANNULLO, MSG_PONTE_NON_CONCLUSO, MSG_PONTE_NON_REGISTRATA } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { erroreIndirizzoItaliano, cittaPerLaSpedizione } from '@/lib/citta-spedizione'
 import { spedizioneDoppioneAttiva, messaggioDoppione, doppioneSenzaTesta } from '@/lib/guardia-doppione'
@@ -976,7 +976,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   // unico, e serve condiviso: il tracking a salire interroga il venditore con quel numero). La LDV pulita
   // resta così libera per il compratore FINALE (master reale), che la vede come suo numero.
   const numeroDb = (cliente as any)?.ledger && numero ? `${numero}-${String(ctx.clienteId).slice(0, 8)}` : numero
-  const { data: inserted, error: insErr } = await admin.from('spedizioni').insert({
+  const riga = {
     master_id: masterId, cliente_id: ctx.clienteId, corriere_id: corriere.id, numero: numeroDb,
     mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_presso: pressoFrom || null, mitt_citta: body.shipFrom.city,
     mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
@@ -1017,7 +1017,30 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     data_ritiro: ritiroPrenotato ? _dataRitiro : null,
     intervallo_ritiro: ritiroPrenotato ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
     canale: 'api',
-  }).select('id').single()
+  }
+  const scriviRiga = () => admin.from('spedizioni').insert(riga).select('id').single()
+  let inserted: any = null, insErr: any = null
+  if (corriere.tipo === 'moovexpress' && numero) {
+    // PONTE: la LDV dal venditore c'e' gia', quindi si riprova e si guarda se la riga e' gia' scritta
+    // (lib/ponte-testa, regola di Lorenzo del 12/11/2026).
+    const { scriviTestaPonte } = await import('@/lib/ponte-testa')
+    const testa = await scriviTestaPonte(admin, scriviRiga, numeroDb, scadenza)
+    if (testa.adottata) console.warn('[V1][MOOVEXPRESS][INSERT] riga gia\' scritta dal primo tentativo, adottata', numeroDb)
+    if (testa.id) inserted = { id: testa.id }
+    else insErr = { message: testa.errore || 'riga non scritta' }
+  } else {
+    const r = await scriviRiga()
+    inserted = r.data; insErr = r.error
+  }
+  // PONTE: se la riga non si scrive, le gambe sotto si annullano adesso con lo storno, e il credito torna,
+  // a chi integra e a ogni salto sopra (che riceve un 400). Solo se il pacco risulta davvero senza la
+  // spedizione di chi l'ha chiesta: altrimenti resta la risposta di sempre, qui sotto.
+  if (insErr && corriere.tipo === 'moovexpress' && numero) {
+    const { annullaPaccoOrfano } = await import('@/lib/ponte-orfane')
+    const chiuso = await annullaPaccoOrfano(admin, numero).catch(() => null)
+    console.error('[V1][MOOVEXPRESS][INSERT]', numero, insErr.message, chiuso ? `gambe: ${chiuso.esito}` : 'pacco non verificato: nessun annullo')
+    if (chiuso) return errore(MSG_PONTE_NON_REGISTRATA, 400)
+  }
   // Qui NON si storna: il pacco dal corriere esiste gia' e va pagato. Il messaggio del database
   // (tabelle, colonne, vincoli) non esce: descrive la nostra struttura interna a chi si integra.
   // Eccezione GLS diretto, come nel portale: prima della chiusura di sera la spedizione non e' ancora

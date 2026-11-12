@@ -89,38 +89,54 @@ export async function sentinellaOrfanePonte(
 
   const esiti: EsitoOrfana[] = []
   for (const trk of orfani) {
-    try {
-      // Si riguarda subito prima di toccarlo: e' lo stesso controllo della guardia doppione.
-      if (!await doppioneSenzaTesta(admin, trk)) continue
-      const gambe = await risolviGambeSpedizione(admin, trk)
-      if (!gambe.length) continue
-      const numeri = gambe.map(g => g.numero)
-      const contratto = gambe.some(g => g.tipo === 'poste') ? 'poste' : gambe.some(g => g.tipo === 'gls') ? 'gls' : (gambe[gambe.length - 1]?.tipo || '?')
-
-      if (contratto === 'poste') {
-        const p = await paccoPartito(admin, gambe)
-        if (p.partito) { esiti.push({ tracking: trk, gambe: numeri, contratto, esito: 'partita', motivo: 'il pacco risulta affidato al corriere' }); continue }
-        if (opz.simula) { esiti.push({ tracking: trk, gambe: numeri, contratto, esito: 'simulata' }); continue }
-        await annullaPaccoPoste(admin, gambe, { richiestoAt: new Date().toISOString(), da: null })
-        esiti.push({ tracking: trk, gambe: numeri, contratto, esito: 'annullata' })
-      } else if (contratto === 'gls') {
-        if (opz.simula) { esiti.push({ tracking: trk, gambe: numeri, contratto, esito: 'simulata' }); continue }
-        const r = await annullaPaccoGls(admin, gambe, { da: null })
-        esiti.push(r.ok
-          ? { tracking: trk, gambe: numeri, contratto, esito: 'annullata' }
-          : { tracking: trk, gambe: numeri, contratto, esito: 'da_gestire', motivo: r.motivo })
-      } else {
-        esiti.push({ tracking: trk, gambe: numeri, contratto, esito: 'da_gestire', motivo: `contratto ${contratto}: nessun annullo automatico sui pacchi condivisi` })
-      }
-    } catch (e: any) {
-      esiti.push({ tracking: trk, gambe: [], contratto: '?', esito: 'errore', motivo: e?.message || String(e) })
-    }
-  }
-
-  for (const e of esiti) {
-    const riga = `[PONTE][ORFANE] ${e.tracking} (${e.contratto}) ${e.esito}${e.motivo ? ': ' + e.motivo : ''} — gambe ${e.gambe.join(', ')}`
-    if (e.esito === 'annullata' || e.esito === 'simulata') console.warn(riga)
-    else console.error(riga)
+    const e = await annullaPaccoOrfano(admin, trk, { simula: opz.simula })
+    if (e) esiti.push(e)
   }
   return { esaminate: elenco.length, orfane: esiti }
+}
+
+// UN PACCO SENZA LA SPEDIZIONE DEL CLIENTE, annullato su tutte le gambe con lo storno a ogni livello. E' la
+// strada della sentinella, e la usano anche le porte (portale e API) quando la riga del cliente non si
+// riesce a scrivere dopo che il ponte ha gia' comprato la LDV: si chiude subito, senza aspettare 20 minuti
+// (382343J004713, 12/11/2026: insert caduto per statement timeout, gambe annullate dalla sentinella mezz'ora
+// dopo, credito del cliente trattenuto per 20 minuti).
+// Torna null se il pacco ha la spedizione del cliente o se non si riesce a leggerlo: in quel caso non si
+// tocca niente. Chi chiama non deve dare la spedizione per non nata.
+export async function annullaPaccoOrfano(admin: any, trk: string, opz: { simula?: boolean } = {}): Promise<EsitoOrfana | null> {
+  let esito: EsitoOrfana | null = null
+  try {
+    // Si riguarda subito prima di toccarlo: e' lo stesso controllo della guardia doppione.
+    if (!await doppioneSenzaTesta(admin, trk)) return null
+    const gambe = await risolviGambeSpedizione(admin, trk)
+    if (!gambe.length) return null
+    const numeri = gambe.map(g => g.numero)
+    const contratto = gambe.some(g => g.tipo === 'poste') ? 'poste' : gambe.some(g => g.tipo === 'gls') ? 'gls' : (gambe[gambe.length - 1]?.tipo || '?')
+
+    if (contratto === 'poste') {
+      const p = await paccoPartito(admin, gambe)
+      if (p.partito) esito = { tracking: trk, gambe: numeri, contratto, esito: 'partita', motivo: 'il pacco risulta affidato al corriere' }
+      else if (opz.simula) esito = { tracking: trk, gambe: numeri, contratto, esito: 'simulata' }
+      else {
+        await annullaPaccoPoste(admin, gambe, { richiestoAt: new Date().toISOString(), da: null })
+        esito = { tracking: trk, gambe: numeri, contratto, esito: 'annullata' }
+      }
+    } else if (contratto === 'gls') {
+      if (opz.simula) esito = { tracking: trk, gambe: numeri, contratto, esito: 'simulata' }
+      else {
+        const r = await annullaPaccoGls(admin, gambe, { da: null })
+        esito = r.ok
+          ? { tracking: trk, gambe: numeri, contratto, esito: 'annullata' }
+          : { tracking: trk, gambe: numeri, contratto, esito: 'da_gestire', motivo: r.motivo }
+      }
+    } else {
+      esito = { tracking: trk, gambe: numeri, contratto, esito: 'da_gestire', motivo: `contratto ${contratto}: nessun annullo automatico sui pacchi condivisi` }
+    }
+  } catch (e: any) {
+    esito = { tracking: trk, gambe: [], contratto: '?', esito: 'errore', motivo: e?.message || String(e) }
+  }
+  if (!esito) return null
+  const riga = `[PONTE][ORFANE] ${esito.tracking} (${esito.contratto}) ${esito.esito}${esito.motivo ? ': ' + esito.motivo : ''} — gambe ${esito.gambe.join(', ')}`
+  if (esito.esito === 'annullata' || esito.esito === 'simulata') console.warn(riga)
+  else console.error(riga)
+  return esito
 }

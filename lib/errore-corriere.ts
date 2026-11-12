@@ -6,14 +6,17 @@
 // "Operazione non supportata dal provider KSync" tale e quale.
 const NOMI_FORNITORI = /spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|easy\s*parcel|api\.easyparcel\.it|\bdva\b|k\s*sync(wrapper)?|parcel\s*pilot|parcelpilot\.it/gi
 
-// I DUE ESITI DEL PONTE DI CONDIVISIONE CHE NON VENGONO DA UN CORRIERE, MA DA NOI. Attraversano uno o due
+// GLI ESITI DEL PONTE DI CONDIVISIONE CHE NON VENGONO DA UN CORRIERE, MA DA NOI. Attraversano uno o due
 // salti (cliente → Wave → LOGIXIA) e a ogni salto passano da erroreCorrierePulito: senza la regola qui sotto
 // diventavano "Il corriere non può gestire questa spedizione (…" tagliati a 120 caratteri, come il 9/11/2026
 // il messaggio della guardia doppione arrivava al cliente con il numero della gamba di LOGIXIA.
-// Testi decisi da Lorenzo (9/11/2026).
+// Testi decisi da Lorenzo (9/11 e 12/11/2026).
 export const MSG_PONTE_NON_CONCLUSO = 'Il corriere non ha risposto in tempo: la spedizione non è stata creata e il credito non è stato scalato. Riprova fra qualche minuto.'
 export const MSG_TENTATIVO_IN_ANNULLO = 'Il tentativo precedente di questo ordine non si è concluso: lo stiamo annullando, riprova fra 15 minuti.'
-const MSG_PONTE = [MSG_PONTE_NON_CONCLUSO, MSG_TENTATIVO_IN_ANNULLO]
+// La LDV era nata ma la riga della spedizione non si e' scritta: le gambe si annullano e il credito torna.
+// Prima: «creata sul corriere ma non registrata, contatta l'assistenza», senza storno (12/11/2026).
+export const MSG_PONTE_NON_REGISTRATA = 'Spedizione non creata per un errore temporaneo: il credito è stato restituito. Riprova.'
+const MSG_PONTE = [MSG_PONTE_NON_CONCLUSO, MSG_TENTATIVO_IN_ANNULLO, MSG_PONTE_NON_REGISTRATA]
 
 // SVINCOLO GIACENZA: l'errore del corriere arrivava all'utente come JSON grezzo
 // ('release : {"processId":"<jmkc…>","error":{"id":"err_…","status":500,…}}') — illeggibile e
