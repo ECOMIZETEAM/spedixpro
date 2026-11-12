@@ -20,6 +20,7 @@ export const dynamic = 'force-dynamic'
 // giro sul callback.
 
 const torna = (req: NextRequest, codice: string) => NextResponse.redirect(new URL(`/cliente/integrazioni?amazon=${codice}`, req.url), 303)
+const haVerifica = (user: any) => (user?.factors || []).some((f: any) => f.status === 'verified')
 
 async function chiEntra() {
   const supabase = await createServerSupabase()
@@ -64,6 +65,9 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.redirect(new URL('/cliente?error=amazon_accedi', req.url))
   if (!cli) return nonCliente()
   if (cli.demo) return inProva()
+  // Senza verifica in due passaggi Amazon non si collega (politica Amazon 1.4.1): si attiva e si torna
+  // su questa stessa pagina, con i parametri di Amazon, per finire il collegamento.
+  if (!haVerifica(user)) return NextResponse.redirect(new URL(`/accesso/verifica?dopo=${encodeURIComponent(url.pathname + url.search)}`, req.url))
 
   const nascosto = (n: string, v: string) => `<input type="hidden" name="${n}" value="${esc(v)}">`
   return paginaAmazon('Collegare Amazon a MoovExpress', `
@@ -90,6 +94,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.redirect(new URL('/cliente?error=amazon_accedi', req.url), 303)
   if (!cli) return nonCliente()
   if (cli.demo) return inProva()
+  if (!haVerifica(user)) return torna(req, 'verifica')
   if (!gettoneValido(gettone, user.id, statoAmazon)) return torna(req, 'scaduto')
 
   const state = crypto.randomBytes(24).toString('hex')

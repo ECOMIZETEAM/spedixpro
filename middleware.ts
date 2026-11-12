@@ -87,7 +87,12 @@ export async function middleware(req: NextRequest) {
     if (!senzaVerifica) {
       const { data: verificata, error: vErr } = await sb.rpc('sessione_verificata')
       if (bloccataDallaVerifica(vErr) || verificata === false) {
-        const no = NextResponse.json({ error: 'Per continuare serve il codice della verifica in due passaggi.', codice: CODICE_VERIFICA }, { status: 403 })
+        // Un link aperto nel browser (entra come, l'arrivo da Seller Central) va alla pagina del codice
+        // e poi torna qui; una chiamata della pagina riceve la risposta da leggere.
+        const navigazione = req.method === 'GET' && (req.headers.get('accept') || '').includes('text/html')
+        const no = navigazione
+          ? NextResponse.redirect(new URL(`${PAGINA_VERIFICA}?dopo=${encodeURIComponent(pathname + req.nextUrl.search)}`, req.url))
+          : NextResponse.json({ error: 'Per continuare serve il codice della verifica in due passaggi.', codice: CODICE_VERIFICA }, { status: 403 })
         risposta.cookies.getAll().forEach((c) => no.cookies.set(c))
         return no
       }

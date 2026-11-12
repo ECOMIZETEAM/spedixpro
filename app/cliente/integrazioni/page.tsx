@@ -114,6 +114,7 @@ export default function IntegrazioniPage() {
       scambio: { type: 'err', text: 'Amazon non ha confermato il collegamento. Riprova tra qualche minuto; se si ripete, contatta l\'assistenza.' },
       salvataggio: { type: 'err', text: 'Collegamento Amazon non salvato. Riprova; se si ripete, contatta l\'assistenza.' },
       non_avviato: { type: 'err', text: 'Collegamento Amazon non avviato. Riprova tra qualche minuto.' },
+      verifica: { type: 'err', text: 'Per collegare Amazon attiva prima la verifica in due passaggi (Impostazioni → Cambia password), poi riprova.' },
     }
     setMsg(FRASI[esito] || FRASI.non_valido)
     sp.delete('amazon')
@@ -152,6 +153,8 @@ export default function IntegrazioniPage() {
       const res = await fetch('/api/integrazioni/amazon/install', { method: 'POST' })
       const d = await res.json().catch(() => ({}))
       if (res.ok && d.url) { window.location.href = d.url; return }
+      // Senza verifica in due passaggi Amazon non si collega: si attiva e si torna qui.
+      if (d.codice === 'verifica_richiesta') { window.location.href = '/accesso/verifica?dopo=%2Fcliente%2Fintegrazioni'; return }
       closeModal()
       setMsg({ type: 'err', text: d.error || 'Collegamento Amazon non avviato' })
     } catch {

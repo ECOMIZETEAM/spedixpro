@@ -21,6 +21,12 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()
   if (utente?.ruolo !== 'cliente' || !utente?.cliente_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // Chi collega Amazon deve avere la verifica in due passaggi attiva, anche prima che diventi
+  // obbligatoria per tutti: i dati dei compratori Amazon si vedono solo con il codice (politica
+  // Amazon 1.4.1). La pagina lo manda ad attivarla e poi lo riporta qui.
+  if (!(user.factors || []).some((f: any) => f.status === 'verified')) {
+    return NextResponse.json({ error: 'Per collegare Amazon attiva prima la verifica in due passaggi.', codice: 'verifica_richiesta' }, { status: 409 })
+  }
   // Senza le chiavi dell'app Amazon (e senza la chiave che cifra i token) il collegamento non parte:
   // un token Amazon non deve mai finire nel database in chiaro.
   if (!amazonConfigurato()) return NextResponse.json({ error: 'Amazon non configurato' }, { status: 503 })
