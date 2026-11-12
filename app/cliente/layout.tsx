@@ -2,7 +2,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import ClienteShell from './ClienteShell'
 import BannerPiano from '../components/BannerPiano'
-import BannerNovitaShopify from '../components/BannerNovitaShopify'
+import BannerNovitaTiktok from '../components/BannerNovitaTiktok'
 import AvvisoApi from './AvvisoApi'
 import EsitoCollegamento from './EsitoCollegamento'
 import { DialogProvider } from '../components/DialogProvider'
@@ -43,8 +43,8 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   // Stessa fonte del portale master (masters.logo_url/nome del master diretto); fallback a MoovExpress
   // se il master non ha caricato un logo/nome.
   let brandLogo: string | null = null, brandNome: string | null = null
-  // Il cliente di un master di prova non puo' collegare Shopify (verificaContoCliente in lib/shopifyCollega):
-  // a lui l'annuncio non si mostra.
+  // Il cliente di un master di prova non puo' collegare un negozio (verificaContoCliente in lib/shopifyCollega,
+  // usata anche da TikTok): a lui l'annuncio non si mostra.
   let masterDemo = false
   if (utente.master_id) {
     const { data: m } = await supabase.from('masters').select('logo_url,nome,demo').eq('id', utente.master_id).maybeSingle()
@@ -94,7 +94,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   return (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}
       completaDati={completaDati} versioneDati={versioneDati} contattoAiuto={contattoAiuto} soloEtichette={soloEtichette}>
-      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano />{!masterDemo && <BannerNovitaShopify per="cliente" />}<EsitoCollegamento />{children}</DialogProvider>
+      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano />{!masterDemo && <BannerNovitaTiktok per="cliente" />}<EsitoCollegamento />{children}</DialogProvider>
     </ClienteShell>
   )
 }

@@ -4,7 +4,7 @@ import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
 import AbbonamentoGate from './AbbonamentoGate'
 import BannerPiano from '../components/BannerPiano'
-import BannerNovitaShopify from '../components/BannerNovitaShopify'
+import BannerNovitaTiktok from '../components/BannerNovitaTiktok'
 import AvvisoImportante from './AvvisoImportante'
 import CongelatoGate from './CongelatoGate'
 import BannerDemo from '../components/BannerDemo'
@@ -77,9 +77,9 @@ export default async function Layout({ children }: { children: React.ReactNode }
         {!demo && <CongelatoGate />}
         {!demo && <AvvisoImportante />}
         {!demo && <BannerPiano linkUpgrade="/dashboard/abbonamento" />}
-        {/* L'annuncio Shopify e' per chi gestisce il portale e i clienti: non per agenti e autisti, ne' per le
-            prove demo, i cui clienti Shopify non lo possono collegare. */}
-        {!demo && ['master', 'admin', 'operatore'].includes(String(utente?.ruolo || '').toLowerCase()) && <BannerNovitaShopify per="master" />}
+        {/* L'annuncio TikTok Shop (prima quello Shopify) e' per chi gestisce il portale e i clienti: non per agenti
+            e autisti, ne' per le prove demo, i cui clienti un negozio non lo possono collegare. */}
+        {!demo && ['master', 'admin', 'operatore'].includes(String(utente?.ruolo || '').toLowerCase()) && <BannerNovitaTiktok per="master" />}
         {children}
       </DialogProvider>
     </DashboardLayout>
