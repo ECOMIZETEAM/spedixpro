@@ -331,8 +331,10 @@ export default function IntegrazioniPage() {
                     )}
                     {/* Negozio collegato e funzionante, ma con qualcosa da sistemare (permessi della
                         chiave, ultima sincronizzazione non riuscita): prima restava scritto
-                        sull'integrazione e nessuno lo vedeva, perche' si mostrava solo a negozio in errore. */}
-                    {it.stato === 'attivo' && it.piattaforma === 'prestashop' && it.errore && (
+                        sull'integrazione e nessuno lo vedeva, perche' si mostrava solo a negozio in errore.
+                        Anche WooCommerce: hard2Buff (12/11/2026) aveva la sync ferma per Cloudflare e la
+                        pagina non diceva niente. */}
+                    {it.stato === 'attivo' && (it.piattaforma === 'prestashop' || it.piattaforma === 'woocommerce') && it.errore && (
                       <div style={{ fontSize: '11.5px', color: '#b45309', marginTop: '2px', lineHeight: 1.45 }}>⚠ {it.errore}</div>
                     )}
                     {/* Il motivo si mostrava solo con stato 'errore': il negozio disinstallato compariva
