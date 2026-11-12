@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import SelectCercabile from '@/app/components/SelectCercabile'
+import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
 
 // CHECK RICARICHE — monitoraggio bonifici delle ricariche manuali (contabilita' + anti-truffa).
 // Ogni ricarica manuale a un cliente/sotto-master compare qui: si segna "bonifico effettuato" e poi
@@ -15,6 +17,12 @@ const btnSec: any = { background: '#fff', color: '#555', border: '1px solid #d5d
 
 const METODO: Record<string, string> = { cod_compensati: '🔁 Contrassegni compensati', contanti: '💵 Contanti', altro: 'Altro pagamento', giro: 'Giro dei bonifici dei suoi clienti' }
 
+const oggiRoma = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' })
+type Modulo = { target: string, importo: string, giorno: string, pagamento: ValorePagamento, note: string }
+const moduloVuoto = (): Modulo => ({ target: '', importo: '', giorno: oggiRoma(), pagamento: PAGAMENTO_INIZIALE, note: '' })
+const campo: any = { width: '100%', padding: '9px 12px', border: '1px solid #ddd', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box', color: '#1a1a1a', background: '#fff' }
+const etichetta: any = { fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px', display: 'block' }
+
 const STATI: [string, string][] = [['', 'Tutti'], ['alert', '⚠ Solo alert'], ['in_attesa', 'In attesa bonifico'], ['effettuato', 'Bonifico effettuato'], ['arrivato', 'Arrivati']]
 
 export default function CheckRicariche() {
@@ -26,6 +34,14 @@ export default function CheckRicariche() {
   const [facendo, setFacendo] = useState('')
   const [err, setErr] = useState('')
   const [contabilita, setContabilita] = useState(false)
+  // Aggiungere a mano una ricarica vecchia (Lorenzo, 12/11): solo registro, il credito non si tocca.
+  const [puoAggiungere, setPuoAggiungere] = useState(false)
+  const [aperto, setAperto] = useState(false)
+  const [modulo, setModulo] = useState<Modulo>(moduloVuoto)
+  const [anagrafiche, setAnagrafiche] = useState<{ valore: string, nome: string, tipo: string }[] | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [errModulo, setErrModulo] = useState('')
+  const [fatto, setFatto] = useState('')
   const dialog = useDialog()
 
   function carica() {
@@ -35,7 +51,7 @@ export default function CheckRicariche() {
     if (cerca.trim()) qs.set('q', cerca.trim())
     fetch(`/api/statistiche/check-ricariche?${qs.toString()}`)
       .then(r => r.json())
-      .then(d => { setRighe(Array.isArray(d?.righe) ? d.righe : []); setRiep(d?.riepilogo || null); setContabilita(d?.contabilita === true); setLoading(false) })
+      .then(d => { setRighe(Array.isArray(d?.righe) ? d.righe : []); setRiep(d?.riepilogo || null); setContabilita(d?.contabilita === true); setPuoAggiungere(d?.puoAggiungere === true); setLoading(false) })
       .catch(() => { setLoading(false); setErr('Errore nel caricamento') })
   }
   useEffect(() => { carica() }, [stato])
@@ -66,6 +82,47 @@ export default function CheckRicariche() {
     } catch { setErr('Errore di rete — ricarica la pagina') } finally { setFacendo('') }
   }
 
+  function apriModulo() {
+    setAperto(true); setErrModulo(''); setFatto('')
+    if (anagrafiche) return
+    fetch('/api/statistiche/check-ricariche?anagrafiche=1').then(async r => {
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || d?.error) { setErrModulo(d?.error || 'Non riesco a leggere i clienti — ricarica la pagina'); return }
+      setAnagrafiche(Array.isArray(d.anagrafiche) ? d.anagrafiche : [])
+    }).catch(() => setErrModulo('Errore di rete — ricarica la pagina'))
+  }
+
+  async function aggiungi() {
+    if (salvando) return
+    setErrModulo('')
+    if (!modulo.target) { setErrModulo('Scegli il cliente o il sotto-master'); return }
+    const importo = Number(modulo.importo.replace(',', '.'))
+    if (!(importo > 0)) { setErrModulo('Scrivi l\'importo della ricarica'); return }
+    if (!modulo.giorno) { setErrModulo('Scegli la data della ricarica'); return }
+    const invia = async (conferma: boolean) => {
+      const res = await fetch('/api/statistiche/check-ricariche', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ azione: 'aggiungi', target: modulo.target, importo, giorno: modulo.giorno, stato: modulo.pagamento.stato,
+          metodo: modulo.pagamento.metodo, mittente: modulo.pagamento.mittente, note: modulo.note, conferma }),
+      })
+      return { res, d: await res.json().catch(() => ({})) }
+    }
+    setSalvando(true)
+    try {
+      let { res, d } = await invia(false)
+      // Una ricarica uguale lo stesso giorno c'e' gia': potrebbe essere la stessa, si chiede.
+      if (res.status === 409 && d?.doppione) {
+        if (!(await dialog.confirm({ title: 'Ricarica già presente?', message: `${d.error} Vuoi aggiungerne un'altra uguale?`, confirmText: 'Aggiungi lo stesso' }))) return
+        ;({ res, d } = await invia(true))
+      }
+      if (!res.ok || d?.error) { setErrModulo(d?.error || 'Non salvata — ricarica la pagina e riprova'); return }
+      const chi = anagrafiche?.find(a => a.valore === modulo.target)?.nome || ''
+      setFatto(d?.avviso || `Aggiunta: ${eur(importo)} a ${chi}. Il credito non è cambiato.`)
+      setAperto(false); setModulo(moduloVuoto())
+      carica()
+    } catch { setErrModulo('Errore di rete — ricarica la pagina') } finally { setSalvando(false) }
+  }
+
   // Chi ha fatto il bonifico, anche dopo la ricarica: resta pure fra i nomi del cliente.
   async function scriviMittente(r: any) {
     if (facendo) return
@@ -92,13 +149,61 @@ export default function CheckRicariche() {
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '22px 20px' }}>
-      <div style={{ marginBottom: '16px' }}>
-        <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Check Ricariche</h1>
-        <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>
-          Bonifici delle ricariche che avete fatto. Segnate quando il cliente dispone il bonifico e quando lo incassate.
-          Alert dopo <b>{soglie.no_bonifico} giorni</b> senza bonifico e dopo <b>{soglie.no_arrivo} giorni</b> se non è confermato l’arrivo.
-        </p>
+      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Check Ricariche</h1>
+          <p style={{ color: '#666', fontSize: '13px', marginTop: '4px' }}>
+            Bonifici delle ricariche che avete fatto. Segnate quando il cliente dispone il bonifico e quando lo incassate.
+            Alert dopo <b>{soglie.no_bonifico} giorni</b> senza bonifico e dopo <b>{soglie.no_arrivo} giorni</b> se non è confermato l’arrivo.
+          </p>
+        </div>
+        {puoAggiungere && !aperto && (
+          <button onClick={apriModulo} style={{ ...btnSec, display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '8px 12px', fontSize: '12.5px', color: '#1a1a1a' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="#f97316" strokeWidth="2" strokeLinecap="round" /></svg>
+            Aggiungi a mano
+          </button>
+        )}
       </div>
+
+      {fatto && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }}>{fatto}</div>}
+
+      {aperto && (
+        <div style={{ ...card, padding: '16px', marginBottom: '16px', overflow: 'visible' }}>
+          <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>Aggiungi una ricarica a mano</div>
+          <div style={{ fontSize: '12.5px', color: '#6b7280', marginTop: '4px', lineHeight: 1.45 }}>
+            Per una ricarica già fatta di cui aspetti ancora il bonifico e che qui non c’è. Resta solo in questo elenco:
+            <b> il credito del cliente non cambia</b> e non nasce nessun movimento.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '14px' }}>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={etichetta}>Chi hai ricaricato</label>
+              <SelectCercabile value={modulo.target} disabled={!anagrafiche}
+                onChange={(e: any) => setModulo(m => ({ ...m, target: e.target.value, pagamento: { ...PAGAMENTO_INIZIALE, stato: m.pagamento.stato } }))} style={campo}>
+                <option value="">{anagrafiche ? 'Scegli il cliente o il sotto-master…' : 'Carico i clienti…'}</option>
+                {(anagrafiche || []).map(a => <option key={a.valore} value={a.valore}>{a.tipo === 'master' ? `${a.nome} · sotto-master` : a.nome}</option>)}
+              </SelectCercabile>
+            </div>
+            <div>
+              <label style={etichetta}>Importo</label>
+              <input value={modulo.importo} onChange={e => setModulo(m => ({ ...m, importo: e.target.value }))} inputMode="decimal" placeholder="es. 500,00" style={campo} />
+            </div>
+            <div>
+              <label style={etichetta}>Ricaricato il</label>
+              <input type="date" value={modulo.giorno} max={oggiRoma()} onChange={e => setModulo(m => ({ ...m, giorno: e.target.value }))} style={campo} />
+            </div>
+          </div>
+          <PagamentoRicarica target={modulo.target} valore={modulo.pagamento} onChange={v => setModulo(m => ({ ...m, pagamento: v }))} />
+          <div style={{ marginTop: '12px' }}>
+            <label style={etichetta}>Nota <span style={{ fontWeight: 400, color: '#9ca3af' }}>(facoltativa)</span></label>
+            <input value={modulo.note} onChange={e => setModulo(m => ({ ...m, note: e.target.value }))} maxLength={500} placeholder="es. ricarica di settembre ancora da pagare" style={campo} />
+          </div>
+          {errModulo && <div style={{ color: '#b91c1c', fontSize: '12.5px', marginTop: '10px' }}>{errModulo}</div>}
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px', flexWrap: 'wrap' }}>
+            <button onClick={() => { setAperto(false); setErrModulo('') }} disabled={salvando} style={{ ...btnSec, padding: '8px 14px' }}>Annulla</button>
+            <button onClick={aggiungi} disabled={salvando} style={{ ...btn, padding: '8px 16px', opacity: salvando ? 0.6 : 1 }}>{salvando ? 'Salvo…' : 'Aggiungi al Check Ricariche'}</button>
+          </div>
+        </div>
+      )}
 
       {err && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }}>{err}</div>}
 
@@ -158,6 +263,8 @@ export default function CheckRicariche() {
                       <span style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 700, color: r.target_tipo === 'master' ? '#7c3aed' : '#0891b2', background: r.target_tipo === 'master' ? '#f3e8ff' : '#ecfeff', padding: '1px 6px', borderRadius: '4px' }}>
                         {r.target_tipo === 'master' ? 'sotto-master' : 'cliente'}
                       </span>
+                      {r.a_mano && <span title="Aggiunta a mano: solo registro, non c'è un movimento di credito" style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 700, color: '#6b7280', background: '#f3f4f6', padding: '1px 6px', borderRadius: '4px' }}>aggiunta a mano</span>}
+                      {r.note && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>{r.note}</div>}
                       {r.mittente && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>bonifico da {r.mittente}
                         {contabilita && <button onClick={() => scriviMittente(r)} disabled={!!facendo} title="Cambia il nome" style={{ background: 'none', border: 'none', color: '#f97316', cursor: 'pointer', fontSize: '11px', padding: '0 4px' }}>✎</button>}</div>}
                       {!r.mittente && contabilita && r.stato !== 'altro_metodo' && (

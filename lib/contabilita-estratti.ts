@@ -99,20 +99,23 @@ async function anagrafiche(admin: any, rete: Rete): Promise<Anagrafica[]> {
 }
 
 /** Le ricariche che si aspettano un bonifico (bonifico, o di prima che esistesse il campo) intorno al periodo,
- *  con quelle gia' abbinate segnate. */
+ *  con quelle gia' abbinate segnate. Le righe tolte dal Check Ricariche (nascosta_il: Ecomize ha ripulito
+ *  l'elenco il 12/11) non si cercano piu' in banca, ma quelle gia' abbinate restano col loro bonifico: il
+ *  lavoro fatto sull'estratto non si perde. */
 async function ricariche(admin: any, rete: Rete, dal: string, al: string) {
-  const righe = await fetchAllStretto(() => admin.from('ricariche_check')
-    .select('id,master_id,target_tipo,target_id,target_nome,importo,ricaricato_il,metodo,mittente,bonifico_effettuato_il,bonifico_arrivato_il')
+  const tutte = await fetchAllStretto(() => admin.from('ricariche_check')
+    .select('id,master_id,target_tipo,target_id,target_nome,importo,ricaricato_il,metodo,mittente,bonifico_effettuato_il,bonifico_arrivato_il,nascosta_il')
     .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -15)).lte('ricaricato_il', spostaGiorni(al, 4))
     .or('metodo.is.null,metodo.eq.bonifico').order('ricaricato_il').order('id'))
-  const ids = righe.map((r: any) => r.id)
+  const ids = tutte.map((r: any) => r.id)
   const abbinate = new Map<string, string>()
   for (let i = 0; i < ids.length; i += 300) {
     const { data, error } = await admin.from('abbinamenti_bonifici').select('ricarica_id,riga_id').in('ricarica_id', ids.slice(i, i + 300))
     if (error) throw new Error(error.message)
     for (const a of data || []) abbinate.set(a.ricarica_id, a.riga_id)
   }
-  return righe.map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il), riga_id: abbinate.get(r.id) || null }))
+  return tutte.filter((r: any) => !r.nascosta_il || abbinate.has(r.id))
+    .map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il), riga_id: abbinate.get(r.id) || null }))
 }
 
 async function movimenti(admin: any, masterId: string, dal: string, al: string) {
@@ -504,7 +507,7 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   }
   const somma = (l: any[]) => r2(l.reduce((t, r) => t + r.importo, 0))
   const altri = await fetchAllStretto(() => admin.from('ricariche_check').select('id,master_id,importo,metodo,target_tipo,target_id,target_nome,ricaricato_il')
-    .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -1)).lte('ricaricato_il', spostaGiorni(al, 1)).not('metodo', 'is', null).neq('metodo', 'bonifico').order('ricaricato_il').order('id'))
+    .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -1)).lte('ricaricato_il', spostaGiorni(al, 1)).not('metodo', 'is', null).neq('metodo', 'bonifico').is('nascosta_il', null).order('ricaricato_il').order('id'))
   const altriNel = altri.map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il) })).filter((r: any) => r.giorno >= dal && r.giorno <= al)
   // Una ricarica a un sotto-master sul conto, fatta dal master: si puo' segnare "giro dei bonifici dei suoi
   // clienti" (prima del pulsante il giro si faceva a mano: ottobre, 36.663 € a Ecomize LL).
