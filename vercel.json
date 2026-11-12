@@ -2,6 +2,13 @@
   "regions": [
     "lhr1"
   ],
+  "functions": {
+    "app/api/ksync-inoltro/route.ts": {
+      "regions": [
+        "fra1"
+      ]
+    }
+  },
   "crons": [
     {
       "path": "/api/distinte/chiusura-automatica",

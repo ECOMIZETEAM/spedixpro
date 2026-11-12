@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { testoIndicaReso, prioritaStato } from '@/lib/spedisci'
 
 /* Provider KSYNC / ParcelPilot — wrapper "ShippingGateway – API compatibile Poste Delivery Business".
@@ -198,6 +199,37 @@ export type KsyncInput = {
 // L'etichetta arriva come A4 con tre copie uguali (e una pagina in piu' col contrassegno, la "copia
 // amministrativa"): la si salva cosi' com'e', ed e' lib/etichetta-sda.ts a ricavarne la resa.
 const HOST_WS = 'https://ksync.guttadauro.it/KIPOINT_20'
+
+// IL SERVER DI KSYNC RIFIUTA LE CONNESSIONI DA FUORI UE. Le nostre funzioni girano a Londra (vercel.json,
+// regions lhr1, vicino al database): il 12/11/2026, appena inserite le credenziali, ogni creazione e'
+// fallita con "fetch failed" (ECONNREFUSED in 9 ms), mentre da Francoforte lo stesso indirizzo
+// rispondeva 200 (provato con due macchine di prova Vercel, lhr1 e fra1). Spostare tutta la piattaforma a
+// Francoforte l'avrebbe allontanata dal database; si sposta solo la chiamata a KSync: da Londra passa
+// per /api/ksync-inoltro, l'unica funzione che vercel.json fa girare in fra1. La richiesta e' firmata
+// con la chiave di servizio (stesso deployment, nessun segreto in piu') e l'inoltro va solo agli
+// indirizzi e ai servizi KSync qui sotto.
+export const REGIONE_KSYNC = 'fra1'
+export const HOST_KSYNC_AMMESSI = new Set(['ksync.guttadauro.it', 'ksync42.guttadauro.it', 'ksync.it'])
+export const SERVIZI_KSYNC_AMMESSI = new Set([
+  'servlet/gt_btc_ldv_soap', 'servlet/gt_btc_ritiro_soap',
+  'servlet/SQLDataProviderServer/gt_qry_tracking_soap_v2', 'servlet/SQLDataProviderServer/gt_qry_shipments_soap',
+  'servlet/SQLDataProviderServer/gt_qry_ldv_soap_localita',
+])
+export const firmaInoltroKsync = (corpo: string) => createHmac('sha256', String(process.env.SUPABASE_SERVICE_ROLE_KEY || '')).update(corpo).digest('hex')
+
+// Una chiamata SOAP a KSync: diretta in locale e a Francoforte, altrimenti attraverso l'inoltro.
+export async function chiamaKsyncWs(host: string, servizio: string, soap: string): Promise<{ ok: boolean; status: number; testo: string }> {
+  if (!process.env.VERCEL || process.env.VERCEL_REGION === REGIONE_KSYNC) {
+    const r = await fetch(`${host}/${servizio}`, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '""' }, body: soap })
+    return { ok: r.ok, status: r.status, testo: await r.text() }
+  }
+  const app = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
+  const corpo = JSON.stringify({ host, servizio, soap, t: Date.now() })
+  const r = await fetch(`${app}/api/ksync-inoltro`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-firma': firmaInoltroKsync(corpo) }, body: corpo })
+  const j: any = await r.json().catch(() => null)
+  if (!r.ok || !j || typeof j.testo !== 'string') throw new Error(j?.errore || `inoltro non riuscito (${r.status})`)
+  return { ok: j.status >= 200 && j.status < 300, status: Number(j.status), testo: j.testo }
+}
 const escXml = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 const unescXml = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
 const tagXml = (t: string, v: unknown) => { const s = String(v ?? ''); return s === '' ? `<${t}/>` : `<${t}>${escXml(s)}</${t}>` }
@@ -256,11 +288,11 @@ async function creaKsyncDiretto(c: KsyncCred, dati: KsyncInput): Promise<{ ldv: 
       + tagXml('m_UserName', String(c.wsUtente || '').trim()) + tagXml('m_Password', c.wsPassword) + tagXml('m_Company', '001')
       + tagXml('XMLData', tracciatoKsync(dati, conEmail)) + '<UUID></UUID>'
       + '</gt_btc_ldv_soap_Run></soap:Body></soap:Envelope>'
-    let r: Response
+    let r: { ok: boolean; status: number; testo: string }
     try {
-      r = await fetch(`${host}/servlet/gt_btc_ldv_soap`, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '""' }, body })
-    } catch (e: any) { throw new Error('KSync non raggiungibile: ' + (e?.message || 'rete')) }
-    const testo = await r.text()
+      r = await chiamaKsyncWs(host, 'servlet/gt_btc_ldv_soap', body)
+    } catch (e: any) { throw new Error('KSync non raggiungibile: ' + (e?.message || 'rete') + (e?.cause?.code ? ` (${e.cause.code})` : '')) }
+    const testo = r.testo
     const ret = primoTag(testo, 'return')
     const xml = ret != null ? unescXml(ret) : ''
     let errore: string | null = null
