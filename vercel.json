@@ -140,7 +140,7 @@
     },
     {
       "path": "/api/controllo/sentinella",
-      "schedule": "0 7 * * *"
+      "schedule": "9 7 * * *"
     },
     {
       "path": "/api/cron/margini-aggiorna",

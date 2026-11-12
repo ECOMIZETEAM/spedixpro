@@ -36,10 +36,21 @@ export async function GET(req: NextRequest) {
   if (!(await autorizzato(req))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
   const admin = createAdminSupabase()
 
-  const { data: righe, error } = await admin.rpc('controllo_giornaliero')
-  if (error || !righe) {
+  // Due parti, una dopo l'altra: il database ferma ogni chiamata dopo 8 secondi, e tutta insieme la
+  // Sentinella li ha sforati (dal 14/10, poi il 10 e 11/11). Se una parte salta, l'email parte lo
+  // stesso con l'altra e con una riga che dice quale manca: un'email che non arriva non si nota.
+  const righe: any[] = []
+  for (const [n, funzione] of [[1, 'controllo_giornaliero_1'], [2, 'controllo_giornaliero_2']] as const) {
+    const { data, error } = await admin.rpc(funzione)
+    if (error || !data) {
+      console.error('[SENTINELLA] controllo non eseguito:', funzione, error?.message)
+      righe.push({ area: 'sentinella', controllo: `parte ${n} dei controlli NON eseguita (${error?.message || 'nessuna risposta'})`, valore: 0, atteso: 'eseguita', allarme: true })
+    } else {
+      righe.push(...(data as any[]))
+    }
+  }
+  if (righe.every(r => r.area === 'sentinella')) {
     // Se non riesco nemmeno a fare le domande, quello E' l'allarme: si dice, non si tace.
-    console.error('[SENTINELLA] controllo non eseguito:', error?.message)
     return NextResponse.json({ error: 'Controllo non eseguito' }, { status: 500 })
   }
 
