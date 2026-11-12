@@ -74,7 +74,8 @@ export async function prenotaRitiroPoste(admin: any, p: {
   const { ritiroPrenotaKsync } = await import('@/lib/ksync')
   const cred: any = p.corriere?.credenziali || {}
   const st: any = p.corriere?.settings || {}
-  const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope }
+  // wsUtente/wsPassword: con questi il ritiro si prenota direttamente sul web service di KSync (lib/ksync).
+  const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope, wsUtente: cred.wsUtente, wsPassword: cred.wsPassword, wsHost: cred.wsHost }
   const prima = p.spedizioni[0]
   const colli = p.spedizioni.reduce((n, s) => n + (s.colli || 1), 0)
   const peso = p.spedizioni.reduce((n, s) => n + (parseFloat(String(s.peso_reale)) || 1), 0)

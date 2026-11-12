@@ -531,7 +531,56 @@ export async function podScaricaKsync(c: KsyncCred, ldv: string): Promise<{ cont
 // Prenota un ritiro (/pickup/booking). `bookingType` = tipo ritiro (RIT0001/2/3). `where` = indirizzo di
 // ritiro, `content` = i colli. operation 'I' = inserimento. Verificato su demo: risposta { bookingId,
 // result: { item: [{ result: 'OK', errorDescription }] } }. Torna { ok, bookingId, errore, raw }.
-export async function ritiroPrenotaKsync(c: KsyncCred, req: { bookingType?: string; indirizzo: KsyncRecapito; colli?: KsyncCollo[]; numColli?: number; pesoKg?: number; shipmentId?: string; dataRitiro?: string; timeSlot?: string; note?: string }): Promise<{ ok: boolean; bookingId: string; errore: string; raw: any }> {
+type RichiestaRitiro = { bookingType?: string; indirizzo: KsyncRecapito; colli?: KsyncCollo[]; numColli?: number; pesoKg?: number; shipmentId?: string; dataRitiro?: string; timeSlot?: string; note?: string }
+
+// RITIRO SUL WEB SERVICE DI KSYNC (manuale §9-11, gt_btc_ritiro_soap), come per la lettera: dal 12/11/2026
+// il ponte non risponde piu'. Servizio PF (porto franco), pacchi. KSync non ha la fascia AM/PM del ponte:
+// ha gli orari di apertura del mittente, e li si compila con la fascia scelta (9-13 o 14-18, gli stessi
+// che il portale registra in intervallo_ritiro). Torna il codice prenotazione (CP...), come prima.
+async function ritiroPrenotaKsyncDiretto(c: KsyncCred, req: RichiestaRitiro): Promise<{ ok: boolean; bookingId: string; errore: string; raw: any }> {
+  const r = req.indirizzo
+  const colli = req.colli && req.colli.length ? req.colli : [{ peso: req.pesoKg || 1 }]
+  const numero = req.numColli || colli.length || 1
+  const peso = req.pesoKg || colli.reduce((n, p) => n + (Number(p.peso) || 0), 0) || 1
+  const mattina = (req.timeSlot || 'AM').toUpperCase() !== 'PM'
+  const adesso = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Rome' }).slice(0, 19)
+  const giorno = /^\d{4}-\d{2}-\d{2}$/.test(String(req.dataRitiro || '')) ? String(req.dataRitiro) : adesso.slice(0, 10)
+  const tracciato = '<?xml version="1.0" encoding="UTF-8"?><root><ritiro>'
+    + tagXml('note1', pulisciPoste(req.note).slice(0, 50)) + tagXml('dataRichiesta', adesso) + tagXml('dataRitiro', `${giorno} 00:00:00`)
+    + tagXml('ldv', String(req.shipmentId || '').trim().slice(0, 13))
+    + '<tiporitiro>' + tagXml('servizio', 'PF') + '<pacchi>' + tagXml('numeroColli', String(numero)) + tagXml('peso', (Number(peso) || 1).toFixed(2))
+    + tagXml('altezza', numKsync(colli[0]?.altezza)) + tagXml('larghezza', numKsync(colli[0]?.larghezza)) + tagXml('profondita', numKsync(colli[0]?.profondita))
+    + tagXml('voluminoso', 'false') + '</pacchi></tiporitiro></ritiro><mittente>'
+    + tagXml('ragioneSociale', c50(r.ragioneSociale)) + tagXml('nominativoContatto', c50(r.referente || r.ragioneSociale))
+    + '<codiceFiscale/><partitaIva/><datoFiscaleInternazionale/>'
+    + tagXml('indirizzo', c50([r.indirizzo, r.civico].filter(Boolean).join(' '))) + tagXml('cap', String(r.cap || '').trim().slice(0, 5))
+    + tagXml('localita', c50(r.citta)) + tagXml('provincia', String(r.provincia || '').toUpperCase().trim().slice(0, 2))
+    + tagXml('email', (() => { const e = emailPoste(r.email); return e.length <= 60 ? e : '' })()) + tagXml('telefono', telPdb(r.telefono || r.cellulare))
+    + '<palazzina/><scala/><interno/><ufficio/>' + tagXml('ritiro_presso_portineria', 'false') + '<citofono/>'
+    + tagXml('oraAperturaMattino', mattina ? '09:00' : '') + tagXml('oraAperturaPomeriggio', mattina ? '' : '14:00')
+    + tagXml('oraChiusuraMattino', mattina ? '13:00' : '') + tagXml('oraChiusuraPomeriggio', mattina ? '' : '18:00')
+    + '<note/></mittente></root>'
+  const body = '<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body>'
+    + '<gt_btc_ritiro_soap_Run xmlns="http://gt_btc_ritiro_soap.ws.localhost/">'
+    + tagXml('m_UserName', String(c.wsUtente || '').trim()) + tagXml('m_Password', c.wsPassword) + tagXml('m_Company', '001')
+    + tagXml('XMLData', tracciato) + '<UUID></UUID>'
+    + '</gt_btc_ritiro_soap_Run></soap:Body></soap:Envelope>'
+  let risp: { ok: boolean; status: number; testo: string }
+  try {
+    risp = await chiamaKsyncWs(String(c.wsHost || HOST_WS).replace(/\/+$/, ''), 'servlet/gt_btc_ritiro_soap', body)
+  } catch (e: any) { throw new Error('KSync non raggiungibile: ' + (e?.message || 'rete')) }
+  const ret = primoTag(risp.testo, 'return')
+  const xml = ret != null ? unescXml(ret) : ''
+  const codice = String(primoTag(xml, 'CodicePrenotazione') || '').trim()
+  let errore = ''
+  if (!risp.ok || ret == null) errore = unescXml(primoTag(risp.testo, 'faultstring') || '') || `KSync: errore ${risp.status}`
+  else if (String(primoTag(xml, 'BackEndStatus') || '').trim().toUpperCase() !== 'OK') errore = unescXml(primoTag(xml, 'BackEndMessage') || '') || 'KSync: ritiro non preso in carico'
+  else if (String(primoTag(xml, 'Status') || '').trim().toLowerCase() !== 'true' || !codice) errore = tuttiTag(xml, 'message').map(m => unescXml(m).trim()).filter(Boolean).join(' - ') || 'KSync: ritiro non prenotato'
+  return { ok: !errore && !!codice, bookingId: errore ? '' : codice, errore, raw: { diretto: true, codice: codice || null, uuid: String(primoTag(xml, 'UUID') || '').trim() || null } }
+}
+
+export async function ritiroPrenotaKsync(c: KsyncCred, req: RichiestaRitiro): Promise<{ ok: boolean; bookingId: string; errore: string; raw: any }> {
+  if (ksyncDiretto(c)) return ritiroPrenotaKsyncDiretto(c, req)
   const r = req.indirizzo
   const colli = req.colli && req.colli.length ? req.colli : [{ peso: req.pesoKg || 1 }]
   const content = {
