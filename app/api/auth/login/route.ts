@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { accessoFermato, azzeraAccessiFalliti, segnaAccessoFallito } from '@/lib/verifica-due-passaggi'
+import { controllaPasswordAlLogin } from '@/lib/password-cambio'
 
 // ACCESSO area master/staff.
 // I cookie della nuova sessione vengono scritti DIRETTAMENTE sulla response di redirect.
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
   // Letti con la chiave di servizio: chi ha attivato la verifica in due passaggi, qui ha messo solo
   // la password, e con questa sessione il database non gli fa leggere niente finche' non mette il
   // codice (lo chiede il middleware, alla prima pagina).
-  const { data: utente } = await admin.from('utenti').select('attivo,cliente_id').eq('id', data.user.id).single()
+  const { data: utente } = await admin.from('utenti').select('attivo,cliente_id,nome,cognome').eq('id', data.user.id).single()
   // Anche la scheda cliente deve essere attiva: altrimenti un cliente disattivato entrava lo stesso
   // passando da questo modulo, e il middleware lo portava tranquillamente al suo portale.
   const { data: cliente } = utente?.cliente_id
@@ -65,6 +66,10 @@ export async function POST(req: NextRequest) {
     await supabase.auth.signOut({ scope: 'local' })
     return NextResponse.redirect(new URL('/?error=account_non_attivo', req.url), 303)
   }
+
+  // Password scaduta (12 mesi) o vecchia e fuori regola: si segna qui, l'unico momento in cui la
+  // password passa in chiaro; il cambio lo chiede il middleware alla prima pagina, dopo il codice.
+  await controllaPasswordAlLogin(admin, { id: data.user.id, email, nome: utente.nome, cognome: utente.cognome }, password)
 
   return ok
 }

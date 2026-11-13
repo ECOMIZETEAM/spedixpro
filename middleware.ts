@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { PARAM_ERRORE, PARAM_COLLEGATO } from '@/lib/esiti-collegamento'
-import { API_SENZA_VERIFICA, CODICE_VERIFICA, PAGINA_VERIFICA, bloccataDallaVerifica } from '@/lib/verifica-due-passaggi'
+import { API_SENZA_VERIFICA, CODICE_CAMBIO_PASSWORD, CODICE_VERIFICA, PAGINA_CAMBIO_PASSWORD, PAGINA_VERIFICA, bloccataDallaVerifica, statoSessione } from '@/lib/verifica-due-passaggi'
 
 // SCRITTURE CONSENTITE ALL'AGENTE.
 // L'agente e' di sola lettura, ma alcune rotte usano POST per LEGGERE (preventivi, esportazioni,
@@ -85,14 +85,24 @@ export async function middleware(req: NextRequest) {
     // Se la domanda non arriva (database giu', token scaduto) si lascia decidere alla rotta, che
     // l'utente lo controlla comunque: fermare tutti per un guasto sarebbe peggio.
     if (!senzaVerifica) {
-      const { data: verificata, error: vErr } = await sb.rpc('sessione_verificata')
-      if (bloccataDallaVerifica(vErr) || verificata === false) {
-        // Un link aperto nel browser (entra come, l'arrivo da Seller Central) va alla pagina del codice
-        // e poi torna qui; una chiamata della pagina riceve la risposta da leggere.
-        const navigazione = req.method === 'GET' && (req.headers.get('accept') || '').includes('text/html')
+      const { stato, errore: vErr } = await statoSessione(sb)
+      // Un link aperto nel browser (entra come, l'arrivo da Seller Central) va alla pagina del codice
+      // e poi torna qui; una chiamata della pagina riceve la risposta da leggere.
+      const navigazione = req.method === 'GET' && (req.headers.get('accept') || '').includes('text/html')
+      if (bloccataDallaVerifica(vErr) || stato === 'codice') {
         const no = navigazione
           ? NextResponse.redirect(new URL(`${PAGINA_VERIFICA}?dopo=${encodeURIComponent(pathname + req.nextUrl.search)}`, req.url))
           : NextResponse.json({ error: 'Per continuare serve il codice della verifica in due passaggi.', codice: CODICE_VERIFICA }, { status: 403 })
+        risposta.cookies.getAll().forEach((c) => no.cookies.set(c))
+        return no
+      }
+      // Password scaduta o fuori regola: prima si cambia, poi si lavora. Solo per le sessioni aperte con
+      // la password (lo decide il database): "entra come" e l'app Shopify non passano di qui.
+      if (stato === 'password_scaduta' || stato === 'password_regole') {
+        const motivo = stato.slice('password_'.length)
+        const no = navigazione
+          ? NextResponse.redirect(new URL(`${PAGINA_CAMBIO_PASSWORD}?motivo=${motivo}&dopo=${encodeURIComponent(pathname + req.nextUrl.search)}`, req.url))
+          : NextResponse.json({ error: 'Per continuare scegli una nuova password.', codice: CODICE_CAMBIO_PASSWORD }, { status: 403 })
         risposta.cookies.getAll().forEach((c) => no.cookies.set(c))
         return no
       }
@@ -271,9 +281,14 @@ export async function middleware(req: NextRequest) {
   // Password giusta ma codice non ancora messo (o verifica da attivare perche' e' diventata
   // obbligatoria): alla pagina del codice, che poi riporta qui. La lettura di `utenti` qui sotto,
   // con questa sessione, il database la rifiuterebbe comunque.
-  const { data: verificata, error: vErr } = await supabase.rpc('sessione_verificata')
-  if (bloccataDallaVerifica(vErr) || verificata === false) {
+  const { stato, errore: vErr } = await statoSessione(supabase)
+  if (bloccataDallaVerifica(vErr) || stato === 'codice') {
     return vaiA(`${PAGINA_VERIFICA}?dopo=${encodeURIComponent(pathname)}`)
+  }
+  // Password scaduta (12 mesi) o vecchia e fuori regola: si sceglie quella nuova, poi si torna qui.
+  // Dopo il codice, non prima: il cambio lo fa solo chi ha passato tutti e due i controlli.
+  if (stato === 'password_scaduta' || stato === 'password_regole') {
+    return vaiA(`${PAGINA_CAMBIO_PASSWORD}?motivo=${stato.slice('password_'.length)}&dopo=${encodeURIComponent(pathname)}`)
   }
 
   const { data: utente } = await supabase

@@ -15,6 +15,23 @@ export function bloccataDallaVerifica(err: any): boolean {
   return !!err && (err.code === 'PT403' || err.message === CODICE_VERIFICA)
 }
 
+// PASSWORD DA CAMBIARE (scaduta dopo 12 mesi, o vecchia e fuori regola: scripts/password-regole.sql).
+export const CODICE_CAMBIO_PASSWORD = 'cambio_password'
+export const PAGINA_CAMBIO_PASSWORD = '/imposta-password'
+
+// La sessione puo' lavorare? Una domanda sola al database per la verifica e per la password:
+// 'codice' (manca il codice), 'password_scaduta' / 'password_regole', 'ok'; null se non si sa
+// (token scaduto, database giu': decide la rotta). Se stato_sessione non c'e' ancora (script non
+// applicato) si torna alla domanda di prima, solo sulla verifica.
+export async function statoSessione(sb: any): Promise<{ stato: string | null; errore: any }> {
+  const r = await sb.rpc('stato_sessione')
+  if (r.error?.code === 'PGRST202') {
+    const v = await sb.rpc('sessione_verificata')
+    return { stato: v.error ? null : v.data === false ? 'codice' : 'ok', errore: v.error }
+  }
+  return { stato: r.error ? null : (r.data as string | null), errore: r.error }
+}
+
 // BLOCCO DOPO 10 PASSWORD SBAGLIATE IN 15 MINUTI (DPP Amazon 1.2.2). Per indirizzo: e' l'account che
 // si protegge, non la rete da cui arriva il tentativo. Un accesso riuscito azzera il conto, quindi
 // contano i tentativi CONSECUTIVI. Le righe hanno solo indirizzo e ora.

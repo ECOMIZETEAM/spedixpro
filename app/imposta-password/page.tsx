@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
-import { REGOLE_PASSWORD_TESTO, erroreRegolePassword, messaggioErrorePassword } from '@/lib/password-regole'
+import { MOTIVO_CAMBIO_PASSWORD, REGOLE_PASSWORD_DURATA, REGOLE_PASSWORD_TESTO, erroreRegolePassword } from '@/lib/password-regole'
 import CampoPassword from '../components/CampoPassword'
 
 export default function ImpostaPassword() {
@@ -12,6 +12,19 @@ export default function ImpostaPassword() {
   const [conferma, setConferma] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err', testo: string } | null>(null)
+  // Arrivati dal middleware perche' la password va cambiata (scaduta o fuori regola): il perche' e la
+  // pagina a cui tornare dopo.
+  const [motivo, setMotivo] = useState<string | null>(null)
+  const [dopo, setDopo] = useState<string | null>(null)
+
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    const m = q.get('motivo')
+    if (m && MOTIVO_CAMBIO_PASSWORD[m]) setMotivo(m)
+    // Solo un percorso di questo sito: "//altro.sito" o un indirizzo intero porterebbero fuori.
+    const d = q.get('dopo') || ''
+    if (d.startsWith('/') && !d.startsWith('//') && !d.startsWith('/\\')) setDopo(d)
+  }, [])
 
   useEffect(() => {
     // Il client browser (@supabase/ssr) scambia automaticamente il token dell'invito
@@ -60,10 +73,13 @@ export default function ImpostaPassword() {
     if (erroreRegole) { setMsg({ tipo: 'err', testo: erroreRegole }); return }
     if (password !== conferma) { setMsg({ tipo: 'err', testo: 'Le password non coincidono' }); return }
     setSalvando(true); setMsg(null)
-    const { error } = await supabase.auth.updateUser({ password })
+    // Dalla rotta, non piu' da Supabase direttamente: e' li' che si controllano riuso, nome ed eta' minima.
+    const r = await fetch('/api/auth/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) }).catch(() => null)
+    const j = r ? await r.json().catch(() => ({})) : {}
     setSalvando(false)
-    if (error) { setMsg({ tipo: 'err', testo: messaggioErrorePassword(error.message) }); return }
+    if (!r || !r.ok) { setMsg({ tipo: 'err', testo: j?.error || 'Password non salvata, riprova.' }); return }
     setMsg({ tipo: 'ok', testo: 'Password impostata! Accesso in corso...' })
+    if (dopo) { setTimeout(() => { window.location.href = dopo }, 800); return }
     // Ogni ruolo al SUO portale. Prima si andava sempre su /dashboard e il cliente veniva poi
     // rimbalzato dal middleware su /cliente/dashboard: un giro in piu' a vuoto, e per un istante
     // vedeva l'area sbagliata. Il caricamento e' pieno (window.location), quindi il layout viene
@@ -90,6 +106,9 @@ export default function ImpostaPassword() {
           <div style={{ fontSize: '13px', color: '#999', marginTop: '4px' }}>Imposta la tua password</div>
         </div>
 
+        {motivo && !msg && (
+          <div style={{ padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: '13px', color: '#7c2d12', background: '#fff7ed', border: '1px solid #fed7aa', lineHeight: 1.5 }}>{MOTIVO_CAMBIO_PASSWORD[motivo]}</div>
+        )}
         {msg && (
           <div style={{ padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: '13px', color: '#fff', background: msg.tipo === 'ok' ? '#16a34a' : '#dc2626' }}>{msg.testo}</div>
         )}
@@ -120,7 +139,7 @@ export default function ImpostaPassword() {
               <label style={lbl}>Conferma password</label>
               <CampoPassword value={conferma} onChange={setConferma} required={false} />
             </div>
-            <div style={{ fontSize: '12px', color: '#888', lineHeight: 1.5 }}>{REGOLE_PASSWORD_TESTO}</div>
+            <div style={{ fontSize: '12px', color: '#888', lineHeight: 1.5 }}>{REGOLE_PASSWORD_TESTO} {REGOLE_PASSWORD_DURATA}</div>
             <button onClick={salva} disabled={salvando} style={{ background: salvando ? '#fbbf24' : '#f97316', color: '#fff', border: 'none', padding: '11px', borderRadius: '6px', fontSize: '14px', fontWeight: 700, cursor: salvando ? 'default' : 'pointer' }}>
               {salvando ? 'Salvataggio...' : 'Imposta password ed entra'}
             </button>

@@ -1,13 +1,12 @@
 'use client'
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase-browser'
-import { REGOLE_PASSWORD_TESTO, erroreRegolePassword, messaggioErrorePassword } from '@/lib/password-regole'
+import { REGOLE_PASSWORD_DURATA, REGOLE_PASSWORD_TESTO, erroreRegolePassword } from '@/lib/password-regole'
 import CampoPassword from './CampoPassword'
 
 // Cambio password self-service per l'utente loggato (master / staff / cliente).
 // Cambia la password dell'account della sessione corrente: stessa email, nuova password.
+// Passa dalla rotta /api/auth/password, che controlla anche riuso, nome ed eta' minima.
 export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?: string }) {
-  const supabase = createClient()
   const [password, setPassword] = useState('')
   const [conferma, setConferma] = useState('')
   const [salvando, setSalvando] = useState(false)
@@ -18,9 +17,10 @@ export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?
     if (erroreRegole) { setMsg({ tipo: 'err', testo: erroreRegole }); return }
     if (password !== conferma) { setMsg({ tipo: 'err', testo: 'Le password non coincidono' }); return }
     setSalvando(true); setMsg(null)
-    const { error } = await supabase.auth.updateUser({ password })
+    const r = await fetch('/api/auth/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) }).catch(() => null)
+    const j = r ? await r.json().catch(() => ({})) : {}
     setSalvando(false)
-    if (error) { setMsg({ tipo: 'err', testo: messaggioErrorePassword(error.message) }); return }
+    if (!r || !r.ok) { setMsg({ tipo: 'err', testo: j?.error || 'Password non salvata, riprova.' }); return }
     setPassword(''); setConferma('')
     setMsg({ tipo: 'ok', testo: 'Password aggiornata con successo. Al prossimo accesso usa la nuova password.' })
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -49,7 +49,7 @@ export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?
           </div>
         </div>
         <div style={{ marginTop: '12px', fontSize: '12.5px', color: '#666' }}>
-          {REGOLE_PASSWORD_TESTO} Da qui scegli tu la password: quella che hai ricevuto per email smette di valere.
+          {REGOLE_PASSWORD_TESTO} {REGOLE_PASSWORD_DURATA} Da qui scegli tu la password: quella che hai ricevuto per email smette di valere.
         </div>
         <button onClick={salva} disabled={salvando} style={{ marginTop: '22px', padding: '9px 22px', background: salvando ? '#7fa8e0' : '#3b82c4', color: '#fff', border: 'none', borderRadius: '5px', fontSize: '14px', fontWeight: 600, cursor: salvando ? 'default' : 'pointer' }}>
           {salvando ? 'Salvataggio...' : 'Salva'}
