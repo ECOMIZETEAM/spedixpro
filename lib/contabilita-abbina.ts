@@ -49,6 +49,24 @@ function consecutive(lista: RicaricaAperta[], importo: number, fini: number[]): 
   return null
 }
 
+/** UNA RICARICA PAGATA A PEZZI (Lorenzo, 13/11/2026): 400 € pagati con due bonifici da 200. Fra i bonifici del
+ *  cliente, in ordine di data, la combinazione che fa ESATTAMENTE quello che manca e che si chiude prima (a
+ *  parita', con meno pezzi). Almeno `minimo` bonifici: due quando la ricarica non ha ancora pezzi, perche' un
+ *  bonifico uguale da solo e' un abbinamento normale e lo fanno le regole di sempre. Si guardano i primi 12:
+ *  oltre e' un cliente che paga tutti i giorni, e la somma tornerebbe per caso. */
+export function pezziChePagano(manca: number, candidati: { id: string, data: string, importo: number }[], minimo: number): string[] | null {
+  const l = [...candidati].sort((a, b) => a.data.localeCompare(b.data) || a.id.localeCompare(b.id)).slice(0, 12)
+  const obiettivo = cent(manca)
+  let meglio: number[] | null = null
+  for (let m = 1; m < 1 << l.length; m++) {
+    const idx = l.map((_, i) => i).filter(i => m & (1 << i))
+    if (idx.length < minimo || idx.reduce((t, i) => t + cent(l[i].importo), 0) !== obiettivo) continue
+    const fine = idx[idx.length - 1], fineMeglio = meglio ? meglio[meglio.length - 1] : Infinity
+    if (fine < fineMeglio || (fine === fineMeglio && idx.length < meglio!.length)) meglio = idx
+  }
+  return meglio ? meglio.map(i => l[i].id) : null
+}
+
 /** Il nome per confrontarlo: maiuscole, senza accenti e punteggiatura ("R.I.A.M." = "R I A M"). */
 export function norma(s: string): string {
   return String(s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')

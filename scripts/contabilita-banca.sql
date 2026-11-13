@@ -291,3 +291,29 @@ insert into public.conti_condivisi (master_id, sotto_master_id, giro_dal) values
   ('75b08143-26c8-4903-8091-cd03fbd635ed', '0bfa96db-0564-4d90-8f22-989db001f8ad', '2026-11-11'),
   ('75b08143-26c8-4903-8091-cd03fbd635ed', '394a68a7-c36b-4369-849b-31e0df8b206a', '2026-11-11')
 on conflict (master_id, sotto_master_id) do nothing;
+
+-- Passo 4: UNA RICARICA PAGATA A PEZZI (Lorenzo, 13/11/2026). Ecomize Solution: una ricarica da 400 € che il
+-- cliente paga con due bonifici da 200. Un abbinamento lega una ricarica a UN bonifico (indice unico), e il giro
+-- ai sotto-master (gira_bonifici_sotto_master) gira le ricariche che hanno l'abbinamento: per questo i pezzi
+-- stanno qui, e l'abbinamento nasce solo quando i pezzi fanno l'importo (col bonifico che chiude). Una ricarica
+-- pagata a meta' non risulta arrivata e non si gira. Le funzioni del giro restano come sono.
+-- Ogni bonifico paga un pezzo di UNA ricarica sola (indice unico sul bonifico).
+create table if not exists public.parti_bonifici (
+  id uuid primary key default gen_random_uuid(),
+  master_id uuid not null references public.masters(id) on delete cascade,
+  riga_id uuid not null references public.estratti_righe(id) on delete cascade,
+  ricarica_id uuid not null references public.ricariche_check(id) on delete cascade,
+  importo numeric(14,2) not null check (importo > 0),
+  -- 'auto': i bonifici facevano esattamente la ricarica; 'confermato': l'ha detto il master
+  modo text not null check (modo in ('auto', 'confermato')),
+  creato_da uuid,
+  creato_il timestamptz not null default now()
+);
+create unique index if not exists parti_bonifici_riga on public.parti_bonifici (riga_id);
+create index if not exists parti_bonifici_ricarica on public.parti_bonifici (ricarica_id);
+create index if not exists parti_bonifici_master on public.parti_bonifici (master_id);
+alter table public.parti_bonifici enable row level security;
+revoke all on table public.parti_bonifici from public;
+revoke all on table public.parti_bonifici from anon;
+revoke all on table public.parti_bonifici from authenticated;
+grant select, insert, update, delete on table public.parti_bonifici to service_role;

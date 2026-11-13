@@ -5,7 +5,7 @@ import { eDiscendente } from '@/lib/rete-masters'
 import { chiSei } from '@/lib/contabilita-accesso'
 import { metodoEstrattoValido, pulisciIban, pulisciNome, sottoSulConto } from '@/lib/contabilita-banca'
 import { norma, type Target } from '@/lib/contabilita-abbina'
-import { assegnaPagatore, escludiPagatore, includiPagatore, scollegaRiga } from '@/lib/contabilita-estratti'
+import { assegnaPagatore, collegaParte, escludiPagatore, includiPagatore, scollegaRiga } from '@/lib/contabilita-estratti'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -14,6 +14,7 @@ export const maxDuration = 60
 //  - pagatore: "questo pagatore e' quel cliente", o quei profili (risponde a "di chi e'?");
 //  - escludi: "non e' un cliente" (un rimborso, un giroconto); includi: lo annulla;
 //  - scollega: toglie un abbinamento sbagliato;
+//  - parte: "questo bonifico paga quella ricarica", anche solo un pezzo (400 € pagati 200 + 200);
 //  - metodo: una ricarica che non era un bonifico (es. contrassegni compensati) esce dall'attesa;
 //  - voce: il nome della voce per le uscite verso una controparte (es. "E.M EXPRESS LTD" → "Fornitore");
 //  - gira / annulla_giro: la ricarica al sotto-master per i bonifici dei suoi clienti arrivati sul conto
@@ -83,6 +84,15 @@ export async function POST(req: NextRequest) {
         await scollegaRiga(admin, c.masterId, b.riga_id)
         await audit('estratto_scollega', b.riga_id)
         return NextResponse.json({ ok: true })
+      }
+      case 'parte': {
+        const riga = String(b?.riga_id || ''), ric = String(b?.ricarica_id || '')
+        if (!UUID.test(riga) || !UUID.test(ric)) return NextResponse.json({ error: 'Dati non validi' }, { status: 400 })
+        try {
+          const esito = await collegaParte(admin, c.masterId, c.userId, riga, ric)
+          await audit('estratto_parte', `${riga} → ricarica ${ric}: € ${esito.pagato} di € ${esito.importo}${esito.completa ? ' (pagata)' : ''}`)
+          return NextResponse.json({ ok: true, ...esito })
+        } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 409 }) }
       }
       case 'metodo': {
         const id = String(b?.ricarica_id || '')

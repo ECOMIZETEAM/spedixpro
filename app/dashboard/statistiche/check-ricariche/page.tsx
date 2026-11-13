@@ -272,7 +272,8 @@ export default function CheckRicariche() {
                       )}
                     </td>
                     <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{eur(r.importo)}</td>
-                    <td style={td}>{badgeStato(r)}</td>
+                    <td style={td}>{badgeStato(r)}
+                      {r.pagato_parti > 0 && r.stato !== 'arrivato' && <div style={{ fontSize: '11px', color: '#2563eb', marginTop: '3px', whiteSpace: 'nowrap' }}>arrivati {eur(r.pagato_parti)} di {eur(r.importo)}</div>}</td>
                     <td style={td}>
                       {r.stato === 'arrivato' || r.stato === 'altro_metodo' ? <span style={{ color: '#9ca3af' }}>—</span> : (
                         <span style={{ color: r.alert ? '#dc2626' : '#666', fontWeight: r.alert ? 700 : 400 }}>

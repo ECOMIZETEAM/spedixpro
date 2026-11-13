@@ -93,6 +93,21 @@ export default function EstrattoConto() {
     }
   }
 
+  // "Questo bonifico paga quella ricarica", anche solo un pezzo (Lorenzo, 13/11: 400 € pagati 200 + 200). Si dice
+  // prima cosa succede: pagata, o quanto restera' da pagare.
+  async function collegaPezzo(x: any, c: any) {
+    const resta = Math.round((c.manca - x.importo) * 100) / 100
+    if (!await dialog.confirm({ title: `Il bonifico di ${eur(x.importo)} paga la ricarica del ${it(c.giorno)}?`,
+      message: resta <= 0
+        ? `La ricarica da ${eur(c.importo)} risulta pagata${c.manca < c.importo ? ' insieme ai pezzi già arrivati' : ''} e «arrivata» nel Check Ricariche, con la data della banca.`
+        : `È un pezzo: della ricarica da ${eur(c.importo)} resteranno da pagare ${eur(resta)}. Quando arriva un altro bonifico dello stesso cliente che fa il resto, la ricarica si chiude da sola.`,
+      confirmText: 'Collega' })) return false
+    setEsito('')
+    const e = await azione('pz' + x.id, { azione: 'parte', riga_id: x.id, ricarica_id: c.id })
+    if (e) setEsito(e.completa ? `Ricarica del ${it(c.giorno)} pagata: ${eur(e.importo)}.` : `Collegato alla ricarica del ${it(c.giorno)}: arrivati ${eur(e.pagato)} di ${eur(e.importo)}, mancano ${eur(e.importo - e.pagato)}.`)
+    return !!e
+  }
+
   const escludi = async (g: any) => {
     if (await dialog.confirm({ title: `«${g.nome}» non è un cliente?`, message: 'I suoi bonifici escono dai conti dei clienti (un rimborso, un giroconto…), anche nei prossimi estratti.', confirmText: 'Non è un cliente' })) {
       await azione('esc' + g.chiave, { azione: 'escludi', nome: g.nome, iban: g.iban })
@@ -175,11 +190,14 @@ export default function EstrattoConto() {
             </div>
 
             <Blocco icona="✅" titolo={`${r.abbinati.n} bonifici pagano ${r.abbinati.ricariche} ricariche`} totale={r.abbinati.totale} aperto={aperti.abb} onApri={() => apri('abb')}
-              frase="Abbinati perché il nome di chi ha pagato corrisponde al cliente o a un nome salvato in «Chi paga i bonifici». Le ricariche risultano «arrivate» anche nel Check Ricariche, con la data della banca.">
+              frase="Abbinati perché il nome di chi ha pagato corrisponde al cliente o a un nome salvato in «Chi paga i bonifici». Le ricariche risultano «arrivate» anche nel Check Ricariche, con la data della banca. Una ricarica pagata in più bonifici compare su ognuno, col suo pezzo.">
               <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', 'Ricariche pagate', '']} righe={r.abbinati.righe.map((x: any) => [
-                it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
+                it(x.data), <Nome x={x} />, <span style={{ whiteSpace: 'nowrap' }}>{eur(x.importo)}</span>, x.cliente,
                 // Con due profili si vede quale ricarica e' di chi.
-                x.ricariche.map((y: any) => `${it(y.giorno)} ${eur(y.importo)}${new Set(x.ricariche.map((z: any) => z.cliente)).size > 1 ? ` (${y.cliente})` : ''}`).join(' + '),
+                x.ricariche.map((y: any) => y.quota !== undefined
+                  // un pezzo: quanto paga questo bonifico e a che punto e' la ricarica
+                  ? `${eur(y.quota)} della ricarica del ${it(y.giorno)} da ${eur(y.importo)} · ${y.completa ? `pagata in ${y.pezzi} bonifici` : `arrivati ${eur(y.pagato)}, mancano ${eur(y.importo - y.pagato)}`}`
+                  : `${it(y.giorno)} ${eur(y.importo)}${new Set(x.ricariche.map((z: any) => z.cliente)).size > 1 ? ` (${y.cliente})` : ''}`).join(' + '),
                 // Girato al sotto-master: non si scollega, si annulla il giro (blocco «Da girare»).
                 x.girato ? <span style={{ fontSize: '11px', color: '#6b7280', whiteSpace: 'nowrap' }}>{x.girato}</span>
                   : <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
@@ -188,9 +206,16 @@ export default function EstrattoConto() {
 
             {r.pagatiSenzaRicarica.n > 0 && (
               <Blocco icona="⚠️" titolo={`${r.pagatiSenzaRicarica.n} bonifici di un cliente senza una ricarica che torni`} totale={r.pagatiSenzaRicarica.totale} aperto={aperti.psr} onApri={() => apri('psr')}
-                frase="Il pagatore è del cliente (nome o IBAN), ma nessuna sua ricarica ha lo stesso importo: per esempio ha pagato 500 € e la ricarica era di 400. Contano nel pagato del cliente; se la ricarica arriva dopo, si abbinano da soli. Se il cliente è sbagliato, scollegalo.">
-                <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', '']} righe={r.pagatiSenzaRicarica.righe.map((x: any) => [
-                  it(x.data), <Nome x={x} />, eur(x.importo), x.cliente,
+                frase="Il pagatore è del cliente (nome o IBAN), ma nessuna sua ricarica ha lo stesso importo: per esempio ha pagato 500 € e la ricarica era di 400, oppure ha pagato una ricarica in più volte. Contano nel pagato del cliente. Se due o più bonifici fanno esattamente una ricarica (400 = 200 + 200) si abbinano da soli; negli altri casi scegli tu di quale ricarica è. Se il cliente è sbagliato, scollegalo.">
+                <Tabella teste={['Data', 'Bonifico da', 'Importo', 'Cliente', 'Di quale ricarica è?', '']} righe={r.pagatiSenzaRicarica.righe.map((x: any) => [
+                  it(x.data), <Nome x={x} />, <span style={{ whiteSpace: 'nowrap' }}>{eur(x.importo)}</span>, x.cliente,
+                  x.candidate?.length
+                    ? <select defaultValue="" disabled={!!occupato} style={{ ...campo, width: 'auto', maxWidth: '260px', padding: '4px 6px', fontSize: '12px' }}
+                        onChange={async e => { const el = e.target, c = x.candidate.find((y: any) => y.id === el.value); if (c && !(await collegaPezzo(x, c))) el.value = '' }}>
+                        <option value="">Scegli…</option>
+                        {x.candidate.map((c: any) => <option key={c.id} value={c.id}>{it(c.giorno)} · {eur(c.importo)}{c.manca < c.importo ? ` (mancano ${eur(c.manca)})` : ''}</option>)}
+                      </select>
+                    : <span style={{ fontSize: '11.5px', color: '#9ca3af' }}>nessuna sua ricarica da pagare</span>,
                   <button style={btnLink} disabled={!!occupato} onClick={() => scollega(x)}>Scollega</button>,
                 ])} />
               </Blocco>
@@ -283,7 +308,8 @@ export default function EstrattoConto() {
               <Tabella teste={['Ricaricata il', 'Cliente', 'Importo', 'Bonifico da', 'Non era un bonifico?']} righe={r.ricaricheSenzaBonifico.righe
                 .filter((x: any) => !filtroSenza || (filtroSenza === 'mio' ? !x.delSotto : x.di === filtroSenza)).map((x: any) => [
                 it(x.giorno),
-                <span>{x.cliente}{x.aManoArrivata && <span style={{ display: 'block', fontSize: '11px', color: '#b45309' }}>segnata «arrivata» a mano il {it(x.aManoArrivata)}, ma in banca non c&apos;è: il bonifico ha un altro nome?</span>}</span>,
+                <span>{x.cliente}{x.pagatoParti > 0 && <span style={{ display: 'block', fontSize: '11px', color: '#2563eb' }}>pagata a pezzi: arrivati {eur(x.pagatoParti)}, mancano {eur(x.importo - x.pagatoParti)}</span>}
+                  {x.aManoArrivata && <span style={{ display: 'block', fontSize: '11px', color: '#b45309' }}>segnata «arrivata» a mano il {it(x.aManoArrivata)}, ma in banca non c&apos;è: il bonifico ha un altro nome?</span>}</span>,
                 eur(x.importo),
                 // Le ricariche dei sotto-master le ha fatte il sotto-master: il nome di chi paga si dà dal «di chi è?».
                 x.delSotto ? <span style={{ color: '#9ca3af' }}>—</span>

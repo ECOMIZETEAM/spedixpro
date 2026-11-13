@@ -4,7 +4,7 @@
 // piu' pagatori_bonifico e ricariche_check del passo 1.
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { ricordaPagatore, pulisciIban, sottoSulConto, type SottoSulConto } from '@/lib/contabilita-banca'
-import { chiaveDi, norma, principale, proponi, ricarichePagate, voceUscita, type Anagrafica, type Entrata, type RicaricaAperta, type Target } from '@/lib/contabilita-abbina'
+import { chiaveDi, norma, pezziChePagano, principale, proponi, ricarichePagate, voceUscita, type Anagrafica, type Entrata, type RicaricaAperta, type Target } from '@/lib/contabilita-abbina'
 import type { Estratto } from '@/lib/estratto-finom'
 
 const GIORNO = 86400000
@@ -25,6 +25,38 @@ async function reteDi(admin: any, masterId: string): Promise<Rete> {
 }
 // Le tabelle del giro (passo 3) possono non esserci ancora: senza, nessun giro esiste.
 const tabellaMancante = (e: any) => /giri_bonifici/.test(e?.message || '') && /does not exist|Could not find|schema cache/i.test(e?.message || '')
+
+// I PEZZI (parti_bonifici): una ricarica pagata con piu' bonifici, 400 € = 200 + 200 (Lorenzo, 13/11/2026). Ogni
+// bonifico che ne paga un pezzo e' una riga li'. Quando i pezzi fanno l'importo la ricarica ha anche il suo
+// abbinamento, col bonifico che l'ha chiusa, e solo allora risulta "arrivata" e si puo' girare al sotto-master:
+// il giro (gira_bonifici_sotto_master) guarda gli abbinamenti, e una ricarica pagata a meta' non deve passare.
+// Senza la tabella (prima della migrazione) nessuna ricarica ha pezzi e tutto resta com'era.
+const partiMancanti = (e: any) => /parti_bonifici/.test(e?.message || '') && /does not exist|Could not find|schema cache/i.test(e?.message || '')
+type Parte = { riga_id: string, ricarica_id: string, importo: number }
+// I pezzi sono pochi (solo le ricariche pagate in piu' bonifici): si leggono tutti quelli del master in una volta
+// e si filtrano qui. A blocchi di 300 id, uno dopo l'altro, l'apertura di ottobre passava da 6 a 20 secondi.
+async function partiDi(admin: any, masterId: string, campo: 'ricarica_id' | 'riga_id', ids: string[]): Promise<Parte[]> {
+  if (!ids.length) return []
+  let tutti: any[]
+  try {
+    tutti = await fetchAllStretto(() => admin.from('parti_bonifici').select('riga_id,ricarica_id,importo').eq('master_id', masterId).order('id'))
+  } catch (e: any) { if (partiMancanti(e)) return []; throw e }
+  const voluti = new Set(ids)
+  return tutti.filter((x: any) => voluti.has(x[campo])).map((x: any) => ({ riga_id: x.riga_id, ricarica_id: x.ricarica_id, importo: Number(x.importo) }))
+}
+/** Gli abbinamenti di tanti id, a blocchi letti insieme. */
+async function abbinamentiDi(admin: any, campo: 'ricarica_id' | 'riga_id', ids: string[]): Promise<{ ricarica_id: string, riga_id: string }[]> {
+  const blocchi: string[][] = []
+  for (let i = 0; i < ids.length; i += 300) blocchi.push(ids.slice(i, i + 300))
+  const letti = await Promise.all(blocchi.map(async b => {
+    const { data, error } = await admin.from('abbinamenti_bonifici').select('ricarica_id,riga_id').in(campo, b)
+    if (error) throw new Error(error.message)
+    return data || []
+  }))
+  return letti.flat()
+}
+const cent = (x: number) => Math.round(x * 100)
+const giorniFra = (a: string, b: string) => (Date.parse(a.slice(0, 10) + 'T00:00:00Z') - Date.parse(b.slice(0, 10) + 'T00:00:00Z')) / GIORNO
 
 /** Per ogni IBAN salvato, i clienti che paga ("cliente:<id>", "master:<id>"). Piu' d'uno = profili dello
  *  stesso cliente pagati dallo stesso conto (lib/contabilita-abbina, proponi). */
@@ -102,20 +134,37 @@ async function anagrafiche(admin: any, rete: Rete): Promise<Anagrafica[]> {
  *  con quelle gia' abbinate segnate. Le righe tolte dal Check Ricariche (nascosta_il: Ecomize ha ripulito
  *  l'elenco il 12/11) non si cercano piu' in banca, ma quelle gia' abbinate restano col loro bonifico: il
  *  lavoro fatto sull'estratto non si perde. */
+const CAMPI_RICARICA = 'id,master_id,target_tipo,target_id,target_nome,importo,ricaricato_il,metodo,mittente,bonifico_effettuato_il,bonifico_arrivato_il,nascosta_il'
 async function ricariche(admin: any, rete: Rete, dal: string, al: string) {
-  const tutte = await fetchAllStretto(() => admin.from('ricariche_check')
-    .select('id,master_id,target_tipo,target_id,target_nome,importo,ricaricato_il,metodo,mittente,bonifico_effettuato_il,bonifico_arrivato_il,nascosta_il')
+  const tutte = await fetchAllStretto(() => admin.from('ricariche_check').select(CAMPI_RICARICA)
     .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -15)).lte('ricaricato_il', spostaGiorni(al, 4))
     .or('metodo.is.null,metodo.eq.bonifico').order('ricaricato_il').order('id'))
+  return conAbbinamenti(admin, rete, tutte)
+}
+/** Le ricariche di bonifici del periodo che le pagano a pezzi, quando sono di prima della finestra. */
+async function ricarichePerId(admin: any, rete: Rete, ids: string[]) {
+  const tutte: any[] = []
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data, error } = await admin.from('ricariche_check').select(CAMPI_RICARICA).in('id', ids.slice(i, i + 300)).in('master_id', rete.ids)
+    if (error) throw new Error(error.message)
+    tutte.push(...(data || []))
+  }
+  return conAbbinamenti(admin, rete, tutte)
+}
+/** Ogni ricarica col bonifico che la paga (`riga_id`) e i suoi pezzi: `pagatoParti` e' quanto e' gia' arrivato
+ *  di una ricarica pagata a pezzi. */
+async function conAbbinamenti(admin: any, rete: Rete, tutte: any[]) {
   const ids = tutte.map((r: any) => r.id)
   const abbinate = new Map<string, string>()
-  for (let i = 0; i < ids.length; i += 300) {
-    const { data, error } = await admin.from('abbinamenti_bonifici').select('ricarica_id,riga_id').in('ricarica_id', ids.slice(i, i + 300))
-    if (error) throw new Error(error.message)
-    for (const a of data || []) abbinate.set(a.ricarica_id, a.riga_id)
-  }
-  return tutte.filter((r: any) => !r.nascosta_il || abbinate.has(r.id))
-    .map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il), riga_id: abbinate.get(r.id) || null }))
+  for (const a of await abbinamentiDi(admin, 'ricarica_id', ids)) abbinate.set(a.ricarica_id, a.riga_id)
+  const pezzi = new Map<string, Parte[]>()
+  for (const p of await partiDi(admin, rete.ids[0], 'ricarica_id', ids)) { if (!pezzi.has(p.ricarica_id)) pezzi.set(p.ricarica_id, []); pezzi.get(p.ricarica_id)!.push(p) }
+  return tutte.filter((r: any) => !r.nascosta_il || abbinate.has(r.id) || pezzi.has(r.id))
+    .map((r: any) => {
+      const parti = pezzi.get(r.id) || []
+      return { ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il), riga_id: abbinate.get(r.id) || null,
+        parti, pagatoParti: r2(parti.reduce((t, p) => t + p.importo, 0)) }
+    })
 }
 
 async function movimenti(admin: any, masterId: string, dal: string, al: string) {
@@ -129,9 +178,9 @@ async function movimenti(admin: any, masterId: string, dal: string, al: string) 
  *  della banca. Si ricorda cosa ha segnato lui, per poterlo togliere se l'abbinamento si annulla.
  *  Tutto a blocchi: una scrittura per riga faceva 700 viaggi al database e il caricamento di ottobre durava
  *  59 secondi, a un passo dal limite del server (60). */
-async function abbinaTutti(admin: any, masterId: string, rete: Rete, legami: { riga: { id: string, data: string }, ric: any[] }[], userId: string | null): Promise<number> {
+async function abbinaTutti(admin: any, masterId: string, rete: Rete, legami: { riga: { id: string, data: string }, ric: any[] }[], userId: string | null, modo: 'auto' | 'confermato' = 'auto'): Promise<number> {
   const nuovi = legami.flatMap(l => l.ric.map(r => ({
-    master_id: masterId, riga_id: l.riga.id, ricarica_id: r.id, modo: 'auto',
+    master_id: masterId, riga_id: l.riga.id, ricarica_id: r.id, modo,
     segnato_effettuato: !r.bonifico_effettuato_il, segnato_arrivato: !r.bonifico_arrivato_il, creato_da: userId,
     _data: l.riga.data,
   })))
@@ -178,19 +227,22 @@ async function aggiornaRighe(admin: any, masterId: string, ids: string[], valori
  *  cliente che non hanno ancora trovato la loro ricarica (magari fatta dopo). Non chiede niente a nessuno. */
 export async function applicaSicuri(admin: any, masterId: string, dal: string, al: string) {
   const rete = await reteDi(admin, masterId)
-  const [righe, ric, anag, pag, giaEsclusi] = await Promise.all([
-    movimenti(admin, masterId, dal, al), ricariche(admin, rete, dal, al), anagrafiche(admin, rete),
+  // Bonifici e ricariche si leggono una volta, larghi quanto servono ai pezzi (pezziAutomatici: bonifici da 30
+  // giorni prima, ricariche da 31), e da li' il periodo: le regole di sempre vedono esattamente quello di prima.
+  const [righeLarghe, ricLarghe, anag, pag, giaEsclusi] = await Promise.all([
+    movimenti(admin, masterId, spostaGiorni(dal, -30), al), ricariche(admin, rete, spostaGiorni(dal, -16), al), anagrafiche(admin, rete),
     fetchAllStretto(() => admin.from('pagatori_bonifico').select('target_tipo,target_id,nome,iban').eq('master_id', masterId).order('id')),
     // Pagatori segnati "non e' un cliente", in qualunque mese: i loro bonifici nuovi restano fuori come i vecchi.
     fetchAllStretto(() => admin.from('estratti_righe').select('nome,iban').eq('master_id', masterId).eq('assegnato', 'escluso').order('id')),
   ])
+  const righe = righeLarghe.filter(r => r.data >= dal)
+  const ric = ricLarghe.filter((r: any) => String(r.ricaricato_il) >= spostaGiorni(dal, -15))
   const legate = new Set<string>()
-  for (let i = 0; i < righe.length; i += 300) {
-    const { data, error } = await admin.from('abbinamenti_bonifici').select('riga_id').in('riga_id', righe.slice(i, i + 300).map(r => r.id))
-    if (error) throw new Error(error.message)
-    for (const a of data || []) legate.add(a.riga_id)
-  }
-  const aperte = ric.filter((r: any) => !r.riga_id)
+  for (const a of await abbinamentiDi(admin, 'riga_id', righeLarghe.map(r => r.id))) legate.add(a.riga_id)
+  // Un bonifico che paga un pezzo di una ricarica non paga altro; e una ricarica gia' pagata in parte non si
+  // abbina per intero a un bonifico solo: si aspettano gli altri pezzi (pezziAutomatici).
+  for (const p of await partiDi(admin, masterId, 'riga_id', righeLarghe.map(r => r.id))) legate.add(p.riga_id)
+  const aperte = ric.filter((r: any) => !r.riga_id && !r.parti.length)
   const perId = new Map(aperte.map((r: any) => [r.id, r]))
   const esclusi = new Set(giaEsclusi.map((r: any) => chiavePagatore(r)))
   const libere = righe.filter(r => r.importo > 0 && r.iban && !r.target_id && !r.assegnato)
@@ -225,8 +277,121 @@ export async function applicaSicuri(admin: any, masterId: string, dal: string, a
     lista.forEach((x: any) => usate.add(x.id))
     legami.push({ riga: r, ric: lista })
   }
-  const abbinati = await abbinaTutti(admin, masterId, rete, legami, null)
-  return { assegnati: [...perCliente.values()].reduce((t, l) => t + l.length, 0), abbinati }
+  const assegnate = new Map<string, string>()
+  for (const [k, ids] of perCliente) for (const id of ids) assegnate.set(id, k)
+  const pezzi = await pezziAutomatici(admin, masterId, righeLarghe, ricLarghe, usate, new Set([...legate, ...legami.map(l => l.riga.id)]), assegnate)
+  const abbinati = await abbinaTutti(admin, masterId, rete, [...legami, ...pezzi], null)
+  return { assegnati: [...perCliente.values()].reduce((t, l) => t + l.length, 0), abbinati, aPezzi: pezzi.length }
+}
+
+/** Le ricariche pagate a pezzi, da sole: i bonifici di quel cliente ancora senza ricarica che fanno ESATTAMENTE
+ *  quello che manca (lib/contabilita-abbina, pezziChePagano), da 2 giorni prima della ricarica a 30 dopo, tutti
+ *  dallo STESSO pagatore (IBAN, o nome senza IBAN). Senza questa condizione, alla prova sui dati veri del 13/11 la
+ *  ricarica da 100 € del 29/09 di CENTRO POST@ (cliente di Ecomize LL) risultava pagata da due bonifici da 50 di
+ *  due pagatori diversi a due settimane di distanza (SumUp il 14/10, A-TONO il 27/10): non erano suoi. Anche
+ *  quella che il master aveva cominciato a mano ("e' un pezzo di..."): si chiude col bonifico che arriva dopo,
+ *  dello stesso pagatore dei pezzi gia' scritti.
+ *  Scrive i pezzi e restituisce le ricariche chiuse, col bonifico che le chiude (l'ultimo): l'abbinamento lo fa
+ *  abbinaTutti insieme agli altri. Solo il cliente gia' riconosciuto del bonifico: nessun nome nuovo. */
+// `righe` e `ric` arrivano da applicaSicuri gia' larghe: bonifici da 30 giorni prima del periodo, ricariche da 31
+// (una ricarica di fine mese pagata a pezzi nel mese dopo). `occupate`: bonifici gia' abbinati, gia' pezzi, o
+// appena presi dalle regole di sempre.
+async function pezziAutomatici(admin: any, masterId: string, righeTutte: any[], ric: any[], usate: Set<string>, occupate: Set<string>, assegnate: Map<string, string>) {
+  // `assegnate`: i bonifici a cui questo stesso giro ha appena dato il cliente ("cliente:<id>")
+  const righe = righeTutte.filter((r: any) => r.importo > 0 && (r.target_id || assegnate.has(r.id))).map((r: any) => {
+    if (r.target_id) return r
+    const [tipo, id] = assegnate.get(r.id)!.split(':')
+    return { ...r, target_tipo: tipo, target_id: id }
+  })
+  const prese = new Set(occupate)
+  const libere = righe.filter((r: any) => !prese.has(r.id)).map((r: any) => ({ ...r, importo: Number(r.importo) }))
+  const aperte = ric.filter((r: any) => !r.riga_id && !usate.has(r.id) && (!r.nascosta_il || r.parti.length))
+  // Data e pagatore dei pezzi gia' scritti: quale bonifico chiude la ricarica, e chi deve pagare il resto.
+  const giaIds = aperte.flatMap((r: any) => r.parti.map((p: Parte) => p.riga_id))
+  const dataDi = new Map<string, string>(righe.map((r: any) => [r.id, r.data]))
+  const chiDi = new Map<string, string>(righe.map((r: any) => [r.id, chiavePagatore(r)]))
+  const daLeggere = giaIds.filter((id: string) => !dataDi.has(id))
+  for (let i = 0; i < daLeggere.length; i += 300) {
+    const { data, error } = await admin.from('estratti_righe').select('id,data,iban,nome').eq('master_id', masterId).in('id', daLeggere.slice(i, i + 300))
+    if (error) throw new Error(error.message)
+    for (const x of data || []) { dataDi.set(x.id, x.data); chiDi.set(x.id, chiavePagatore(x)) }
+  }
+  const nuovi: any[] = [], chiuse: { riga: { id: string, data: string }, ric: any[], pezzi: string[] }[] = []
+  for (const R of aperte) {
+    const manca = r2(R.importo - R.pagatoParti)
+    let scelti: string[] = []
+    if (cent(manca) > 0) {
+      const giaChi = new Set(R.parti.map((p: Parte) => chiDi.get(p.riga_id)).filter(Boolean))
+      const cand = libere.filter((b: any) => !prese.has(b.id) && chiaveDi(b) === chiaveDi(R) && cent(b.importo) <= cent(manca)
+        && giorniFra(b.data, R.giorno) >= -2 && giorniFra(b.data, R.giorno) <= 30 && (!giaChi.size || giaChi.has(chiavePagatore(b))))
+      // Pagatore per pagatore; vince la combinazione che si chiude prima (a parita', con meno pezzi).
+      const perChi = new Map<string, any[]>()
+      for (const b of cand) { const k = chiavePagatore(b); if (!perChi.has(k)) perChi.set(k, []); perChi.get(k)!.push(b) }
+      let meglio: { ids: string[], fine: string } | null = null
+      for (const lista of perChi.values()) {
+        const t = pezziChePagano(manca, lista, R.parti.length ? 1 : 2)
+        if (!t) continue
+        const fine = t.map(id => lista.find((b: any) => b.id === id)!.data).sort().pop()!
+        if (!meglio || fine < meglio.fine || (fine === meglio.fine && t.length < meglio.ids.length)) meglio = { ids: t, fine }
+      }
+      if (!meglio) continue
+      scelti = meglio.ids
+    } else if (!R.parti.length) continue
+    // (manca 0 con i pezzi gia' scritti e senza abbinamento: una scrittura interrotta, la si chiude adesso)
+    scelti.forEach(id => prese.add(id))
+    for (const id of scelti) nuovi.push({ master_id: masterId, riga_id: id, ricarica_id: R.id, importo: libere.find((b: any) => b.id === id)!.importo, modo: 'auto' })
+    for (const id of scelti) dataDi.set(id, libere.find((b: any) => b.id === id)!.data)
+    const tutti = [...R.parti.map((p: Parte) => p.riga_id), ...scelti]
+    const ultimo = tutti.reduce((a: string, b: string) => (String(dataDi.get(b) || '') > String(dataDi.get(a) || '') ? b : a))
+    chiuse.push({ riga: { id: ultimo, data: String(dataDi.get(ultimo) || '') }, ric: [R], pezzi: scelti })
+  }
+  if (!chiuse.length) return []
+  const scritti = new Set<string>()
+  for (let i = 0; i < nuovi.length; i += 500) {
+    // Due aperture insieme: un bonifico preso dall'altra (indice unico sul bonifico) si salta, e la sua
+    // ricarica resta aperta finche' i pezzi non tornano.
+    const { data, error } = await admin.from('parti_bonifici').upsert(nuovi.slice(i, i + 500), { onConflict: 'riga_id', ignoreDuplicates: true }).select('riga_id')
+    if (error) { if (partiMancanti(error)) return []; throw new Error(error.message) }
+    for (const x of data || []) scritti.add(x.riga_id)
+  }
+  return chiuse.filter(c => c.pezzi.every(id => scritti.has(id))).map(({ riga, ric }) => ({ riga, ric }))
+}
+
+/** "Questo bonifico paga quella ricarica", anche solo un pezzo: lo dice il master su un bonifico di un cliente che
+ *  non ha trovato la sua ricarica (Lorenzo, 13/11: 400 € pagati 200 + 200). Quando i pezzi fanno l'importo la
+ *  ricarica e' pagata: abbinamento col bonifico che la chiude e "arrivata" con la sua data. Prima si vede quanto
+ *  manca, e il prossimo bonifico del cliente che fa il resto la chiude da solo. */
+export async function collegaParte(admin: any, masterId: string, userId: string, rigaId: string, ricaricaId: string) {
+  const rete = await reteDi(admin, masterId)
+  const { data: riga, error: e0 } = await admin.from('estratti_righe').select('id,data,importo,target_tipo,target_id').eq('id', rigaId).eq('master_id', masterId).maybeSingle()
+  if (e0) throw new Error(e0.message)
+  if (!riga || Number(riga.importo) <= 0) throw new Error('Bonifico non trovato')
+  if (!riga.target_id) throw new Error('Prima dì di quale cliente è questo bonifico')
+  const [{ data: suoi, error: e1 }, suoiPezzi] = await Promise.all([
+    admin.from('abbinamenti_bonifici').select('id').eq('riga_id', rigaId).limit(1), partiDi(admin, masterId, 'riga_id', [rigaId])])
+  if (e1) throw new Error(e1.message)
+  if (suoi?.length || suoiPezzi.length) throw new Error('Questo bonifico paga già una ricarica: prima scollegalo')
+  const [R] = await ricarichePerId(admin, rete, [ricaricaId])
+  if (!R) throw new Error('Ricarica non trovata')
+  if (R.metodo && R.metodo !== 'bonifico') throw new Error('Questa ricarica non è stata pagata con bonifico')
+  if (chiaveDi(R) !== chiaveDi(riga)) throw new Error('Questa ricarica è di un altro cliente')
+  if (R.riga_id) throw new Error('Questa ricarica è già pagata')
+  if (R.nascosta_il && !R.parti.length) throw new Error('Questa ricarica è stata tolta dal Check Ricariche')
+  const importo = Number(riga.importo), manca = r2(R.importo - R.pagatoParti)
+  if (cent(importo) > cent(manca)) throw new Error(`Il bonifico (€ ${importo.toFixed(2)}) è più di quanto manca alla ricarica (€ ${manca.toFixed(2)})`)
+  const { error: e2 } = await admin.from('parti_bonifici').insert({ master_id: masterId, riga_id: rigaId, ricarica_id: R.id, importo, modo: 'confermato', creato_da: userId })
+  if (e2) throw new Error(e2.code === '23505' ? 'Questo bonifico paga già una ricarica: prima scollegalo' : partiMancanti(e2) ? 'Funzione non ancora attiva' : e2.message)
+  const completa = cent(importo) === cent(manca)
+  if (completa) {
+    // La chiude l'ultimo bonifico arrivato: e' la data in cui la ricarica risulta pagata.
+    const altri = R.parti.map((p: Parte) => p.riga_id)
+    const { data: date, error: e3 } = altri.length
+      ? await admin.from('estratti_righe').select('id,data').eq('master_id', masterId).in('id', altri) : { data: [], error: null }
+    if (e3) throw new Error(e3.message)
+    const ultimo = [{ id: riga.id, data: riga.data }, ...(date || [])].reduce((a: any, b: any) => (b.data > a.data ? b : a))
+    await abbinaTutti(admin, masterId, rete, [{ riga: ultimo, ric: [R] }], userId, 'confermato')
+  }
+  return { completa, pagato: r2(R.pagatoParti + importo), importo: R.importo }
 }
 
 /** "Questo pagatore e' quel cliente" (risposta al "di chi e'?"), o "e' di questi profili": un cliente con due
@@ -271,8 +436,9 @@ export async function assegnaPagatore(admin: any, masterId: string, userId: stri
     if (e3) throw new Error(e3.message)
     abb.push(...(data || []))
   }
-  const legate = new Set(abb.map((a: any) => a.riga_id))
-  return { ...esito, pagatore: { bonifici: ids.length, conRicarica: legate.size, ricariche: abb.length,
+  const pezzi = await partiDi(admin, masterId, 'riga_id', ids)
+  const legate = new Set([...abb.map((a: any) => a.riga_id), ...pezzi.map(p => p.riga_id)])
+  return { ...esito, pagatore: { bonifici: ids.length, conRicarica: legate.size, ricariche: new Set([...abb.map((a: any) => a.ricarica_id), ...pezzi.map(p => p.ricarica_id)]).size,
     senzaRicarica: (sue || []).filter((x: any) => x.target_id && !legate.has(x.id)).length } }
 }
 
@@ -303,19 +469,39 @@ export async function scollegaRiga(admin: any, masterId: string, rigaId: string)
   const { data: gir, error: eg } = await admin.from('giri_bonifici_ricariche').select('giro_id').eq('riga_id', rigaId).eq('attivo', true).limit(1)
   if (eg && !tabellaMancante(eg)) throw new Error(eg.message)
   if (gir?.length) throw new Error('Questo bonifico è già stato girato al sotto-master: prima annulla il giro')
-  const { data: abb, error } = await admin.from('abbinamenti_bonifici').select('id,ricarica_id,segnato_effettuato,segnato_arrivato').eq('riga_id', rigaId).eq('master_id', masterId)
+  // Un pezzo di una ricarica pagata a pezzi: la ricarica non e' piu' pagata per intero, quindi perde anche il suo
+  // abbinamento (che puo' stare su un altro dei suoi bonifici) e torna "in attesa". Se e' gia' girata, no.
+  const pezzi = await partiDi(admin, masterId, 'riga_id', [rigaId])
+  for (const p of pezzi) {
+    const { data: g2, error: eg2 } = await admin.from('giri_bonifici_ricariche').select('giro_id').eq('ricarica_id', p.ricarica_id).eq('attivo', true).limit(1)
+    if (eg2 && !tabellaMancante(eg2)) throw new Error(eg2.message)
+    if (g2?.length) throw new Error('Questo bonifico paga una ricarica già girata al sotto-master: prima annulla il giro')
+  }
+  const { data: abbPezzi, error: ep } = pezzi.length
+    ? await admin.from('abbinamenti_bonifici').select('id,ricarica_id,segnato_effettuato,segnato_arrivato').in('ricarica_id', pezzi.map(p => p.ricarica_id)).eq('master_id', masterId)
+    : { data: [], error: null }
+  if (ep) throw new Error(ep.message)
+  const { data: abbRiga, error } = await admin.from('abbinamenti_bonifici').select('id,ricarica_id,segnato_effettuato,segnato_arrivato').eq('riga_id', rigaId).eq('master_id', masterId)
   if (error) throw new Error(error.message)
+  const abb = [...(abbRiga || []), ...(abbPezzi || []).filter((a: any) => !(abbRiga || []).some((b: any) => b.id === a.id))]
   // I clienti delle ricariche che pagava, prima di toglierle: con due profili non e' solo quello della riga.
-  const { data: ricPagate, error: e0 } = (abb || []).length
-    ? await admin.from('ricariche_check').select('target_tipo,target_id').in('id', abb!.map((a: any) => a.ricarica_id)).in('master_id', rete.ids)
+  const ricToccate = [...new Set([...abb.map((a: any) => a.ricarica_id), ...pezzi.map(p => p.ricarica_id)])]
+  const { data: ricPagate, error: e0 } = ricToccate.length
+    ? await admin.from('ricariche_check').select('target_tipo,target_id').in('id', ricToccate).in('master_id', rete.ids)
     : { data: [], error: null }
   if (e0) throw new Error(e0.message)
-  for (const a of abb || []) {
+  for (const a of abb) {
     const torna: any = {}
     if (a.segnato_arrivato) torna.bonifico_arrivato_il = null
     if (a.segnato_effettuato) torna.bonifico_effettuato_il = null
     if (Object.keys(torna).length) await admin.from('ricariche_check').update(torna).eq('id', a.ricarica_id).in('master_id', rete.ids)
     await admin.from('abbinamenti_bonifici').delete().eq('id', a.id).eq('master_id', masterId)
+  }
+  // Il pezzo si toglie dopo l'abbinamento: se qualcosa si ferma a meta', la ricarica resta "da pagare" con un
+  // pezzo in piu' (si vede e si scollega di nuovo), mai "pagata" con un pezzo in meno.
+  if (pezzi.length) {
+    const { error: e1 } = await admin.from('parti_bonifici').delete().eq('riga_id', rigaId).eq('master_id', masterId)
+    if (e1) throw new Error(e1.message)
   }
   const { data: prima } = await admin.from('estratti_righe').select('iban,target_tipo,target_id').eq('id', rigaId).eq('master_id', masterId).maybeSingle()
   const { error: e2 } = await admin.from('estratti_righe').update({ target_tipo: null, target_id: null, assegnato: 'libero' }).eq('id', rigaId).eq('master_id', masterId)
@@ -337,10 +523,12 @@ export async function scollegaRiga(admin: any, masterId: string, rigaId: string)
         .eq('master_id', masterId).eq('iban', prima.iban).neq('id', rigaId).order('id'))
       ancora = new Set<string>(altre.filter((x: any) => x.target_id).map((x: any) => chiaveDi(x)))
       const ids = altre.map((x: any) => x.id)
+      // anche i bonifici che pagano una sua ricarica a pezzi
+      const pezziAltri = await partiDi(admin, masterId, 'riga_id', ids)
       for (let i = 0; i < ids.length; i += 300) {
         const { data: a2, error: e4 } = await admin.from('abbinamenti_bonifici').select('ricarica_id').in('riga_id', ids.slice(i, i + 300))
         if (e4) throw new Error(e4.message)
-        const ricIds = (a2 || []).map((x: any) => x.ricarica_id)
+        const ricIds = [...(a2 || []).map((x: any) => x.ricarica_id), ...(i === 0 ? pezziAltri.map(p => p.ricarica_id) : [])]
         for (let j = 0; j < ricIds.length; j += 300) {
           const { data: r2, error: e5 } = await admin.from('ricariche_check').select('target_tipo,target_id').in('id', ricIds.slice(j, j + 300))
           if (e5) throw new Error(e5.message)
@@ -412,11 +600,14 @@ async function situazioneGiri(admin: any, masterId: string, rete: Rete, nome: (t
 /** Il racconto del periodo, a blocchi (come piace a Lorenzo: numero, frase, elenco da aprire). */
 export async function resoconto(admin: any, masterId: string, dal: string, al: string) {
   const rete = await reteDi(admin, masterId)
-  const [righe, ric, anag, pag, voci] = await Promise.all([
-    movimenti(admin, masterId, dal, al), ricariche(admin, rete, dal, al), anagrafiche(admin, rete),
+  // Le ricariche si leggono una volta, da 45 giorni prima: servono alle proposte di «Di quale ricarica e'?».
+  // Il periodo (da 15 giorni prima) si ricava da li', identico a prima.
+  const [righe, ricLarghe, anag, pag, voci] = await Promise.all([
+    movimenti(admin, masterId, dal, al), ricariche(admin, rete, spostaGiorni(dal, -30), al), anagrafiche(admin, rete),
     fetchAllStretto(() => admin.from('pagatori_bonifico').select('target_tipo,target_id,nome,iban').eq('master_id', masterId).order('id')),
     fetchAllStretto(() => admin.from('uscite_voci').select('controparte,voce').eq('master_id', masterId).order('controparte')),
   ])
+  const ric = ricLarghe.filter((r: any) => String(r.ricaricato_il) >= spostaGiorni(dal, -15))
   // I clienti dei sotto-master si leggono con accanto il sotto-master: "ARIOLDI GIULIA · Ecomize LL". Ecomize
   // Solution vedeva gia' quel nome nelle rettifiche e lo credeva suo (Lorenzo, 10/11).
   const etichetta = (a: Anagrafica) => a.di ? `${a.nome} · ${a.di}` : a.nome
@@ -425,16 +616,27 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   const nome = (t: string, id: string) => nomeDi.get(`${t}:${id}`) || '—'
   const nomeK = (k: string) => nomeDi.get(k) || '—'
   const perIban = clientiPerIban(pag as any)
+  // Una ricarica pagata a pezzi si legge dai suoi pezzi, uno per bonifico, non dal suo abbinamento (che sta solo
+  // sul bonifico che l'ha chiusa).
   const ricPerRiga = new Map<string, any[]>()
-  for (const r of ric) if (r.riga_id) { if (!ricPerRiga.has(r.riga_id)) ricPerRiga.set(r.riga_id, []); ricPerRiga.get(r.riga_id)!.push(r) }
+  for (const r of ric) if (r.riga_id && !r.parti.length) { if (!ricPerRiga.has(r.riga_id)) ricPerRiga.set(r.riga_id, []); ricPerRiga.get(r.riga_id)!.push(r) }
+  const ricPerIdTutte = new Map<string, any>(ric.map(r => [r.id, r]))
+  const pezziDelPeriodo = await partiDi(admin, masterId, 'riga_id', righe.filter(r => r.importo > 0).map(r => r.id))
+  const fuoriFinestra = [...new Set(pezziDelPeriodo.map(p => p.ricarica_id).filter(id => !ricPerIdTutte.has(id)))]
+  if (fuoriFinestra.length) for (const r of await ricarichePerId(admin, rete, fuoriFinestra)) ricPerIdTutte.set(r.id, r)
+  const pezzoDi = new Map<string, { ric: any, quota: number }>()
+  for (const p of pezziDelPeriodo) { const R = ricPerIdTutte.get(p.ricarica_id); if (R) pezzoDi.set(p.riga_id, { ric: R, quota: p.importo }) }
   // Il cliente di un bonifico come lo si legge: quelli delle ricariche che paga (due profili = "A + B"); senza
   // ricarica, il suo cliente, o i suoi profili se l'IBAN li paga tutti ("A / B").
   const clienteDi = (r: any) => {
-    const sue = ricPerRiga.get(r.id)
-    if (sue?.length) return [...new Set(sue.map((y: any) => nome(y.target_tipo, y.target_id)))].join(' + ')
+    const sue = [...(ricPerRiga.get(r.id) || []), ...(pezzoDi.has(r.id) ? [pezzoDi.get(r.id)!.ric] : [])]
+    if (sue.length) return [...new Set(sue.map((y: any) => nome(y.target_tipo, y.target_id)))].join(' + ')
     return [...famigliaDi(r, perIban)].map(nomeK).join(' / ')
   }
   const breve = (r: any) => ({ id: r.id, giorno: r.giorno, importo: r.importo, cliente: nome(r.target_tipo, r.target_id) })
+  // Il pezzo di un bonifico: quanto paga e a che punto e' la ricarica.
+  const brevePezzo = (p: { ric: any, quota: number }) => ({ ...breve(p.ric), quota: p.quota, pagato: p.ric.pagatoParti, pezzi: p.ric.parti.length, completa: !!p.ric.riga_id })
+  const pagaRicariche = (r: any) => [...(ricPerRiga.get(r.id) || []).map(breve), ...(pezzoDi.has(r.id) ? [brevePezzo(pezzoDi.get(r.id)!)] : [])]
   // Nella tendina del "di chi e'?" i clienti hanno "<id>" o "m:<id>".
   const perTendina = (k: string) => { const [tipo, id] = k.split(':'); return tipo === 'master' ? 'm:' + id : id }
   const riga = (r: any) => ({ id: r.id, data: r.data, nome: r.nome, causale: r.causale, iban: r.iban, importo: r.importo })
@@ -443,7 +645,7 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   const clienti = entrate.filter(r => r.iban)
   // Quelle ancora senza cliente (le sicure le ha gia' applicate applicaSicuri prima del resoconto)
   const libere = clienti.filter(r => !r.target_id && (!r.assegnato || r.assegnato === 'libero'))
-  const aperte = ric.filter(r => !r.riga_id)
+  const aperte = ric.filter(r => !r.riga_id && !r.parti.length)
   const proposte = proponi(libere as Entrata[], aperte as RicaricaAperta[], pag as any, anag)
   const ricPerId = new Map(ric.map(r => [r.id, r]))
 
@@ -467,8 +669,8 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     return [...m.values()].sort((a, b) => b.totale - a.totale)
   }
 
-  const abbinati = clienti.filter(r => ricPerRiga.has(r.id))
-  const soloCliente = clienti.filter(r => r.target_id && !ricPerRiga.has(r.id))
+  const abbinati = clienti.filter(r => ricPerRiga.has(r.id) || pezzoDi.has(r.id))
+  const soloCliente = clienti.filter(r => r.target_id && !ricPerRiga.has(r.id) && !pezzoDi.has(r.id))
   const ultimoUtile = spostaGiorni(al, -3)
   const senzaBonifico = ric.filter(r => !r.riga_id && r.giorno >= dal && r.giorno <= ultimoUtile)
   const recenti = ric.filter(r => !r.riga_id && r.giorno > ultimoUtile && r.giorno <= al)
@@ -485,11 +687,13 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   // 1.000 all'uno e 0 all'altro. Senza ricarica va al cliente del bonifico. Quello che avanza (non dovrebbe: le
   // ricariche abbinate sommano sempre l'importo) resta al cliente del bonifico, cosi' il totale non cambia.
   for (const r of clienti) {
-    if (!r.target_id && !ricPerRiga.has(r.id)) continue
+    if (!r.target_id && !ricPerRiga.has(r.id) && !pezzoDi.has(r.id)) continue
     let resto = r.importo
     const toccati = new Set<string>()
-    for (const y of ricPerRiga.get(r.id) || []) {
-      const v = voce(y.target_tipo, y.target_id); v.pagato = r2(v.pagato + y.importo); resto = r2(resto - y.importo)
+    // un pezzo vale il suo bonifico, non la ricarica intera
+    const quote = [...(ricPerRiga.get(r.id) || []).map((y: any) => ({ y, q: y.importo })), ...(pezzoDi.has(r.id) ? [{ y: pezzoDi.get(r.id)!.ric, q: pezzoDi.get(r.id)!.quota }] : [])]
+    for (const { y, q } of quote) {
+      const v = voce(y.target_tipo, y.target_id); v.pagato = r2(v.pagato + q); resto = r2(resto - q)
       if (!toccati.has(chiaveDi(y))) { toccati.add(chiaveDi(y)); v.bonifici++ }
     }
     if (Math.abs(resto) >= 0.005 && r.target_id) {
@@ -517,7 +721,8 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   // I bonifici che pagano ricariche gia' girate: niente Scollega, si annulla il giro.
   const girataDa = new Map<string, string>()
   if (giri) {
-    const idsS = ric.filter(r => r.riga_id && sottoIds.has(r.master_id)).map(r => r.id)
+    const idsS = [...new Set([...ric.filter(r => r.riga_id && sottoIds.has(r.master_id)).map(r => r.id),
+      ...[...pezzoDi.values()].filter(p => sottoIds.has(p.ric.master_id)).map(p => p.ric.id)])]
     for (let i = 0; i < idsS.length; i += 300) {
       const { data, error } = await admin.from('giri_bonifici_ricariche').select('ricarica_id,giro_id').in('ricarica_id', idsS.slice(i, i + 300)).eq('attivo', true)
       if (error && !tabellaMancante(error)) throw new Error(error.message)
@@ -526,7 +731,7 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   }
   const giroDi = new Map((giri?.giri || []).map((g: any) => [g.id, g]))
   const girato = (r: any) => {
-    const y = (ricPerRiga.get(r.id) || []).find((z: any) => girataDa.has(z.id))
+    const y = [...(ricPerRiga.get(r.id) || []), ...(pezzoDi.has(r.id) ? [pezzoDi.get(r.id)!.ric] : [])].find((z: any) => girataDa.has(z.id))
     if (!y) return null
     const g: any = giroDi.get(girataDa.get(y.id)!)
     return g ? `girato a ${g.sotto} il ${g.il.split('-').reverse().join('/')}` : 'girato al sotto-master'
@@ -540,12 +745,21 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     const x = esclusiPer.get(k)!; x.n++; x.totale = r2(x.totale + r.importo)
   }
 
+  // "Di quale ricarica e'?" per i bonifici di un cliente senza ricarica: le sue ricariche ancora da pagare in cui
+  // il bonifico ci sta (anche solo come pezzo), da 45 giorni prima a 5 dopo, le piu' vicine per prime.
+  const larghe = ricLarghe
+  const candidate = (x: any) => larghe.filter((R: any) => !R.riga_id && !R.nascosta_il && chiaveDi(R) === chiaveDi(x)
+      && cent(R.importo - R.pagatoParti) >= cent(x.importo) && giorniFra(x.data, R.giorno) >= -5 && giorniFra(x.data, R.giorno) <= 45)
+    .sort((a: any, b: any) => Math.abs(giorniFra(x.data, a.giorno)) - Math.abs(giorniFra(x.data, b.giorno)))
+    .slice(0, 8).map((R: any) => ({ id: R.id, giorno: R.giorno, importo: R.importo, manca: r2(R.importo - R.pagatoParti) }))
+
   return {
     periodo: { dal, al },
     totali: { entrate: somma(entrate), nEntrate: entrate.length, uscite: somma(uscite), nUscite: uscite.length },
-    abbinati: { n: abbinati.length, totale: somma(abbinati), ricariche: abbinati.reduce((t, r) => t + (ricPerRiga.get(r.id)?.length || 0), 0),
-      righe: abbinati.map(r => ({ ...riga(r), cliente: clienteDi(r), assegnato: r.assegnato, ricariche: ricPerRiga.get(r.id)!.map(breve), girato: girato(r) })) },
-    pagatiSenzaRicarica: { n: soloCliente.length, totale: somma(soloCliente), righe: soloCliente.map(r => ({ ...riga(r), cliente: clienteDi(r) })) },
+    // le ricariche si contano una volta: una pagata a pezzi ha piu' bonifici
+    abbinati: { n: abbinati.length, totale: somma(abbinati), ricariche: new Set(abbinati.flatMap(r => pagaRicariche(r).map(y => y.id))).size,
+      righe: abbinati.map(r => ({ ...riga(r), cliente: clienteDi(r), assegnato: r.assegnato, ricariche: pagaRicariche(r), girato: girato(r) })) },
+    pagatiSenzaRicarica: { n: soloCliente.length, totale: somma(soloCliente), righe: soloCliente.map(r => ({ ...riga(r), cliente: clienteDi(r), candidate: candidate(r) })) },
     chiEe: chiEe(),
     esclusi: { n: clienti.filter(r => r.assegnato === 'escluso').length, totale: somma(clienti.filter(r => r.assegnato === 'escluso')),
       pagatori: [...esclusiPer.values()].sort((a, b) => b.totale - a.totale) },
@@ -553,7 +767,8 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     ricaricheSenzaBonifico: { n: senzaBonifico.length, totale: somma(senzaBonifico), dopoIl: ultimoUtile,
       // `aManoArrivata`: nella ricarica o nel Check Ricariche qualcuno l'ha segnata "arrivata", ma in banca non
       // c'e': o il bonifico ha un nome che il portale non conosce, o non e' arrivato davvero.
-      righe: senzaBonifico.map(r => ({ ...breve(r), mittente: r.mittente, target: { tipo: r.target_tipo, id: r.target_id }, aManoArrivata: r.bonifico_arrivato_il ? giornoRoma(r.bonifico_arrivato_il) : null,
+      // `pagatoParti`: pagata a pezzi e non ancora tutta (es. arrivati 200 di 400)
+      righe: senzaBonifico.map(r => ({ ...breve(r), mittente: r.mittente, target: { tipo: r.target_tipo, id: r.target_id }, aManoArrivata: r.bonifico_arrivato_il ? giornoRoma(r.bonifico_arrivato_il) : null, pagatoParti: r.pagatoParti,
         giroPossibile: giroPossibile(r), delSotto: r.master_id !== masterId, di: r.master_id })) },
     ricaricheRecenti: { n: recenti.length, totale: somma(recenti) },
     altriMetodi: { n: altriNel.length, totale: somma(altriNel), righe: altriNel.map((r: any) => ({ ...breve(r), cliente: nome(r.target_tipo, r.target_id) !== '—' ? nome(r.target_tipo, r.target_id) : (r.target_nome || '—'), metodo: r.metodo, giroPossibile: giroPossibile(r) })) },

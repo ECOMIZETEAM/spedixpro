@@ -79,7 +79,16 @@ export async function GET(req: NextRequest) {
   const { data, error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  let righe = (data || []).map(arricchisci)
+  // Le ricariche pagate a pezzi dall'estratto conto (400 € = 200 + 200): quanto e' gia' arrivato. I pezzi li scrive
+  // il master che ha il conto (anche per le ricariche dei suoi sotto-master), quindi qui si cercano per ricarica.
+  const pezzi = new Map<string, number>()
+  const ids = (data || []).map((r: any) => r.id)
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data: pz, error: ep } = await admin.from('parti_bonifici').select('ricarica_id,importo').in('ricarica_id', ids.slice(i, i + 300))
+    if (ep) break   // senza la tabella (prima della migrazione) nessun pezzo
+    for (const x of pz || []) pezzi.set(x.ricarica_id, Math.round(((pezzi.get(x.ricarica_id) || 0) + Number(x.importo)) * 100) / 100)
+  }
+  let righe = (data || []).map((r: any) => ({ ...arricchisci(r), pagato_parti: pezzi.get(r.id) || 0 }))
   const cerca = (p.get('q') || '').trim().toLowerCase()
   if (cerca) righe = righe.filter((r: any) => (r.target_nome || '').toLowerCase().includes(cerca) || (r.mittente || '').toLowerCase().includes(cerca))
   const filtro = p.get('stato')
