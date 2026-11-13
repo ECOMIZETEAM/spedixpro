@@ -9,11 +9,14 @@ import { senzaNomiFornitori } from '@/lib/corriere-logo'
 
 export type MovimentoProforma = { created_at: string; voce: string; descrizione: string; importo: number }
 export type Accrediti = { n: number; importo: number }
+// Una voce scritta a mano dal master: entra solo se lui la spunta (lib/fatture/voci.ts, 'a_mano').
+export type VoceAMano = { id: string; created_at: string; descrizione: string; importo: number; inclusa: boolean }
 
 export type CalcoloProforma = {
   righe: RigaVoce[]
   imponibile: number
   movimenti: MovimentoProforma[]
+  aMano: VoceAMano[]
   // Per informazione, fuori dal totale: quanto il cliente ha ricaricato e quanti contrassegni gli sono
   // stati accreditati nello stesso periodo (importi positivi = a favore del cliente).
   ricariche: Accrediti
@@ -39,11 +42,13 @@ export function motivoPeriodo(dal: string, al: string): string | null {
 
 // I movimenti del cliente nel periodo, gamba del cliente verso QUESTO master. Ordine stabile (giorno,
 // id): si legge a pagine da 1.000, e un movimento nuovo arriva sempre in fondo, quindi non sposta le
-// pagine gia' lette.
-export async function calcolaProforma(admin: any, masterId: string, clienteId: string, dal: string, al: string): Promise<CalcoloProforma> {
+// pagine gia' lette. `aManoIncluse`: gli id delle voci scritte a mano che il master ha spuntato; un id
+// che non e' una voce a mano di questo cliente in questo periodo non conta.
+export async function calcolaProforma(admin: any, masterId: string, clienteId: string, dal: string, al: string, aManoIncluse: string[] = []): Promise<CalcoloProforma> {
   const inizio = inizioGiornoRomaISO(dal)
   const fine = fineGiornoRomaISO(al)
-  const grezzi: { created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean }[] = []
+  const spuntate = new Set(aManoIncluse)
+  const grezzi: { id: string; created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean }[] = []
   for (let da = 0; ; da += 1000) {
     const { data, error } = await admin.from('movimenti')
       .select('id,created_at,tipo,descrizione,importo,spedizione_id')
@@ -57,15 +62,17 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
       .range(da, da + 999)
     if (error) throw new Error('Movimenti non leggibili: ' + error.message)
     for (const m of data || []) {
-      grezzi.push({ created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id })
+      grezzi.push({ id: m.id, created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id })
     }
     if (grezzi.length > MOVIMENTI_MAX) throw new Error('Troppi movimenti per una proforma sola: scegli un periodo più corto')
     if (!data || data.length < 1000) break
   }
 
   const movimenti: MovimentoProforma[] = []
+  const aMano: VoceAMano[] = []
   const ricariche: Accrediti = { n: 0, importo: 0 }
   const contrassegni: Accrediti = { n: 0, importo: 0 }
+  const contano: typeof grezzi = []
   for (const m of grezzi) {
     if (m.tipo === 'ricarica') { ricariche.n++; ricariche.importo += m.importo; continue }
     if (m.tipo === 'contrassegno') { contrassegni.n++; contrassegni.importo += m.importo; continue }
@@ -73,12 +80,20 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
     if (!voce) continue
     // Il PDF arriva al cliente: le descrizioni scritte a mano passano dallo stesso filtro della Lista
     // Movimenti, che toglie i nomi dei fornitori tecnici.
-    movimenti.push({ created_at: m.created_at, voce, descrizione: senzaNomiFornitori(String(m.descrizione || '')), importo: cent(-m.importo) })
+    const descrizione = senzaNomiFornitori(String(m.descrizione || ''))
+    if (voce === 'a_mano') {
+      const inclusa = spuntate.has(m.id)
+      aMano.push({ id: m.id, created_at: m.created_at, descrizione, importo: cent(-m.importo), inclusa })
+      if (!inclusa) continue
+    }
+    contano.push(m)
+    movimenti.push({ created_at: m.created_at, voce, descrizione, importo: cent(-m.importo) })
   }
-  const { righe, imponibile } = righeSpesa(grezzi.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo })))
+  // Qui dentro ci sono gia' solo le voci a mano spuntate.
+  const { righe, imponibile } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo })), true)
   ricariche.importo = cent(ricariche.importo)
   contrassegni.importo = cent(contrassegni.importo)
-  return { righe, imponibile, movimenti, ricariche, contrassegni }
+  return { righe, imponibile, movimenti, aMano, ricariche, contrassegni }
 }
 
 // ── Chi la emette e a chi va ─────────────────────────────────────────────────────────────────────

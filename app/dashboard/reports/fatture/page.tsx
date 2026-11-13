@@ -56,9 +56,10 @@ export default function ReportFatturePage() {
   //
   // CLIENTI: stessa regola della Fattura proforma (decisione di Lorenzo, 13/11/2026), dalla rotta
   // /api/reports/fatture: tutti i movimenti del cliente registrati nel periodo — spedizioni, rettifiche,
-  // giacenze, resi, servizi, voci scritte a mano, meno i rimborsi. Prima qui c'erano solo spedizioni e
-  // rettifiche: a VPERFUME (GTS EXPRESS) a ottobre mancavano 38,30 € di giacenze, resi e servizi, e la
-  // proforma dello stesso mese dava un altro totale.
+  // giacenze, resi, servizi, meno i rimborsi. Prima qui c'erano solo spedizioni e rettifiche: a VPERFUME
+  // (GTS EXPRESS) a ottobre mancavano 38,30 € di giacenze, resi e servizi, e la proforma dello stesso
+  // mese dava un altro totale. Le voci scritte a mano senza spedizione si vedono in una colonna loro ma
+  // NON sommano: sono soprattutto correzioni del credito ("ERRATO ACCREDITO" 1.000 € a NUOVAPOSTA).
   //
   // SOTTO-MASTER di prima linea: come prima, dalla rotta del report spedizioni — le spedizioni create nel
   // periodo al prezzo del listino verso di lui, e le rettifiche addebitate nel periodo (?vista=rettifiche,
@@ -102,7 +103,13 @@ export default function ReportFatturePage() {
           corpo.push([], ...(d.righe || []).map((r: any) => ['', r.descrizione, `${r.quantita}`, eur(r.importo)]),
             ['', '', 'IMPONIBILE', eur(d.imponibile)], ['', '', `IVA (${d.aliquota}%)`, eur(d.iva)], ['', '', 'TOTALE', eur(d.totale)])
         }
+        const fuori = d.aMano || []
+        if (fuori.length) {
+          corpo.push([], ['', 'VOCI SCRITTE A MANO (non incluse nel totale)', '', ''],
+            ...fuori.map((m: any) => [new Date(m.created_at).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }), 'Voce a mano', m.descrizione, eur(m.importo)]))
+        }
         riepilogo = `${(d.movimenti || []).length} movimenti · imponibile € ${eur(d.imponibile)} · IVA € ${eur(d.iva)} · totale € ${eur(d.totale)}`
+          + (fuori.length ? ` · ${fuori.length} voci a mano fuori dal totale` : '')
       } else {
         // Sotto-master (e spedizioni senza cliente) dalla lettura di sempre; i clienti dalla regola della proforma.
         const pS = new URLSearchParams(base); pS.set('rettifiche', 'escluse')
@@ -128,20 +135,21 @@ export default function ReportFatturePage() {
             else if (r.voce === 'rettifica') v.rett += r.importo
             else if (r.voce === 'giacenza') v.giac += r.importo
             else if (r.voce === 'reso') v.resi += r.importo
-            else if (r.voce === 'a_mano') v.aMano += r.importo
             else if (r.voce === 'rimborso') v.rimborsi += r.importo
             else v.servizi += r.importo
           }
+          v.aMano += x.aMano?.importo || 0
         }
-        const imp = (v: Riga) => c2(v.sped + v.rett + v.giac + v.resi + v.servizi + v.aMano + v.rimborsi)
+        // Le voci a mano NON sono nell'imponibile: colonna a parte, per vederle.
+        const imp = (v: Riga) => c2(v.sped + v.rett + v.giac + v.resi + v.servizi + v.rimborsi)
         const ivaDi = (v: Riga) => c2(imp(v) * v.aliquota / 100)
         const voci = [...per.values()].sort((a, b) => imp(b) - imp(a))
         const tot = (f: (v: Riga) => number) => voci.reduce((t, v) => t + f(v), 0)
         const vuotoSeZero = (n: number) => c2(n) ? eur(n) : ''
-        testata = ['Cliente', 'N. spedizioni', 'Spedizioni €', 'Rettifiche €', 'Giacenze €', 'Resi €', 'Servizi €', 'Voci a mano €', 'Rimborsi €', 'Imponibile €', 'IVA %', 'IVA €', 'Totale €']
-        corpo = voci.map(v => [v.nome, v.n, eur(v.sped), vuotoSeZero(v.rett), vuotoSeZero(v.giac), vuotoSeZero(v.resi), vuotoSeZero(v.servizi), vuotoSeZero(v.aMano), vuotoSeZero(v.rimborsi), eur(imp(v)), v.aliquota, eur(ivaDi(v)), eur(imp(v) + ivaDi(v))])
+        testata = ['Cliente', 'N. spedizioni', 'Spedizioni €', 'Rettifiche €', 'Giacenze €', 'Resi €', 'Servizi €', 'Rimborsi €', 'Voci a mano € (fuori)', 'Imponibile €', 'IVA %', 'IVA €', 'Totale €']
+        corpo = voci.map(v => [v.nome, v.n, eur(v.sped), vuotoSeZero(v.rett), vuotoSeZero(v.giac), vuotoSeZero(v.resi), vuotoSeZero(v.servizi), vuotoSeZero(v.rimborsi), vuotoSeZero(v.aMano), eur(imp(v)), v.aliquota, eur(ivaDi(v)), eur(imp(v) + ivaDi(v))])
         const imponibile = tot(imp), iva = tot(ivaDi)
-        if (corpo.length) corpo.push(['TOTALE', tot(v => v.n), eur(tot(v => v.sped)), eur(tot(v => v.rett)), eur(tot(v => v.giac)), eur(tot(v => v.resi)), eur(tot(v => v.servizi)), eur(tot(v => v.aMano)), eur(tot(v => v.rimborsi)), eur(imponibile), '', eur(iva), eur(imponibile + iva)])
+        if (corpo.length) corpo.push(['TOTALE', tot(v => v.n), eur(tot(v => v.sped)), eur(tot(v => v.rett)), eur(tot(v => v.giac)), eur(tot(v => v.resi)), eur(tot(v => v.servizi)), eur(tot(v => v.rimborsi)), eur(tot(v => v.aMano)), eur(imponibile), '', eur(iva), eur(imponibile + iva)])
         riepilogo = `${tot(v => v.n)} spedizioni · imponibile € ${eur(imponibile)} · IVA € ${eur(iva)} · totale € ${eur(imponibile + iva)}`
       }
       if (!corpo.length) corpo = [['Niente da fatturare nel periodo', ...Array(testata.length - 1).fill('')]]

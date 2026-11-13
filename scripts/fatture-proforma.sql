@@ -69,3 +69,7 @@ $$;
 
 revoke all on function public.fatture_importi_periodo_v1(uuid, timestamptz, timestamptz) from public, anon, authenticated;
 grant execute on function public.fatture_importi_periodo_v1(uuid, timestamptz, timestamptz) to service_role;
+
+-- Le voci scritte a mano che il master ha spuntato in quella proforma (Lorenzo, 13/11/2026: partono
+-- escluse, sono soprattutto correzioni del credito). Gli id dei movimenti, per sapere dopo cosa c'era dentro.
+alter table public.fatture_proforma add column if not exists a_mano_incluse jsonb not null default '[]'::jsonb;

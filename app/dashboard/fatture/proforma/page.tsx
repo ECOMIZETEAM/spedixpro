@@ -6,9 +6,10 @@ import { useDialog } from '@/app/components/DialogProvider'
 import { giornoRoma } from '@/lib/date-roma'
 
 // FATTURA PROFORMA: il master sceglie un cliente e un periodo, vede quanto il cliente gli deve voce per
-// voce (spedizioni, rettifiche, giacenze, resi, servizi, voci a mano, meno i rimborsi), e la crea:
-// numero suo, PDF col dettaglio, invio per email. Il calcolo e' tutto nella rotta (lib/fatture/proforma):
-// la pagina mostra, non conta.
+// voce (spedizioni, rettifiche, giacenze, resi, servizi, meno i rimborsi), e la crea: numero suo, PDF col
+// dettaglio, invio per email. Il calcolo e' tutto nella rotta (lib/fatture/proforma): la pagina mostra,
+// non conta. Le voci scritte a mano partono escluse e il master spunta quelle che sono servizi: sono
+// soprattutto correzioni del credito (Lorenzo, 13/11/2026). Ogni spunta rifa' l'anteprima dalla rotta.
 
 const eur = (n: number) => '€ ' + Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const giorno = (g: string) => g ? `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}` : ''
@@ -38,6 +39,7 @@ export default function FatturaProformaPage() {
   const [clienteId, setClienteId] = useState('')
   const [periodo, setPeriodo] = useState(meseScorso())
   const [anteprima, setAnteprima] = useState<any>(null)
+  const [spunte, setSpunte] = useState<string[]>([])
   const [occupato, setOccupato] = useState('')
   const [elenco, setElenco] = useState<any[]>([])
   const [erroreElenco, setErroreElenco] = useState('')
@@ -55,25 +57,31 @@ export default function FatturaProformaPage() {
   }
 
   // Cambiare cliente o date rende vecchia l'anteprima: si toglie, cosi' non si crea su cifre di prima.
-  function scegliCliente(v: string) { setClienteId(v); setAnteprima(null) }
-  function scegliPeriodo(dal: string, al: string) { setPeriodo({ dal, al }); setAnteprima(null) }
+  function scegliCliente(v: string) { setClienteId(v); setAnteprima(null); setSpunte([]) }
+  function scegliPeriodo(dal: string, al: string) { setPeriodo({ dal, al }); setAnteprima(null); setSpunte([]) }
 
-  async function chiama(crea: boolean) {
+  async function chiama(crea: boolean, aMano = spunte) {
     const r = await fetch('/api/fatture/proforma', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clienteId, dal: periodo.dal, al: periodo.al, crea }),
+      body: JSON.stringify({ clienteId, dal: periodo.dal, al: periodo.al, aMano, crea }),
     }).catch(() => null)
     const d = await r?.json().catch(() => null)
     if (!r?.ok || !d) throw new Error(d?.error || 'errore di rete')
     return d
   }
 
-  async function calcola() {
+  async function calcola(aMano = spunte) {
     if (!clienteId) { await dialog.alert({ title: 'Manca il cliente', message: 'Scegli il cliente della proforma.' }); return }
     setOccupato('calcolo')
-    try { setAnteprima(await chiama(false)) }
+    try { setAnteprima(await chiama(false, aMano)) }
     catch (e: any) { await dialog.alert({ title: 'Errore', message: e.message }) }
     finally { setOccupato('') }
+  }
+
+  function spunta(id: string) {
+    const nuove = spunte.includes(id) ? spunte.filter(x => x !== id) : [...spunte, id]
+    setSpunte(nuove)
+    calcola(nuove)
   }
 
   async function crea() {
@@ -81,6 +89,7 @@ export default function FatturaProformaPage() {
     try {
       const d = await chiama(true)
       setAnteprima(null)
+      setSpunte([])
       await caricaElenco()
       window.open(`/api/fatture/proforma/${d.id}/pdf`, '_blank')
     } catch (e: any) { await dialog.alert({ title: 'Proforma non creata', message: e.message }) }
@@ -120,7 +129,7 @@ export default function FatturaProformaPage() {
           <div><label style={lbl}>Periodo</label>
             <DateRangePicker dal={periodo.dal} al={periodo.al} onChange={scegliPeriodo} />
           </div>
-          <div><button onClick={calcola} disabled={!!occupato} style={{ ...btnP, opacity: occupato ? 0.6 : 1 }}>{occupato === 'calcolo' ? 'Calcolo…' : 'Calcola'}</button></div>
+          <div><button onClick={() => calcola()} disabled={!!occupato} style={{ ...btnP, opacity: occupato ? 0.6 : 1 }}>{occupato === 'calcolo' ? 'Calcolo…' : 'Calcola'}</button></div>
         </div>
       </div>
 
@@ -129,7 +138,7 @@ export default function FatturaProformaPage() {
           <div style={{ fontSize: '13px', fontWeight: 700, color: NERO, marginBottom: '10px' }}>
             Anteprima — dal {giorno(periodo.dal)} al {giorno(periodo.al)}
           </div>
-          {!a.movimenti ? (
+          {!a.movimenti && !a.aMano?.length ? (
             <div style={{ fontSize: '13px', color: GRIGIO }}>Nel periodo il cliente non ha spese: non c&apos;è niente da mettere in proforma.</div>
           ) : (
             <>
@@ -144,6 +153,20 @@ export default function FatturaProformaPage() {
                   <tr><td style={{ ...td, fontWeight: 700 }}>Totale</td><td style={td}></td><td style={{ ...td, textAlign: 'right', fontWeight: 700, color: ARANCIO }}>{eur(a.totale)}</td></tr>
                 </tbody>
               </table>
+              {a.aMano?.length > 0 && (
+                <div style={{ marginTop: '12px', padding: '10px 12px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '6px', fontSize: '12px', color: NERO, maxWidth: '616px' }}>
+                  <b>Voci scritte a mano ({a.aMano.length})</b>
+                  <div style={{ color: GRIGIO, margin: '2px 0 8px' }}>Sono soprattutto correzioni del credito (errati accrediti, trasferimenti, bonifici non arrivati): non entrano da sole. Spunta solo quelle che sono servizi da far pagare.</div>
+                  {a.aMano.map((v: any) => (
+                    <label key={v.id} style={{ display: 'flex', gap: '8px', alignItems: 'baseline', padding: '3px 0', cursor: occupato ? 'wait' : 'pointer' }}>
+                      <input type="checkbox" checked={spunte.includes(v.id)} disabled={!!occupato} onChange={() => spunta(v.id)} />
+                      <span style={{ color: GRIGIO, minWidth: '74px' }}>{quando(v.created_at).slice(0, 10)}</span>
+                      <span style={{ flex: 1 }}>{v.descrizione || '—'}</span>
+                      <span style={{ fontWeight: 600 }}>{eur(v.importo)}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
               {(a.ricariche?.n > 0 || a.contrassegni?.n > 0) && (
                 <div style={{ marginTop: '12px', padding: '10px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '12px', color: GRIGIO, maxWidth: '616px' }}>
                   <b style={{ color: NERO }}>Per informazione, non inclusi nel totale:</b>
@@ -152,7 +175,7 @@ export default function FatturaProformaPage() {
                 </div>
               )}
               <div style={{ marginTop: '14px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <button onClick={crea} disabled={!!occupato} style={{ ...btnP, opacity: occupato ? 0.6 : 1 }}>{occupato === 'crea' ? 'Creazione…' : 'Crea proforma'}</button>
+                <button onClick={crea} disabled={!!occupato || !a.movimenti} style={{ ...btnP, opacity: occupato || !a.movimenti ? 0.6 : 1 }}>{occupato === 'crea' ? 'Creazione…' : 'Crea proforma'}</button>
                 <span style={{ fontSize: '12px', color: GRIGIO }}>{a.movimenti} movimenti nel dettaglio. Prende il prossimo numero della serie proforma dell&apos;anno.</span>
               </div>
             </>

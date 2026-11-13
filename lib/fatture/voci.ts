@@ -19,10 +19,13 @@ export const VOCI_SPESA: Voce[] = [
   { chiave: 'reso', descrizione: 'Resi al mittente', uno: 'reso', tanti: 'resi' },
   { chiave: 'logistica', descrizione: 'Servizi di magazzino', uno: 'voce', tanti: 'voci' },
   { chiave: 'consumabile', descrizione: 'Servizi aggiuntivi', uno: 'voce', tanti: 'voci' },
-  // Le rettifiche SENZA spedizione le scrive a mano il master, e sotto quel nome c'e' di tutto:
-  // servizi veri ("rettifiche portale vecchio", "ritiro vivian"), ma anche correzioni di una ricarica.
-  // Lorenzo (13/11/2026): dentro il totale, in una riga a parte e ben visibile, cosi' il master le vede
-  // e se una e' sbagliata la toglie dai movimenti. (Nella fattura vera restano fuori: lib/fatture/calcolo.)
+  // Le rettifiche SENZA spedizione le scrive a mano il master, e sotto quel nome ci sono soprattutto
+  // correzioni del credito, non servizi. Ottobre 2026, tutti i master: 190 righe per 30.203,64 €, di cui
+  // ~24.500 € "Accredito credito a scalare - storno distinta / errore ricarica / spostamento master",
+  // "ERRATO ACCREDITO" 1.000 € (NUOVAPOSTA, GTS), "STORNO ACCREDITO - BONIFICO NON PERVENUTO"; solo
+  // ~5.600 € sono servizi veri (col numero di spedizione nella descrizione). Lorenzo (13/11/2026): non
+  // entrano da sole. Nella proforma il master le vede una per una e spunta quelle che sono servizi; nel
+  // Report Fatture stanno in una colonna a parte, fuori dall'imponibile.
   { chiave: 'a_mano', descrizione: 'Voci registrate a mano', uno: 'voce', tanti: 'voci' },
   // Un tipo di movimento nato dopo questa lista non sparisce in silenzio: finisce qui, con la sua descrizione.
   { chiave: 'altro', descrizione: 'Altre voci', uno: 'voce', tanti: 'voci' },
@@ -50,11 +53,18 @@ const cent = (x: number) => Math.round((Number(x) || 0) * 100) / 100
 
 // Dai movimenti (o dai loro aggregati) alle righe del riepilogo. `importo` e' quello del movimento
 // (addebito negativo). Una voce che somma a zero non diventa riga.
-export function righeSpesa(elenco: { tipo: string; con_spedizione: boolean; n: number; importo: number }[]): { righe: RigaVoce[]; imponibile: number } {
+// Le voci scritte a mano entrano nelle righe solo con `conAMano` (la proforma ci passa soltanto quelle
+// spuntate dal master); altrimenti restano fuori e si contano a parte in `aMano` (spesa: + = addebito).
+export function righeSpesa(
+  elenco: { tipo: string; con_spedizione: boolean; n: number; importo: number }[],
+  conAMano = false,
+): { righe: RigaVoce[]; imponibile: number; aMano: { n: number; importo: number } } {
   const perVoce = new Map<string, { n: number; importo: number }>()
+  const aMano = { n: 0, importo: 0 }
   for (const r of elenco) {
     const k = voceSpesa(r.tipo, r.con_spedizione)
     if (!k) continue
+    if (k === 'a_mano' && !conAMano) { aMano.n += Number(r.n) || 0; aMano.importo -= Number(r.importo) || 0; continue }
     const v = perVoce.get(k) || { n: 0, importo: 0 }
     v.n += Number(r.n) || 0
     v.importo += Number(r.importo) || 0
@@ -69,7 +79,7 @@ export function righeSpesa(elenco: { tipo: string; con_spedizione: boolean; n: n
     righe.push({ voce: voce.chiave, descrizione: voce.descrizione, quantita: v.n, importo })
   }
   // Il totale e' la somma delle righe GIA' arrotondate: e' la cifra che si legge sommando il riepilogo.
-  return { righe, imponibile: cent(righe.reduce((t, r) => t + r.importo, 0)) }
+  return { righe, imponibile: cent(righe.reduce((t, r) => t + r.importo, 0)), aMano: { n: aMano.n, importo: cent(aMano.importo) } }
 }
 
 export function unitaVoce(chiave: string, n: number): string {

@@ -12,6 +12,9 @@ import { calcolaProforma, motivoPeriodo, aliquotaDi, ivaDi } from '@/lib/fatture
 // spedizioni e rettifiche, e a VPERFUME (GTS EXPRESS) a ottobre mancavano 38,30 € di giacenze, resi e
 // servizi; due pagine davano due totali diversi per lo stesso cliente e lo stesso mese.
 //
+// Le voci scritte a mano senza spedizione stanno FUORI dall'imponibile, in una colonna a parte: sono
+// soprattutto correzioni del credito, e nella proforma entrano solo quelle che il master spunta.
+//
 // Le righe dei SOTTO-MASTER restano quelle di /api/reports/spedizioni (listino del master verso il
 // sotto-master): la proforma vale per i clienti, e i movimenti fra master hanno regole loro.
 
@@ -51,7 +54,7 @@ export async function GET(req: NextRequest) {
       const aliquota = aliquotaDi(c), iva = ivaDi(calc.imponibile, aliquota)
       return NextResponse.json({
         cliente: { id: c.id, nome: c.ragione_sociale }, righe: calc.righe, imponibile: calc.imponibile,
-        aliquota, iva, totale: cent(calc.imponibile + iva), movimenti: calc.movimenti,
+        aliquota, iva, totale: cent(calc.imponibile + iva), movimenti: calc.movimenti, aMano: calc.aMano,
       })
     } catch (e: any) { return NextResponse.json({ error: e?.message || 'Calcolo non riuscito' }, { status: 500 }) }
   }
@@ -78,11 +81,11 @@ export async function GET(req: NextRequest) {
   }
   const clienti = []
   for (const [id, l] of perCliente) {
-    const { righe, imponibile } = righeSpesa(l)
-    if (!righe.length) continue
+    const { righe, imponibile, aMano } = righeSpesa(l)
+    if (!righe.length && !aMano.n) continue
     const c = anagrafica.get(id)
     const aliquota = aliquotaDi(c), iva = ivaDi(imponibile, aliquota)
-    clienti.push({ id, nome: String(c?.ragione_sociale || '—').trim(), righe, imponibile, aliquota, iva, totale: cent(imponibile + iva) })
+    clienti.push({ id, nome: String(c?.ragione_sociale || '—').trim(), righe, imponibile, aliquota, iva, totale: cent(imponibile + iva), aMano })
   }
   clienti.sort((a, b) => b.imponibile - a.imponibile)
   return NextResponse.json({ clienti })

@@ -36,8 +36,9 @@ export async function GET(req: NextRequest) {
   })))
 }
 
-// { clienteId, dal, al, crea }: senza `crea` e' l'anteprima (si calcola e si mostra, non si salva
-// niente e non si consuma un numero); con `crea` si numera, si fa il PDF e si salva.
+// { clienteId, dal, al, aMano, crea }: senza `crea` e' l'anteprima (si calcola e si mostra, non si salva
+// niente e non si consuma un numero); con `crea` si numera, si fa il PDF e si salva. `aMano` sono gli id
+// delle voci scritte a mano che il master ha spuntato: senza spunta non entrano (lib/fatture/voci.ts).
 export async function POST(req: NextRequest) {
   const acc = await accessoProforma('admin.invoice.create')
   if (!acc.ok) return acc.risposta
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
   const dal = String(body?.dal || '')
   const al = String(body?.al || '')
   if (!UUID.test(clienteId)) return NextResponse.json({ error: 'Scegli il cliente' }, { status: 400 })
+  const aMano = Array.isArray(body?.aMano) ? body.aMano.map(String).filter((x: string) => UUID.test(x)).slice(0, 5000) : []
   const motivo = motivoPeriodo(dal, al)
   if (motivo) return NextResponse.json({ error: motivo }, { status: 400 })
 
@@ -55,7 +57,7 @@ export async function POST(req: NextRequest) {
   if (!c) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
 
   let calc
-  try { calc = await calcolaProforma(admin, acc.masterId, clienteId, dal, al) }
+  try { calc = await calcolaProforma(admin, acc.masterId, clienteId, dal, al, aMano) }
   catch (e: any) { return NextResponse.json({ error: e?.message || 'Calcolo non riuscito' }, { status: 500 }) }
   const aliquota = aliquotaDi(c)
   const iva = ivaDi(calc.imponibile, aliquota)
@@ -64,7 +66,7 @@ export async function POST(req: NextRequest) {
     righe: calc.righe, imponibile: calc.imponibile, aliquota, natura: (c as any).natura_iva || null, iva, totale,
     ricariche: calc.ricariche, contrassegni: calc.contrassegni, movimenti: calc.movimenti.length,
   }
-  if (!body?.crea) return NextResponse.json({ anteprima: true, ...riepilogo })
+  if (!body?.crea) return NextResponse.json({ anteprima: true, ...riepilogo, aMano: calc.aMano })
 
   if (!calc.movimenti.length) return NextResponse.json({ error: 'Nel periodo il cliente non ha spese: non c\'è niente da mettere in proforma' }, { status: 422 })
 
@@ -100,6 +102,7 @@ export async function POST(req: NextRequest) {
     imponibile: calc.imponibile, aliquota, natura_iva: riepilogo.natura, iva, totale,
     accrediti: { ricariche: calc.ricariche, contrassegni: calc.contrassegni },
     movimenti: calc.movimenti.length, file_path: path, creata_da: acc.userId,
+    a_mano_incluse: calc.aMano.filter(v => v.inclusa).map(v => v.id),
   }).select('id').single()
   if (eI || !riga) {
     // Il PDF senza riga non lo ritroverebbe nessuno: si toglie.
