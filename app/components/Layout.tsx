@@ -96,6 +96,7 @@ const NAV: NavItem[] = [
     // 20/10). La voce resta, e scripts/controlla-link-menu.mjs la lascia passare con un'eccezione
     // esplicita; finche' manca, chi la apre trova la 404 del portale con la via per tornare indietro.
     { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova', perm: 'admin.invoice.create' },
+    { label: 'Fattura proforma', href: '/dashboard/fatture/proforma', perm: 'admin.invoice.create' },
   ]},
   { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
   // Senza perm: solo titolare e admin (isFull). Ci sono gli stipendi, l'operatore non la vede (lib/costi-gestione).

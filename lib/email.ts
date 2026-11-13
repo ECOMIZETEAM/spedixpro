@@ -570,3 +570,41 @@ export async function inviaEmailGiacenza(p: {
     return { ok: false, error: e?.message || 'invio non riuscito' }
   }
 }
+
+// LA PROFORMA AL CLIENTE, col PDF allegato. Parte a nome del master e col suo marchio: il cliente
+// compra da lui. Le risposte vanno al master (replyTo), non a noi.
+export async function inviaEmailProforma(p: {
+  to: string; replyTo?: string | null
+  master: { nome: string; logo?: string | null }
+  cliente: string; numero: string; dal: string; al: string; totale: number
+  pdf: Buffer; nomeFile: string
+}): Promise<{ ok: boolean; error?: string }> {
+  const dest = String(p.to || '').trim().toLowerCase()
+  if (!EMAIL_RE.test(dest)) return { ok: false, error: 'email del cliente non valida' }
+  const giorno = (g: string) => `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}`
+  const euro = p.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const corpo = `
+          <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Fattura proforma ${esc(p.numero)}</h2>
+          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px">Gentile <strong>${esc(p.cliente)}</strong>,
+          in allegato la fattura proforma dei servizi dal <strong>${giorno(p.dal)}</strong> al <strong>${giorno(p.al)}</strong>,
+          per un totale di <strong>€ ${euro}</strong> IVA compresa.</p>
+          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px">Nel PDF trovi il riepilogo per voce e, dalla seconda pagina, il dettaglio di ogni movimento.</p>
+          <p style="color:#999;font-size:12px;line-height:1.6;margin:14px 0 0">Documento non valido ai fini fiscali. Per qualsiasi domanda rispondi a questa email.</p>
+        `
+  const fromAddr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+  const nome = String(p.master.nome || '').replace(/["<>]/g, '').slice(0, 60)
+  const fromBrand = nome ? `${nome} <${fromAddr}>` : FROM
+  const replyTo = EMAIL_RE.test(String(p.replyTo || '').trim().toLowerCase()) ? String(p.replyTo).trim().toLowerCase() : undefined
+  try {
+    const r: any = await invia({
+      from: fromBrand, to: dest, replyTo,
+      subject: `Fattura proforma ${p.numero} - ${nome || 'MoovExpress'}`,
+      html: wrapBrand(corpo, { logo: p.master.logo || null, nome: nome || null }),
+      attachments: [{ filename: p.nomeFile, content: p.pdf }],
+    })
+    if (r?.error) return { ok: false, error: r.error?.message || 'invio non riuscito' }
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'invio non riuscito' }
+  }
+}
