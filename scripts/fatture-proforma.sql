@@ -45,3 +45,27 @@ create index if not exists idx_proforma_master on public.fatture_proforma (maste
 alter table public.fatture_proforma enable row level security;
 revoke all on table public.fatture_proforma from public, anon, authenticated;
 grant all on table public.fatture_proforma to service_role;
+
+-- IL REPORT FATTURE CON LA STESSA REGOLA DELLA PROFORMA (Lorenzo, 13/11/2026: "due pagine non danno
+-- piu' due totali diversi"). Gli importi di un periodo qualsiasi, per cliente e per tipo di movimento,
+-- gamba del cliente verso questo master. Solo somme: quali tipi sono una spesa lo decide
+-- lib/fatture/voci.ts, in un punto solo. I confini [p_dal, p_al] sono istanti gia' calcolati sul
+-- giorno di Roma dalla rotta (lib/date-roma), inclusi tutti e due.
+create or replace function public.fatture_importi_periodo_v1(p_master uuid, p_dal timestamptz, p_al timestamptz)
+returns table(cliente_id uuid, tipo text, con_spedizione boolean, n bigint, importo numeric)
+language sql
+stable
+set search_path = public
+as $$
+  select m.cliente_id, m.tipo, (m.spedizione_id is not null), count(*), sum(m.importo)
+    from movimenti m
+   where m.master_id = p_master
+     and m.cliente_id is not null
+     and m.master_target_id is null
+     and m.created_at >= p_dal
+     and m.created_at <= p_al
+   group by m.cliente_id, m.tipo, (m.spedizione_id is not null)
+$$;
+
+revoke all on function public.fatture_importi_periodo_v1(uuid, timestamptz, timestamptz) from public, anon, authenticated;
+grant execute on function public.fatture_importi_periodo_v1(uuid, timestamptz, timestamptz) to service_role;

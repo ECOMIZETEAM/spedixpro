@@ -54,75 +54,97 @@ export default function ReportFatturePage() {
 
   // QUANTO HA DA PAGARE OGNUNO, NON QUALI FILTRI HO SCELTO.
   //
-  // Due fonti, una per voce, entrambe dalla rotta del report spedizioni (stesso perimetro di chi guarda):
-  //  - le SPEDIZIONI create nel periodo, al prezzo della sola spedizione (come il Report Spedizioni);
-  //  - le RETTIFICHE ADDEBITATE nel periodo al diretto (?vista=rettifiche), per data dell'addebito:
-  //    prese per data della spedizione, le ripesature di settembre arrivate a ottobre non finivano in
-  //    nessuna fattura (1-14/10/2026: 4.623 rettifiche, 14.833 €) e cambiavano a posteriori quella di
-  //    settembre. Dentro ci sono anche i POD.
-  // Importo = spedizioni + rettifiche, e la colonna "di cui rettifiche" viene dalla stessa lettura: prima
-  // erano due conti diversi (MULTIEXPRESS 1-7/10: 5.804,33 nella colonna, 3.104,42 dentro l'importo).
+  // CLIENTI: stessa regola della Fattura proforma (decisione di Lorenzo, 13/11/2026), dalla rotta
+  // /api/reports/fatture: tutti i movimenti del cliente registrati nel periodo — spedizioni, rettifiche,
+  // giacenze, resi, servizi, voci scritte a mano, meno i rimborsi. Prima qui c'erano solo spedizioni e
+  // rettifiche: a VPERFUME (GTS EXPRESS) a ottobre mancavano 38,30 € di giacenze, resi e servizi, e la
+  // proforma dello stesso mese dava un altro totale.
+  //
+  // SOTTO-MASTER di prima linea: come prima, dalla rotta del report spedizioni — le spedizioni create nel
+  // periodo al prezzo del listino verso di lui, e le rettifiche addebitate nel periodo (?vista=rettifiche,
+  // per data dell'addebito: prese per data della spedizione, le ripesature di settembre arrivate a ottobre
+  // non finivano in nessuna fattura). Da quella lettura si tengono solo le righe che non sono di un cliente.
+  //
   // Una riga per DIRETTO: il cliente diretto o il sotto-master di prima linea, cioe' chi il master fattura.
-  // Su un cliente solo, voce per voce, che e' l'allegato da mandargli quando chiede il dettaglio.
+  // Su un cliente solo, movimento per movimento, che e' l'allegato da mandargli quando chiede il dettaglio.
   async function generaReport() {
     setGenerating(true)
     try {
+      const leggi = async (url: string, cosa: string) => {
+        const r = await fetch(url)
+        const d = await r.json().catch(() => null)
+        if (!r.ok || !d || d.error) throw new Error(cosa + ' non lette: ' + (d?.error || ('risposta ' + r.status)))
+        return d
+      }
       const base = new URLSearchParams()
-      if (filtri.clienteId) base.set('clienteId', filtri.clienteId)
       if (filtri.dal) base.set('dal', filtri.dal)
       if (filtri.al) base.set('al', filtri.al)
-      const pS = new URLSearchParams(base); pS.set('rettifiche', 'escluse')
-      const pR = new URLSearchParams(base); pR.set('vista', 'rettifiche')
-      const [resS, resR] = await Promise.all([fetch('/api/reports/spedizioni?' + pS.toString()), fetch('/api/reports/spedizioni?' + pR.toString())])
-      const [sped, rett] = await Promise.all([resS.json().catch(() => null), resR.json().catch(() => null)])
-      if (!resS.ok || !Array.isArray(sped)) { await dialog.alert({ title: 'Errore', message: 'Spedizioni non lette: ' + (sped?.error || ('risposta ' + resS.status)) }); return }
-      if (!resR.ok || !Array.isArray(rett)) { await dialog.alert({ title: 'Errore', message: 'Rettifiche non lette: ' + (rett?.error || ('risposta ' + resR.status)) }); return }
-
       const c2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100
       const eur = (n: number) => c2(n).toFixed(2).replace('.', ',')
       const aliq = (v: any) => (v != null && Number.isFinite(Number(v))) ? Number(v) : 22
       const unCliente = !!filtri.clienteId && !filtri.clienteId.startsWith('m:')
+      const unSotto = !!filtri.clienteId && filtri.clienteId.startsWith('m:')
       const c = clienti.find((x: any) => x.id === filtri.clienteId)
       const intestazione = unCliente
         ? `Da fatturare a ${c?.ragione_sociale || c?.nome || 'cliente'}`
         : 'Da fatturare per cliente'
 
-      // Per diretto: spedizioni del periodo + rettifiche addebitate nel periodo, con la sua aliquota.
-      type Voce = { nome: string; n: number; sped: number; rett: number; aliquota: number }
-      const per = new Map<string, Voce>()
-      const voce = (id: string, nome: string, aliquota: any) => {
-        let v = per.get(id)
-        if (!v) { v = { nome: nome || '—', n: 0, sped: 0, rett: 0, aliquota: aliq(aliquota) }; per.set(id, v) }
-        return v
-      }
-      for (const s of sped) { const v = voce(s.diretto_id, s.diretto_nome, s.aliquota_iva); v.n++; v.sped += Number(s.costo_totale) || 0 }
-      for (const r of rett) { const v = voce(r.diretto_id, r.diretto_nome, r.aliquota_iva); v.rett += Number(r.importo) || 0 }
-      const voci = [...per.values()]
-      const imponibile = voci.reduce((t, v) => t + v.sped + v.rett, 0)
-      const rettifiche = voci.reduce((t, v) => t + v.rett, 0)
-      const iva = voci.reduce((t, v) => t + (v.sped + v.rett) * v.aliquota / 100, 0)
-
       let testata: string[]
       let corpo: (string | number)[][]
+      let riepilogo: string
       if (unCliente) {
-        testata = ['Data', 'Spedizione', 'Destinatario / voce', 'Importo €', 'di cui rettifica €']
-        const righe = [
-          ...sped.map((r: any) => ({ data: r.created_at, riga: [r.numero || '—', r.dest_nome || '—', eur(r.costo_totale), ''] })),
-          ...rett.map((r: any) => ({ data: r.created_at, riga: [r.numero || '—', 'Rettifica: ' + (r.descrizione || ''), eur(r.importo), eur(r.importo)] })),
-        ].sort((a, b) => String(a.data).localeCompare(String(b.data)))
-        corpo = righe.map(x => [x.data ? new Date(x.data).toLocaleDateString('it-IT') : '—', ...x.riga])
+        const pC = new URLSearchParams(base); pC.set('clienteId', filtri.clienteId)
+        const d = await leggi('/api/reports/fatture?' + pC.toString(), 'Movimenti del cliente')
+        testata = ['Data', 'Voce', 'Descrizione', 'Importo €']
+        const voce = new Map<string, string>((d.righe || []).map((r: any) => [r.voce, r.descrizione]))
+        corpo = (d.movimenti || []).map((m: any) => [new Date(m.created_at).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }), voce.get(m.voce) || m.voce, m.descrizione, eur(m.importo)])
         if (corpo.length) {
-          const al = voci[0]?.aliquota ?? aliq(c?.aliquota_iva)
-          corpo.push([], ['', '', 'IMPONIBILE', eur(imponibile), rettifiche ? eur(rettifiche) : ''], ['', '', `IVA (${al}%)`, eur(iva), ''], ['', '', 'TOTALE', eur(imponibile + iva), ''])
+          corpo.push([], ...(d.righe || []).map((r: any) => ['', r.descrizione, `${r.quantita}`, eur(r.importo)]),
+            ['', '', 'IMPONIBILE', eur(d.imponibile)], ['', '', `IVA (${d.aliquota}%)`, eur(d.iva)], ['', '', 'TOTALE', eur(d.totale)])
         }
+        riepilogo = `${(d.movimenti || []).length} movimenti · imponibile € ${eur(d.imponibile)} · IVA € ${eur(d.iva)} · totale € ${eur(d.totale)}`
       } else {
-        testata = ['Cliente', 'Spedizioni', 'Importo €', 'di cui rettifiche €', 'IVA %', 'IVA €', 'Totale €']
-        corpo = voci.sort((a, b) => (b.sped + b.rett) - (a.sped + a.rett))
-          .map(v => { const imp = v.sped + v.rett; const i = imp * v.aliquota / 100; return [v.nome, v.n, eur(imp), v.rett ? eur(v.rett) : '', v.aliquota, eur(i), eur(imp + i)] })
-        if (corpo.length) corpo.push(['TOTALE', sped.length, eur(imponibile), rettifiche ? eur(rettifiche) : '', '', eur(iva), eur(imponibile + iva)])
+        // Sotto-master (e spedizioni senza cliente) dalla lettura di sempre; i clienti dalla regola della proforma.
+        const pS = new URLSearchParams(base); pS.set('rettifiche', 'escluse')
+        const pR = new URLSearchParams(base); pR.set('vista', 'rettifiche')
+        if (unSotto) { pS.set('clienteId', filtri.clienteId); pR.set('clienteId', filtri.clienteId) }
+        const [sped, rett, perCliente] = await Promise.all([
+          leggi('/api/reports/spedizioni?' + pS.toString(), 'Spedizioni'),
+          leggi('/api/reports/spedizioni?' + pR.toString(), 'Rettifiche'),
+          unSotto ? Promise.resolve({ clienti: [] }) : leggi('/api/reports/fatture?' + base.toString(), 'Importi dei clienti'),
+        ])
+        if (!Array.isArray(sped) || !Array.isArray(rett)) throw new Error('Risposta del report spedizioni non valida')
+        const diCliente = (id: any) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(id || ''))
+        type Riga = { nome: string; n: number; sped: number; rett: number; giac: number; resi: number; servizi: number; aMano: number; rimborsi: number; aliquota: number }
+        const vuota = (nome: string, aliquota: number): Riga => ({ nome, n: 0, sped: 0, rett: 0, giac: 0, resi: 0, servizi: 0, aMano: 0, rimborsi: 0, aliquota })
+        const per = new Map<string, Riga>()
+        const riga = (id: string, nome: string, aliquota: any) => { let v = per.get(id); if (!v) { v = vuota(nome || '—', aliq(aliquota)); per.set(id, v) } return v }
+        for (const s of sped) { if (diCliente(s.diretto_id)) continue; const v = riga(s.diretto_id, s.diretto_nome, s.aliquota_iva); v.n++; v.sped += Number(s.costo_totale) || 0 }
+        for (const r of rett) { if (diCliente(r.diretto_id)) continue; riga(r.diretto_id, r.diretto_nome, r.aliquota_iva).rett += Number(r.importo) || 0 }
+        for (const x of perCliente.clienti || []) {
+          const v = riga(x.id, x.nome, x.aliquota)
+          for (const r of x.righe) {
+            if (r.voce === 'spedizione') { v.sped += r.importo; v.n += r.quantita }
+            else if (r.voce === 'rettifica') v.rett += r.importo
+            else if (r.voce === 'giacenza') v.giac += r.importo
+            else if (r.voce === 'reso') v.resi += r.importo
+            else if (r.voce === 'a_mano') v.aMano += r.importo
+            else if (r.voce === 'rimborso') v.rimborsi += r.importo
+            else v.servizi += r.importo
+          }
+        }
+        const imp = (v: Riga) => c2(v.sped + v.rett + v.giac + v.resi + v.servizi + v.aMano + v.rimborsi)
+        const ivaDi = (v: Riga) => c2(imp(v) * v.aliquota / 100)
+        const voci = [...per.values()].sort((a, b) => imp(b) - imp(a))
+        const tot = (f: (v: Riga) => number) => voci.reduce((t, v) => t + f(v), 0)
+        const vuotoSeZero = (n: number) => c2(n) ? eur(n) : ''
+        testata = ['Cliente', 'N. spedizioni', 'Spedizioni €', 'Rettifiche €', 'Giacenze €', 'Resi €', 'Servizi €', 'Voci a mano €', 'Rimborsi €', 'Imponibile €', 'IVA %', 'IVA €', 'Totale €']
+        corpo = voci.map(v => [v.nome, v.n, eur(v.sped), vuotoSeZero(v.rett), vuotoSeZero(v.giac), vuotoSeZero(v.resi), vuotoSeZero(v.servizi), vuotoSeZero(v.aMano), vuotoSeZero(v.rimborsi), eur(imp(v)), v.aliquota, eur(ivaDi(v)), eur(imp(v) + ivaDi(v))])
+        const imponibile = tot(imp), iva = tot(ivaDi)
+        if (corpo.length) corpo.push(['TOTALE', tot(v => v.n), eur(tot(v => v.sped)), eur(tot(v => v.rett)), eur(tot(v => v.giac)), eur(tot(v => v.resi)), eur(tot(v => v.servizi)), eur(tot(v => v.aMano)), eur(tot(v => v.rimborsi)), eur(imponibile), '', eur(iva), eur(imponibile + iva)])
+        riepilogo = `${tot(v => v.n)} spedizioni · imponibile € ${eur(imponibile)} · IVA € ${eur(iva)} · totale € ${eur(imponibile + iva)}`
       }
-      if (!corpo.length) corpo = [['Nessuna spedizione e nessuna rettifica nel periodo', ...Array(testata.length - 1).fill('')]]
-      const riepilogo = `${sped.length} spedizioni · imponibile € ${eur(imponibile)}${rettifiche ? ` (di cui rettifiche € ${eur(rettifiche)})` : ''} · IVA € ${eur(iva)} · totale € ${eur(imponibile + iva)}`
+      if (!corpo.length) corpo = [['Niente da fatturare nel periodo', ...Array(testata.length - 1).fill('')]]
 
       const nomeBase = `report_fatture_${filtri.dal}`
       const formato = (filtri.formato || 'PDF').toLowerCase()
@@ -139,7 +161,8 @@ export default function ReportFatturePage() {
         const { default: jsPDF } = await import('jspdf')
         const { default: autoTable } = await import('jspdf-autotable')
         // compress: senza, il PDF esce 12 volte piu' grosso e oltre i 25 MB l'archivio lo rifiuta (lib/report-client.ts).
-        const doc = new jsPDF({ compress: true })
+        // Con tutte le voci il riepilogo per cliente ha 13 colonne: in orizzontale.
+        const doc = new jsPDF({ compress: true, orientation: unCliente ? 'portrait' : 'landscape' })
         doc.setFontSize(14)
         doc.text(`${intestazione} — ${filtri.dal} / ${filtri.al}`, 14, 15)
         doc.setFontSize(10)
