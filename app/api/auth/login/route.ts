@@ -42,10 +42,10 @@ export async function POST(req: NextRequest) {
     // Tracciato: prima successo ed errore rispondevano entrambi 303 e dai log non si
     // distingueva un accesso riuscito da uno fallito. Nel log solo l'indirizzo, mai la password.
     console.warn('[LOGIN][FALLITO]', { email, motivo: error.message })
-    await segnaAccessoFallito(admin, email)
+    await segnaAccessoFallito(admin, email, 'portale')
     return NextResponse.redirect(new URL('/?error=credenziali_errate', req.url), 303)
   }
-  await azzeraAccessiFalliti(admin, email)
+  await azzeraAccessiFalliti(admin, email, data.user.id, 'portale')
 
   // "Account attivo" e' un interruttore che il master usa davvero (staff che se ne va, cliente
   // moroso) ma che nessuno leggeva: chi veniva disattivato continuava a entrare con tutti i suoi

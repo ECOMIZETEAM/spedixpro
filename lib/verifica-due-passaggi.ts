@@ -30,14 +30,32 @@ export async function accessoFermato(admin: any, email: string): Promise<boolean
   return (count || 0) >= TENTATIVI_MAX
 }
 
-export async function segnaAccessoFallito(admin: any, email: string): Promise<void> {
-  const { error } = await admin.from('accessi_falliti').insert({ email })
-  if (error) console.error('[ACCESSO] tentativo non registrato:', error.message)
+// Ogni accesso, riuscito o no, va anche nel registro accessi (13 mesi, DPP Amazon 2.6.1): le righe di
+// accessi_falliti servono al blocco e si cancellano al primo accesso riuscito, quindi da sole non
+// raccontano chi ha provato cosa. `porta` dice da dove: 'portale', 'clienti', 'shopify'.
+// Nel registro niente indirizzo in chiaro: quello di un tentativo fallito si maschera (lo***@gmail.com).
+export async function segnaAccessoFallito(admin: any, email: string, porta: string): Promise<void> {
+  const [a, b] = await Promise.all([
+    admin.from('accessi_falliti').insert({ email }),
+    admin.from('audit_accessi').insert({ azione: 'accesso_fallito', risorsa: porta, dettaglio: emailMascherata(email) }),
+  ])
+  if (a.error) console.error('[ACCESSO] tentativo non registrato:', a.error.message)
+  if (b.error) console.error('[ACCESSO] tentativo non scritto nel registro accessi:', b.error.message)
 }
 
-export async function azzeraAccessiFalliti(admin: any, email: string): Promise<void> {
-  const { error } = await admin.from('accessi_falliti').delete().eq('email', email)
-  if (error) console.error('[ACCESSO] tentativi non azzerati:', error.message)
+export async function azzeraAccessiFalliti(admin: any, email: string, utenteId: string, porta: string): Promise<void> {
+  const [a, b] = await Promise.all([
+    admin.from('accessi_falliti').delete().eq('email', email),
+    admin.from('audit_accessi').insert({ utente_id: utenteId, azione: 'accesso', risorsa: porta }),
+  ])
+  if (a.error) console.error('[ACCESSO] tentativi non azzerati:', a.error.message)
+  if (b.error) console.error('[ACCESSO] accesso non scritto nel registro accessi:', b.error.message)
+}
+
+// Stessa regola di public.email_mascherata (scripts/allarmi-sicurezza.sql).
+export function emailMascherata(email: string): string {
+  const at = email.indexOf('@')
+  return at > 0 ? email.slice(0, Math.min(2, at)) + '***' + email.slice(at) : '***'
 }
 
 export const MESSAGGIO_FERMATO = `Troppi tentativi sbagliati: per sicurezza l'accesso e' sospeso per ${FINESTRA_MIN} minuti.`

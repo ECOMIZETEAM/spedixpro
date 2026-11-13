@@ -35,10 +35,10 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
     console.warn('[LOGIN][CLIENTE][FALLITO]', { email, motivo: error.message })
-    await segnaAccessoFallito(admin, email)
+    await segnaAccessoFallito(admin, email, 'clienti')
     return NextResponse.json({ error: 'Email o password non corretti' }, { status: 401 })
   }
-  await azzeraAccessiFalliti(admin, email)
+  await azzeraAccessiFalliti(admin, email, data.user.id, 'clienti')
   // Con la chiave di servizio, come nell'accesso master: con la sola password, chi ha attivato la
   // verifica in due passaggi non legge niente dal database finche' non mette il codice.
   const { data: utente } = await admin.from('utenti').select('ruolo,cliente_id,attivo').eq('id', data.user.id).single()

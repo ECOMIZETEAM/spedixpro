@@ -59,6 +59,10 @@
       "schedule": "3,18,33,48 * * * *"
     },
     {
+      "path": "/api/controllo/allarmi",
+      "schedule": "8,23,38,53 * * * *"
+    },
+    {
       "path": "/api/privacy/purge-pii",
       "schedule": "15 2 * * *"
     },

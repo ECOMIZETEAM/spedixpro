@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { conErrore, conCollegato } from '@/lib/esiti-collegamento'
+import { accessoFermato, azzeraAccessiFalliti, segnaAccessoFallito } from '@/lib/verifica-due-passaggi'
 import {
   PAGINA_SCELTA, type Sospeso, attendiCollegamento, azzeraSospesoShopify, collegaNegozioShopify, consumaSospeso,
   contaTentativoSbagliato, gettoneModuloShopify, gettoneModuloValido, sessioneNelBrowser, sospesoDelBrowser,
@@ -152,6 +153,13 @@ async function accedi(req: NextRequest, admin: any, s: Sospeso, gettone: string,
   })
   const conSessione = (r: NextResponse) => { for (const c of raccolti) r.cookies.set(c.name, c.value, c.options); return r }
 
+  // Il blocco per indirizzo (10 password sbagliate in 15 minuti, DPP Amazon 1.2.2) vale anche qui, non
+  // solo sui due moduli d'accesso: il conto per installazione, da solo, si azzera aprendone un'altra, e
+  // questa porta diventava il modo di provare password all'infinito sullo stesso account.
+  if (await accessoFermato(admin, email)) {
+    console.warn('[SHOPIFY][SCELTA] accesso fermato per troppi tentativi', s.shop, { email })
+    return azzeraSospesoShopify(allaPagina(req, 'troppi_tentativi'))
+  }
   const { data, error } = await sb.auth.signInWithPassword({ email, password })
   if (error || !data?.user || !data?.session) {
     // Nel log l'indirizzo, come il modulo d'accesso clienti, mai la password.
@@ -160,10 +168,12 @@ async function accedi(req: NextRequest, admin: any, s: Sospeso, gettone: string,
       return allaPagina(req, 'temporaneo', altro)
     }
     console.warn('[SHOPIFY][SCELTA] accesso non riuscito', s.shop, { email, motivo: error?.message })
+    await segnaAccessoFallito(admin, email, 'shopify')
     const conto = await contaTentativoSbagliato(admin, s)
     if (conto === 'esaurito') return azzeraSospesoShopify(allaPagina(req, 'troppi_tentativi'))
     return allaPagina(req, 'credenziali', altro)
   }
+  await azzeraAccessiFalliti(admin, email, data.user.id, 'shopify')
 
   const chi = await verificaContoCliente(admin, data.user.id)
   if (!chi.ok) {

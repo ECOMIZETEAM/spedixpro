@@ -233,6 +233,57 @@ export async function inviaControlloGiornaliero(to: string, righe: { area: strin
   }
 }
 
+// ALLARMI DI SICUREZZA (/api/controllo/allarmi, ogni 15 minuti, solo quando c'e' qualcosa di nuovo).
+// Per ogni allarme: cosa e' successo, chi, quando e cosa fare. Il "cosa fare" sta qui e non nel
+// database perche' e' testo per chi legge, non una regola. Risponde ok solo se Resend ha preso
+// l'email: se no gli allarmi restano "da spedire" e riparte al giro dopo.
+const COSA_FARE_ALLARME: Record<string, string> = {
+  accesso_bloccato: "Se l'account è di un cliente, sentilo: se non era lui a sbagliare, va cambiata la password. Il blocco si toglie da solo dopo 15 minuti.",
+  tentativi_su_molti_account: "Qualcuno prova password rubate su altri siti. Guarda nel registro accessi se uno di questi account è poi entrato davvero.",
+  letture_anomale: "Senti chi c'è dietro: un lavoro vero (cambio gestionale, inventario) o qualcuno che si porta via i dati? Se non ne sa niente: cambio password e azzeramento della verifica in due passaggi.",
+  etichette_anomale: "Senti chi c'è dietro: un lavoro vero (cambio gestionale, inventario) o qualcuno che si porta via i dati? Se non ne sa niente: cambio password e azzeramento della verifica in due passaggi.",
+  api_anomala: "Senti il cliente: se non è un suo programma, la chiave va revocata dal suo portale (Impostazioni → Chiavi API).",
+  frequenza_api: "Le chiamate in più sono già state respinte. Senti il cliente: se non è un suo programma, la chiave va revocata.",
+  chiamate_non_autorizzate: "Se è un gestionale rimasto con una chiave vecchia, va avvisato il cliente. Se le chiavi sono tutte diverse e continua, qualcuno sta provando chiavi a caso.",
+  entra_come_anomalo: "Chiedi alla persona il motivo: entrare negli account degli altri serve all'assistenza, a raffica no.",
+  verifica_azzerata: "Controlla che il cliente l'abbia chiesto davvero (telefono cambiato o perso). Se non l'ha chiesto, è il primo passo per prendersi un account.",
+  esca: "Nessun lavoro vero tocca un'esca: va trattato come incidente (piano di risposta agli incidenti; se ci sono di mezzo dati Amazon, avviso ad Amazon entro 24 ore).",
+  verifica_spenta: "Se non è stato spento apposta, va riacceso subito: scripts/verifica-due-passaggi.sql.",
+}
+
+export async function inviaAllarmiSicurezza(to: string, allarmi: { tipo: string; descrizione: string; chi: string; quando: string }[]): Promise<{ ok: boolean }> {
+  if (!to || !allarmi.length) return { ok: false }
+  const esc = (t: string) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c])
+  const blocco = (a: typeof allarmi[number]) => `
+    <div style="border:1px solid #fecaca;background:#fff7f7;border-radius:8px;padding:12px 14px;margin:0 0 10px">
+      <div style="font-size:14px;color:#b91c1c;font-weight:700;margin:0 0 4px">${esc(a.descrizione)}</div>
+      <div style="font-size:12px;color:#6b7280;margin:0 0 6px">${esc(a.quando)}${a.chi ? ` · ${esc(a.chi)}` : ''}</div>
+      <div style="font-size:13px;color:#374151;line-height:1.5">${esc(COSA_FARE_ALLARME[a.tipo] || 'Va guardato.')}</div>
+    </div>`
+  try {
+    const r: any = await invia({
+      from: FROM, to,
+      subject: `🚨 MoovExpress — ${allarmi.length === 1 ? 'allarme di sicurezza' : `${allarmi.length} allarmi di sicurezza`}`,
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 4px">Allarme di sicurezza</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 16px">
+          I registri hanno visto qualcosa fuori dal normale. Non vuol dire per forza un attacco, ma va guardato.
+        </p>
+        ${allarmi.map(blocco).join('')}
+        <p style="color:#9ca3af;font-size:12px;line-height:1.6;margin:14px 0 0">
+          Ogni allarme va esaminato e l'esito scritto: lo chiede Amazon (politica sui dati, punto 2.6.2).
+          Lo stesso fatto non si ripete prima di un'ora.
+        </p>
+      `),
+    })
+    if (r?.error) { console.error('[ALLARMI] email non inviata:', r.error?.message || r.error); return { ok: false } }
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[ALLARMI] email non inviata:', err?.message || err)
+    return { ok: false }
+  }
+}
+
 // Email credenziali (clienti e master): email + password + link portale
 // areaStaff = l'account NON e' un cliente (master, admin, operatore, agente): va mandato al
 // Control Center, non al portale clienti. Prima ricevevano tutti la stessa email con scritto
