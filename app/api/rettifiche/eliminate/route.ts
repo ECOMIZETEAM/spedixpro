@@ -4,7 +4,6 @@ import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { confineGiornoRoma, giorniFaRoma, giornoRoma } from '@/lib/date-roma'
-import { controlloAttivo, FERMA } from '@/lib/ripesature-controllo'
 
 // ── RETTIFICHE ELIMINATE: PAGATE DA ME, NON RECUPERATE DA NESSUNO ──
 //
@@ -20,9 +19,14 @@ import { controlloAttivo, FERMA } from '@/lib/ripesature-controllo'
 // Solo lettura. Le righe appartengono al master di sopra -> si leggono con la chiave di servizio,
 // autorizzazione = target_master_id mio (come in network/ricevuti).
 // Per MULTI (2.675 righe in 90 giorni) ora si leggono anche le sue rettifiche verso sotto sugli stessi pacchi: ~9 secondi.
+//
+// NON TUTTO QUELLO CHE NON E' GIRATO E' PERSO (Lorenzo, 13/11/2026: «il master non la capisce... pensano che sbaglia la
+// piattaforma a fare il calcolo e dicono di perdere soldi»). Le righe stavano in rosso come «Davvero non recuperate», ma
+// su Ecomize Solution 135 delle 189 erano pacchi su cui ci guadagnava ancora e 24 spedizioni fatte dal suo account senza
+// cliente; in perdita davvero 31 pacchi (−80,36 €). Ora ogni riga dice quanto il master ha incassato da chi sta sotto e quanto ha
+// pagato in tutto (lib/conto-pacco), e i gruppi si fanno su quello: ci perdi, ci guadagni comunque, gia' fatte pagare
+// sotto, spedizioni tue senza cliente.
 export const maxDuration = 120
-
-const MOTIVO_GIA = 'Già fatta pagare sotto con un\'altra rettifica: qui c\'è solo il costo, non è una perdita'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -40,86 +44,9 @@ export async function GET(req: NextRequest) {
   const alG = req.nextUrl.searchParams.get('al') || giornoRoma()
   const dal = confineGiornoRoma(dalG, 'dal')!, al = confineGiornoRoma(alG, 'al')!
 
-  const campi = 'id,master_id,spedizione_id,numero_spedizione,differenza,fuori_sagoma,costo_fornitore,propagazione,created_at,masters:master_id(nome)'
-  const leggi = async (filtra: (q: any) => any, extra = '') => {
-    const out: any[] = []
-    for (let da = 0; ; da += 1000) {
-      const { data, error } = await filtra(admin.from('rettifiche').select(campi + extra))
-        .gte('created_at', dal).lte('created_at', al).order('created_at', { ascending: false }).order('id').range(da, da + 999)
-      if (error) throw new Error(error.message)
-      out.push(...(data || []))
-      if (!data || data.length < 1000) break
-    }
-    return out
-  }
-
   try {
-    // Ricevute da sopra, confermate (quindi gia' scalate a me), assorbite o caricate.
-    const ricevute = await leggi(q => q.eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true)
-      .in('propagazione', ['assorbita', 'propagata']))
-    // Delle caricate, quali hanno ancora una figlia (in attesa o confermata): quelle sono girate.
-    const caricate = ricevute.filter(r => r.propagazione === 'propagata').map(r => r.id)
-    const conFiglia = new Set<string>()
-    for (let i = 0; i < caricate.length; i += 300) {
-      const { data } = await admin.from('rettifiche').select('origine_rettifica_id').in('origine_rettifica_id', caricate.slice(i, i + 300))
-      for (const f of (data || []) as any[]) conFiglia.add(f.origine_rettifica_id)
-    }
-    // Il mio costo di detentore senza nessuno sotto da rettificare. Su queste, che sono righe MIE, anche l'esito del
-    // controllo Poste (se l'ho acceso): se Poste le smentisce le ho pagate al fornitore per niente, e si contestano.
-    // Sulle ricevute da sopra no: l'esito e' di chi ha caricato il file, e sotto non deve sapere che era sbagliata.
-    const conPoste = await controlloAttivo(admin, mio)
-    const mie = await leggi(q => q.eq('master_id', mio).eq('target_master_id', mio).eq('confermata', true),
-      ',peso_reale,peso_volume_reale,supplementi_nomi,perche' + (conPoste ? ',controllo' : ''))
-
-    // GIA' FATTE PAGARE SOTTO NON SONO SOLDI PERSI (lib/rettifiche-perche). Sulla maggior parte di questi pacchi avevo
-    // gia' fatto pagare la ripesatura a qualcuno sotto con un'altra rettifica (dalle misure del portale, da un file di
-    // prima): il costo arrivato dopo resta a me perche' sotto non si chiede due volte, ma l'ho gia' incassato. Sulle
-    // righe di MULTI del 05/11/2026 erano 2.635 su 2.675. Si dice riga per riga: a chi, quando, quanto.
-    const { giaFattePagareSotto, perchePropri, descriviStessoPrezzo } = await import('@/lib/rettifiche-perche')
-    const ricevuteNonGirate = ricevute.filter(r => !(r.propagazione === 'propagata' && conFiglia.has(r.id)))
-    const giaRicevute = await giaFattePagareSotto(admin, mio, ricevuteNonGirate.map(r => r.spedizione_id))
-    const percheMie = await perchePropri(admin, mio, mie)
-
-    const arr = (n: number) => Math.round(n * 100) / 100
-    const righe: any[] = []
-    for (const r of ricevute) {
-      if (r.propagazione === 'propagata' && conFiglia.has(r.id)) continue
-      // Quanto mi e' stato scalato: ripesatura (differenza, negativa = addebito) + supplementi fissi.
-      const pagato = arr(-(Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)))
-      if (pagato < 0.005) continue
-      const gia = r.spedizione_id ? giaRicevute.get(r.spedizione_id) : undefined
-      righe.push({
-        id: r.id, ldv: r.numero_spedizione, quando: r.created_at,
-        da: (r as any).masters?.nome || 'livello sopra', importo: pagato,
-        recuperata: gia || null,
-        motivo: gia ? MOTIVO_GIA
-          : r.propagazione === 'assorbita'
-            ? 'Assorbita: non girata sotto (o sotto non c\'era niente da recuperare)'
-            : 'Caricata in Rettifica Costi e poi cancellata senza confermarla',
-      })
-    }
-    for (const r of mie) {
-      const costo = arr(Number(r.costo_fornitore || 0))
-      if (costo < 0.005) continue
-      const p: any = percheMie.get(r.id)
-      righe.push({
-        id: r.id, ldv: r.numero_spedizione, quando: r.created_at,
-        da: 'Tuo costo (contratto tuo)', importo: costo,
-        recuperata: p?.tipo === 'gia_fatta_pagare' ? p.gia : null,
-        motivo: p?.tipo === 'gia_fatta_pagare' ? MOTIVO_GIA
-          : p?.tipo === 'reso' ? 'Reso: il ritorno si paga col nolo del reso, non con la ripesatura'
-          : p?.tipo === 'senza_voce' ? 'Il fornitore ha addebitato un importo senza dire per cosa (né chili né un supplemento conosciuto): il portale non sa a chi girarlo'
-          : 'Solo a tuo carico: ' + descriviStessoPrezzo(p?.conto),
-        ...(conPoste && FERMA.has(r.controllo?.esito) ? { poste: r.controllo.motivo } : {}),
-      })
-    }
-    righe.sort((a, b) => String(b.quando).localeCompare(String(a.quando)))
-    const perMotivo: Record<string, { n: number; euro: number }> = {}
-    for (const r of righe) { const m = perMotivo[r.motivo] || { n: 0, euro: 0 }; m.n++; m.euro = arr(m.euro + r.importo); perMotivo[r.motivo] = m }
-    const perse = righe.filter(r => !r.recuperata), recuperate = righe.filter(r => r.recuperata)
-    return NextResponse.json({ dal: dalG, al: alG, righe, totale: arr(righe.reduce((t, r) => t + r.importo, 0)), perMotivo,
-      perse: { n: perse.length, euro: arr(perse.reduce((t, r) => t + r.importo, 0)) },
-      recuperate: { n: recuperate.length, euro: arr(recuperate.reduce((t, r) => t + r.importo, 0)), incassato: arr(recuperate.reduce((t, r) => t + Number(r.recuperata.euro || 0), 0)) } })
+    const { rettificheNonGirate } = await import('@/lib/rettifiche-non-girate')
+    return NextResponse.json({ dal: dalG, al: alG, ...await rettificheNonGirate(admin, mio, dal, al) })
   } catch (e: any) {
     console.error('[RETTIFICHE] eliminate:', e?.message || e)
     return NextResponse.json({ error: 'Lettura non riuscita' }, { status: 500 })

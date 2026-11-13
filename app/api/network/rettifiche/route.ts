@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
 
   if (decisione !== 'propagata') {
     await adminDb.from('rettifiche').update({ propagazione: decisione }).in('id', righe.map((r: any) => r.id))
+    if (decisione === 'assorbita') await scriviPercheAssorbita(adminDb, righe.map((r: any) => r.id), 'assorbita_a_mano')
     // Decisa: il promemoria di «Cosa devi fare» non serve piu'.
     await scriviDaSistemare(adminDb, mio, [], new Map(), righe.map((r: any) => r.id))
     return NextResponse.json({ ok: true, assorbite: righe.length, inAttesaSopra: attesaLdv.length })
@@ -286,6 +287,7 @@ export async function POST(req: NextRequest) {
   // A BLOCCHI: con migliaia di id un solo .in() diventa una richiesta enorme e il database la rifiuta.
   for (let i = 0; i < idFatte.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', idFatte.slice(i, i + 500))
   for (let i = 0; i < idAzzerate.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'assorbita' }).in('id', idAzzerate.slice(i, i + 500))
+  await scriviPercheAssorbita(adminDb, idAzzerate, 'paga_uguale')
   await scriviDaSistemare(adminDb, mio, lavorabili, motivi, [...idFatte, ...idAzzerate])
 
   const ritentabili = righe.length - idFatte.length - idAzzerate.length
@@ -298,6 +300,21 @@ export async function POST(req: NextRequest) {
     scartate,
     inAttesaSopra: attesaLdv.length, dettaglioAttesaSopra: attesaLdv.slice(0, 100),
   })
+}
+
+// PERCHE' E' STATA ASSORBITA, scritto sulla riga (rettifiche.perche): col bottone «Assorbi» del master, o scartata dal
+// portale perche' col listino di chi sta sotto il peso nuovo costa uguale. Lo legge Rettifica Costi → «non girate sotto»
+// (app/api/rettifiche/eliminate): fino al 13/11/2026 le due cose finivano nella stessa frase, «non girata sotto (o sotto
+// non c'era niente da recuperare)», e il master non sapeva se l'aveva scelto lui o il portale. Non muove soldi: se la
+// scrittura non riesce si perde solo la frase.
+async function scriviPercheAssorbita(adminDb: any, ids: string[], tipo: 'assorbita_a_mano' | 'paga_uguale') {
+  try {
+    const il = new Date().toISOString()
+    for (let i = 0; i < ids.length; i += 500) {
+      const { error } = await adminDb.from('rettifiche').update({ perche: { tipo, il } }).in('id', ids.slice(i, i + 500))
+      if (error) { console.error('[NETWORK] perche assorbita:', error.message); return }
+    }
+  } catch (e: any) { console.error('[NETWORK] perche assorbita:', e?.message || e) }
 }
 
 // Scrive sulle righe non girate il loro motivo (rettifiche.da_sistemare) e lo toglie da quelle decise. Non muove soldi e

@@ -103,6 +103,49 @@ export type EsitoRipesatura = {
 
 const arrotonda = (n: number) => Math.round(n * 100) / 100
 
+// ── QUANTO HA PAGATO OGNI LIVELLO PER IL VIAGGIO DI UN PACCO ──
+// Una regola sola, usata dal motore e da chi mostra al master quanto ha incassato e speso su un pacco
+// (Rettifica Costi → «non girate sotto»): se i due contassero in modo diverso, la pagina direbbe un margine
+// e la rettifica ne userebbe un altro.
+export const CAMPI_MOVIMENTI_NOLO = 'importo,cliente_id,master_id,master_target_id,tipo,riferimento'
+export const TIPI_MOVIMENTI_NOLO = ['spedizione', 'rettifica', 'reso', 'giacenza']
+// Un addebito ha importo negativo, un accredito positivo: la spedizione conta per il suo valore assoluto, la
+// rettifica col segno girato, cosi' una nota di credito ABBASSA quanto risulta pagato.
+export const quantoPesaNolo = (m: any) => m.tipo === 'spedizione'
+  ? Math.abs(Number(m.importo || 0))
+  : -Number(m.importo || 0)
+// NON OGNI "RETTIFICA" E' NOLO. Col tipo 'rettifica' passano anche i costi del fornitore per resi e
+// giacenze (RESOFORN-, GIACFORN-) coi loro storni (STORNOFORN-), e gli STORNI DEI RESI addebitati per
+// sbaglio: il 15/10/2026 un reso addebitato due volte a Wave e LOGIXIA (pacco condiviso) e' stato
+// restituito con +3,85 di tipo 'rettifica', e qui sembrava un rimborso del nolo — ricaricando il file
+// LOGIXIA del 12/10 a Wave si sarebbero richiesti 3,85 € su 13 pacchi che non erano cambiati di peso
+// (282224J031018: da 1 a 0,02 kg). Uno storno di reso si riconosce dai soldi, non dalla descrizione (che
+// un lavoro pianificato riscrive): stesso pagante, stesso riferimento, importo esattamente opposto a un
+// addebito 'reso' o 'giacenza'. Le correzioni di peso a mano (MAN-), gli allineamenti di margine e i
+// riaddebiti dopo un annullo restano: quelli sono nolo. Fuori anche la POD (riferimento POD-, dal
+// 04/11/2026, scripts/pod-addebito.sql): e' la prova di consegna, non il viaggio, e contata qui
+// abbasserebbe la rettifica dopo di quanto il cliente o il master ha pagato la POD.
+// `movTutti` = i movimenti di TUTTE le gambe di un pacco, dei tipi TIPI_MOVIMENTI_NOLO.
+export function movimentiDelNolo(movTutti: any[]): any[] {
+  const paganteDi = (m: any) => m.cliente_id ? 'c:' + m.cliente_id : 'm:' + (m.master_target_id || m.master_id)
+  const addebitiResi = new Map<string, number>()
+  for (const m of movTutti) {
+    if (m.tipo !== 'reso' && m.tipo !== 'giacenza') continue
+    const k = `${paganteDi(m)}|${m.riferimento || ''}|${Math.round(-Number(m.importo || 0) * 100)}`
+    addebitiResi.set(k, (addebitiResi.get(k) || 0) + 1)
+  }
+  return movTutti.filter((m: any) => {
+    if (m.tipo === 'spedizione') return true
+    if (m.tipo !== 'rettifica') return false
+    const rif = String(m.riferimento || '')
+    if (/^(RESOFORN|GIACFORN|STORNOFORN|POD)-/.test(rif)) return false
+    const k = `${paganteDi(m)}|${rif}|${Math.round(Number(m.importo || 0) * 100)}`
+    const n = addebitiResi.get(k) || 0
+    if (n > 0) { addebitiResi.set(k, n - 1); return false }
+    return true
+  })
+}
+
 // L'addebito di un livello non supera il salto fatto con lo stesso listino: dovuto sul ripesato meno
 // dovuto sul dichiarato (vedi «LA RETTIFICA CONTA I CHILI» in calcolaRipesature). Il livello torna
 // com'era quando non c'e' niente da limitare: nessun addebito, dichiarato non prezzabile, o un salto che
@@ -238,40 +281,12 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // e l'owner sono sulle gambe create dal dispatch, non sull'originante. Leggo i movimenti di TUTTE le
     // gambe, se no i livelli codice/owner risultano "pagato 0" e la differenza esce come prezzo pieno
     // invece dell'incremento. Per una spedizione normale `legs` è una riga sola → identico a prima.
-    // NON OGNI "RETTIFICA" E' NOLO. Col tipo 'rettifica' passano anche i costi del fornitore per resi e
-    // giacenze (RESOFORN-, GIACFORN-) coi loro storni (STORNOFORN-), e gli STORNI DEI RESI addebitati per
-    // sbaglio: il 15/10/2026 un reso addebitato due volte a Wave e LOGIXIA (pacco condiviso) e' stato
-    // restituito con +3,85 di tipo 'rettifica', e qui sembrava un rimborso del nolo — ricaricando il file
-    // LOGIXIA del 12/10 a Wave si sarebbero richiesti 3,85 € su 13 pacchi che non erano cambiati di peso
-    // (282224J031018: da 1 a 0,02 kg). Uno storno di reso si riconosce dai soldi, non dalla descrizione (che
-    // un lavoro pianificato riscrive): stesso pagante, stesso riferimento, importo esattamente opposto a un
-    // addebito 'reso' o 'giacenza'. Le correzioni di peso a mano (MAN-), gli allineamenti di margine e i
-    // riaddebiti dopo un annullo restano: quelli sono nolo. Fuori anche la POD (riferimento POD-, dal
-    // 04/11/2026, scripts/pod-addebito.sql): e' la prova di consegna, non il viaggio, e contata qui
-    // abbasserebbe la rettifica dopo di quanto il cliente o il master ha pagato la POD.
+    // Quali movimenti sono nolo e quanto pesano: movimentiDelNolo / quantoPesaNolo, qui sotto.
     const { data: movTutti } = await admin.from('movimenti')
-      .select('importo,cliente_id,master_id,master_target_id,tipo,riferimento')
-      .in('spedizione_id', (legs || []).map((x: any) => x.id)).in('tipo', ['spedizione', 'rettifica', 'reso', 'giacenza'])
-    const paganteDi = (m: any) => m.cliente_id ? 'c:' + m.cliente_id : 'm:' + (m.master_target_id || m.master_id)
-    const addebitiResi = new Map<string, number>()
-    for (const m of (movTutti || []) as any[]) {
-      if (m.tipo !== 'reso' && m.tipo !== 'giacenza') continue
-      const k = `${paganteDi(m)}|${m.riferimento || ''}|${Math.round(-Number(m.importo || 0) * 100)}`
-      addebitiResi.set(k, (addebitiResi.get(k) || 0) + 1)
-    }
-    const mov = ((movTutti || []) as any[]).filter((m: any) => {
-      if (m.tipo === 'spedizione') return true
-      if (m.tipo !== 'rettifica') return false
-      const rif = String(m.riferimento || '')
-      if (/^(RESOFORN|GIACFORN|STORNOFORN|POD)-/.test(rif)) return false
-      const k = `${paganteDi(m)}|${rif}|${Math.round(Number(m.importo || 0) * 100)}`
-      const n = addebitiResi.get(k) || 0
-      if (n > 0) { addebitiResi.set(k, n - 1); return false }
-      return true
-    })
-    const quantoPesa = (m: any) => m.tipo === 'spedizione'
-      ? Math.abs(Number(m.importo || 0))
-      : -Number(m.importo || 0)
+      .select(CAMPI_MOVIMENTI_NOLO)
+      .in('spedizione_id', (legs || []).map((x: any) => x.id)).in('tipo', TIPI_MOVIMENTI_NOLO)
+    const mov = movimentiDelNolo((movTutti || []) as any[])
+    const quantoPesa = quantoPesaNolo
     const pagatoCliente = (mov || []).filter((m: any) => m.cliente_id)
       .reduce((a: number, m: any) => a + quantoPesa(m), 0)
     const pagatoMaster = new Map<string, number>()
