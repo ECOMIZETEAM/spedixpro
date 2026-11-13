@@ -5,6 +5,7 @@ import { gestisceLaRete } from '@/lib/ruoli'
 import { masterVedeReteCompleta, eDiscendente } from '@/lib/rete-masters'
 import { accessoDelCliente, emailPerNuovoAccesso } from '@/lib/accesso-cliente'
 import { registraEntraCome } from '@/lib/verifica-due-passaggi'
+import { generaPassword } from '@/lib/password'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // La response finale (redirect) DEVE portare i cookie della nuova sessione:
@@ -76,8 +77,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!email) {
       return NextResponse.redirect(new URL('/dashboard/clienti?erroreAccesso=cliente_email_non_valida', req.url))
     }
-    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
-    const pwd = Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    const pwd = generaPassword()
     const { data: created, error: cErr } = await admin.auth.admin.createUser({ email, password: pwd, email_confirm: true })
     if (cErr || !created?.user) {
       // Tipicamente: email già usata da un altro account.

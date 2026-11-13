@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vedeLaRete } from '@/lib/perimetro'
+import { generaPassword } from '@/lib/password'
 
 // LO STAFF LO GESTISCE CHI GOVERNA IL PORTALE, NON CHI CI ENTRA DENTRO.
 // Queste rotte bloccavano il solo ruolo 'agente' e poi usavano la chiave di servizio (che scavalca la
@@ -141,12 +142,6 @@ export async function POST(req: NextRequest) {
   } catch (e) { console.error('Errore invio credenziali staff:', e) }
 
   return NextResponse.json({ success: true, email: email.trim(), password })
-}
-
-// 'Mv' + len: totale >= 12, soglia minima accettata da Supabase.
-function generaPassword(len = 12): string {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-  return 'Mv' + Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
 }
 
 // Reimposta password (+ resend credenziali) e/o cambia email di un account staff

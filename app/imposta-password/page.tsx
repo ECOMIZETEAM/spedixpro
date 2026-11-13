@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import { REGOLE_PASSWORD_TESTO, erroreRegolePassword, messaggioErrorePassword } from '@/lib/password-regole'
 import CampoPassword from '../components/CampoPassword'
 
 export default function ImpostaPassword() {
@@ -55,12 +56,13 @@ export default function ImpostaPassword() {
   }, [])
 
   async function salva() {
-    if (password.length < 12) { setMsg({ tipo: 'err', testo: 'La password deve avere almeno 12 caratteri' }); return }
+    const erroreRegole = erroreRegolePassword(password)
+    if (erroreRegole) { setMsg({ tipo: 'err', testo: erroreRegole }); return }
     if (password !== conferma) { setMsg({ tipo: 'err', testo: 'Le password non coincidono' }); return }
     setSalvando(true); setMsg(null)
     const { error } = await supabase.auth.updateUser({ password })
     setSalvando(false)
-    if (error) { setMsg({ tipo: 'err', testo: error.message || 'Errore durante il salvataggio' }); return }
+    if (error) { setMsg({ tipo: 'err', testo: messaggioErrorePassword(error.message) }); return }
     setMsg({ tipo: 'ok', testo: 'Password impostata! Accesso in corso...' })
     // Ogni ruolo al SUO portale. Prima si andava sempre su /dashboard e il cliente veniva poi
     // rimbalzato dal middleware su /cliente/dashboard: un giro in piu' a vuoto, e per un istante
@@ -118,6 +120,7 @@ export default function ImpostaPassword() {
               <label style={lbl}>Conferma password</label>
               <CampoPassword value={conferma} onChange={setConferma} required={false} />
             </div>
+            <div style={{ fontSize: '12px', color: '#888', lineHeight: 1.5 }}>{REGOLE_PASSWORD_TESTO}</div>
             <button onClick={salva} disabled={salvando} style={{ background: salvando ? '#fbbf24' : '#f97316', color: '#fff', border: 'none', padding: '11px', borderRadius: '6px', fontSize: '14px', fontWeight: 700, cursor: salvando ? 'default' : 'pointer' }}>
               {salvando ? 'Salvataggio...' : 'Imposta password ed entra'}
             </button>

@@ -1,5 +1,6 @@
 import { randomInt } from 'crypto'
 import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
+import { generaPassword } from '@/lib/password'
 
 // ATTIVAZIONE di un preventivo accettato: crea la POSIZIONE (cliente o sotto-master, nuovo o esistente)
 // + le credenziali d'accesso + aggancia il listino-bozza come listino reale, e mette stato='accettato'.
@@ -11,10 +12,6 @@ import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } 
 //
 // Ritorna { ok: true } oppure { error, status } (niente NextResponse: la usano più rotte).
 
-function generaPassword(len = 14): string {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
-  let out = ''; for (let i = 0; i < len; i++) out += chars[randomInt(chars.length)]; return out
-}
 function slugify(s: string): string {
   return (s || '').toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'master'
 }

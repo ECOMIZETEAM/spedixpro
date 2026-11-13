@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomInt } from 'crypto'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { inviaCredenzialiCliente } from '@/lib/email'
 import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
 import { MASTER_VETRINA, LISTINO_VETRINA } from '@/lib/vetrina'
+import { generaPassword } from '@/lib/password'
 
 /* REGISTRAZIONE dal SITO PUBBLICO (www.moovexpress.com): un visitatore diventa cliente vero.
  *
@@ -55,15 +55,6 @@ const intestazioni = (o: string | null) => ({
 
 export async function OPTIONS(req: NextRequest) {
   return new NextResponse(null, { status: 204, headers: intestazioni(req.headers.get('origin')) })
-}
-
-// Password CRITTOGRAFICAMENTE casuale (randomInt, non Math.random: quella e' prevedibile e non va
-// mai usata per un segreto). Almeno 12 caratteri: sotto quella soglia Supabase rifiuta.
-function generaPassword(len = 14): string {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
-  let out = ''
-  for (let i = 0; i < len; i++) out += chars[randomInt(chars.length)]
-  return out
 }
 
 const pulisci = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '')

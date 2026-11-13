@@ -4,6 +4,7 @@ import { gestisceLaRete, eTitolareOAdmin } from '@/lib/ruoli'
 import { bloccaAgente, isAgente, clientiAgente, nomeAgente } from '@/lib/agente'
 import { contoNatoDaShopify } from '@/lib/conti-shopify'
 import { COLONNE_DATI_NEGOZIO, fondiImpostazioniNegozio, versioneDatiNegozio, type ClienteNegozio } from '@/lib/dati-negozio'
+import { generaPassword } from '@/lib/password'
 
 // Assegnazione listino a un cliente/sotto-master: puo' innescare la propagazione a cascata.
 export const maxDuration = 300
@@ -280,10 +281,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const adminClient = createAdminSupabase()
       // Email di destinazione = quella NUOVA se cambiata in questo salvataggio, altrimenti l'attuale.
       const emailFinale = (aggiornamento.email || emailVecchia || cliente?.email || '').trim()
-      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-      // 14 caratteri: con 11 (Mv + 9) Supabase rifiutava la password ('at least 12 characters'),
-      // l'errore non veniva letto e al cliente arrivava una password MAI impostata.
-      const newPassword = 'Mv' + Array.from({length:12}, () => chars[Math.floor(Math.random()*chars.length)]).join('')
+      // Dal generatore unico (lib/password): con 11 caratteri (Mv + 9) Supabase rifiutava la password
+      // ('at least 12 characters'), l'errore non veniva letto e al cliente arrivava una password MAI impostata.
+      const newPassword = generaPassword()
       // Utente di login del cliente (utenti.id == id auth). Se NON esiste (cliente importato/creato
       // senza accesso), lo CREO ora: così "reset password" vale anche come "attiva accesso".
       let { data: uLogin } = await adminClient.from('utenti').select('id').eq('cliente_id', id).limit(1).maybeSingle()

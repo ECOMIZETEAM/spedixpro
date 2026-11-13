@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomInt } from 'crypto'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vedeLaRete } from '@/lib/perimetro'
 import { pianoById } from '@/lib/piani'
 import { inviaCredenzialiCliente, inviaRichiestaPartnerRifiutata } from '@/lib/email'
+import { generaPassword } from '@/lib/password'
 
 // NUOVI MASTER auto-registrati dalla vetrina (stato 'da_approvare'). GET = elenco della rete di chi
 // guarda; POST = approva (crea l'accesso + credenziali + attiva) o rifiuta (email cortese). Visto dal
 // master della vetrina (genitore diretto, lib/vetrina.ts: MOOVY) e da chi gli sta sopra (MULTIEXPRESS,
 // MoovExpress/root): il controllo è la CATENA.
-
-function generaPassword(len = 14): string {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
-  let out = ''; for (let i = 0; i < len; i++) out += chars[randomInt(chars.length)]; return out
-}
 
 // È il master `masterId` dentro la rete di chi guarda (`mioMasterId`)? Risale la catena dei genitori.
 async function nellaRete(admin: any, masterId: string, mioMasterId: string): Promise<boolean> {

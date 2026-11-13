@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
+import { REGOLE_PASSWORD_TESTO, erroreRegolePassword, messaggioErrorePassword } from '@/lib/password-regole'
 import CampoPassword from './CampoPassword'
 
 // Cambio password self-service per l'utente loggato (master / staff / cliente).
@@ -13,12 +14,13 @@ export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'err', testo: string } | null>(null)
 
   async function salva() {
-    if (password.length < 12) { setMsg({ tipo: 'err', testo: 'La password deve avere almeno 12 caratteri' }); return }
+    const erroreRegole = erroreRegolePassword(password)
+    if (erroreRegole) { setMsg({ tipo: 'err', testo: erroreRegole }); return }
     if (password !== conferma) { setMsg({ tipo: 'err', testo: 'Le password non coincidono' }); return }
     setSalvando(true); setMsg(null)
     const { error } = await supabase.auth.updateUser({ password })
     setSalvando(false)
-    if (error) { setMsg({ tipo: 'err', testo: error.message || 'Errore durante il salvataggio' }); return }
+    if (error) { setMsg({ tipo: 'err', testo: messaggioErrorePassword(error.message) }); return }
     setPassword(''); setConferma('')
     setMsg({ tipo: 'ok', testo: 'Password aggiornata con successo. Al prossimo accesso usa la nuova password.' })
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -39,7 +41,7 @@ export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', maxWidth: '760px' }}>
           <div>
             <label style={lbl}>Nuova Password:</label>
-            <CampoPassword value={password} onChange={setPassword} placeholder="Almeno 12 caratteri" required={false} />
+            <CampoPassword value={password} onChange={setPassword} placeholder="Almeno 12 caratteri, con simbolo" required={false} />
           </div>
           <div>
             <label style={lbl}>Conferma Password:</label>
@@ -47,7 +49,7 @@ export default function CambioPassword({ titolo = 'Cambio Password' }: { titolo?
           </div>
         </div>
         <div style={{ marginTop: '12px', fontSize: '12.5px', color: '#666' }}>
-          Da qui scegli tu la password: quella che hai ricevuto per email smette di valere.
+          {REGOLE_PASSWORD_TESTO} Da qui scegli tu la password: quella che hai ricevuto per email smette di valere.
         </div>
         <button onClick={salva} disabled={salvando} style={{ marginTop: '22px', padding: '9px 22px', background: salvando ? '#7fa8e0' : '#3b82c4', color: '#fff', border: 'none', borderRadius: '5px', fontSize: '14px', fontWeight: 600, cursor: salvando ? 'default' : 'pointer' }}>
           {salvando ? 'Salvataggio...' : 'Salva'}
