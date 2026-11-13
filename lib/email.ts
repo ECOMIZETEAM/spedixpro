@@ -1,6 +1,7 @@
 import { Resend } from 'resend'
 import { eIndirizzoInterno } from '@/lib/indirizzi-interni'
 import { eSpedizioneDaAmazon } from '@/lib/compratore-amazon'
+import { COSA_FARE_ALLARME } from '@/lib/allarmi-sicurezza'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 // Mittente con NOME VISIBILE: se la env contiene solo l'indirizzo (noreply@...), Gmail mostrava
@@ -234,23 +235,9 @@ export async function inviaControlloGiornaliero(to: string, righe: { area: strin
 }
 
 // ALLARMI DI SICUREZZA (/api/controllo/allarmi, ogni 15 minuti, solo quando c'e' qualcosa di nuovo).
-// Per ogni allarme: cosa e' successo, chi, quando e cosa fare. Il "cosa fare" sta qui e non nel
-// database perche' e' testo per chi legge, non una regola. Risponde ok solo se Resend ha preso
-// l'email: se no gli allarmi restano "da spedire" e riparte al giro dopo.
-const COSA_FARE_ALLARME: Record<string, string> = {
-  accesso_bloccato: "Se l'account è di un cliente, sentilo: se non era lui a sbagliare, va cambiata la password. Il blocco si toglie da solo dopo 15 minuti.",
-  tentativi_su_molti_account: "Qualcuno prova password rubate su altri siti. Guarda nel registro accessi se uno di questi account è poi entrato davvero.",
-  letture_anomale: "Senti chi c'è dietro: un lavoro vero (cambio gestionale, inventario) o qualcuno che si porta via i dati? Se non ne sa niente: cambio password e azzeramento della verifica in due passaggi.",
-  etichette_anomale: "Senti chi c'è dietro: un lavoro vero (cambio gestionale, inventario) o qualcuno che si porta via i dati? Se non ne sa niente: cambio password e azzeramento della verifica in due passaggi.",
-  api_anomala: "Senti il cliente: se non è un suo programma, la chiave va revocata dal suo portale (Impostazioni → Chiavi API).",
-  frequenza_api: "Le chiamate in più sono già state respinte. Senti il cliente: se non è un suo programma, la chiave va revocata.",
-  chiamate_non_autorizzate: "Se è un gestionale rimasto con una chiave vecchia, va avvisato il cliente. Se le chiavi sono tutte diverse e continua, qualcuno sta provando chiavi a caso.",
-  entra_come_anomalo: "Chiedi alla persona il motivo: entrare negli account degli altri serve all'assistenza, a raffica no.",
-  verifica_azzerata: "Controlla che il cliente l'abbia chiesto davvero (telefono cambiato o perso). Se non l'ha chiesto, è il primo passo per prendersi un account.",
-  esca: "Nessun lavoro vero tocca un'esca: va trattato come incidente (piano di risposta agli incidenti; se ci sono di mezzo dati Amazon, avviso ad Amazon entro 24 ore).",
-  verifica_spenta: "Se non è stato spento apposta, va riacceso subito: scripts/verifica-due-passaggi.sql.",
-}
-
+// Per ogni allarme: cosa e' successo, chi, quando e cosa fare (lib/allarmi-sicurezza: lo stesso testo
+// della pagina Allarmi di sicurezza). Risponde ok solo se Resend ha preso l'email: se no gli allarmi
+// restano "da spedire" e riparte al giro dopo.
 export async function inviaAllarmiSicurezza(to: string, allarmi: { tipo: string; descrizione: string; chi: string; quando: string }[]): Promise<{ ok: boolean }> {
   if (!to || !allarmi.length) return { ok: false }
   const esc = (t: string) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c])

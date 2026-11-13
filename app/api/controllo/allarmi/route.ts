@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { inviaAllarmiSicurezza } from '@/lib/email'
+import { chiAllarme, nomiPerId } from '@/lib/allarmi-sicurezza'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,35 +33,13 @@ export async function GET(req: NextRequest) {
   if (!nuovi.length) return NextResponse.json({ ok: true, nuovi: 0 })
 
   // Nomi per chi legge l'email: nel registro degli allarmi restano solo gli id.
-  const idUtenti = [...new Set(nuovi.map(a => a.utente_id).filter(Boolean))]
-  const { data: utenti } = idUtenti.length
-    ? await admin.from('utenti').select('id, nome, cognome, ruolo, cliente_id, master_id').in('id', idUtenti)
-    : { data: [] as any[] }
-  const idClienti = [...new Set([...nuovi.map(a => a.cliente_id), ...(utenti || []).map((u: any) => u.cliente_id)].filter(Boolean))]
-  const idMaster = [...new Set((utenti || []).map((u: any) => u.master_id).filter(Boolean))]
-  const [{ data: clienti }, { data: masters }] = await Promise.all([
-    idClienti.length ? admin.from('clienti').select('id, ragione_sociale').in('id', idClienti) : Promise.resolve({ data: [] as any[] }),
-    idMaster.length ? admin.from('masters').select('id, nome').in('id', idMaster) : Promise.resolve({ data: [] as any[] }),
-  ])
-  const nomeCliente = new Map((clienti || []).map((c: any) => [c.id, c.ragione_sociale]))
-  const nomeMaster = new Map((masters || []).map((m: any) => [m.id, m.nome]))
-  const chiE = (a: any): string => {
-    const u = (utenti || []).find((x: any) => x.id === a.utente_id)
-    const parti: string[] = []
-    if (u) {
-      const persona = [u.nome, u.cognome].filter(Boolean).join(' ')
-      const dove = u.cliente_id ? `cliente ${nomeCliente.get(u.cliente_id) || ''}` : `${u.ruolo || 'staff'} di ${nomeMaster.get(u.master_id) || 'un master'}`
-      parti.push([persona, dove].filter(Boolean).join(', '))
-    } else if (a.utente_id) parti.push(`utente ${a.utente_id}`)
-    if (a.cliente_id && a.cliente_id !== u?.cliente_id) parti.push(`cliente ${nomeCliente.get(a.cliente_id) || a.cliente_id}`)
-    return parti.join(' · ')
-  }
+  const nomi = await nomiPerId(admin, nuovi.map(a => a.utente_id), nuovi.map(a => a.cliente_id))
   const quando = (t: string) => new Date(t).toLocaleString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
   const { data: sess } = await admin.from('onetracking_sessione').select('email_alert').eq('id', 1).maybeSingle()
   const to = (sess as any)?.email_alert || DESTINATARIO_DI_RIPIEGO
   const inviata = await inviaAllarmiSicurezza(to, nuovi.map(a => ({
-    tipo: String(a.tipo), descrizione: String(a.descrizione), chi: chiE(a), quando: quando(a.creato_il),
+    tipo: String(a.tipo), descrizione: String(a.descrizione), chi: chiAllarme(a, nomi), quando: quando(a.creato_il),
   })))
   if (!inviata.ok) {
     // Restano "da spedire": il giro dopo ci riprova, e la Sentinella dice se restano indietro.

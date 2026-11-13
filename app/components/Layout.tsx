@@ -128,6 +128,7 @@ const NAV: NavItem[] = [
     { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto', soloMultiexpress: true },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
+  { label: 'Allarmi di sicurezza', href: '/dashboard/sicurezza', icon: '⚑', superMaster: true },
   { label: 'Controllo Giacenze', href: '/dashboard/controllo-giacenze', icon: '🛰', superMaster: true },
   { label: 'Centrale di Controllo', href: '/dashboard/controllo', icon: '🎛', superMaster: true },
   { label: 'Abbonamenti API', href: '/dashboard/api-clienti', icon: '⚿', superMaster: true },
