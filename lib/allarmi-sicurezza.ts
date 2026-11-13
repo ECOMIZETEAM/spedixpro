@@ -54,9 +54,13 @@ export async function nomiPerId(admin: any, idUtenti: string[], idClienti: strin
     utente: (id: string) => {
       const u = perUtente.get(id)
       if (!u) return id ? `utente ${id}` : ''
-      const persona = [u.nome, u.cognome].filter(Boolean).join(' ')
-      const dove = u.cliente_id ? `cliente ${nomeCliente.get(u.cliente_id) || ''}` : `${u.ruolo || 'staff'} di ${nomeMaster.get(u.master_id) || 'un master'}`
-      return [persona, dove].filter(Boolean).join(', ')
+      const persona = [u.nome, u.cognome].filter(Boolean).join(' ').trim()
+      const azienda = (u.cliente_id ? nomeCliente.get(u.cliente_id) : nomeMaster.get(u.master_id)) || ''
+      const dove = u.cliente_id ? `cliente ${azienda}` : `${u.ruolo || 'staff'} di ${azienda || 'un master'}`
+      // Molti account portano come nome quello dell'azienda: "MAIL EXPRESS, cliente MAIL EXPRESS" si
+      // legge male, basta una volta.
+      if (!persona || persona.toLowerCase() === azienda.trim().toLowerCase()) return u.cliente_id ? dove : `${u.ruolo || 'staff'} ${azienda}`.trim()
+      return `${persona}, ${dove}`
     },
     cliente: (id: string) => (id ? `cliente ${nomeCliente.get(id) || id}` : ''),
     clienteDi: (id: string) => perUtente.get(id)?.cliente_id || null,
