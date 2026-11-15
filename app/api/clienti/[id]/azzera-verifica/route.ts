@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { masterVedeReteCompleta, eDiscendente } from '@/lib/rete-masters'
 import { registraAudit } from '@/lib/audit'
+import { togliVerifica } from '@/lib/azzera-verifica'
 
 // AZZERA LA VERIFICA IN DUE PASSAGGI di un cliente che ha cambiato o perso il telefono: al prossimo
 // accesso la riattiva da capo inquadrando un codice nuovo. Toglie un pezzo della protezione
@@ -35,17 +36,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { data: accessi, error: eAcc } = await admin.from('utenti').select('id').eq('cliente_id', id)
   if (eAcc) return NextResponse.json({ error: 'Accessi del cliente non letti' }, { status: 500 })
 
-  let tolti = 0
-  for (const a of accessi || []) {
-    const { data: fattori, error: eF } = await admin.auth.admin.mfa.listFactors({ userId: a.id })
-    if (eF) return NextResponse.json({ error: 'Verifica del cliente non letta' }, { status: 500 })
-    for (const f of fattori?.factors || []) {
-      const { error: eD } = await admin.auth.admin.mfa.deleteFactor({ userId: a.id, id: f.id })
-      if (eD) return NextResponse.json({ error: 'Azzeramento non riuscito, riprova' }, { status: 500 })
-      tolti++
-    }
-  }
+  const esito = await togliVerifica(admin, (accessi || []).map(a => a.id))
+  if ('errore' in esito) return NextResponse.json({ error: esito.errore }, { status: 500 })
 
-  await registraAudit({ utenteId: user.id, ruolo: utente.ruolo, azione: 'azzera_verifica_cliente', risorsa: id, dettaglio: `fattori tolti: ${tolti}` })
-  return NextResponse.json({ ok: true, tolti })
+  await registraAudit({ utenteId: user.id, ruolo: utente.ruolo, azione: 'azzera_verifica_cliente', risorsa: id, dettaglio: `fattori tolti: ${esito.tolti}` })
+  return NextResponse.json({ ok: true, tolti: esito.tolti })
 }

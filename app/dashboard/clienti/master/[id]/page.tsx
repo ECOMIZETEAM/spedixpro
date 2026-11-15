@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
 import PagatoriBonifico from '@/app/components/PagatoriBonifico'
+import AzzeraVerifica from '@/app/components/AzzeraVerifica'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
@@ -209,6 +210,12 @@ export default function ModificaMasterPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Azzeramento verifica in due passaggi del titolare: agisce subito, non con "Salva modifiche". */}
+      <div style={sec}>
+        <div style={sech}>Verifica in due passaggi</div>
+        <AzzeraVerifica url={`/api/master/${id}/azzera-verifica`} chi="il master" />
       </div>
 
       <div style={{display:'flex',gap:'8px',maxWidth:'560px'}}>

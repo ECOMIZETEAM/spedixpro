@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vedeLaRete } from '@/lib/perimetro'
 import { generaPassword } from '@/lib/password'
+import { RUOLI_STAFF } from '@/lib/ruoli'
 
 // LO STAFF LO GESTISCE CHI GOVERNA IL PORTALE, NON CHI CI ENTRA DENTRO.
 // Queste rotte bloccavano il solo ruolo 'agente' e poi usavano la chiave di servizio (che scavalca la
@@ -21,7 +22,6 @@ import { generaPassword } from '@/lib/password'
 // E le modifiche valgono SOLO sui collaboratori: il titolare e i login cliente hanno lo stesso master_id,
 // e con il solo controllo sul master_id si poteva reimpostare la password del titolare, o cancellare il
 // suo accesso o quello di un cliente. La pagina Staff non li mostra mai (staff/page.tsx li filtra).
-const RUOLI_STAFF = ['admin', 'operatore', 'agente', 'autista']
 const governaLoStaff = (u: any) => ['master', 'admin'].includes(String(u?.ruolo || '').toLowerCase())
 const SOLO_TITOLARE = 'Lo staff lo gestiscono il titolare e gli admin'
 
