@@ -48,12 +48,14 @@ export async function formatoStampaUtente(admin: any, utente: ChiStampa): Promis
 
 // La resa pulita SDA EXPRESS L e' ORIZZONTALE (14,8x10,5 cm). Con la Zebra (lib/zebra-print: adatta la
 // pagina a 10 cm) uscirebbe al 67,5%, con le barre dei codici a righe sotto i 2 punti di una termica a
-// 203 dpi: in simulazione il CAP non si leggeva piu' (13/10), la 1011 si'. A chi stampa in ZPL resta la
-// 1011 di Poste. Tutti gli altri formati la ricevono (vedi applicaFormatoEtichetta). Nel dubbio la 1011.
-export async function resaSdaAdatta(admin: any, utente: ChiStampa): Promise<boolean> {
+// 203 dpi: in simulazione il CAP non si leggeva piu' (13/10), la 1011 si'. A chi stampa in ZPL 'zebra':
+// la 1011 dove c'e', e sull'A4 di KSync (dal 12/11 non c'e' altro) la resa girata in verticale (vedi
+// resaSdaPerZebra). Tutti gli altri formati ricevono la resa (vedi applicaFormatoEtichetta). Se le
+// impostazioni non si leggono, l'originale.
+export async function resaSdaAdatta(admin: any, utente: ChiStampa): Promise<boolean | 'zebra'> {
   try {
     const imp = await impostazioniStampa(admin, utente)
-    return imp?.zpl_abilita !== 'si'
+    return imp?.zpl_abilita === 'si' ? 'zebra' : true
   } catch { return false }
 }
 

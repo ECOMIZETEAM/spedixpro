@@ -258,7 +258,9 @@ export async function leggiEtichettaCompleta(
   // 1011 com'e' arrivata da Poste: un punto nuovo che salva l'etichetta e dimentica l'opzione salva
   // l'originale, non una resa. L'API v1 la chiede solo per i partner: la catena della condivisione
   // (chiavi dei clienti-ledger) scarica da li' l'etichetta e la SALVA sulla riga del compratore.
-  opz: { resaSda?: boolean | (() => Promise<boolean>) } = {}
+  // 'zebra' = chi stampa ha la Zebra (lib/formato-etichetta, resaSdaAdatta): la resa girata in verticale
+  // se l'originale e' l'A4 di KSync, la 1011 com'e' se l'originale e' quella (lib/etichetta-sda).
+  opz: { resaSda?: boolean | 'zebra' | (() => Promise<boolean | 'zebra'>) } = {}
 ): Promise<EtichettaLetta | null> {
   const et = await leggiEtichettaGrezza(admin, sped)
   const resaChiesta = RESA_SDA_ATTIVA && !!opz.resaSda
@@ -274,10 +276,13 @@ export async function leggiEtichettaCompleta(
       // SDA EXPRESS L (Poste Delivery Business): la 1011 che torna da Poste e' ruotata e coi campi
       // accavallati. La ri-rendiamo nel layout pulito approvato, COPIANDO i codici originali (restano
       // quelli di SDA, scansionabili). Qualunque problema → torna l'etichetta ORIGINALE (vedi sotto).
-      if (resaChiesta && contrattoSdaExpressL(corr) && (typeof opz.resaSda === 'function' ? await opz.resaSda() : true)) {
-        const { riscriviEtichettaSdaExpressL, datiEtichettaSda } = await import('@/lib/etichetta-sda')
+      const modo = resaChiesta && contrattoSdaExpressL(corr)
+        ? (typeof opz.resaSda === 'function' ? await opz.resaSda() : opz.resaSda)
+        : false
+      if (modo) {
+        const { riscriviEtichettaSdaExpressL, resaSdaPerZebra, datiEtichettaSda } = await import('@/lib/etichetta-sda')
         const dati = await datiEtichettaSda(admin, sped.numero)
-        if (dati) return { ...et, buffer: await riscriviEtichettaSdaExpressL(et.buffer, dati) }
+        if (dati) return { ...et, buffer: modo === 'zebra' ? await resaSdaPerZebra(et.buffer, dati) : await riscriviEtichettaSdaExpressL(et.buffer, dati) }
       }
       if (!perFornitori) return et
       if ((corr as any)?.tipo === 'spediamopro') {

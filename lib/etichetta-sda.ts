@@ -363,6 +363,32 @@ export async function riscriviEtichettaSdaExpressL(buffer: Buffer, dati: DatiEti
   }
 }
 
+// LA STAMPA ZEBRA (lib/zebra-print) adatta ogni pagina ai 10 cm del rotolo. Fino all'11/11 a chi stampava
+// cosi' si dava la 1011 del ponte com'era: 10,2 cm, usciva al 98%. Dal 12/11 l'originale e' l'A4 di KSync
+// con tre copie, e adattato a 10 cm usciva al 47,7%: tre etichette alte 4,7 cm su un foglio, il barcode
+// del CAP non si leggeva piu' (MASTER ESSENZE, 16/11). La resa orizzontale non va bene neanche lei: 14,8
+// cm sul rotolo da 10 fanno il 67,6%. Girata in verticale e' 10,5x14,8, la misura delle A6 dei corrieri:
+// la Zebra la stampa al 95,2%, la scala a cui il palmare del corriere l'ha letta su 4x6 (12/10).
+// Sulla 1011 non si tocca niente: era gia' della misura giusta.
+export async function resaSdaPerZebra(buffer: Buffer, dati: DatiEtichettaSda): Promise<Buffer> {
+  try {
+    const src = await PDFDocument.load(new Uint8Array(buffer))
+    if (!src.getPages().every(p => eA4(p.getSize()))) return buffer
+    const resa = await riscriviEtichettaSdaExpressL(buffer, dati)
+    const doc = await PDFDocument.load(new Uint8Array(resa))
+    const pagine = doc.getPages()
+    // Resa non riuscita: riscriviEtichettaSdaExpressL ha reso l'A4 com'era, e non lo si gira.
+    if (!pagine.every(p => misura(p.getSize(), 420, 298.1))) return resa
+    const out = await PDFDocument.create()
+    const emb = await out.embedPages(pagine)
+    for (const e of emb) out.addPage([e.height, e.width]).drawPage(e, { x: e.height, y: 0, rotate: degrees(90) })
+    return Buffer.from(await out.save())
+  } catch (e: any) {
+    console.error('[RESA-SDA] zebra: originale', dati.ldv, e?.message)
+    return buffer
+  }
+}
+
 // Costruisce i dati CONDIVISI del layout dalla riga spedizione (fonte autorevole, pulita). Indirizzi
 // MAIUSCOLI come nel riferimento; telefono numerico. LDV, peso, misure, colli e riquadro nero vengono poi
 // sovrascritti pagina per pagina da datiPerCollo, come il contrassegno (importo e pagamento li scrive

@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   // Resa pulita SDA EXPRESS L: dipende da chi stampa (vedi resaSdaAdatta), quindi si chiede una volta
   // sola per tutta la stampa, e solo se nella selezione c'e' una SDA.
-  let resaSdaChiStampa: boolean | null = null
+  let resaSdaChiStampa: boolean | 'zebra' | null = null
   const resaSda = async () => {
     if (resaSdaChiStampa === null) {
       const { resaSdaAdatta } = await import('@/lib/formato-etichetta')
