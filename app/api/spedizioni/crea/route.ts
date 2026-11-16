@@ -2022,7 +2022,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       return NextResponse.json({ error: 'Contratto GLS non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
     }
     try {
-      const { creaSpedizioneGls, etichetteGls, annullaSpedizioneGls, codiceServizioGls } = await import('@/lib/gls')
+      const { creaSpedizioneGls, etichetteGls, annullaSpedizioneGls, codiceServizioGls, bdaSpedizioneGls, numeroGlsGiaNostro } = await import('@/lib/gls')
 
       // Prezzo dal listino PRIMA della creazione (come il circuito interno).
       let costoCorrente = costoMaster
@@ -2036,17 +2036,15 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       }
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
-      // GLS EUROPA (Parcel, settings.tipo_spedizione = 'P'): per GLS il riferimento (Bda) e'
-      // obbligatorio, quindi se l'ordine non ne ha uno se ne genera uno univoco; paese, telefono e
-      // persona di riferimento li mette lib/gls. Contrassegno e servizi accessori sono gia' stati
-      // fermati prima del credito (sul Parcel GLS non li accetta).
-      // Sul Parcel GLS tiene 11 caratteri: si taglia QUI, cosi' AddParcel e GetPdfBySped ricevono lo
-      // stesso valore (l'etichetta si cerca anche per Bda).
+      // RIFERIMENTO (Bda): quello dell'ordine o, se manca, uno univoco nostro, anche sul nazionale. Senza,
+      // GLS univa due spedizioni allo stesso destinatario nella stessa giornata e la seconda faceva
+      // annullare la prima (lib/gls, bdaSpedizioneGls). Sul Parcel la Bda e' anche obbligatoria e tiene
+      // 11 caratteri: si taglia li', cosi' AddParcel e GetPdfBySped ricevono lo stesso valore.
+      // GLS EUROPA (Parcel, settings.tipo_spedizione = 'P'): paese, telefono e persona di riferimento li
+      // mette lib/gls. Contrassegno e servizi accessori sono gia' stati fermati prima del credito (sul
+      // Parcel GLS non li accetta).
       const parcelGls = servizioGls(corriereRecord.settings) === 'P'
-      const _rif = (body.rifOrdine ? String(body.rifOrdine) : '').trim()
-      const bda = parcelGls
-        ? (_rif.substring(0, 11) || 'MX' + Date.now().toString(36).toUpperCase().slice(-9))
-        : (_rif.substring(0, 20) || undefined)
+      const bda = bdaSpedizioneGls(body.rifOrdine, parcelGls)
       // MULTICOLLO: un peso per collo (GLS crea un <Parcel> per collo). Contrassegno/assicurazione
       // vanno solo sul primo collo (li mette lib/gls).
       const pesiColli = packages.map((p: any) => parseFloat(p?.weight) || 1)
@@ -2166,7 +2164,8 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         colli_dettaglio: colliDettaglio,
         // Si conserva il numero NUDO (serve a GetPdfBySped/DeleteSped/CloseWorkDay) accanto al
         // tracking mostrato, più le sigle sede e il flag GLS Check.
-        raw_response: { _gls: true, numero: numeroBare, tracking: numeroFinale, siglaMittente: ris.siglaMittente, siglaSedeDestino: ris.siglaSedeDestino, glsCheck: ris.glsCheck, ...(parcelGls ? { parcel: true, bda } : {}) },
+        // La Bda si salva sempre: anche quella generata da noi e' il riferimento della spedizione su GLS.
+        raw_response: { _gls: true, numero: numeroBare, tracking: numeroFinale, siglaMittente: ris.siglaMittente, siglaSedeDestino: ris.siglaSedeDestino, glsCheck: ris.glsCheck, bda, ...(parcelGls ? { parcel: true } : {}) },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
@@ -2178,6 +2177,18 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       }).select('id').single()
 
       if (insertError) {
+        // NUMERO GIA' NOSTRO: GLS ha messo il pacco dentro una spedizione che esiste gia' (stesso
+        // destinatario e stesso riferimento). Quella spedizione e' viva, pagata e magari gia' etichettata:
+        // annullarla qui la cancellava tutta (NI665655922, 10/11/2026). Non nasce una spedizione nuova,
+        // quindi il credito prenotato torna.
+        if (numeroGlsGiaNostro(insertError)) {
+          console.error('[CREA][GLS][INSERT] numero gia\' di una nostra spedizione, NON annullato su GLS', numeroFinale, insertError.message)
+          await stornaPrenotazione()
+          return NextResponse.json({
+            error: `GLS ha unito questo pacco alla spedizione ${numeroFinale}, già creata per lo stesso destinatario con lo stesso riferimento ordine${body.rifOrdine ? ` (${body.rifOrdine})` : ''}. Non è stata creata una spedizione nuova e non ti è stato addebitato niente: contatta l'assistenza indicando ${numeroFinale}.`,
+            numero: numeroFinale, annullataSuCorriere: false,
+          }, { status: 409 })
+        }
         // COMPENSAZIONE: la spedizione esiste su GLS ma non da noi -> la si annulla, cosi' nessuno
         // paga una spedizione che non risulta a sistema.
         const annullata = await annullaSpedizioneGls(credGls, numeroBare)

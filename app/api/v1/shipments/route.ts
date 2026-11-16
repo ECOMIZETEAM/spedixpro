@@ -848,14 +848,12 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     }
     if (!credGls.sigla_sede || !credGls.user_webservice || !credGls.password_webservice) return errore('Contratto non configurato correttamente')
     try {
-      const { creaSpedizioneGls, etichetteGls, servizioGls } = await import('@/lib/gls')
-      // Sul Parcel il Bda e' obbligatorio e tiene 11 caratteri: si taglia qui, cosi' AddParcel e
-      // GetPdfBySped ricevono lo stesso valore (l'etichetta si cerca anche per Bda).
+      const { creaSpedizioneGls, etichetteGls, servizioGls, bdaSpedizioneGls } = await import('@/lib/gls')
+      // Riferimento (Bda): quello dell'ordine o uno univoco nostro, anche sul nazionale, come nel portale.
+      // Senza, GLS univa due spedizioni allo stesso destinatario nella stessa giornata (lib/gls,
+      // bdaSpedizioneGls). Sul Parcel e' obbligatorio e tiene 11 caratteri.
       const parcelGls = servizioGls((corriere as any).settings) === 'P'
-      const _rif = (body.rifOrdine ? String(body.rifOrdine) : '').trim()
-      const bda = parcelGls
-        ? (_rif.substring(0, 11) || 'MX' + Date.now().toString(36).toUpperCase().slice(-9))
-        : (_rif.substring(0, 20) || undefined)
+      const bda = bdaSpedizioneGls(body.rifOrdine, parcelGls)
       const _im = String(body.incassoModalita || 'C')
       const modalitaIncassoGls = (_im === 'AB' || _im === 'A') ? 'AB' : _im === 'AC' ? 'AC' : 'CONT'
       const risGls = await creaSpedizioneGls(credGls, {
@@ -889,7 +887,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       costoCorrente = 0
       raw = {
         _gls: true, numero: risGls.numeroSpedizione, tracking: numero, siglaMittente: risGls.siglaMittente,
-        siglaSedeDestino: risGls.siglaSedeDestino, glsCheck: risGls.glsCheck, ...(parcelGls ? { parcel: true, bda } : {}),
+        siglaSedeDestino: risGls.siglaSedeDestino, glsCheck: risGls.glsCheck, bda, ...(parcelGls ? { parcel: true } : {}),
       }
       // Un'etichetta per collo, unite in una per la spedizione. Mittente stampato: dove il contratto lo
       // chiede ci va quello vero e non l'intestatario del conto GLS (lib/etichetta-mittente).
@@ -1051,7 +1049,14 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   // Eccezione GLS diretto, come nel portale: prima della chiusura di sera la spedizione non e' ancora
   // trasmessa, quindi si toglie da GLS e il credito torna. Solo se GLS conferma l'annullo.
   if (insErr && corriere.tipo === 'gls' && raw?.numero) {
-    const { annullaSpedizioneGls } = await import('@/lib/gls')
+    const { annullaSpedizioneGls, numeroGlsGiaNostro } = await import('@/lib/gls')
+    // NUMERO GIA' NOSTRO: GLS ha messo il pacco dentro una spedizione che esiste gia' (stesso destinatario
+    // e stesso riferimento). Annullarla la cancellava tutta, col pacco gia' etichettato (NI665655922,
+    // 10/11/2026, dal portale). Non nasce niente di nuovo: il credito torna e quella spedizione resta.
+    if (numeroGlsGiaNostro(insErr)) {
+      console.error('[V1][GLS][INSERT] numero gia\' di una nostra spedizione, NON annullato su GLS', numero, insErr.message)
+      return errore(`GLS ha unito questo pacco alla spedizione ${numero}, già creata per lo stesso destinatario con lo stesso riferimento ordine. Non è stata creata una spedizione nuova: contatta l'assistenza indicando ${numero}.`, 409)
+    }
     const annullata = await annullaSpedizioneGls(cred as any, String(raw.numero)).catch(() => false)
     console.error('[V1][GLS][INSERT]', numero, insErr.message, annullata ? 'annullata su GLS' : 'NON annullata su GLS')
     if (annullata) return errore('Spedizione non registrata e annullata sul corriere: riprova.', 500)

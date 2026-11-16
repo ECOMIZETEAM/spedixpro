@@ -45,6 +45,31 @@ export function servizioGls(settings: unknown): ServizioGls {
   return (settings as any)?.tipo_spedizione === 'P' ? 'P' : 'N'
 }
 
+// IL RIFERIMENTO (Bda) DI UNA SPEDIZIONE NUOVA: quello dell'ordine, oppure uno nostro diverso ogni volta.
+// GLS mette nella STESSA spedizione i colli con lo stesso destinatario e la stessa Bda, anche fra due
+// AddParcel diversi, finche' la prima non e' chiusa. Senza riferimento la Bda e' vuota per tutte, quindi
+// uguale: il secondo pacco allo stesso destinatario nello stesso giorno finiva dentro la spedizione ancora
+// aperta, e AddParcel restituiva il numero della PRIMA. Il salvataggio falliva sul numero doppio e la
+// compensazione annullava su GLS quel numero, cioe' la prima spedizione intera, col suo pacco gia' etichettato.
+// Caso vero: DOLCE LUNA → RITA AUGENTI, 10/11/2026, NI665655922 (contrassegno 29,90 €) cancellata alle 10:44
+// dal secondo pacco; 8 spedizioni cosi' dal 20/10 (7 su GLS NI W di Wave, 1 su GLS LIGHT NN di M.C).
+// Quello generato sta in 11 caratteri, il limite del Parcel. Il riferimento dell'ordine resta com'era (sul
+// nazionale fino a 20 caratteri, sul Parcel 11): e' quello che il cliente cerca su GLS.
+export function bdaSpedizioneGls(rifOrdine: unknown, parcel: boolean): string {
+  const rif = String(rifOrdine ?? '').trim()
+  if (rif) return rif.substring(0, parcel ? 11 : 20)
+  // Tutto casuale (9 cifre esadecimali, 68 miliardi di valori): con ora + 2 caratteri casuali, 1.000
+  // creazioni nello stesso millisecondo davano solo 854 riferimenti diversi.
+  return 'MX' + globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 9).toUpperCase()
+}
+
+// Il salvataggio di una spedizione GLS appena creata e' fallito perche' quel NUMERO e' gia' di una nostra
+// spedizione? Allora GLS ha messo il pacco dentro una spedizione che esiste gia' (stesso destinatario e
+// stesso riferimento, vedi bdaSpedizioneGls). Quella spedizione e' viva e pagata: NON va annullata.
+export function numeroGlsGiaNostro(err: { message?: string } | null | undefined): boolean {
+  return /spedizioni_numero_key/.test(String(err?.message || ''))
+}
+
 // IL PAESE DEL PARCEL VA NEL TAG <Provincia>, con la sigla GLS del paese: non c'e' un tag "nazione".
 // Fonte: manuale GLS MU162 rev.22 (05/07/2022), par. 6.1 "Tag <Provincia> (sigla sede paesi
 // internazionali)" e tabella AddParcel ("Provincia / Codice Stato"). Le sigle coincidono con l'ISO
