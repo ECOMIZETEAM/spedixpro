@@ -13,6 +13,7 @@ const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem(
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
+import { pesiDelModulo, pesiDivisiScritti } from '@/lib/colli-ordine'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
@@ -122,8 +123,11 @@ export default function NuovaSpedizioneCliente() {
   const [ritiroData, setRitiroData] = useState(() => { const d = new Date(); while ([0,6].includes(d.getDay())) d.setDate(d.getDate()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })   // weekend -> primo giorno lavorativo (data LOCALE, non UTC)
   const [ritiroOrario, setRitiroOrario] = useState('mattina')
   const [numColli, setNumColli] = useState(1)
-  const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
-  const [peso, setPeso] = useState('1')
+  // PESO COLLO PER COLLO, NIENTE PESO TOTALE (Lorenzo, 16/11/2026). Prima un peso solo, "1" gia' scritto,
+  // diviso in parti uguali fra i colli: 7.883 multicollo su 7.883 partite dai moduli avevano colli tutti
+  // uguali, mentre alla ripesatura 548 su 889 avevano piu' di 2 kg di scarto fra un collo e l'altro — e
+  // il prezzo si fa collo per collo. Il collo nasce col peso VUOTO: senza, il prezzo non si calcola.
+  const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:'',peso:''}])
   const [pacchiSalvati, setPacchiSalvati] = useState<any[]>([])
   useEffect(() => { fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>setPacchiSalvati(Array.isArray(d)?d:[])).catch(()=>{}) }, [])
   // CATALOGO: serve a dire cosa c'e' nel pacco e a scaricare il magazzino. Se il cliente non ha
@@ -142,7 +146,7 @@ export default function NuovaSpedizioneCliente() {
     const code = art ? String((art as any).codice_hs).replace(/[^0-9]/g, '') : ''
     if (code) setHscode(prev => prev ? prev : code)
   }, [articoliScelti, catalogo])
-  function applicaPacco(p:any) { setPeso(String(p.peso||'')); setNumColli(1); setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }]); setTariffe([]); setSelected(null) }
+  function applicaPacco(p:any) { setNumColli(1); setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||''), peso:String(p.peso||'') }]); setTariffe([]); setSelected(null) }
   const [contenuto, setContenuto] = useState('')
   const [tipoContenuto, setTipoContenuto] = useState('Merce destinata alla vendita')
   const [rifOrdine, setRifOrdine] = useState('')   // → "Rif." in etichetta (order id da import/integrazione o digitato)
@@ -211,14 +215,16 @@ export default function NuovaSpedizioneCliente() {
       telefono: q.get('telefono') || d.telefono,
       note: q.get('note') || d.note,
     }))
-    // Dati collo / pagamento dell'ordine
-    if (q.get('peso')) setPeso(q.get('peso') as string)
-    if (q.get('colli')) { const n = Math.max(1, parseInt(q.get('colli') as string) || 1); aggiornaNumColli(n) }
-    // Misure del 1° collo (da catalogo SKU / pacco dell'ordine importato)
-    if (q.get('l') || q.get('w') || q.get('h')) {
-      setColli(prev => { const n = prev.length ? [...prev] : [{ lunghezza: '', larghezza: '', altezza: '' }]
-        n[0] = { lunghezza: q.get('l') || n[0].lunghezza, larghezza: q.get('w') || n[0].larghezza, altezza: q.get('h') || n[0].altezza }
-        return n })
+    // Dati collo / pagamento dell'ordine. L'ordine porta il peso TOTALE e il numero di colli: ogni collo
+    // prende il suo pezzo del peso (la stessa divisione di "Spedisci selezionati", lib/colli-ordine.ts),
+    // scritto nella sua riga, dove chi spedisce lo corregge col peso vero. Le misure vanno al 1° collo.
+    if (q.get('peso') || q.get('colli') || q.get('l') || q.get('w') || q.get('h')) {
+      const n = Math.max(1, parseInt(q.get('colli') || '1') || 1)
+      const pesi = q.get('peso') ? pesiDivisiScritti(Number(q.get('peso')), n) : Array.from({ length: n }, () => '')
+      setNumColli(pesi.length)
+      setColli(pesi.map((peso, i) => i === 0
+        ? { lunghezza: q.get('l') || '', larghezza: q.get('w') || '', altezza: q.get('h') || '', peso }
+        : { lunghezza: '', larghezza: '', altezza: '', peso }))
     }
     // OGNI COLLO CON LE SUE MISURE E IL SUO PESO, quando l'ordine di un negozio ne ha piu' d'uno (pacchi
     // con «Un collo per ogni pezzo», lib/colli-negozio). Sta DOPO il blocco qui sopra, che riscrive il
@@ -237,7 +243,7 @@ export default function NuovaSpedizioneCliente() {
   }, [])
   useEffect(() => {
     setTariffe([]); setSelected(null); setVista('dati')
-  }, [dest, mitt, peso, colli, numColli, contrassegno, assicurazione, consegnaA])
+  }, [dest, mitt, colli, numColli, contrassegno, assicurazione, consegnaA])
   // Tariffe da mostrare in base alla modalità: "a un punto" → solo contratti a punto (P2TAB/P2UP).
   // Il Locker InPost è consegna A UN PUNTO (come PuntoPoste): sta nella tab "a un punto", non a domicilio.
   const tariffeVis = tariffe.filter((t:any) => consegnaA==='punto' ? (!!t._consegna_punto || !!t._inpost_locker) : (!t._consegna_punto && !t._inpost_locker))
@@ -249,7 +255,7 @@ export default function NuovaSpedizioneCliente() {
     if (primoRender.current) { primoRender.current = false; return }
     if (tariffe.length) { setTariffe([]); setSelected(null) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peso, numColli, colli, contrassegno, assicurazione])
+  }, [numColli, colli, contrassegno, assicurazione])
 
   useEffect(() => {
     fetch('/api/cliente/dati').then(r=>r.json()).then(c => {
@@ -277,27 +283,19 @@ export default function NuovaSpedizioneCliente() {
     setTariffe([]); setSelected(null)
   }
 
-  // ESTERO MULTICOLLO: il peso va indicato COLLO PER COLLO (i corrieri internazionali — es. UPS —
-  // lo pretendono per ogni collo, non un totale). Solo estero (non Italia) e piu' di un collo.
-  const esteroMulti = dest.paese !== 'IT' && colli.length > 1
-  const pesoTotaleColli = colli.reduce((s,c)=>s+(+(c.peso||0)||0), 0)
+  // Somma dei pesi scritti: solo da leggere sotto i colli ("In tutto"), non si scrive.
+  const pesoInTutto = colli.reduce((s,c)=>s+(+(c.peso||0)||0), 0)
+  const pesiMancanti = colli.some(c => !(+(c.peso||0) > 0))
 
   function buildPackages() {
-    if (esteroMulti) {
-      return colli.map(c => ({
-        length: +c.lunghezza||20,
-        width: +c.larghezza||15,
-        height: +c.altezza||10,
-        weight: +(c.peso||0)||0,
-      }))
-    }
-    const n = Math.max(1, colli.length)
-    const pesoPerCollo = (+peso || 0) / n
-    return colli.map(c => ({
+    // Ogni collo col SUO peso, cosi' com'e' stato scritto (pesiDelModulo toglie solo l'eccedenza della
+    // virgola mobile, che altrimenti spingerebbe una somma esatta nella fascia dopo).
+    const pesi = pesiDelModulo(colli.map(c => c.peso))
+    return colli.map((c, i) => ({
       length: +c.lunghezza||20,
       width: +c.larghezza||15,
       height: +c.altezza||10,
-      weight: pesoPerCollo
+      weight: pesi[i],
     }))
   }
 
@@ -308,8 +306,8 @@ export default function NuovaSpedizioneCliente() {
     if (consegnaA==='domicilio' && dest.paese==='IT' && !dest.provincia) {
       setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return
     }
-    if (esteroMulti && colli.some(c => !(+(c.peso||0)>0))) {
-      setErrore('Spedizione estera multicollo: indica il peso (kg) di OGNI collo'); return
+    if (pesiMancanti) {
+      setErrore(colli.length > 1 ? 'Indica il peso (kg) di ogni collo.' : 'Indica il peso (kg) del collo.'); return
     }
     setErrore(''); setLoading(true); setTariffe([]); setSelected(null)
     const res = await fetch('/api/spedizioni/tariffe', {
@@ -358,8 +356,8 @@ export default function NuovaSpedizioneCliente() {
     const c = clienteData
     if (c) setMitt({nome:c.ragione_sociale||'',indirizzo:c.so_indirizzo||'',citta:c.so_citta||'',provincia:c.so_provincia||'',cap:c.so_cap||'',email:(c.email_mittente??c.email)||'',telefono:c.telefono||''})
     setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
-    setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
-    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setHscode(''); setRifOrdine('')
+    setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:'',peso:''}])
+    setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setHscode(''); setRifOrdine('')
     setContrassegno('0'); setAssicurazione('0')
     setTariffe([]); setSelected(null); setExtraNomi([])
     // Anche gli articoli: senza questo il pacco successivo scaricherebbe di nuovo la stessa merce.
@@ -749,22 +747,11 @@ export default function NuovaSpedizioneCliente() {
                 </div>
               )}
 
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
                 <div>
                   <label style={lbl}>Colli</label>
                   <input type="number" value={numColli} min="1"
                     onChange={e=>aggiornaNumColli(parseInt(e.target.value)||1)} style={inp}/>
-                </div>
-                <div>
-                  <label style={lbl}>Peso totale{esteroMulti ? ' (somma colli)' : ''}</label>
-                  {esteroMulti ? (
-                    <input type="number" value={pesoTotaleColli ? pesoTotaleColli.toFixed(2) : ''} readOnly disabled
-                      title="Spedizione estera multicollo: il peso si indica per collo qui sotto"
-                      style={{...inp, background:'#f1f5f9', color:'#475569'}}/>
-                  ) : (
-                    <input type="number" value={peso} min="0.1" step="0.1"
-                      onChange={e=>{setPeso(e.target.value);setTariffe([]);setSelected(null)}} style={inp}/>
-                  )}
                 </div>
                 <div>
                   <label style={lbl}>Contrassegno €</label>
@@ -779,26 +766,32 @@ export default function NuovaSpedizioneCliente() {
               </div>
 
               <div style={{marginBottom:'14px'}}>
-                <div style={{display:'grid',gridTemplateColumns: esteroMulti ? '32px 1fr 1fr 1fr 1fr' : '32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px'}}>
+                <div style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr 1fr',gap:'6px',marginBottom:'6px'}}>
                   <div style={{...lbl,marginBottom:0}}>#</div>
+                  <div style={{...lbl,marginBottom:0}}>Peso (kg)</div>
                   <div style={{...lbl,marginBottom:0}}>Lunghezza (cm)</div>
                   <div style={{...lbl,marginBottom:0}}>Larghezza (cm)</div>
                   <div style={{...lbl,marginBottom:0}}>Altezza (cm)</div>
-                  {esteroMulti && <div style={{...lbl,marginBottom:0}}>Peso (kg)</div>}
                 </div>
                 {colli.map((c,i)=>(
-                  <div key={i} style={{display:'grid',gridTemplateColumns: esteroMulti ? '32px 1fr 1fr 1fr 1fr' : '32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
+                  <div key={i} style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
                     <div style={{fontSize:'12px',color:'#999',fontWeight:'600',textAlign:'center'}}>{i+1}</div>
+                    <input type="number" value={c.peso||''} min="0.1" step="0.1" placeholder="kg"
+                      onChange={e=>aggiornaCollo(i,'peso',e.target.value)} style={inp}/>
                     <input type="number" value={c.lunghezza} placeholder="es. 30"
                       onChange={e=>aggiornaCollo(i,'lunghezza',e.target.value)} style={inp}/>
                     <input type="number" value={c.larghezza} placeholder="es. 20"
                       onChange={e=>aggiornaCollo(i,'larghezza',e.target.value)} style={inp}/>
                     <input type="number" value={c.altezza} placeholder="es. 15"
                       onChange={e=>aggiornaCollo(i,'altezza',e.target.value)} style={inp}/>
-                    {esteroMulti && <input type="number" value={c.peso||''} min="0.1" step="0.1" placeholder="kg"
-                      onChange={e=>aggiornaCollo(i,'peso',e.target.value)} style={inp}/>}
                   </div>
                 ))}
+                {colli.length > 1 && (
+                  <div style={{fontSize:'12px',color:'#555',marginTop:'2px',paddingLeft:'38px'}}>
+                    In tutto <strong>{pesoInTutto.toLocaleString('it-IT',{maximumFractionDigits:3})} kg</strong>
+                    {pesiMancanti && <span style={{color:'#b45309'}}> · manca il peso di qualche collo</span>}
+                  </div>
+                )}
               </div>
 
 
