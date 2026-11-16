@@ -4,6 +4,7 @@ import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
+import { clientiAutodistintaSpenta, righeFermePerAutodistinta, righeDaRiprendereDopoChiusuraAMano } from '@/lib/autodistinta'
 
 // Una sera porta ~7.000 spedizioni da chiudere in ~700 distinte (20/10/2026), e ogni distinta parla col
 // corriere: in un passaggio solo non ci stanno. Il giro gira piu' volte a sera (vercel.json) e ogni
@@ -59,15 +60,44 @@ export async function GET(req: NextRequest) {
 
   // AUTODISTINTA OFF (impostazioni cliente): il cron NON chiude le spedizioni di questi clienti —
   // le distinte le fanno loro a mano dal portale. Default (nessuna impostazione) = ON.
-  const { data: esclusi } = await supabase.from('clienti').select('id').eq('impostazioni->>autodistinta', 'no')
-  const autodistintaOff = new Set((esclusi || []).map((c: any) => c.id))
+  // Vale per TUTTO il pacco: anche le righe dei master che vendono il contratto condiviso restano ferme finche'
+  // il cliente non chiude la sua, e quando la chiude si riprendono qui (lib/autodistinta, guasto SPIRITUAL 15/11).
+  // Se queste letture falliscono, in questo passaggio non si chiude nessuna spedizione: chiudendo tutto si
+  // trasmetterebbero ai corrieri proprio i pacchi dei clienti spenti. Il passaggio dopo, fra 15 minuti, riprova.
+  let autodistintaOff = new Set<string>()
+  let righeFerme = new Set<string>()
+  let regoleLette = true
+  try {
+    autodistintaOff = await clientiAutodistintaSpenta(supabase)
+    righeFerme = await righeFermePerAutodistinta(supabase, autodistintaOff, new Date(inizioSpedizioni.getTime() - 864e5))
+  } catch (e: any) {
+    regoleLette = false
+    console.error('[DISTINTE][CRON] auto distinta spenta non letta, nessuna spedizione chiusa in questo passaggio:', e?.message)
+  }
+  let righeRiprese = 0
+  if (regoleLette) {
+    try {
+      const riprese = await righeDaRiprendereDopoChiusuraAMano(supabase, autodistintaOff, {
+        chiuseDal: inizioSpedizioni, taglio, righeDal: inizio,
+      })
+      // In testa: sono le piu' vecchie, e se il tempo finisce restano indietro le piu' recenti (vedi sotto).
+      const gia = new Set(speds.map(s => String(s.id)))
+      const nuove = riprese.filter((r: any) => !gia.has(String(r.id)))
+      speds.unshift(...nuove)
+      righeRiprese = riprese.length
+    } catch (e: any) {
+      console.error('[DISTINTE][CRON] righe dei venditori da riprendere non lette (riprova il passaggio dopo):', e?.message)
+    }
+  }
 
   const gruppi: Record<string, any[]> = {}
-  for (const s of (speds || [])) {
+  let righeFermeSaltate = 0
+  for (const s of (regoleLette ? speds : [])) {
     // cliente_id NULL = spedizione PROPRIA del master: prima veniva SALTATA (mai chiusa in distinta).
     // Ora la raggruppo per master+corriere con distinta senza cliente (come la chiusura manuale "m:").
     if (!s.master_id || !s.corriere_id) continue
     if (s.cliente_id && autodistintaOff.has(s.cliente_id)) continue   // autodistinta OFF: chiude lui
+    if (righeFerme.has(String(s.id))) { righeFermeSaltate++; continue }   // riga di venditore di un pacco che il cliente spento non ha ancora chiuso
     const key = s.master_id + '|' + (s.cliente_id || 'PROPRIA') + '|' + s.corriere_id
     if (!gruppi[key]) gruppi[key] = []
     gruppi[key].push(s)
@@ -208,5 +238,8 @@ export async function GET(req: NextRequest) {
   }
   if (evasioneRimandata) console.warn('[DISTINTE][CRON] evasione negozi lasciata al recupero:', evasioneRimandata, 'spedizioni')
   if (gruppiRimandati) console.warn('[DISTINTE][CRON] tempo finito: distinte rimandate al passaggio successivo', gruppiRimandati)
-  return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse, gruppiRimandati, distinteResiCreate, evasioneRimandata })
+  return NextResponse.json({
+    success: true, distinteCreate, spedizioniChiuse, gruppiRimandati, distinteResiCreate, evasioneRimandata,
+    autodistinta: { lette: regoleLette, clientiSpenti: autodistintaOff.size, righeFermeSaltate, righeRiprese },
+  })
 }
