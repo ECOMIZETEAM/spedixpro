@@ -303,12 +303,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         const numeroNudo = (s as any).gls_numero
         if (!numeroNudo || !cred?.sigla_sede) return
         const { trackingGls, mapStatoGls } = await import('@/lib/gls')
-        const { stati, eventi: glsEventi } = await trackingGls(cred, String(numeroNudo))
+        const { stati, eventi: glsEventi, motivoGiacenza: motivoGls } = await trackingGls(cred, String(numeroNudo))
         for (const str of stati) {
           const m = mapStatoGls(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
         }
         if (stati.some((str) => mapStatoGls(str) === 'in_giacenza')) vistaGiacenza = true
+        // Il motivo (es. "Destinatario sconosciuto — Tel errato") lo ricava lib/gls.motivoGiacenzaGls
+        // dall'evento che ha causato la giacenza: prima non si leggeva e le giacenze GLS erano tutte senza.
+        if (vistaGiacenza && motivoGls) motivoGiacenza = motivoGls
         // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
         if (stati.some((str) => mapStatoGls(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 

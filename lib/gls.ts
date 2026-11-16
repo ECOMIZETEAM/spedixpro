@@ -772,14 +772,60 @@ export async function creaSpedizioneConEtichettaGls(cred: CredenzialiGls, parcel
 // ─────────────────────────────────────────────────────────────────────────────
 const GLS_TT_ENDPOINT = 'https://infoweb.gls-italy.com/XML/get_xml_track.php'
 
+// MOTIVO DELLA GIACENZA. L'evento della giacenza ("Spedizione in giacenza presso la sede GLS, siamo in
+// attesa di istruzioni", codice 66) non dice perché: lo dice l'evento PRIMA, quello che l'ha causata
+// (69 "Destinatario sconosciuto", 1/7 primo/secondo tentativo fallito, 24 "non e' possibile consegnare"),
+// a volte con la nota dell'autista in <Note> ("Tel errato"). Fino al 16/11/2026 note e codici si
+// scartavano: le 71 giacenze GLS dirette da meta' ottobre erano tutte senza motivo, e M.C. LOGISTICA
+// sceglieva lo svincolo alla cieca (con "Destinatario sconosciuto" la riconsegna allo stesso indirizzo
+// torna indietro). Gli eventi arrivano dal piu' recente, in tuple Data/Ora/Luogo/Stato/Note/Codice.
+function motivoGiacenzaGls(blocco: string): string | null {
+  const eventi: { stato: string; note: string }[] = []
+  let cur: { stato: string; note: string } | null = null
+  const reTag = /<(Data|Stato|Note)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/\1>/gi
+  let m: RegExpExecArray | null
+  while ((m = reTag.exec(blocco))) {
+    const nome = m[1].toLowerCase()
+    const val = m[2].replace(/\s+/g, ' ').trim()
+    if (nome === 'data') { if (cur) eventi.push(cur); cur = { stato: '', note: '' }; continue }
+    if (!cur) cur = { stato: '', note: '' }
+    if (nome === 'stato') cur.stato = val
+    else cur.note = val
+  }
+  if (cur) eventi.push(cur)
+  const iGiacenza = eventi.findIndex(e => mapStatoGls(e.stato) === 'in_giacenza')
+  if (iGiacenza < 0) return null
+  // La causa e' il primo evento prima della giacenza che non sia un passaggio normale: si saltano
+  // la stessa frase di giacenza ripetuta, "Consegna prevista", i transiti, la presa in carico e gli
+  // avvisi di ritardo ("non e' ancora arrivata presso la sede", codice 26).
+  // Fa eccezione "disponibile per il ritiro presso la sede" (codici 10/907): per mapStatoGls e' "in
+  // consegna", ma se e' quello che precede la giacenza il motivo e' che il destinatario non e' passato
+  // a ritirarlo (visto il 16/11 su Quick e Wave: senza questa eccezione il motivo diventava un ritardo
+  // di giorni prima, o il contatore "3g" della nota).
+  const passaggio = ['in_giacenza', 'in_consegna', 'in_transito', 'spedita']
+  const causa = eventi.slice(iGiacenza + 1).find(e => e.stato && (
+    /disponibile per il ritiro/i.test(e.stato)
+    || (!passaggio.includes(mapStatoGls(e.stato) || '') && !/non e' (ancora )?arrivata/i.test(e.stato))
+  ))
+  if (causa && /disponibile per il ritiro/i.test(causa.stato)) return 'Non ritirata dal destinatario presso la sede GLS'
+  // Solo la prima frase: il resto ("ti invitiamo a contattare il mittente…") e' rivolto al destinatario.
+  let testo = (causa?.stato || '').split(/[.,;](?:\s|$)/)[0].trim()
+    .replace(/^non siamo riusciti a raggiungerti/i, 'Destinatario non raggiunto')
+  // Le note fatte solo di un numero ("1", "2", "3g") sono il contatore dei giorni, non un motivo.
+  const notaVera = (n: string) => (n && !/^\d+\s*g?$/i.test(n) ? n : '')
+  const nota = notaVera(causa?.note || '') || notaVera(eventi[iGiacenza].note)
+  if (nota && !testo.toLowerCase().includes(nota.toLowerCase())) testo = testo ? `${testo} — ${nota}` : nota
+  return testo ? testo.slice(0, 200) : null
+}
+
 // Interroga il T&T GLS per numero spedizione e ritorna le stringhe di stato del tracking PRINCIPALE.
 export async function trackingGls(
   cred: CredenzialiGls, numeroNudo: string, timeoutMs = 15000
-): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; raw: string }> {
+): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; motivoGiacenza: string | null; raw: string }> {
   const sede = (cred.sigla_sede || '').trim()
   const contratto = (cred.codice_contratto || '').trim()
   const num = String(numeroNudo || '').replace(/\D/g, '')   // il T&T vuole il numero NUDO (solo cifre)
-  if (!sede || !num) return { stati: [], eventi: [], raw: '' }
+  if (!sede || !num) return { stati: [], eventi: [], motivoGiacenza: null, raw: '' }
   const url = `${GLS_TT_ENDPOINT}?locpartenza=${encodeURIComponent(sede)}&NumSped=${encodeURIComponent(num)}` +
     (contratto ? `&CodCli=${encodeURIComponent(contratto)}` : '')
   const ctrl = new AbortController()
@@ -789,7 +835,7 @@ export async function trackingGls(
     const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/xml, text/xml' } })
     xml = await res.text()
   } catch {
-    return { stati: [], eventi: [], raw: '' }   // rete/timeout: nessun aggiornamento, si riprova al giro dopo
+    return { stati: [], eventi: [], motivoGiacenza: null, raw: '' }   // rete/timeout: nessun aggiornamento, si riprova al giro dopo
   } finally {
     clearTimeout(t)
   }
@@ -802,6 +848,7 @@ export async function trackingGls(
   // sui testi precisi degli eventi.
   const mTrack = /<TRACKING>([\s\S]*?)<\/TRACKING>/i.exec(xml)
   const blocco = mTrack ? mTrack[1] : ''
+  const motivoGiacenza = motivoGiacenzaGls(blocco)
   const stati: string[] = []
   const re = /<Stato>([\s\S]*?)<\/Stato>/gi
   let m: RegExpExecArray | null
@@ -877,9 +924,9 @@ export async function trackingGls(
       return m !== 'in_giacenza' && (m !== 'consegnata' || tuttiConsegnati)
     })
     const statiItalia = stati.filter(s => mapStatoGls(s) !== 'consegnata')
-    return { stati: [...statiItalia, ...statiEsteri], eventi, raw: xml.substring(0, 2000) }
+    return { stati: [...statiItalia, ...statiEsteri], eventi, motivoGiacenza, raw: xml.substring(0, 2000) }
   }
-  return { stati, eventi, raw: xml.substring(0, 2000) }
+  return { stati, eventi, motivoGiacenza, raw: xml.substring(0, 2000) }
 }
 
 // Mappa una stringa di stato del T&T GLS (evento <Stato>) allo stato interno. Sullo stampo di
