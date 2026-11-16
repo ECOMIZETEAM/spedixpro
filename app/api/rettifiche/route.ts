@@ -835,8 +835,13 @@ export async function DELETE(req: NextRequest) {
   if (!rettificaIds?.length) return NextResponse.json({ error: 'Nessuna rettifica selezionata' }, { status: 400 })
   // A LOTTI come la conferma: con centinaia di id un solo `.in()` sfora la URL verso PostgREST.
   let eliminate = 0
+  const girateCancellate: any[] = []
   for (let i = 0; i < rettificaIds.length; i += 200) {
     const fetta = rettificaIds.slice(i, i + 200)
+    // Prima di cancellare si leggono le girate da sopra (origine_rettifica_id), per segnarle sulla madre: dopo non ci sono piu'.
+    const { data: figlie } = await supabase.from('rettifiche')
+      .select('id,origine_rettifica_id,cliente_id,target_master_id,differenza,fuori_sagoma,costo_iniziale,costo_finale,peso_reale,peso_volume_reale')
+      .in('id', fetta).eq('master_id', utente?.master_id).eq('confermata', false).not('origine_rettifica_id', 'is', null)
     const { error } = await supabase.from('rettifiche')
       .delete()
       .in('id', fetta)
@@ -844,6 +849,49 @@ export async function DELETE(req: NextRequest) {
       .eq('confermata', false)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     eliminate += fetta.length
+    if (figlie?.length) {
+      // Solo quelle andate davvero: una confermata nel frattempo da un'altra scheda resta, e la madre non si tocca.
+      const { data: rimaste } = await supabase.from('rettifiche').select('id').in('id', figlie.map((f: any) => f.id))
+      const ancora = new Set(((rimaste || []) as any[]).map(r => r.id))
+      girateCancellate.push(...(figlie as any[]).filter(f => !ancora.has(f.id)))
+    }
   }
+  if (girateCancellate.length) await segnaGirateCancellate(girateCancellate, utente!.master_id)
   return NextResponse.json({ success: true, eliminate })
+}
+
+// GIRATA E POI CANCELLATA: la madre ricevuta da sopra resta 'propagata' senza figlia, e il costo resta al master. Si
+// scrive sulla madre (rettifiche.perche) a chi era girata e quanto le si chiedeva, col suo listino: lo legge Rettifica
+// Costi → «non girate sotto» (lib/rettifiche-perche, descriviNonGirata). Il 15/11/2026 su Ecomize Solution erano 4 su
+// POSTA CENTRALE (3UW1UHA266010, Poste Express M): collo di 5,32 kg, listino che passa da 5,94 € fino a 5 kg a 24,51 €
+// fino a 100 kg — le si chiedevano 19,11 € e Ecomize le ha cancellate; ricostruirlo dopo voleva dire rifare il conto a
+// mano. Non muove soldi: se la scrittura non riesce si perde solo la frase.
+async function segnaGirateCancellate(figlie: any[], mio: string) {
+  try {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const cl = [...new Set(figlie.map(f => f.cliente_id).filter(Boolean))]
+    const ms = [...new Set(figlie.map(f => f.target_master_id).filter(Boolean))]
+    const nomi = new Map<string, string>()
+    if (cl.length) { const { data } = await admin.from('clienti').select('id,ragione_sociale').in('id', cl); for (const c of (data || []) as any[]) nomi.set(c.id, String(c.ragione_sociale || '').trim()) }
+    if (ms.length) { const { data } = await admin.from('masters').select('id,nome').in('id', ms); for (const m of (data || []) as any[]) nomi.set(m.id, m.nome) }
+    const il = new Date().toISOString()
+    const a2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100
+    let k = 0
+    await Promise.all(Array.from({ length: Math.min(8, figlie.length) }, async () => {
+      while (k < figlie.length) {
+        const f = figlie[k++]
+        const peso = Math.max(Number(f.peso_reale) || 0, Number(f.peso_volume_reale) || 0)
+        const perche = {
+          tipo: 'cancellata_sotto', il, chi: nomi.get(f.cliente_id || f.target_master_id) || null,
+          chiedeva: a2(-Number(f.differenza || 0) + Number(f.fuori_sagoma || 0)),
+          pagato: f.costo_iniziale != null ? a2(f.costo_iniziale) : null, dovuto: f.costo_finale != null ? a2(f.costo_finale) : null,
+          peso_dopo: peso > 0 ? a2(peso) : null,
+        }
+        // Solo una madre ricevuta da me: il filtro sul destinatario e' la garanzia, l'id viene dalla mia figlia.
+        const { error } = await admin.from('rettifiche').update({ perche }).eq('id', f.origine_rettifica_id).eq('target_master_id', mio)
+        if (error) console.error('[RETTIFICHE] girata cancellata:', error.message)
+      }
+    }))
+  } catch (e: any) { console.error('[RETTIFICHE] girata cancellata:', e?.message || e) }
 }

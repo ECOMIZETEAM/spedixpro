@@ -4,6 +4,7 @@ import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { raggruppaPerInvio } from '@/lib/network-invii'
+import { senzaChili } from '@/lib/rettifiche-perche'
 
 // Cosa il MIO master ha ricevuto dai livelli superiori della catena.
 // RLS: le righe appartengono al master PADRE -> lettura via admin, autorizzazione = target_master_id mio.
@@ -38,7 +39,7 @@ export async function GET(_req: NextRequest) {
     }
   } catch { /* best-effort: non deve mai bloccare la lista */ }
 
-  const COLONNE = 'id,master_id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,confermata_il,stato,propagazione,created_at,masters:master_id(nome)'
+  const COLONNE = 'id,master_id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,confermata_il,stato,propagazione,perche,created_at,masters:master_id(nome)'
   const TETTO_STORICHE = 500
   const [rett, cod, resi] = await Promise.all([
     // SI VEDE SOLO QUELLO CHE E' GIA' STATO ADDEBITATO.
@@ -117,7 +118,8 @@ export async function GET(_req: NextRequest) {
   // a cui girarla: è già a suo carico (il credito gli è stato scalato). Non va mostrata come una
   // scelta "propaga / Le assorbo io" — quel bottone suona come accollarsi il costo di un altro,
   // mentre qui il pacco è suo. Si marca `propria` così la UI la mostra come "tua spedizione".
-  const rettRows = (rett.data || []) as any[]
+  // Le rettifiche senza chili (senzaChili in lib/rettifiche-perche) chi le ha ricevute non le vede.
+  const rettRows = ((rett.data || []) as any[]).filter(r => !senzaChili(r))
   const spedIds = [...new Set(rettRows.map(r => r.spedizione_id).filter(Boolean))]
   const proprieSet = new Set<string>()
   for (let i = 0; i < spedIds.length; i += 300) {

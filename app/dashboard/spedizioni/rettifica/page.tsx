@@ -9,21 +9,27 @@ import { descriviStessoPrezzo } from '@/lib/rettifiche-perche'
 
 import { useDialog } from '@/app/components/DialogProvider'
 
-// I GRUPPI DELLE RETTIFICHE NON GIRATE SOTTO (app/api/rettifiche/eliminate). Si fanno sul conto del pacco, non sul gesto:
-// il 13/11/2026 Ecomize Solution vedeva 189 «davvero non recuperate» per 416,44 €, e su 135 di quei pacchi ci guadagnava
-// ancora. In perdita davvero erano 31 (−80,36 €).
-const ELIM_ORDINE = ['perdi', 'guadagni', 'gia', 'senza', 'nd']
+// I GRUPPI DELLE RETTIFICHE NON GIRATE SOTTO (app/api/rettifiche/eliminate, lib/rettifiche-non-girate): il perche' di
+// ognuna, non il margine sul pacco. Lorenzo, 15/11/2026: «ci perdi non deve esistere.. pensano che stanno perdendo soldi»
+// e «ci guadagni comunque sembra che non ha recuperato la rettifica». Su Ecomize Solution le 138 righe di quei due gruppi
+// erano: 103 clienti nella stessa fascia anche col collo rimisurato, 26 assorbite, 4 listini che non arrivano al collo,
+// 5 girate e poi cancellate. Nessuna era un errore della piattaforma.
+const ELIM_ORDINE = ['listino', 'cancellate', 'assorbite', 'uguale', 'gia', 'senza', 'altre']
 const ELIM_GRUPPI: Record<string, { nome: string; colore: string; sfondo: string; spiega: string }> = {
-  perdi: { nome: 'Ci perdi', colore: '#b91c1c', sfondo: '#fef2f2',
-    spiega: 'Pacchi su cui hai pagato più di quanto hai incassato da chi sta sotto. Accanto a ognuno c\'è il perché: di solito un listino che al cliente costa meno di quello che paghi tu, o una rettifica assorbita.' },
-  guadagni: { nome: 'Ci guadagni comunque', colore: '#166534', sfondo: '#f0fdf4',
-    spiega: 'Pacchi su cui chi sta sotto ti ha già pagato più di quanto hai pagato tu in tutto, rettifica compresa: la rettifica ti ha tolto un po\' di guadagno, ma non ci perdi.' },
+  listino: { nome: 'Listino da sistemare', colore: '#92400e', sfondo: '#fffbeb',
+    spiega: 'Il listino che hai dato a chi sta sotto non ha un prezzo per il collo rimisurato: si ferma prima di quel peso, e per questo la rettifica non si poteva girare. Ogni riga dice quale listino, su che contratto e zona, fin dove arriva e quanti chili servivano. Alzalo, così le prossime passano.' },
+  cancellate: { nome: 'Girate e poi cancellate', colore: '#334155', sfondo: '#f8fafc',
+    spiega: 'Le avevi girate a chi sta sotto e poi le hai cancellate in Rettifica Costi senza confermarle. Ogni riga dice quanto gli si chiedeva col tuo listino.' },
+  assorbite: { nome: 'Assorbite da te', colore: '#334155', sfondo: '#f8fafc',
+    spiega: 'Rettifiche che non hai girato a chi sta sotto: col tuo listino, col collo rimisurato, avrebbe pagato di più. Dal 13/11/2026 la riga dice anche se l\'hai scelto tu col bottone «Assorbi».' },
+  uguale: { nome: 'Sotto paga uguale', colore: '#166534', sfondo: '#f0fdf4',
+    spiega: 'Chi sta sotto, col listino che gli hai dato tu e col suo divisore, paga la stessa cifra anche col collo rimisurato: sta nella stessa fascia, non c\'era niente da chiedergli. Succede quando le sue fasce sono più larghe delle tue, o il suo divisore è diverso dal tuo.' },
   gia: { nome: 'Già fatte pagare sotto', colore: '#166534', sfondo: '#f0fdf4',
     spiega: 'Pacchi che avevi già fatto pagare sotto con un\'altra rettifica: qui c\'è solo il costo arrivato dopo, che sotto non si chiede una seconda volta.' },
   senza: { nome: 'Spedizioni tue senza cliente', colore: '#475569', sfondo: '#f8fafc',
     spiega: 'Spedizioni fatte dal tuo account senza un cliente: non c\'è nessuno a cui girare la rettifica, è il costo di una tua spedizione.' },
-  nd: { nome: 'Senza conto del pacco', colore: '#92400e', sfondo: '#fffbeb',
-    spiega: 'Pacchi di cui non si ricostruisce chi sta subito sotto di te: qui si vede solo la rettifica pagata.' },
+  altre: { nome: 'Altri motivi', colore: '#475569', sfondo: '#f8fafc',
+    spiega: 'Costi tuoi di detentore che non si girano: resi (il ritorno si paga col nolo del reso) e importi del fornitore senza una voce che il portale conosca.' },
 }
 
 export default function RettificaCostiPage() {
@@ -57,7 +63,7 @@ export default function RettificaCostiPage() {
   const [elimCarico, setElimCarico] = useState(false)
   // Di serie i pacchi su cui CI PERDI DAVVERO (lib/conto-pacco): gli altri sono pacchi su cui ci guadagni ancora, gia' fatti
   // pagare sotto con un'altra rettifica, o spedizioni tue senza un cliente a cui girarli.
-  const [elimFiltro, setElimFiltro] = useState<'perdi' | 'guadagni' | 'gia' | 'senza' | 'nd' | ''>('perdi')
+  const [elimFiltro, setElimFiltro] = useState<string>('')
   // Solo l'ultima lettura chiesta finisce a schermo. Il 13/11/2026 Ecomize Solution vedeva «13/11/2026 - 13/11/2026» sopra
   // le righe dei 90 giorni: aveva scelto «oggi» mentre la lettura dei 90 giorni, piu' lenta, era ancora in corsa, e quella
   // e' arrivata dopo. 416 € «persi» in un giorno, che erano di tre mesi.
@@ -169,8 +175,7 @@ export default function RettificaCostiPage() {
     const righe = elimFiltrate.map((r: any) => ({
       'LDV': r.ldv, 'Data': new Date(r.quando).toLocaleDateString('it-IT'), 'Da': r.da,
       'Rettifica pagata (€)': r.importo, 'Chi sta sotto': r.chi || '',
-      'Incassato (€)': r.incassato ?? '', 'Pagato in tutto (€)': r.pagato_tot ?? '', 'Sul pacco (€)': r.margine ?? '',
-      'Cosa è': ELIM_GRUPPI[r.gruppo]?.nome || '', 'Perché': r.frase || r.motivo,
+      'Cosa è': ELIM_GRUPPI[r.gruppo]?.nome || '', 'Perché': r.frase,
       ...(elimFiltrate.some((x: any) => x.poste) ? { 'Controllo Poste': r.poste ? `Poste la smentisce — ${r.poste}` : '' } : {}),
     }))
     const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Non girate sotto')
@@ -847,7 +852,7 @@ export default function RettificaCostiPage() {
   const elimFiltrate: any[] = (elim?.righe || []).filter((r: any) =>
     (!elimFiltro || r.gruppo === elimFiltro) && (!elimQ
     || String(r.ldv || '').toLowerCase().includes(elimQ) || String(r.da || '').toLowerCase().includes(elimQ)
-    || String(r.chi || '').toLowerCase().includes(elimQ) || String(r.frase || r.motivo || '').toLowerCase().includes(elimQ)))
+    || String(r.chi || '').toLowerCase().includes(elimQ) || String(r.frase || '').toLowerCase().includes(elimQ)))
   const elimTotPagine = Math.max(1, Math.ceil(elimFiltrate.length / elimPerPage))
   const elimPagCorr = Math.min(elimPagina, elimTotPagine)
   const elimVisibili = elimFiltrate.slice((elimPagCorr - 1) * elimPerPage, elimPagCorr * elimPerPage)
@@ -1334,8 +1339,8 @@ export default function RettificaCostiPage() {
       </div>
       )}
 
-      {/* RETTIFICHE NON GIRATE SOTTO — quello che ti e' stato scalato e che non hai girato a nessuno, col conto del pacco:
-          quanto hai incassato da chi sta sotto e quanto hai pagato in tutto (app/api/rettifiche/eliminate, lib/conto-pacco). */}
+      {/* RETTIFICHE NON GIRATE SOTTO — quello che ti e' stato scalato e che non hai girato a nessuno, col perche' di ognuna
+          (app/api/rettifiche/eliminate, lib/rettifiche-non-girate). */}
       {!elim?.vietato && (
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden',marginTop:'16px'}}>
         <div onClick={()=>{ const apri = !elimAperta; setElimAperta(apri); if (apri && !elim) caricaEliminate(elimDal, elimAl) }}
@@ -1343,11 +1348,11 @@ export default function RettificaCostiPage() {
           <span style={{fontSize:'14px',fontWeight:'700',color:'#1a1a1a'}}>
             <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{elimAperta?'▾':'▸'}</span>
             Rettifiche non girate sotto
-            <span style={{fontSize:'12px',color:'#6b7280',fontWeight:400,marginLeft:'8px'}}>pagate da te e non girate a nessuno: su quali pacchi ci perdi davvero e su quali hai già incassato abbastanza</span>
+            <span style={{fontSize:'12px',color:'#6b7280',fontWeight:400,marginLeft:'8px'}}>pagate da te e non girate a nessuno, col perché di ognuna</span>
           </span>
-          {elim?.gruppi && (elim.gruppi.perdi.n > 0
-            ? <span style={{fontSize:'13px',fontWeight:700,color:'#dc2626'}}>{elim.gruppi.perdi.n} {elim.gruppi.perdi.n === 1 ? 'pacco' : 'pacchi'} in perdita · − € {Math.abs(Number(elim.gruppi.perdi.margine)).toFixed(2)}</span>
-            : <span style={{fontSize:'13px',fontWeight:700,color:'#166534'}}>nessun pacco in perdita</span>)}
+          {elim?.gruppi && Number(elim.gruppi.listino?.n || 0) > 0 && (
+            <span style={{fontSize:'13px',fontWeight:700,color:'#92400e'}}>{elim.gruppi.listino.n} {elim.gruppi.listino.n === 1 ? 'listino da sistemare' : 'righe con un listino da sistemare'}</span>
+          )}
         </div>
         {elimAperta && (
           <div>
@@ -1377,14 +1382,10 @@ export default function RettificaCostiPage() {
                 {elim?.gruppi && (
                   <div style={{padding:'10px 16px',borderBottom:'1px solid #f0f0f0'}}>
                     <div style={{display:'flex',gap:'6px',flexWrap:'wrap' as const}}>
-                      {([...ELIM_ORDINE.filter(g => g !== 'nd' || elim.gruppi.nd?.n), ''] as string[]).map(v => {
+                      {(['', ...ELIM_ORDINE.filter(g => elim.gruppi[g]?.n)] as string[]).map(v => {
                         const g = v ? ELIM_GRUPPI[v] : { nome: 'Tutte', colore: '#334155', sfondo: '#fff' }
                         const n = v ? elim.gruppi[v]?.n || 0 : (elim.righe || []).length
-                        const m = v ? Number(elim.gruppi[v]?.margine || 0) : 0
-                        const cifra = v === 'perdi' ? `− € ${Math.abs(m).toFixed(2)}`
-                          : v === 'guadagni' || v === 'gia' ? `+ € ${m.toFixed(2)}`
-                          : v ? `€ ${Number(elim.gruppi[v]?.euro || 0).toFixed(2)}`
-                          : `rettifiche € ${Number(elim.totale || 0).toFixed(2)}`
+                        const cifra = `€ ${Number(v ? elim.gruppi[v]?.euro || 0 : elim.totale || 0).toFixed(2)}`
                         return (
                           <button key={v || 'tutte'} onClick={() => { setElimFiltro(v as any); setElimPagina(1) }} title={v ? ELIM_GRUPPI[v].spiega : 'Tutte le rettifiche pagate da te e non girate sotto'}
                             style={{padding:'5px 12px',borderRadius:'999px',fontSize:'12px',fontWeight:600,cursor:'pointer',color:g.colore,background:g.sfondo,border:`1px solid ${elimFiltro === v ? g.colore : '#e5e7eb'}`,boxShadow:elimFiltro === v ? `0 0 0 1px ${g.colore}` : 'none'}}>
@@ -1400,8 +1401,7 @@ export default function RettificaCostiPage() {
                 )}
                 <div style={{padding:'8px 16px',fontSize:'12px',color:'#475569',lineHeight:1.6,display:'flex',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
                   <div style={{maxWidth:'760px'}}>
-                    «Sul pacco» = quello che ti ha pagato chi sta sotto per quella spedizione, meno quello che hai pagato tu in tutto (spedizione + rettifiche; resi e giacenze esclusi).
-                    Se è positivo la rettifica ti ha tolto un po' di guadagno, ma non ci perdi.
+                    Ogni riga dice perché la rettifica non è scesa, col listino che hai dato a chi sta sotto: i chili sono quelli su cui paga lui, col suo divisore.
                   </div>
                   <span style={{color:'#666'}}>
                     Mostra{' '}
@@ -1413,7 +1413,7 @@ export default function RettificaCostiPage() {
                 </div>
                 {!elimFiltrate.length ? (
                   <div style={{padding:'24px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>
-                    {elimQ ? 'Nessuna rettifica corrisponde alla ricerca.' : elimFiltro === 'perdi' ? 'In questo periodo non c\'è nessun pacco su cui ci perdi.' : 'Nessuna rettifica in questo gruppo.'}
+                    {elimQ ? 'Nessuna rettifica corrisponde alla ricerca.' : 'Nessuna rettifica in questo gruppo.'}
                   </div>
                 ) : (<>
                 <div style={{overflowX:'auto' as const}}>
@@ -1421,12 +1421,9 @@ export default function RettificaCostiPage() {
                     <thead><tr style={{background:'#f9fafb'}}>
                       {([
                         ['LDV', ''], ['Data', 'Quando è arrivata la rettifica'], ['Da', 'Chi te l\'ha addebitata'],
-                        ['Rettifica', 'Quanto ti è stato scalato con questa rettifica'],
-                        ['Incassato', 'Quanto ti ha pagato chi sta sotto (cliente o sotto-master) per questa spedizione, rettifiche comprese'],
-                        ['Pagato in tutto', 'Quanto hai pagato tu per questa spedizione: spedizione + rettifiche'],
-                        ['Sul pacco', 'Incassato meno pagato in tutto'], ['Perché', ''],
+                        ['Rettifica', 'Quanto ti è stato scalato con questa rettifica'], ['Perché', ''],
                       ] as [string, string][]).map(([h, t])=>(
-                        <th key={h} title={t || undefined} style={{textAlign:(['Rettifica','Incassato','Pagato in tutto','Sul pacco'].includes(h) ? 'right' : 'left') as any,padding:'7px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
+                        <th key={h} title={t || undefined} style={{textAlign:(h === 'Rettifica' ? 'right' : 'left') as any,padding:'7px 10px',fontSize:'10px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                       ))}
                     </tr></thead>
                     <tbody>
@@ -1436,13 +1433,8 @@ export default function RettificaCostiPage() {
                           <td style={{padding:'7px 10px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{new Date(r.quando).toLocaleDateString('it-IT')}</td>
                           <td style={{padding:'7px 10px',color:'#1a1a1a'}}>{r.da}</td>
                           <td style={{padding:'7px 10px',color:'#1a1a1a',fontWeight:600,textAlign:'right' as const,whiteSpace:'nowrap' as const}}>€ {Number(r.importo).toFixed(2)}</td>
-                          <td style={{padding:'7px 10px',color:'#1a1a1a',textAlign:'right' as const,whiteSpace:'nowrap' as const}}>{r.incassato != null ? `€ ${Number(r.incassato).toFixed(2)}` : '—'}</td>
-                          <td style={{padding:'7px 10px',color:'#1a1a1a',textAlign:'right' as const,whiteSpace:'nowrap' as const}}>{r.pagato_tot != null ? `€ ${Number(r.pagato_tot).toFixed(2)}` : '—'}</td>
-                          <td style={{padding:'7px 10px',fontWeight:700,textAlign:'right' as const,whiteSpace:'nowrap' as const,color:r.margine == null ? '#94a3b8' : r.margine < 0 ? '#dc2626' : '#166534'}}>
-                            {r.margine == null ? '—' : `${r.margine < 0 ? '−' : '+'} € ${Math.abs(Number(r.margine)).toFixed(2)}`}
-                          </td>
-                          <td style={{padding:'7px 10px',color:r.gruppo === 'gia' ? '#166534' : '#475569',minWidth:'280px'}}>
-                            {r.frase || r.motivo}
+                          <td style={{padding:'7px 10px',color:r.gruppo === 'listino' ? '#92400e' : r.gruppo === 'gia' || r.gruppo === 'uguale' ? '#166534' : '#475569',minWidth:'320px'}}>
+                            {r.frase}
                             {r.poste && <div style={{color:'#b91c1c',fontWeight:600,marginTop:'2px'}}>⛔ Poste la smentisce — {r.poste}</div>}
                           </td>
                         </tr>

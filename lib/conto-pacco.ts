@@ -7,8 +7,9 @@ import { CAMPI_MOVIMENTI_NOLO, TIPI_MOVIMENTI_NOLO, movimentiDelNolo, quantoPesa
 // il conto pacco per pacco su Ecomize Solution: delle 189 «davvero non recuperate» (416,44 €), 135 erano pacchi su cui ci
 // guadagnava ancora (il cliente aveva gia' pagato piu' di quanto Ecomize ha pagato in tutto, rettifica compresa: su
 // 282343J061744 MB POSTE 16,70 €, Ecomize 8,33 + 6,27 = 14,60 €), 24 spedizioni fatte dal suo account senza cliente, e
-// 31 pacchi davvero in perdita, contando anche le gia' fatte pagare sotto (−80,36 €). Si mostra quindi, per ogni pacco, quello che il master ha incassato da chi
-// sta subito sotto e quello che ha pagato in tutto: si vede da se' se ci perde.
+// 31 pacchi davvero in perdita, contando anche le gia' fatte pagare sotto (−80,36 €). Dal 16/11/2026 la pagina non mostra
+// piu' il margine (vedi «I GRUPPI SONO IL PERCHE'» in lib/rettifiche-non-girate): di qui si usano chi sta subito sotto e
+// se la spedizione e' del master senza cliente. Il conto resta per chi lo vuole rifare a mano.
 //
 // I soldi si leggono come li legge il motore delle rettifiche (movimentiDelNolo): solo nolo — spedizione e rettifiche,
 // non resi, giacenze e POD — da TUTTE le gambe del pacco (condivisione: stesso tracking). Chi paga e' master_target_id

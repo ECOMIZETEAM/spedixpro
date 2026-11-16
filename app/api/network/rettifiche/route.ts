@@ -5,6 +5,8 @@ import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 import { controllaListiniClienti, daSistemareDaMotivo, type DaSistemare } from '@/lib/network-da-fare'
+import type { ContoSotto } from '@/lib/rettifiche-perche'
+import type { LivelloRettifica } from '@/lib/ripesature-calcolo'
 
 // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena: su un blocco intero sono
 // centinaia di viaggi al database.
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest) {
   const idFatte: string[] = []      // figlia creata (o già esistente) → 'propagata'
   const idAzzerate: string[] = []   // differenza a zero → 'assorbita'. Tutte le ALTRE saltate NON
                                     // vengono più marcate: restano propagazione=null e ritentabili.
+  const contiUguali = new Map<string, ContoSotto>()   // i numeri con cui si e' visto che sotto si paga uguale
   // IL MOTIVO RESTA SCRITTO SULLA RIGA (rettifiche.da_sistemare), non solo nel messaggio di risposta. Il 12/11/2026
   // Ecomize Solution ha caricato 849 righe a blocchi in un'ora: il motivo di 3UW1UHA334029 (listino della cliente fermo
   // a 5 kg, pacco ripesato 19,85) e' comparso in un messaggio che il «Carica» dopo ha sostituito. Ora la pagina lo
@@ -228,7 +231,8 @@ export async function POST(req: NextRequest) {
       // catena prosegue (vedi qualcunoSottoDeve). Il 15/10 Wave ne aveva scartate 2 cosi', e Velox e i
       // suoi clienti non potevano piu' essere rettificati.
       if (!qualcunoSottoDeve(esito, figlio)) {
-        scartate.push({ ldv: r.numero_spedizione, perche: 'il cliente pagherebbe uguale col suo listino (stesso scaglione di peso): niente da recuperare' }); idAzzerate.push(r.id); continue
+        scartate.push({ ldv: r.numero_spedizione, perche: 'il cliente pagherebbe uguale col suo listino (stesso scaglione di peso): niente da recuperare' }); idAzzerate.push(r.id)
+        contiUguali.set(r.id, contoDelLivello(liv)); continue
       }
     }
     const soloPassaggio = !reweighGirabile && fs === 0
@@ -287,7 +291,7 @@ export async function POST(req: NextRequest) {
   // A BLOCCHI: con migliaia di id un solo .in() diventa una richiesta enorme e il database la rifiuta.
   for (let i = 0; i < idFatte.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', idFatte.slice(i, i + 500))
   for (let i = 0; i < idAzzerate.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'assorbita' }).in('id', idAzzerate.slice(i, i + 500))
-  await scriviPercheAssorbita(adminDb, idAzzerate, 'paga_uguale')
+  await scriviPercheAssorbita(adminDb, idAzzerate, 'paga_uguale', contiUguali)
   await scriviDaSistemare(adminDb, mio, lavorabili, motivi, [...idFatte, ...idAzzerate])
 
   const ritentabili = righe.length - idFatte.length - idAzzerate.length
@@ -307,14 +311,36 @@ export async function POST(req: NextRequest) {
 // (app/api/rettifiche/eliminate): fino al 13/11/2026 le due cose finivano nella stessa frase, «non girata sotto (o sotto
 // non c'era niente da recuperare)», e il master non sapeva se l'aveva scelto lui o il portale. Non muove soldi: se la
 // scrittura non riesce si perde solo la frase.
-async function scriviPercheAssorbita(adminDb: any, ids: string[], tipo: 'assorbita_a_mano' | 'paga_uguale') {
+// Con i numeri (paga_uguale) ogni riga ha i suoi e si scrive da sola, otto alla volta; senza, a blocchi.
+async function scriviPercheAssorbita(adminDb: any, ids: string[], tipo: 'assorbita_a_mano' | 'paga_uguale', conti?: Map<string, ContoSotto>) {
   try {
     const il = new Date().toISOString()
-    for (let i = 0; i < ids.length; i += 500) {
-      const { error } = await adminDb.from('rettifiche').update({ perche: { tipo, il } }).in('id', ids.slice(i, i + 500))
-      if (error) { console.error('[NETWORK] perche assorbita:', error.message); return }
+    if (!conti?.size) {
+      for (let i = 0; i < ids.length; i += 500) {
+        const { error } = await adminDb.from('rettifiche').update({ perche: { tipo, il } }).in('id', ids.slice(i, i + 500))
+        if (error) { console.error('[NETWORK] perche assorbita:', error.message); return }
+      }
+      return
     }
+    let k = 0
+    await Promise.all(Array.from({ length: Math.min(8, ids.length) }, async () => {
+      while (k < ids.length) {
+        const id = ids[k++]
+        const { error } = await adminDb.from('rettifiche').update({ perche: { tipo, il, ...(conti.get(id) || {}) } }).eq('id', id)
+        if (error) console.error('[NETWORK] perche assorbita:', error.message)
+      }
+    }))
   } catch (e: any) { console.error('[NETWORK] perche assorbita:', e?.message || e) }
+}
+
+// Il conto di chi sta sotto, per la frase di Rettifica Costi: il suo listino sul collo ripesato (prima del limite dei
+// chili, vedi dovutoListino in lib/ripesature-calcolo) e sul dichiarato, e i chili su cui paga quando si sanno.
+function contoDelLivello(liv: LivelloRettifica): ContoSotto {
+  return {
+    chi: String(liv.chi || '').trim() || null, pagato: liv.pagato, dovuto: liv.dovutoListino ?? liv.dovuto,
+    dovuto_dich: liv.dovutoDichiarato ?? null, zona: liv.zona ?? null,
+    peso_prima: liv.pesoFatturatoPrima ?? null, peso_dopo: liv.pesoFatturato ?? null,
+  }
 }
 
 // Scrive sulle righe non girate il loro motivo (rettifiche.da_sistemare) e lo toglie da quelle decise. Non muove soldi e

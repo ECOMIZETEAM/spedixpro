@@ -49,6 +49,15 @@ export type LivelloRettifica = {
   pesoVolumeDopo?: number | null
   pesoVolumePrima?: number | null
   fattoreVolume?: number | null
+  // PER DIRE PERCHE', NON PER I SOLDI. Il listino di questo livello sul collo ripesato prima del limite «la rettifica
+  // conta i chili» (soloIlSalto lo riporta a pagato + salto, e su un pacco gia' rettificato sembrerebbe il prezzo di
+  // listino), sul dichiarato, e i chili su cui paga (reale o volume col suo divisore, agevolazione compresa). Li scrive
+  // il «Carica» sulla riga che non scende perche' sotto si paga uguale (lib/rettifiche-perche, descriviNonGirata).
+  // undefined = non noto: il giro sul dichiarato si fa solo quando qualcuno deve qualcosa.
+  dovutoListino?: number | null
+  dovutoDichiarato?: number | null
+  pesoFatturato?: number | null
+  pesoFatturatoPrima?: number | null
 }
 
 // I volumi e il divisore da scrivere sulla riga di rettifica di CHI PAGA (il livello `liv`).
@@ -333,6 +342,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         let volumeCliente: number | null = null
         let fattoreCliente: number | null = null
         let zonaCliente: string | null = null
+        let fatturatoCliente: number | null = null
         if (cl?.listino_cliente_id) {
           const ris = await calcolaPrezzoListino(admin, {
             listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest, zonaForzata,
@@ -344,6 +354,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
             if (Number(ris.peso_volume) > 0) pesoVolumeDopo = arrotonda(Number(ris.peso_volume))
             volumeCliente = arrotonda(Number(ris.peso_volume) || 0)
             fattoreCliente = Number(ris.fattore_volume) || null
+            fatturatoCliente = Number(ris.peso_fatturato) > 0 ? arrotonda(Number(ris.peso_fatturato)) : null
             // LE DUE CIFRE DEVONO ESSERE FATTE CON LA STESSA RICETTA.
             // `pagato` viene dai movimenti, e alla creazione il cliente e' addebitato di
             // nolo + fee contrassegno + fee assicurazione. Riprezzando il solo nolo si sottraeva una
@@ -386,7 +397,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           zona: zonaCliente,
           pagato: arrotonda(pagatoCliente), dovuto,
           differenza: dovuto == null ? null : arrotonda(dovuto - pagatoCliente),
-          pesoVolumeDopo: volumeCliente, fattoreVolume: fattoreCliente,
+          pesoVolumeDopo: volumeCliente, fattoreVolume: fattoreCliente, pesoFatturato: fatturatoCliente,
         })
       }
 
@@ -450,11 +461,13 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         let dovuto: number | null = null
         let volumeCliente: number | null = null
         let fattoreCliente: number | null = null
+        let fatturatoCliente: number | null = null
         if ((cl as any)?.listino_cliente_id) {
           const ris = await calcolaPrezzoListino(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest })
           if (ris) {
             volumeCliente = arrotonda(Number(ris.peso_volume) || 0)
             fattoreCliente = Number(ris.fattore_volume) || null
+            fatturatoCliente = Number(ris.peso_fatturato) > 0 ? arrotonda(Number(ris.peso_fatturato)) : null
             const sup = await calcolaSupplementiCliente(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
             if (sup.disponibile) {
               const acc = Array.isArray(s.servizi_accessori) ? s.servizi_accessori.reduce((a: number, x: any) => a + (Number(x?.importo) || 0), 0) : 0
@@ -463,7 +476,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           } else catenaCompleta = false
         }
         const pag = arrotonda(pagatoPerCliente.get(s.cliente_id) || 0)
-        livelli.push({ chi: (cl as any)?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag), pesoVolumeDopo: volumeCliente, fattoreVolume: fattoreCliente })
+        livelli.push({ chi: (cl as any)?.ragione_sociale || 'cliente', clienteId: s.cliente_id, masterId: null, pagato: pag, dovuto, differenza: dovuto == null ? null : arrotonda(dovuto - pag), pesoVolumeDopo: volumeCliente, fattoreVolume: fattoreCliente, pesoFatturato: fatturatoCliente })
       }
       for (const liv of catena) {
         let dovuto: number | null = null
@@ -564,12 +577,18 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         const volumeDich = new Map(resDich.livelli.filter(l => l.pesoVolumeDopo != null).map(l => [chiave(l), l.pesoVolumeDopo as number]))
         const conDichiarato = (l: LivelloRettifica): LivelloRettifica =>
           volumeDich.has(chiave(l)) ? { ...l, pesoVolumePrima: volumeDich.get(chiave(l)) } : l
+        // Solo per la frase (vedi dovutoListino nel tipo): i soldi restano quelli di soloIlSalto.
+        const fatturatoDich = new Map(resDich.livelli.filter(l => l.pesoFatturato != null).map(l => [chiave(l), l.pesoFatturato as number]))
+        const perDirePerche = (prima: LivelloRettifica, dopo: LivelloRettifica): LivelloRettifica => ({
+          ...dopo, dovutoListino: prima.dovuto, dovutoDichiarato: dovutoDich.get(chiave(prima)) ?? null,
+          ...(fatturatoDich.has(chiave(prima)) ? { pesoFatturatoPrima: fatturatoDich.get(chiave(prima)) } : {}),
+        })
         // Il detentore col contratto proprio non ha un listino qui: il suo dovuto e' pagato + addebito del
         // fornitore, uguale nei due giri, e il salto verrebbe zero.
         const detentori = new Set(res.detentori)
         res = {
           ...res,
-          livelli: res.livelli.map(l => conDichiarato((l.masterId && detentori.has(l.masterId)) ? l : soloIlSalto(l, dovutoDich.get(chiave(l))))),
+          livelli: res.livelli.map(l => perDirePerche(l, conDichiarato((l.masterId && detentori.has(l.masterId)) ? l : soloIlSalto(l, dovutoDich.get(chiave(l)))))),
           costoDetentore: res.costoDetentore ? soloIlSalto(res.costoDetentore, resDich.costoDetentore?.dovuto) : res.costoDetentore,
         }
       }

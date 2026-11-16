@@ -85,6 +85,83 @@ export async function giaFattePagareSotto(admin: any, masterId: string, spedizio
 // Una stima del portale (riferimento = LDV) su un pacco che ha gia' la fattura del fornitore alla Conferma non si
 // registra (vedi pacchiConCostoGia in lib/ripesature-crea): il costo vero e' quello della fattura.
 export const eStima = (r: any) => !!r?.rif_fornitore && r.rif_fornitore === r.numero_spedizione
+
+// SENZA CHILI: una rettifica ricevuta che al livello di chi l'ha pagata non conteneva un chilo in piu'. Prima della regola
+// del 02/11 («la rettifica conta i chili», lib/ripesature-calcolo) il motore sulle misure di Poste contava il prezzo di
+// oggi meno quello pagato alla spedizione, e il controllo «il collo e' diventato piu' grande» guardava il volume anche
+// quando valeva l'agevolazione sul peso reale. 2UW07WF015754 (Poste Delivery Business S, Edit Shop): dichiarato 1 kg,
+// Poste 0,85 kg in 27×19,5×14,5 — nella scatola 50×32×28, si paga sul reale, stessa fascia — e a Ecomize Solution e'
+// arrivata una rettifica di 1,05 €, che era solo l'aumento del listino da luglio. Lorenzo, 13/11/2026: quello che e' stato
+// pagato e fatto pagare resta com'e', ma queste righe si tolgono da Rettifica Costi di chi le ha ricevute: non le gira
+// e non le vede. Il segno sta sulla riga (perche.tipo = 'senza_chili'); i soldi non si toccano.
+export const senzaChili = (r: any) => r?.perche?.tipo === 'senza_chili'
+
+// ── PERCHE' UNA RICEVUTA NON E' SCESA, COI NUMERI (colonna rettifiche.perche sulla riga ricevuta) ──
+// Lorenzo, 15/11/2026, sulle rettifiche non girate di Ecomize Solution: «ci perdi non deve esistere.. pensano che stanno
+// perdendo soldi» e «ci guadagni comunque sembra che non ha recuperato la rettifica». Il conto del pacco (incassato meno
+// pagato) non diceva il perche', e spingeva a leggere una perdita dove c'era una scelta o un listino. La riga ora dice
+// cosa e' successo sotto, col listino di chi sta sotto: MB POSTE (282343J061744, SDA EXPRESS L) a 5000 sta nella fascia
+// 30–50 sia sul dichiarato (33,6 kg) sia sul collo rimisurato (43,4 kg), 16,70 €; Ecomize a 6000 passa da 20–30 a 30–50.
+// I numeri si scrivono quando succede (Carica, Assorbi, cancellazione della figlia): rifarli a ogni apertura della pagina
+// vorrebbe dire riprezzare ogni pacco a ogni livello. Le righe di prima del 16/11 di Ecomize Solution sono state
+// ricostruite a mano (tipo 'assorbita': chi l'abbia deciso, se il master col bottone o il portale, prima non si scriveva).
+//   pagato = quello che chi sta sotto ha pagato; dovuto = il suo listino sul collo rimisurato; dovuto_dich = sul dichiarato
+//   peso_prima / peso_dopo = i chili su cui paga (il maggiore fra reale e volume, col SUO divisore)
+export type ContoSotto = {
+  chi?: string | null; pagato?: number | null; dovuto?: number | null; dovuto_dich?: number | null
+  zona?: string | null; peso_prima?: number | null; peso_dopo?: number | null
+}
+export type PercheRicevuta = ContoSotto & {
+  tipo: 'paga_uguale' | 'assorbita_a_mano' | 'assorbita' | 'cancellata_sotto' | 'listino_non_arriva' | 'senza_chili'
+  il?: string
+  chiedeva?: number | null                                      // cancellata_sotto: quanto chiedeva la figlia cancellata
+  listino?: string | null; contratto?: string | null           // listino_non_arriva: quale listino, su che contratto,
+  destinazione?: string | null; arriva_a?: number | null        // fin dove arriva, quanti chili servivano (peso_dopo)
+  nota?: string | null                                         // una riga in piu', scritta a mano (es. il listino che salta)
+}
+
+// I gruppi di «Rettifiche non girate sotto» (app/dashboard/spedizioni/rettifica): uguale, assorbite, listino, cancellate.
+// Gia' fatte pagare sotto e spedizioni senza cliente si decidono prima, dal pacco (lib/rettifiche-non-girate).
+export function gruppoRicevuta(r: any): 'uguale' | 'assorbite' | 'listino' | 'cancellate' {
+  if (r?.propagazione === 'propagata') return 'cancellate'
+  const t = r?.perche?.tipo
+  return t === 'paga_uguale' ? 'uguale' : t === 'listino_non_arriva' ? 'listino' : 'assorbite'
+}
+
+const kgDi = (n: any) => n != null && Number(n) > 0 ? ` (${kg(n)})` : ''
+
+// La frase di una ricevuta non girata. `chi` di ripiego (dal conto del pacco) quando la riga non lo porta.
+export function descriviNonGirata(r: any, chiDiRipiego?: string | null): string {
+  const p: PercheRicevuta | null = r?.perche || null
+  const chi = p?.chi || chiDiRipiego || 'chi sta sotto'
+  const nota = p?.nota ? ' ' + p.nota : ''
+  const haConto = p?.pagato != null && p?.dovuto != null
+  if (r?.propagazione === 'propagata') {
+    const base = `L'avevi girata a ${chi} e poi l'hai cancellata in Rettifica Costi senza confermarla.`
+    if (p?.tipo !== 'cancellata_sotto' || p.chiedeva == null) return base + nota
+    return `${base} Gli si chiedeva ${eur(p.chiedeva)}${haConto ? `: col tuo listino il collo rimisurato${kgDi(p.peso_dopo)} costa ${eur(p.dovuto)} e ne aveva pagati ${eur(p.pagato)}.` : '.'}${nota}`
+  }
+  if (p?.tipo === 'listino_non_arriva') {
+    const dove = [p.contratto, p.zona ? `zona ${p.zona}` : null].filter(Boolean).join(', ')
+    return `Il tuo listino${p.listino ? ` «${p.listino}»` : ''} di ${chi}${dove ? ` su ${dove}` : ''} arriva a ${kg(p.arriva_a)}. `
+      + `Il pacco${p.destinazione ? ` per ${p.destinazione}` : ''} rimisurato fa ${kg(p.peso_dopo)}: quel peso non ha un prezzo. Aggiungi la fascia sopra i ${kg(p.arriva_a)} per poter girare le prossime.${nota}`
+  }
+  if (p?.tipo === 'paga_uguale') {
+    if (haConto && p.dovuto_dich != null) {
+      const d = Number(p.dovuto), dd = Number(p.dovuto_dich)
+      if (Math.abs(d - dd) < 0.005) return `Col tuo listino ${chi} paga ${eur(d)} sia sul dichiarato${kgDi(p.peso_prima)} sia sul collo rimisurato${kgDi(p.peso_dopo)}: stessa fascia, non c'era niente da chiedergli.${nota}`
+      if (d < dd) return `Col tuo listino ${chi} paga ${eur(d)} sul collo rimisurato${kgDi(p.peso_dopo)}, meno dei ${eur(dd)} sul dichiarato${kgDi(p.peso_prima)}: non c'era niente da chiedergli.${nota}`
+    }
+    if (haConto) return `Col tuo listino, sul collo rimisurato${kgDi(p.peso_dopo)}, ${chi} paga ${eur(p.dovuto)} e ne aveva già pagati ${eur(p.pagato)}: non c'era niente da chiedergli.${nota}`
+    return `Non girata: col tuo listino ${chi} paga uguale anche col peso nuovo, quindi non c'era niente da chiedergli.${nota}`
+  }
+  if (p?.tipo === 'assorbita_a_mano') return `L'hai assorbita tu, col bottone «Assorbi»: non l'hai girata a ${chi}.${nota}`
+  if (p?.tipo === 'assorbita' && haConto) {
+    return `Non l'hai girata a ${chi}. Col tuo listino di oggi, sul collo rimisurato${kgDi(p.peso_dopo)}, ${chi} pagherebbe ${eur(p.dovuto)} invece dei ${eur(p.pagato)} pagati.${nota}`
+  }
+  return `Assorbita: non l'hai girata a ${chi}.${nota}`
+}
+
 export function stimaCedeAllaFattura(r: any, p: PercheMio | undefined): boolean {
   return !!p && p.tipo === 'gia_fatta_pagare' && eStima(r) && !p.gia.stima && p.gia.costo > 0.005
 }
