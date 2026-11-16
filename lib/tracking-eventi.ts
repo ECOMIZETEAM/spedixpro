@@ -121,3 +121,21 @@ export async function scriviCronologia(admin: any, spedizioneId: string, eventi:
   )
   return eventi.length
 }
+
+// MANCA QUALCOSA? Il corriere rimanda a ogni giro la cronologia intera: vale la pena scrivere solo se fra i
+// suoi eventi ce n'e' almeno uno che da noi non c'e'. Stessa chiave dell'indice unico: istante + frase +
+// luogo (vuoto, mai NULL, come in scriviCronologia). L'istante si confronta in millisecondi, perche' il
+// database lo rende con il fuso ("+00:00") e istanteDaTesto no.
+// Serve agli eventi che NON cambiano lo stato ("non arrivata in sede", "zona servita in 48 ore"): prima si
+// salvavano solo dentro una quota per giro e restavano indietro per giorni (vedi il giro del tracking).
+// Una lettura sull'indice per spedizione. Se la lettura non riesce si risponde "si'": scrivere un evento gia'
+// salvato non fa danni (lo ferma la chiave unica), perderne uno nuovo si'.
+export async function mancanoEventi(admin: any, spedizioneId: string, eventi: EventoTracking[]): Promise<boolean> {
+  if (!spedizioneId || !eventi.length) return false
+  const { data, error } = await admin.from('tracking_events')
+    .select('data_evento,descrizione,luogo').eq('spedizione_id', spedizioneId).limit(1000)
+  if (error || !Array.isArray(data)) return true
+  const chiave = (quando: any, frase: any, luogo: any) => `${Date.parse(String(quando))}|${frase}|${luogo ?? ''}`
+  const salvati = new Set(data.map((r: any) => chiave(r.data_evento, r.descrizione, r.luogo)))
+  return eventi.some((e) => !salvati.has(chiave(e.data_evento, e.descrizione, e.luogo)))
+}

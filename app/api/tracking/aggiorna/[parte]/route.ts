@@ -120,11 +120,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
 
   let aggiornate = 0, errori = 0
   let spedisciBloccato = false   // breaker: al primo 403 di policy niente altre chiamate Spedisci nel giro
-  // BUDGET DI RECUPERO DELLE CRONOLOGIE (solo terzo provider, vedi il ramo 'easyparcel').
-  // Le spedizioni gia' esistenti non hanno mai avuto eventi salvati: sono migliaia, e riscriverle
-  // tutte in un giro solo ucciderebbe questa funzione, che va gia' in timeout. Se ne recupera un
-  // pezzo per volta; le spedizioni che si MUOVONO passano sempre, fuori budget.
-  let budgetCronologie = 300
+  // CRONOLOGIE: niente piu' quota. Fino al 16/11/2026 gli eventi che NON cambiano lo stato si salvavano solo
+  // dentro 300 scritture per giro, divise fra tutti i corrieri e consumate dai primi pacchi della coda (la
+  // quota era nata per recuperare lo storico vecchio senza far scadere il giro). Gli altri restavano
+  // indietro per giorni: NI665698814 (GLS di Wave) con "La spedizione non e' arrivata presso la sede GLS
+  // destinataria" del 16/11 08:56 ancora assente alle 17:45; 18 GLS su 39 in viaggio indietro di 1-2 eventi.
+  // Ora si scrive quando lo stato cambia o quando il corriere ha un evento che da noi manca
+  // (lib/tracking-eventi, mancanoEventi): una lettura sull'indice per spedizione, e si scrive solo il nuovo.
   let chiaviEventoIgnote: string[] = []
   const lavora = async (s: any) => {
     const corr: any = (s as any).corrieri
@@ -207,16 +209,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // description }. Regole e scrittura in lib/tracking-eventi, uguali per tutti i provider.
         try {
           const cambiatoSp = nuovo !== s.stato
-          if (cambiatoSp || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(tr.events, {
               data: ['at', 'date', 'datetime', 'data'],
               descrizione: ['description', 'title'],
               luogo: ['location', 'place', 'luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoSp) budgetCronologie--
+            if (eventi.length && (cambiatoSp || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -275,18 +276,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // CANCELLA E RISCRIVI, come nel poller Poste: la risposta arriva COMPLETA a ogni giro, e
         // aggiungere in coda riempirebbe il popup di doppioni.
         //
-        // Quando: sempre se lo stato e' cambiato — li' c'e' davvero qualcosa di nuovo — e per il
-        // resto a piccole dosi (budgetCronologie), per recuperare lo storico vecchio senza far
-        // scadere il giro.
+        // Quando: se lo stato e' cambiato, o se fra gli eventi del provider ce n'e' uno che da noi
+        // manca (vedi CRONOLOGIE in testa al giro).
         try {
           const cambiato = nuovo !== s.stato
-          if (cambiato || budgetCronologie > 0) {
+          {
             const { eventiEasyparcel } = await import('@/lib/easyparcel')
-            const { scriviCronologia } = await import('@/lib/tracking-eventi')
+            const { scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = eventiEasyparcel(raw)
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiato) budgetCronologie--
+            if (eventi.length && (cambiato || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -321,16 +320,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // solo <Stato> e si buttava via data e luogo. Stesse regole degli altri rami.
         try {
           const cambiatoGls = nuovo !== s.stato
-          if (cambiatoGls || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(glsEventi, {
               data: ['data'],
               descrizione: ['descrizione'],
               luogo: ['luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoGls) budgetCronologie--
+            if (eventi.length && (cambiatoGls || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -359,16 +357,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // altri, la data si legge e si scrive con le regole di lib/tracking-eventi.
         try {
           const cambiatoBrt = nuovo !== s.stato
-          if (cambiatoBrt || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(brtEventi, {
               data: ['data', 'dataOra', 'datetime'],
               descrizione: ['descrizione'],
               luogo: ['luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoBrt) budgetCronologie--
+            if (eventi.length && (cambiatoBrt || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -395,16 +392,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // La data italiana la gestisce istanteDaTesto (mai new Date(), che leggerebbe mese-giorno).
         try {
           const cambiatoDl = nuovo !== s.stato
-          if (cambiatoDl || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(dlEventi, {
               data: ['data', 'dataOra', 'datetime'],
               descrizione: ['descrizione'],
               luogo: ['luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoDl) budgetCronologie--
+            if (eventi.length && (cambiatoDl || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -427,16 +423,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         if (ec.stati.some((str) => mapStatoEcosmos(str) === 'reso_mittente')) nuovo = 'reso_mittente'
         try {
           const cambiatoEc = nuovo !== s.stato
-          if (cambiatoEc || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(ec.eventi, {
               data: ['data'],
               descrizione: ['descrizione'],
               luogo: ['luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoEc) budgetCronologie--
+            if (eventi.length && (cambiatoEc || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -482,16 +477,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
 
         try {
           const cambiatoPo = nuovo !== s.stato
-          if (cambiatoPo || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(poEventi, {
               data: ['data', 'dataOra', 'datetime'],
               descrizione: ['descrizione'],
               luogo: ['luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoPo) budgetCronologie--
+            if (eventi.length && (cambiatoPo || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -514,16 +508,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
 
         try {
           const cambiatoIp = nuovo !== s.stato
-          if (cambiatoIp || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(ipEventi, {
               data: ['data', 'dataOra', 'datetime'],
               descrizione: ['descrizione'],
               luogo: ['luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoIp) budgetCronologie--
+            if (eventi.length && (cambiatoIp || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -556,16 +549,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
 
         try {
           const cambiatoMv = nuovo !== s.stato
-          if (cambiatoMv || budgetCronologie > 0) {
-            const { normalizzaEventi, scriviCronologia } = await import('@/lib/tracking-eventi')
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
             const { eventi, chiaviIgnote } = normalizzaEventi(mvEventi, {
               data: ['data', 'dataOra', 'datetime'],
               descrizione: ['descrizione'],
               luogo: ['luogo'],
             })
             if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
-            if (eventi.length) {
-              if (!cambiatoMv) budgetCronologie--
+            if (eventi.length && (cambiatoMv || await mancanoEventi(admin, s.id, eventi))) {
               await scriviCronologia(admin, s.id, eventi)
             }
           }
@@ -806,5 +798,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
     console.error('[TRACKING][EP][EVENTI] nessun campo data riconosciuto. Chiavi presenti nell\'evento:',
       chiaviEventoIgnote.join(', '))
   }
-  return NextResponse.json({ ok: true, parte: `${k}/${n}`, daControllare: lista.length, lavorate, aggiornate, errori, scadute, cronologieDaRecuperare: budgetCronologie <= 0, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
+  return NextResponse.json({ ok: true, parte: `${k}/${n}`, daControllare: lista.length, lavorate, aggiornate, errori, scadute, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
 }
