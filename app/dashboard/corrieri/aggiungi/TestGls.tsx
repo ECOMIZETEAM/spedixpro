@@ -17,8 +17,8 @@ export default function TestGls({ corriereId }: { corriereId: string }) {
       })
       const d = await res.json().catch(() => ({}))
       const giacenze = d?.giacenze
-        ? `\nSvincolo giacenze: ${d.giacenze.ok ? d.giacenze.esito : '⚠️ ' + d.giacenze.esito + ' — controlla la password Weblabeling.'}`
-        : '\nSvincolo giacenze: password Weblabeling non inserita (serve per svincolare dal gestionale).'
+        ? `\nSvincolo giacenze: ${d.giacenze.ok ? d.giacenze.esito : '⚠️ ' + d.giacenze.esito + ' — controlla la password dell\'area personale del sito GLS (non quella del Weblabeling).'}`
+        : '\nSvincolo giacenze: password dell\'area personale del sito GLS non inserita (serve per svincolare dal gestionale).'
       if (d?.ok) {
         setStato(d?.giacenze && !d.giacenze.ok ? 'ko' : 'ok')
         setMsg(`Connessione riuscita. Tracking di prova: ${d.tracking || d.numeroSpedizione}${d.haEtichetta ? ' · etichetta ricevuta' : ' · ⚠️ nessuna etichetta'}${d.collodProvaAnnullato === false ? ' · ⚠️ collo di prova NON annullato (cancellalo dal portale GLS)' : ''}${giacenze}`)

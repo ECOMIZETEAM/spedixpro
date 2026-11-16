@@ -58,7 +58,7 @@ export async function POST(req: Request) {
       annullato = await annullaSpedizioneGls(cred, ris.numeroSpedizione)
     }
 
-    // Password Weblabeling (svincolo giacenze): si prova con una spedizione inesistente, nessun pacco
+    // Password dell'area personale GLS (svincolo giacenze): si prova con una spedizione inesistente, nessun pacco
     // coinvolto. Così chi la inserisce sa subito se è giusta, senza aspettare la prima giacenza vera.
     // Una password che GLS ha già rifiutato non si rimanda (vedi lib/gls.improntaPasswordWeblabeling).
     let giacenze: { ok: boolean; esito: string } | null = null

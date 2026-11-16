@@ -200,13 +200,14 @@ export async function eseguiSvincolo(
       }
     } else if (sped.corrieri?.tipo === 'gls') {
       // GLS DIRETTO: svincolo col servizio giacenze di GLS (manuale MU276, lib/gls.svincolaGiacenzaGls).
-      // Vuole la password del Weblabeling, che il proprietario mette nel contratto: finché manca, ci si
+      // Vuole la password dell'area personale del sito GLS (non del Weblabeling: vedi il campo in
+      // corrieri/aggiungi), che il proprietario mette nel contratto: finché manca, ci si
       // ferma qui come prima, senza addebitare. Fino al 2/11/2026 questo ramo non c'era e ogni richiesta
       // su GLS diretto restava ferma (Wave: 4 il 2/11; Quick ne aveva annullate 10).
       const nomeContratto = String(sped.corrieri?.nome_contratto || 'questo contratto')
       if (!cred.password_weblabeling) {
         throw new Error(
-          `Lo svincolo automatico su ${nomeContratto} si attiva inserendo la password Weblabeling di GLS nel contratto (Corrieri → Modifica). `
+          `Lo svincolo automatico su ${nomeContratto} si attiva inserendo nel contratto (Corrieri → Modifica) la password dell'area personale del sito GLS, non quella del Weblabeling. `
           + `Intanto contatta il corriere per la ${(opLabel[rich.operazione] || rich.operazione).toLowerCase()}, poi chiudi la giacenza a mano.`,
         )
       }
@@ -222,7 +223,7 @@ export async function eseguiSvincolo(
       }
       settingsG = settingsG || {}
       if (settingsG.svincolo_gls_password_rifiutata === impronta) {
-        throw new Error(`GLS ha già rifiutato la password Weblabeling di ${nomeContratto}: aggiornala nel contratto (Corrieri → Modifica). Finché è la stessa non la rimandiamo, per non far bloccare il profilo da GLS.`)
+        throw new Error(`GLS ha già rifiutato la password per lo svincolo di ${nomeContratto}: nel contratto (Corrieri → Modifica) va la password dell'area personale del sito GLS, non quella del Weblabeling. Finché è la stessa non la rimandiamo, per non far bloccare il profilo da GLS.`)
       }
       const tipoSv = rich.operazione === 'reso' ? 3 : rich.operazione === 'riconsegna_nuovo' ? 2 : 1
       const sigla = String(sped.raw_response?.siglaMittente || cred.sigla_sede || '').trim()
@@ -248,7 +249,7 @@ export async function eseguiSvincolo(
           try {
             await admin.from('corrieri').update({ settings: { ...settingsG, svincolo_gls_password_rifiutata: impronta } }).eq('id', sped.corriere_id)
           } catch (e) { console.error('[SVINCOLO][GLS] impronta password non salvata:', e) }
-          throw new Error(`GLS ha rifiutato l'accesso allo svincolo (${esitoG.esito}): controlla la password Weblabeling nel contratto (Corrieri → Modifica).`)
+          throw new Error(`GLS ha rifiutato l'accesso allo svincolo (${esitoG.esito}): nel contratto (Corrieri → Modifica) va la password dell'area personale del sito GLS, non quella del Weblabeling.`)
         }
         throw new Error(erroreSvincoloPulito(new Error(esitoG.esito)))
       }
@@ -256,7 +257,7 @@ export async function eseguiSvincolo(
       // NESSUN CORRIERE CONTATTATO: ci si ferma QUI, prima di addebitare.
       //
       // I rami sopra coprono i contratti che sanno ricevere uno svincolo (SpediamoPro, DVA, Spedisci,
-      // Poste diretto, GLS diretto con la password Weblabeling). Su tutti gli altri — BRT diretto, FedEx, Dielle, circuito interno —
+      // Poste diretto, GLS diretto con la password dell'area personale GLS). Su tutti gli altri — BRT diretto, FedEx, Dielle, circuito interno —
       // non esiste una chiamata di svincolo, e senza questo blocco la funzione tirava dritto: addebitava
       // il servizio, segnava la richiesta "confermata" e la spedizione "svincolata" SENZA che nessuna
       // istruzione fosse partita. Il cliente avrebbe pagato una riconsegna che nessuno ha chiesto, e il

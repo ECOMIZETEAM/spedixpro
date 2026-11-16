@@ -208,7 +208,11 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['user_webservice','User Webservice (API)','username','text'],
       ['password_webservice','Password Webservice (API)','••••••••','password'],
       ['codice_contratto','Codice Contratto','es. 123456','text'],
-      ['password_weblabeling','Password Weblabeling (svincolo giacenze)','password del Weblabeling GLS','password',true],
+      // Lo svincolo vuole la password dell'AREA PERSONALE del sito GLS, non quella del Weblabeling. Il campo
+      // nel DB si chiama ancora password_weblabeling (le password salvate restano valide), ma l'etichetta no:
+      // il 16/11/2026 M.C. LOGISTICA, seguendo la scritta "Weblabeling", ne ha messe due che GLS ha rifiutato,
+      // con 12 giacenze ferme dal 12/11.
+      ['password_weblabeling','Password area personale sito GLS (svincolo giacenze)','quella con cui entri su gls-italy.com, non il Weblabeling','password',true],
     ],
   },
   sda: {
