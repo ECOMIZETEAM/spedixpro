@@ -37,7 +37,7 @@ export default function DistinteContrassegniPage() {
   // destinatari, carico rimesse). Modo indeterminato: e' una POST unica, non sappiamo la percentuale.
   const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string;sottotitolo?:string}|null>(null)
   const [caricando, setCaricando] = useState(false)
-  const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number;resiFermi:any[];resiTotale:number}>({gruppi:[],totale:0,spedizioni:0,resiFermi:[],resiTotale:0})
+  const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number;perContratto:any[];resiFermi:any[];resiTotale:number}>({gruppi:[],totale:0,spedizioni:0,perContratto:[],resiFermi:[],resiTotale:0})
   const [selResi, setSelResi] = useState<Set<string>>(new Set())          // resi fermati scelti per farli scendere (solo MULTIEXPRESS)
   const [selDest, setSelDest] = useState<Set<string>>(new Set())        // gruppi INTERI selezionati
   const [selSped, setSelSped] = useState<Record<string, Set<string>>>({}) // spedizioni singole per gruppo
@@ -64,7 +64,7 @@ export default function DistinteContrassegniPage() {
 
   function caricaDaCaricare() {
     fetch('/api/contrassegni/da-caricare').then(r=>r.json()).then(d=>{
-      setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0), resiFermi: d?.resiFermi || [], resiTotale: Number(d?.resiTotale||0) })
+      setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0), perContratto: d?.perContratto || [], resiFermi: d?.resiFermi || [], resiTotale: Number(d?.resiTotale||0) })
       setSelDest(new Set()); setSelSped({}); setEspansi(new Set()); setDettGruppo({}); setSelResi(new Set())
     }).catch(()=>{})
   }
@@ -439,6 +439,16 @@ export default function DistinteContrassegniPage() {
             <div>
               <div style={{fontSize:'13px',fontWeight:800,color:'#15803d'}}>💰 Contrassegni da caricare — {daCaricare.spedizioni} spedizioni · € {daCaricare.totale.toFixed(2)}</div>
               <div style={{fontSize:'11.5px',color:'#166534',marginTop:'2px'}}>Apri un cliente per scegliere le singole spedizioni (anche su più pagine), oppure spunta il cliente intero. Le non selezionate restano in attesa.</div>
+              {/* Totale per contratto: ogni cifra si confronta col file del corriere da cui viene (vedi la rotta). */}
+              {daCaricare.perContratto.length > 0 && (
+                <div style={{display:'flex',flexWrap:'wrap' as const,gap:'6px',marginTop:'7px'}}>
+                  {daCaricare.perContratto.map((c:any)=>(
+                    <span key={c.nome} style={{fontSize:'11.5px',color:'#14532d',background:'#dcfce7',border:'1px solid #bbf7d0',borderRadius:'999px',padding:'2px 9px'}}>
+                      <b>{c.nome}</b> · {c.spedizioni} sped. · <b>€ {Number(c.totale).toFixed(2)}</b>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
               <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#166534',cursor:'pointer',fontWeight:600}}>
@@ -479,7 +489,14 @@ export default function DistinteContrassegniPage() {
                       <span style={{fontSize:'10.5px',fontWeight:700,padding:'2px 7px',borderRadius:'999px',background:g.tipo==='cliente'?'#eff6ff':'#fff7ed',color:g.tipo==='cliente'?'#1d4ed8':'#c2410c'}}>{g.tipo}</span>
                     </td>
                     <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{g.spedizioni}</td>
-                    <td style={{padding:'7px 12px',fontWeight:700,color:'#15803d'}}>€ {Number(g.totale).toFixed(2)}</td>
+                    <td style={{padding:'7px 12px',fontWeight:700,color:'#15803d'}}>
+                      € {Number(g.totale).toFixed(2)}
+                      {(g.perContratto||[]).map((c:any)=>(
+                        <div key={c.nome} style={{fontSize:'11px',fontWeight:500,color:'#4b5563',marginTop:'2px',whiteSpace:'nowrap' as const}}>
+                          {c.nome}: <b style={{color:'#15803d'}}>€ {Number(c.totale).toFixed(2)}</b> <span style={{color:'#9ca3af'}}>({c.spedizioni})</span>
+                        </div>
+                      ))}
+                    </td>
                     <td style={{padding:'7px 12px',color:'#6b7280',fontSize:'11px'}}>{(g.origini||[]).map((o:string)=>o==='file'?'file corriere':'rimessa rete').join(' + ')}</td>
                   </tr>
                   {aperto && (

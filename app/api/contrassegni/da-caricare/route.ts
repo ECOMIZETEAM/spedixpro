@@ -65,6 +65,27 @@ export async function GET() {
   const nomeCli = new Map((cli || []).map((c: any) => [c.id, c.ragione_sociale]))
   const nomeMst = new Map((mst || []).map((m: any) => [m.id, m.nome]))
 
+  // CONTRATTO di ogni contrassegno. La sosta mette insieme il file del corriere e le rimesse della rete,
+  // e un totale unico non si confronta con nessun file: il 16/11/2026 M.C. LOGISTICA aveva 3.788 € per un
+  // cliente contro un file GLS da 2.336, e la differenza (1.452 € di SDA arrivati come rimessa da MULTI)
+  // dal totale non si vedeva. Il NOME del contratto, non il tipo: e' quello che il master conosce, e il
+  // tipo tecnico porterebbe a video il nome del fornitore.
+  const contrattoDi = new Map<string, string>()
+  const spedIds = Array.from(new Set(righe.map((r: any) => r.spedizione_id).filter(Boolean)))
+  for (let i = 0; i < spedIds.length; i += 300) {
+    const { data: sp } = await admin.from('spedizioni').select('id,corrieri(nome_contratto)').in('id', spedIds.slice(i, i + 300))
+    for (const s of (sp || []) as any[]) contrattoDi.set(s.id, String(s.corrieri?.nome_contratto || '').trim() || 'Altro')
+  }
+  const perContratto = (m: Map<string, { spedizioni: number; totale: number }>) => Array.from(m.entries())
+    .map(([nome, v]) => ({ nome, spedizioni: v.spedizioni, totale: Math.round(v.totale * 100) / 100 }))
+    .sort((a, b) => b.totale - a.totale)
+  const totaliContratto = new Map<string, { spedizioni: number; totale: number }>()
+  const somma = (m: Map<string, { spedizioni: number; totale: number }>, nome: string, importo: number) => {
+    const v = m.get(nome) || { spedizioni: 0, totale: 0 }
+    v.spedizioni++; v.totale += importo
+    m.set(nome, v)
+  }
+
   const mappa = new Map<string, any>()
   for (const r of righe as any[]) {
     // cliente_id → distinta cliente; target_master_id → verso sotto-master; ENTRAMBI null → "proprio"
@@ -74,16 +95,19 @@ export async function GET() {
       mappa.set(chiave, {
         chiave, tipo: r.cliente_id ? 'cliente' : (r.target_master_id ? 'sotto-master' : 'proprio'),
         nome: r.cliente_id ? (nomeCli.get(r.cliente_id) || '—') : (r.target_master_id ? (nomeMst.get(r.target_master_id) || '—') : 'Contrassegni propri (già incassati)'),
-        spedizioni: 0, totale: 0, aZero: 0, origini: new Set<string>(),
+        spedizioni: 0, totale: 0, aZero: 0, origini: new Set<string>(), contratti: new Map(),
       })
     }
     const g = mappa.get(chiave)
     g.spedizioni++; g.totale += Number(r.importo) || 0
     if (!(Number(r.importo) > 0)) g.aZero++
     g.origini.add(r.origine)
+    const contratto = contrattoDi.get(r.spedizione_id) || 'Altro'
+    somma(g.contratti, contratto, Number(r.importo) || 0)
+    somma(totaliContratto, contratto, Number(r.importo) || 0)
   }
   const gruppi = Array.from(mappa.values())
-    .map(g => ({ ...g, totale: Math.round(g.totale * 100) / 100, origini: Array.from(g.origini) }))
+    .map(({ contratti, ...g }) => ({ ...g, totale: Math.round(g.totale * 100) / 100, origini: Array.from(g.origini), perContratto: perContratto(contratti) }))
     .sort((a, b) => (a.tipo === b.tipo ? b.totale - a.totale : a.tipo === 'cliente' ? -1 : 1))
 
   // I resi fermi con quello che serve a decidere: LDV, a chi scenderebbero, per quanto, chi l'ha spedito e a chi.
@@ -111,6 +135,7 @@ export async function GET() {
     gruppi,
     totale: Math.round(gruppi.reduce((s, g) => s + g.totale, 0) * 100) / 100,
     spedizioni: righe.length,
+    perContratto: perContratto(totaliContratto),
     resiFermi,
     resiTotale: Math.round(resiFermi.reduce((s, r) => s + r.importo, 0) * 100) / 100,
   })
