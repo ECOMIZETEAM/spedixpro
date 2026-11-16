@@ -1,7 +1,8 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { frasePesoPagato } from '@/lib/peso-pagato-frase'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
+import { sottoDi, sintesi } from '@/lib/network-sintesi'
 
 const ACCENT = '#f97316'
 const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
@@ -33,10 +34,21 @@ export default function NetworkRicevutiPage() {
   const [daFare, setDaFare] = useState<{azioni:any[],righe:Record<string,string>,pronte:number,totaleRighe:number,totaleEuro:number}>({azioni:[],righe:{},pronte:0,totaleRighe:0,totaleEuro:0})
   const [tutteAzioni, setTutteAzioni] = useState(false)
 
+  // Le rettifiche nuove senza stima (il giro automatico passa ogni 5 minuti): si calcola adesso, una volta per apertura,
+  // e la pagina si rilegge da sola (app/api/network/stima).
+  const stimaAvviata = useRef(false)
+  const [stimando, setStimando] = useState(false)
   async function carica() {
     setLoading(true)
     const d = await fetch('/api/network/ricevuti').then(r=>r.json()).catch(()=>null)
     if (d && !d.error) setDati(d)
+    if (d && !d.error && !stimaAvviata.current && (d.rettifiche || []).some((r: any) => !r.propagazione && !r.propria && !r.perche?.stima)) {
+      stimaAvviata.current = true; setStimando(true)
+      fetch('/api/network/stima', { method: 'POST' })
+        .then(() => fetch('/api/network/ricevuti').then(r => r.json()))
+        .then(x => { if (x && !x.error) setDati(x) })
+        .catch(() => {}).finally(() => setStimando(false))
+    }
     fetch('/api/network/da-fare').then(r=>r.json()).then(x=>{ if (x && !x.error) setDaFare(x) }).catch(()=>{})
     setLoading(false)
   }
@@ -134,6 +146,8 @@ export default function NetworkRicevutiPage() {
         'Addebito (€)': Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100,
         'di cui supplementi (€)': Number(r.fuori_sagoma) || 0,
         'Stato': r.propria && !r.propagazione ? 'Tua spedizione (già a tuo carico)' : r.propagazione === 'propagata' ? 'Caricata' : r.propagazione === 'assorbita' ? 'Assorbita' : r.propagazione === 'annullata' ? 'Annullata' : 'Da decidere',
+        'Si recupera sotto (€)': sottoDi(r).euro ?? '',
+        'Sotto': sottoDi(r).testo,
       }
     })
     const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Rettifiche')
@@ -363,29 +377,57 @@ export default function NetworkRicevutiPage() {
               {blocchi.map((b:any)=>(
                 <div key={b.k} style={{borderTop:'1px solid #f0f0f0'}}>
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',padding:'14px 16px'}}>
-                    <div>
+                    {(() => {
+                      const s = sintesi(b.righe, b.proprie)
+                      const eu = (n: number) => `€ ${(Math.round(n * 100) / 100).toFixed(2)}`
+                      const sp = (n: number) => `${n} ${n === 1 ? 'spedizione' : 'spedizioni'}`
+                      const ferme = b.daDecidere.filter((id:string)=>daFare.righe[id]).length
+                      // Una riga per cosa e' successo (o succedera') sotto: quante spedizioni, quanto ti e' costato, e
+                      // per quelle che scendono quanto chiedi. Solo le voci che ci sono.
+                      const voci: [string, string, string, string][] = [
+                        s.recupera.n ? ['Da recuperare sotto', sp(s.recupera.n), `chiedi ${eu(s.recupera.chiede)}`, `le hai pagate ${eu(s.recupera.euro)} · con «Carica» vanno nella tua Rettifica Costi`] : null,
+                        s.ugualeStima.n ? ['Sotto paga uguale', sp(s.ugualeStima.n), `${eu(s.ugualeStima.euro)} restano a te`, 'stessa fascia anche col collo rimisurato: niente da chiedere'] : null,
+                        s.ferme.n ? ['Ferme', sp(s.ferme.n), `${eu(s.ferme.euro)} restano a te`, ferme ? 'finché non sistemi: vedi «Cosa devi fare»' : 'apri il dettaglio per il motivo'] : null,
+                        s.inCalcolo.n ? ['In calcolo', sp(s.inCalcolo.n), eu(s.inCalcolo.euro), stimando ? 'sto calcolando quanto recuperi…' : 'fra qualche minuto si vede quanto recuperi'] : null,
+                        s.girate.n ? ['Girate sotto', sp(s.girate.n), `chiedi ${eu(s.girate.chiede)}`, `incassati ${eu(s.girate.incassato)}${s.girate.daConfermare > 0.005 ? ` · ${eu(s.girate.daConfermare)} da confermare in Rettifica Costi` : ''} · le hai pagate ${eu(s.girate.euro)}`] : null,
+                        s.uguale.n ? ['Sotto paga uguale', sp(s.uguale.n), `${eu(s.uguale.euro)} restano a te`, 'stessa fascia anche col collo rimisurato'] : null,
+                        s.assorbite.n ? ['Assorbite da te', sp(s.assorbite.n), `${eu(s.assorbite.euro)} restano a te`, ''] : null,
+                        s.cancellate.n ? ['Girate e poi cancellate', sp(s.cancellate.n), `${eu(s.cancellate.euro)} restano a te`, ''] : null,
+                        s.proprie.n ? ['Tue spedizioni senza cliente', sp(s.proprie.n), `${eu(s.proprie.euro)} restano a te`, 'le trovi in «Tue spedizioni proprie»'] : null,
+                      ].filter(Boolean) as [string, string, string, string][]
+                      return (
+                    <div style={{flex:'1 1 420px',minWidth:0}}>
                       <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
-                        Da {b.da} · {b.daDecidere.length > 0
-                          ? <><span style={{color:ACCENT}}>{b.daDecidere.length} da caricare</span> · <span style={{color:'#dc2626'}}>€ {Math.abs(b.totaleDaDecidere).toFixed(2)}</span>
-                            {(() => { const n = b.daDecidere.filter((id:string)=>daFare.righe[id]).length
-                              return n ? <span style={{color:'#dc2626'}}> · ⚠ {n} {n===1?'ferma':'ferme'}: vedi «Cosa devi fare»</span> : null })()}</>
-                          : <>{b.righe.length} rettifiche · € {Math.abs(b.totale).toFixed(2)} · <span style={{color:'#999'}}>già decise</span></>}
+                        Da {b.da} · addebitate il {b.giorno}{orarioBlocco(b)}
+                        {b.daDecidere.length > 0
+                          ? <span style={{color:ACCENT}}> · {b.daDecidere.length} da caricare</span>
+                          : <span style={{color:'#999',fontWeight:600}}> · già decise</span>}
                       </div>
-                      <div style={{fontSize:'12px',color:'#8a8a8a',marginTop:'3px'}}>
-                        {/* QUANDO E QUANTO TI E' STATO ADDEBITATO, come lo vede chi te l'ha mandato: e' il numero
-                            da confrontare col mittente. Su un blocco a meta' (il giorno piu' vecchio dello storico,
-                            vedi lib/network-invii) il totale intero non si scrive: sarebbe sbagliato. */}
-                        Addebitate il {b.giorno}{orarioBlocco(b)}
-                        {b.parziale ? '' : ` · ${b.righe.length + b.proprie.length} ${b.righe.length + b.proprie.length === 1 ? 'riga' : 'righe'} per € ${Math.abs(b.totale + b.totaleProprie).toFixed(2)}`}
-                        {b.proprie.length === 0 ? '' : b.proprie.length === 1
-                          ? ` — 1 è una tua spedizione (€ ${Math.abs(b.totaleProprie).toFixed(2)}), la trovi in «Tue spedizioni proprie»`
-                          : ` — ${b.proprie.length} sono tue spedizioni (€ ${Math.abs(b.totaleProprie).toFixed(2)}), le trovi in «Tue spedizioni proprie»`}
-                        {' '}· già scalate dal tuo credito.
-                        {b.daDecidere.length
-                          ? (b.righe.length > b.daDecidere.length ? ` Le altre ${b.righe.length - b.daDecidere.length} le hai già decise.` : '') + ' Caricandole vanno nella tua Rettifica Costi, divise per cliente e sotto-master: da lì scegli a chi addebitarle.'
-                          : ' Già decise.'}
+                      {/* QUANTO TI E' STATO ADDEBITATO, come lo vede chi te l'ha mandato: e' il numero da confrontare col
+                          mittente. Su un blocco a meta' (il giorno piu' vecchio dello storico, vedi lib/network-invii) il
+                          totale intero non si scrive: sarebbe sbagliato. */}
+                      <div style={{fontSize:'13px',color:'#1a1a1a',marginTop:'4px'}}>
+                        {b.parziale
+                          ? <>Ti hanno scalato queste rettifiche dal credito <span style={{color:'#8a8a8a'}}>(qui c'è solo una parte di quel giorno)</span></>
+                          : <>Ti hanno scalato <strong style={{color:'#dc2626'}}>{eu(Math.abs(b.totale + b.totaleProprie))}</strong> su <strong>{sp(s.spedizioni)}</strong> · già tolti dal tuo credito</>}
                       </div>
+                      {voci.length > 0 && (
+                        <table style={{borderCollapse:'collapse',marginTop:'6px',fontSize:'12.5px'}}>
+                          <tbody>
+                            {voci.map(([nome, quante, soldi, nota], i) => (
+                              <tr key={i}>
+                                <td style={{padding:'2px 12px 2px 0',color:'#334155',fontWeight:600,whiteSpace:'nowrap'}}>▸ {nome}</td>
+                                <td style={{padding:'2px 12px 2px 0',color:'#1a1a1a',whiteSpace:'nowrap'}}>{quante}</td>
+                                <td style={{padding:'2px 12px 2px 0',fontWeight:700,whiteSpace:'nowrap',color:nome.includes('recuperare') || nome === 'Girate sotto' ? '#166534' : '#1a1a1a'}}>{soldi}</td>
+                                <td style={{padding:'2px 0',color:'#8a8a8a'}}>{nota}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
+                      )
+                    })()}
                     <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
                       <button onClick={()=>setApertoBlocco(apertoBlocco===b.k?'':b.k)}
                         style={{background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
@@ -417,7 +459,7 @@ export default function NetworkRicevutiPage() {
                   {apertoBlocco===b.k && (
                     <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
                       <thead><tr style={{background:'#f9fafb'}}>
-                        <th style={th}>LDV</th><th style={th}>Peso fatturato (vol.)</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Stato</th>
+                        <th style={th}>LDV</th><th style={th}>Peso fatturato (vol.)</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Sotto</th><th style={th}>Stato</th>
                       </tr></thead>
                       <tbody>
                         {b.righe.map((r:any)=>(
@@ -456,6 +498,8 @@ export default function NetworkRicevutiPage() {
                                 </td>
                               )
                             })()}
+                            {(() => { const x = sottoDi(r)
+                              return <td style={{...td,color:x.euro != null ? '#166534' : '#475569',fontWeight:x.euro != null ? 700 : 400,maxWidth:'260px'}}>{x.testo}</td> })()}
                             <td style={td}>
                               {r.propagazione === 'propagata' ? (
                                 <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Caricata — è in Rettifica Costi</span>

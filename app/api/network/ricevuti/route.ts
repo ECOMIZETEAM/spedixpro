@@ -141,6 +141,18 @@ export async function GET(_req: NextRequest) {
     } catch (e: any) { console.error('[NETWORK] peso su cui si paga:', e?.message) }
   }
   for (const r of rettRows) delete r.colli_ripesati
+  // GIRATE SOTTO: per ogni riga caricata, la rettifica nata per chi sta sotto — quanto chiede e se e' gia' confermata
+  // (quindi incassata). Il blocco dice cosi' quanto ti hanno scalato e quanto stai recuperando (Lorenzo, 16/11/2026).
+  // Una figlia sola per riga: la garantisce l'indice unico su origine_rettifica_id.
+  const caricate = rettRows.filter(r => r.propagazione === 'propagata').map(r => r.id)
+  const figlie = new Map<string, { euro: number; confermata: boolean }>()
+  for (let i = 0; i < caricate.length; i += 300) {
+    const { data: ff } = await adminDb.from('rettifiche').select('origine_rettifica_id,differenza,fuori_sagoma,confermata')
+      .in('origine_rettifica_id', caricate.slice(i, i + 300))
+    for (const f of (ff || []) as any[]) figlie.set(f.origine_rettifica_id, {
+      euro: Math.round((-Number(f.differenza || 0) + Number(f.fuori_sagoma || 0)) * 100) / 100, confermata: !!f.confermata })
+  }
+  for (const r of rettRows) if (figlie.has(r.id)) r.figlia = figlie.get(r.id)
 
   return NextResponse.json({
     rettifiche: raggruppaPerInvio(rettRows, !!(rett as any).storicheTagliate),

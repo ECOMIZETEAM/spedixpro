@@ -153,6 +153,10 @@
     {
       "path": "/api/cron/margini-aggiorna",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/stime-rettifiche",
+      "schedule": "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
     }
   ]
 }
