@@ -17,8 +17,10 @@ import { useDialog } from '@/app/components/DialogProvider'
 import { riferimentoFornitore } from '@/lib/numero-spedizione'
 // Default: ultimi 60 giorni di annullate (le code pending/manuali restano complete: sono attive e
 // poche). Prima si scaricavano e arricchivano TUTTE le annullate di sempre -> pagina sempre piu' lenta.
-const _oggiC = new Date().toISOString().slice(0, 10)
-const _da60C = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+// Calcolate all'APERTURA della pagina, non al caricamento del modulo: nell'app il modulo resta in
+// memoria per giorni se la scheda non si ricarica, e "oggi" restava il giorno in cui la si era aperta.
+const oggiC = () => new Date().toISOString().slice(0, 10)
+const da60C = () => new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 // Etichettina della SECONDA riga (valori sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 export default function SpedizioniCancellatePage() {
@@ -32,8 +34,13 @@ export default function SpedizioniCancellatePage() {
   // Filtri persistiti: restano finché l'utente non preme "Azzera" (chiave unica per questa pagina).
   const [cerca, setCerca, azzeraCerca] = useFiltriPersistenti('spedizioni-cancellate-master:cerca', '')
   const [filtroCliente, setFiltroCliente, azzeraCliente] = useFiltriPersistenti('spedizioni-cancellate-master:cliente', '')
-  const [dal, setDal, azzeraDal] = useFiltriPersistenti('spedizioni-cancellate-master:dal', _da60C)
-  const [al, setAl, azzeraAl] = useFiltriPersistenti('spedizioni-cancellate-master:al', _oggiC)
+  // Il PERIODO invece non si ricorda: riparte ogni volta dagli ultimi 60 giorni fino a oggi.
+  // Era persistito, e useFiltriPersistenti salva anche il valore iniziale alla prima apertura: il
+  // giorno "al" restava quello della prima visita, e tutto quello che si cancellava dopo non
+  // compariva piu', ne' nelle annullate ne' nelle attese. Wave il 17/11: "le GLS cancellate non
+  // vanno su Spedizioni Cancellate" — erano annullate e stornate, solo fuori dal periodo rimasto fermo.
+  const [dal, setDal] = useState(da60C)
+  const [al, setAl] = useState(oggiC)
   const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cancellate-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [paginaPending, setPaginaPending] = useState(1)   // paginazione sezione "in attesa di annullo"
@@ -202,7 +209,7 @@ export default function SpedizioniCancellatePage() {
               style={{padding:'8px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',width:'100%',color:'#1a1a1a',background:'#fff',boxSizing:'border-box'}}/>
           </div>
           {filtriAttivi && (
-            <button onClick={()=>{azzeraCliente();azzeraDal();azzeraAl();azzeraCerca();setPagina(1)}}
+            <button onClick={()=>{azzeraCliente();setDal(da60C());setAl(oggiC());azzeraCerca();setPagina(1)}}
               style={{padding:'8px 14px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>Azzera</button>
           )}
         </div>
