@@ -19,6 +19,17 @@ export async function togliVerifica(admin: ReturnType<typeof createAdminSupabase
       if (eD) return { errore: 'Azzeramento non riuscito, riprova' }
       tolti++
     }
+    // Anche gli altri metodi (lib/verifica-metodi): la mail, i codici di riserva, le app riconosciute e
+    // le sessioni verificate dal portale. Chi non entra piu' nella sua casella riparte da zero come chi
+    // ha perso il telefono.
+    const { data: viaMail, error: eM } = await admin.from('verifica_metodo').delete().eq('utente_id', userId).select('utente_id')
+    if (eM) return { errore: 'Azzeramento non riuscito, riprova' }
+    await Promise.all([
+      admin.from('codici_riserva').delete().eq('utente_id', userId),
+      admin.from('fattori_approvati').delete().eq('utente_id', userId),
+      admin.from('sessioni_verificate').delete().eq('utente_id', userId),
+    ])
+    tolti += viaMail?.length || 0
   }
   return { tolti }
 }

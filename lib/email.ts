@@ -77,6 +77,27 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
 }
 
+// Il codice della verifica in due passaggi via mail (lib/verifica-mail). Il codice sta anche
+// nell'oggetto: lo si legge gia' dalla notifica del telefono, senza aprire la mail.
+export async function inviaCodiceAccesso({ to, codice, minuti }: { to: string; codice: string; minuti: number }): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const r: any = await invia({
+      from: FROM,
+      to,
+      subject: `Codice di accesso MoovExpress: ${codice}`,
+      html: wrap(`
+        <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">Il tuo codice di accesso</h2>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 6px">Per entrare in MoovExpress scrivi questo codice:</p>
+        <p style="font-size:32px;letter-spacing:8px;font-weight:800;color:#1a1a1a;text-align:center;margin:20px 0">${esc(codice)}</p>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 18px">Vale ${minuti} minuti e si può usare una volta sola.</p>
+        <p style="color:#999;font-size:12px;line-height:1.5;margin:0">Se non stai provando ad accedere tu, qualcuno conosce la tua password: cambiala subito con «Password dimenticata» nella pagina di accesso.</p>
+      `),
+    })
+    if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
+    return { ok: true }
+  } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
+}
+
 // Email di prova (verifica dominio/mittente Resend). Ritorna esito + id Resend o errore.
 export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: string; id?: string | null; error?: string }> {
   try {
