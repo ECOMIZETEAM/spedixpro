@@ -1155,6 +1155,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   // li' farebbe un ritiro per ogni livello della fila sullo stesso pacco. Se non riesce la spedizione
   // resta valida (e' gia' creata e pagata): la risposta dice perche' e che si puo' riprovare.
   let avvisoRitiro: string | null = null
+  // Il giorno davvero prenotato: KSync rifiuta il ritiro in giornata e lib/ritiro-poste ripiega sul giorno dopo.
+  let dataRitiroPrenotata = _dataRitiro
   if (_vuoleRitiro && !ritiroPrenotato && inserted?.id && !(cliente as any)?.ledger
     && (corriere.tipo === 'poste' || corriere.tipo === 'moovexpress')) {
     try {
@@ -1181,10 +1183,12 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
           if (esito.ok) {
             ritiroPrenotato = true
             codiceRitiro = esito.codice
+            dataRitiroPrenotata = esito.data
+            if (esito.data !== _dataRitiro) avvisoRitiro = `Il corriere non accetta il ritiro per il ${_dataRitiro}: ritiro prenotato per il ${esito.data}, il primo giorno utile.`
             // La riga era nata con il ritiro spento (non era ancora prenotato): il portale mostra
             // "Ritiro richiesto" da questi campi.
             await admin.from('spedizioni').update({
-              richiedi_ritiro: true, data_ritiro: _dataRitiro, intervallo_ritiro: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
+              richiedi_ritiro: true, data_ritiro: esito.data, intervallo_ritiro: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
             }).eq('id', inserted.id)
           } else if (esito.motivo === 'registrazione') {
             // Prenotato presso il corriere ma non registrato: il codice va dato, o si rischia un doppione.
@@ -1217,7 +1221,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     ...(codModeUsata ? { codMode: codModeUsata } : {}),
     // Se il ritiro e' stato chiesto, la risposta dice se e' stato PRENOTATO e, se no, cosa fare.
     ...(_vuoleRitiro ? { ritiro: ritiroInRisposta({
-      prenotato: ritiroPrenotato, data: _dataRitiro, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
+      prenotato: ritiroPrenotato, data: dataRitiroPrenotata, intervallo: _pomeriggio ? '14:00-18:00' : '09:00-13:00',
       codice: codiceRitiro, tipo: corriere.tipo, spedizioneId: inserted?.id || null, avviso: avvisoRitiro || _avvisoRitiroDeposito,
     }) } : {}),
     // Dove va il pacco, quando non va a casa: il punto come l'ha registrato il corriere.

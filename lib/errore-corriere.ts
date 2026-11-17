@@ -113,8 +113,23 @@ export function erroreRitiroPulito(raw: any): string {
   if (!msg) msg = s.replace(/^.*?failed[^:]*:\s*/i, '').replace(/\{[\s\S]*\}/, '').trim()
   msg = msg.replace(NOMI_FORNITORI, '').replace(/pickup failed[^:]*:?/ig, '').replace(/\s{2,}/g, ' ').trim()
   // Messaggi tipici del corriere → testo chiaro in italiano per l'utente.
-  if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg) || /time slot not compatible with today/i.test(msg) || /nella mattina stessa/i.test(msg)) {
+  if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg) || /time slot not compatible with today/i.test(msg) || /nella mattina stessa|per la stessa giornata|same-day pickup/i.test(msg)) {
     return 'Il ritiro in giornata non è più disponibile per questo corriere: scegli una data futura (di norma il giorno lavorativo successivo).'
+  }
+  // Rifiuti di SpediamoPro che arrivavano in inglese (3-17/11/2026: 133 "not eligible", 57 "already
+  // assigned", 99 "pickup address"): quasi sempre spedizioni gia' in un ritiro, gia' partite o
+  // annullate. Non e' un guasto, ma chi legge deve capire che non c'e' niente da riprovare.
+  if (/already assigned to a pickup/i.test(msg)) {
+    return 'Questa spedizione è già in un ritiro prenotato: non serve richiederlo di nuovo.'
+  }
+  if (/not eligible for pickup/i.test(msg)) {
+    return 'Questa spedizione non si può più mettere in un ritiro: è già in un ritiro, è già partita oppure è stata annullata.'
+  }
+  if (/does not allow pickup/i.test(msg)) {
+    return 'Il servizio di questa spedizione non prevede il ritiro a domicilio: il pacco va consegnato a un punto del corriere.'
+  }
+  if (/pickup address is not valid for the shipment sender/i.test(msg)) {
+    return 'Il ritiro va fatto all\'indirizzo del mittente della spedizione: per spedizioni di mittenti diversi serve un ritiro per ciascuno.'
   }
   // "Nessun prezzo impostato nel listino per il contratto X per il peso inserito" e la variante
   // "Contratto X non ha un prezzo impostato per fascia di peso o per questa zona di consegna": il

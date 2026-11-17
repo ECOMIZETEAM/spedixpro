@@ -181,7 +181,7 @@ export default function NuovaSpedizioneCliente() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
-  const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string}}|null>(null)
+  const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string,avviso?:string}}|null>(null)
   // SICUREZZA LDV: appena si comincia una NUOVA spedizione (si compila il destinatario) dopo una
   // creazione, si toglie il banner con "Scarica LDV" della spedizione PRECEDENTE, così non si stampa
   // per abitudine la LDV vecchia sul pacco nuovo (due colli con la stessa lettera di vettura). Il form
@@ -426,7 +426,7 @@ export default function NuovaSpedizioneCliente() {
     // PuntoPoste (contratti a deposito): niente ritiro a domicilio — il pacco si porta al punto. Non
     // chiamo /api/ritiri/crea (lo rifiuterebbe): eviterei solo un falso "ritiro non prenotato".
     const conRitiro = richiediRitiro && !selected?._deposito
-    let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string}|undefined
+    let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string,avviso?:string}|undefined
     if (conRitiro && data.spedizioneId) {
       try {
         const rr = await fetch('/api/ritiri/crea', {
@@ -440,7 +440,7 @@ export default function NuovaSpedizioneCliente() {
           })
         })
         const rj = await rr.json().catch(()=>({}))
-        ritiroEsito = (!rr.ok || rj.error) ? { errore: rj.error || 'Ritiro non riuscito' } : { ok:true, pickupId: rj.pickupId }
+        ritiroEsito = (!rr.ok || rj.error) ? { errore: rj.error || 'Ritiro non riuscito' } : { ok:true, pickupId: rj.pickupId, avviso: rj.avviso }
       } catch { ritiroEsito = { errore: 'Ritiro non riuscito: il corriere non ha risposto. Riprova.' } }
     }
     if (daOrdine) {
@@ -506,7 +506,7 @@ export default function NuovaSpedizioneCliente() {
           : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
       </div>}
       {successo?.ritiro && (successo.ritiro.ok
-        ? <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#166534'}}>📦 Ritiro prenotato{successo.ritiro.pickupId?<> — <strong>{successo.ritiro.pickupId}</strong></>:''}</div>
+        ? <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#166534'}}>📦 Ritiro prenotato{successo.ritiro.pickupId?<> — <strong>{successo.ritiro.pickupId}</strong></>:''}{successo.ritiro.avviso?<div style={{marginTop:'4px',color:'#92400e'}}>{successo.ritiro.avviso}</div>:null}</div>
         : <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#b91c1c'}}>⚠️ Spedizione creata, ma <strong>ritiro NON prenotato</strong>: {successo.ritiro.errore}</div>)}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',alignItems:'start'}}>
