@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
+import AvvisoCreditoSms from '@/app/components/AvvisoCreditoSms'
 
 const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
 const cardHead = {padding:'14px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'14px',fontWeight:'700' as const,color:'#1a1a1a'}
@@ -271,8 +272,11 @@ export default function ImpostazioniClientePage() {
             <select value={imp('email_giacenze')} onChange={e=>setImp('email_giacenze',e.target.value)} style={selWide}>
               <option value="si">Si</option><option value="no">No</option>
             </select></div>
-          <div style={rowFull}><span style={lblStrong}>Attiva notifica SMS</span>
-            <Toggle on={imp('notifica_sms')===true} onToggle={()=>setImp('notifica_sms', !(imp('notifica_sms')===true))} /></div>
+          <div style={{borderBottom:'1px solid #f5f5f5'}}>
+            <div style={{...rowFull,borderBottom:'none'}}><span style={lblStrong}>Attiva notifica SMS</span>
+              <Toggle on={imp('notifica_sms')===true} onToggle={()=>setImp('notifica_sms', !(imp('notifica_sms')===true))} /></div>
+            <AvvisoCreditoSms attiva={imp('notifica_sms')===true} credito={cliente?.credito_sms} vista="master" />
+          </div>
           <div style={{padding:'13px 18px'}}>
             <div style={{...lblStrong,marginBottom:'8px'}}>Testo sms</div>
             <textarea value={imp('testo_sms')} onChange={e=>setImp('testo_sms',e.target.value)} rows={4}

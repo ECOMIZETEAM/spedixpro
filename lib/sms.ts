@@ -23,11 +23,11 @@
 
 import { eSpedizioneDaAmazon } from '@/lib/compratore-amazon'
 
-const BASE = 'https://app.esendex.it/API/v1.0/REST'
+// Il prezzo sta in lib/sms-prezzo.ts, che leggono anche le pagine; qui si riesporta per chi lo importava da qui.
+import { COSTO_SMS_EUR } from '@/lib/sms-prezzo'
+export { COSTO_SMS_EUR }
 
-// Prezzo di vendita per SMS: 1.000 SMS = 100 € → 0,10 €/SMS (senza IVA — società UK, reverse charge).
-// Lo compra CHI manda gli SMS (il cliente per sé, o il master per i suoi clienti), pagando su Stripe.
-export const COSTO_SMS_EUR = 0.10
+const BASE = 'https://app.esendex.it/API/v1.0/REST'
 
 function tokenConfigurato(): boolean {
   return !!((process.env.ESENDEX_USER_KEY || process.env.SKEBBY_USER_KEY)?.trim() && (process.env.ESENDEX_ACCESS_TOKEN || process.env.SKEBBY_ACCESS_TOKEN)?.trim())
