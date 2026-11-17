@@ -40,7 +40,11 @@ export async function annullaPaccoGls(
   }
   // DeleteSped con le credenziali della gamba GLS (lib/annullaSpedizione, ramo GLS).
   const esito = await annullaSpedizioneSulCorriere(admin, sped)
-  if (!esito.ok) return { ok: false, motivo: esito.reason || 'GLS non ha confermato l\'annullo' }
+  // Il motivo finisce in "Annullo non riuscito: <motivo> La spedizione resta valida.": serve il punto.
+  if (!esito.ok) {
+    const m = esito.reason || 'GLS non ha confermato l\'annullo'
+    return { ok: false, motivo: /[.!?]$/.test(m) ? m : m + '.' }
+  }
   const r = await annullaGambePacco(admin, gambe, { richiestoAt: new Date().toISOString(), da: rich.da || null })
   return { ok: true, gambe: r.gambe }
 }

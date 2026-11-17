@@ -494,6 +494,80 @@ export async function annullaSpedizioneGls(cred: CredenzialiGls, numeroSpedizion
   }
 }
 
+// REGISTRO DEL CONTO GLS (ListSpedPeriod, sola lettura): le spedizioni che GLS ha davvero, ciascuna con
+// "IN ATTESA DI CHIUSURA." o "CHIUSA.". Quelle cancellate — da noi o da Weblabeling — non ci sono.
+// - Al massimo 5.000 righe per chiamata: si chiede UN giorno per volta, e un giorno che arriva a 5.000 si
+//   dichiara incompleto (il conto più pieno, il 17/11/2026, faceva circa 600 spedizioni al giorno).
+// - L'errore arriva in <DescrizioneErrore>. Una password sbagliata risponde "Funzionalità non abilitata",
+//   come un conto senza la funzione: per noi è la stessa cosa, il registro non si legge.
+// - Giorni in formato AAAAMMGG, ora italiana (vedi giornoGls).
+export type RegistroGls =
+  | { ok: true; spedizioni: Map<string, { stato: string; data: string }> }
+  | { ok: false; motivo: string }
+
+export function giornoGls(quando: string | Date, deltaGiorni = 0): string {
+  const t = new Date(quando).getTime() + deltaGiorni * 86400000
+  // en-CA formatta AAAA-MM-GG; il fuso è quello di GLS, non quello del server.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date(t)).replace(/-/g, '')
+}
+
+export async function registroSpedizioniGls(cred: CredenzialiGls, giorni: string[]): Promise<RegistroGls> {
+  const spedizioni = new Map<string, { stato: string; data: string }>()
+  const risposte = await Promise.all(giorni.map(async (g) => {
+    const inner =
+      tag('SedeGls', cred.sigla_sede) +
+      tag('CodiceClienteGls', cred.user_webservice) +
+      tag('PasswordClienteGls', cred.password_webservice) +
+      tag('DataInizio', g) + tag('DataFine', g)
+    try { return { g, xml: await chiamaGls('ListSpedPeriod', inner) } }
+    catch { return { g, xml: null as string | null } }
+  }))
+  for (const { g, xml: grezzo } of risposte) {
+    if (grezzo == null) return { ok: false, motivo: 'GLS non risponde' }
+    // Di solito l'XML arriva vero; se arriva come testo dentro il Result, lo si riapre.
+    const xml = /&lt;Parcel&gt;|&lt;ListParcel/.test(grezzo)
+      ? grezzo.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+      : grezzo
+    const errore = (xml.match(/<DescrizioneErrore[^>]*>([^<]*)</) || [])[1]
+    if (errore) return { ok: false, motivo: errore.trim() }
+    if (!/<ListParcel\b/.test(xml)) return { ok: false, motivo: 'risposta GLS non riconosciuta' }
+    let righe = 0
+    for (const m of xml.matchAll(/<Parcel>([\s\S]*?)<\/Parcel>/g)) {
+      righe++
+      const numero = ((m[1].match(/<NumSpedizione>([^<]*)</) || [])[1] || '').replace(/\D/g, '')
+      if (!numero) continue
+      spedizioni.set(numero, {
+        stato: ((m[1].match(/<StatoSpedizione>([^<]*)</) || [])[1] || '').trim(),
+        data: ((m[1].match(/<Data>([^<]*)</) || [])[1] || '').trim(),
+      })
+    }
+    if (righe >= 5000) return { ok: false, motivo: `registro GLS del ${g} incompleto (5.000 righe)` }
+  }
+  return { ok: true, spedizioni }
+}
+
+// Dove sta UNA spedizione su GLS, cercandola nel registro del giorno in cui è nata (e quelli accanto,
+// per le spedizioni create a cavallo della mezzanotte):
+// - aperta: in attesa di chiusura, GLS non passa ancora a ritirarla;
+// - chiusa: già trasmessa alla sede, il pacco parte;
+// - assente: GLS non ce l'ha (già cancellata);
+// - sconosciuto: il registro non si legge, o GLS scrive uno stato che non conosciamo.
+export type StatoSuGls =
+  | { stato: 'aperta' | 'chiusa' | 'assente' }
+  | { stato: 'sconosciuto'; motivo: string }
+
+export async function statoSpedizioneSuGls(cred: CredenzialiGls, numeroNudo: string, creataIl: string | Date): Promise<StatoSuGls> {
+  const numero = String(numeroNudo || '').replace(/\D/g, '')
+  if (!numero) return { stato: 'sconosciuto', motivo: 'numero GLS mancante' }
+  const reg = await registroSpedizioniGls(cred, [giornoGls(creataIl, -1), giornoGls(creataIl), giornoGls(creataIl, 1)])
+  if (!reg.ok) return { stato: 'sconosciuto', motivo: reg.motivo }
+  const r = reg.spedizioni.get(numero)
+  if (!r) return { stato: 'assente' }
+  if (/ATTESA/i.test(r.stato)) return { stato: 'aperta' }
+  if (/CHIUSA/i.test(r.stato)) return { stato: 'chiusa' }
+  return { stato: 'sconosciuto', motivo: `stato GLS "${r.stato}"` }
+}
+
 // Chiude (= TRASMETTE alla sede GLS) una o più spedizioni per numero NUDO. Senza questa, AddParcel
 // crea la spedizione ma resta "in attesa di chiusura" e GLS NON passa a ritirare. Batch: un <Parcel>
 // per numero in una sola chiamata. Il campo è `NumeroDiSpedizioneGLSDaConfermare` (verificato: con

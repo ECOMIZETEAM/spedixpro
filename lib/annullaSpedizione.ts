@@ -96,23 +96,37 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: 'l\'annullo di questo contratto va gestito dall\'assistenza' }
   }
 
-  // GLS diretto: prima della chiusura (CloseWorkDay) la spedizione NON è ancora trasmessa a GLS, quindi
-  // annullarla lato Moove è già sicuro (GLS non passa a ritirarla). La si rimuove comunque da GLS con
-  // DeleteSped (best-effort) per non lasciare numeri appesi. L'esito NON blocca il rimborso: il modello
-  // GLS (attesa-chiusura) lo rende sicuro, a differenza di BRT (auto-conferma) qui sotto.
+  // GLS diretto: si rimborsa SOLO se GLS non ha più la spedizione, o se conferma di averla tolta adesso.
+  // Prima l'annullo lato Moove valeva comunque, con DeleteSped "best-effort" e l'esito ignorato, perché si
+  // pensava che prima della NOSTRA chiusura GLS non passasse a ritirare. Non è così: il conto GLS si chiude
+  // anche da Weblabeling (su quello di Wave il 17/11 c'erano 649 spedizioni create e chiuse fuori dal
+  // portale), e il cliente consegna il pacco con l'etichetta in mano. NI665682165 (MSM STUDIO): cancellata
+  // il 12/11 alle 10:29 e rimborsata, su GLS era CHIUSA e il pacco il giorno dopo era a Foggia.
   if (corr.tipo === 'gls') {
     // GIÀ TRASMESSA (distinta chiusa = confermata_vettore): GLS consegna il pacco → non annullare a vuoto,
     // mai rimborso su merce che parte. La porta elimina lo blocca già prima; questa è la rete di sicurezza
     // anche per il cron e i percorsi legacy che dovessero passare di qui.
     if ((sped as any).confermata_vettore) return { ok: false, reason: 'GLS già trasmessa (distinta chiusa): non annullabile in automatico' }
-    const numeroNudo = raw.numero ? String(raw.numero) : ''
-    // Pre-chiusura la spedizione NON è trasmessa a GLS: l'annullo lato Moove è già sicuro anche se DeleteSped
-    // non risponde (GLS non passa a ritirarla). DeleteSped best-effort, per non lasciare numeri appesi.
-    if (numeroNudo) {
-      try { const { annullaSpedizioneGls } = await import('@/lib/gls'); await annullaSpedizioneGls(cred, numeroNudo) }
-      catch (e) { console.error('[ANNULLO][GLS] DeleteSped:', e) }
+    const { numeroNudoGls, statoSpedizioneSuGls, annullaSpedizioneGls } = await import('@/lib/gls')
+    const numeroNudo = numeroNudoGls(sped as any)
+    // Senza numero GLS non ha mai assegnato la spedizione: su GLS non c'è niente da togliere.
+    if (!numeroNudo) return { ok: true }
+    // Il registro si cerca nel giorno di nascita: il cron e i pacchi condivisi non passano la data.
+    let creata: string | null = (sped as any).created_at || null
+    if (!creata && (sped as any).id) {
+      const { data: c } = await admin.from('spedizioni').select('created_at').eq('id', (sped as any).id).maybeSingle()
+      creata = c?.created_at || null
     }
-    return { ok: true }
+    const su = creata ? await statoSpedizioneSuGls(cred, numeroNudo, creata) : { stato: 'sconosciuto' as const, motivo: 'data di creazione mancante' }
+    if (su.stato === 'assente') return { ok: true }   // già tolta da GLS: nessun pacco parte, il rimborso è giusto
+    if (su.stato === 'chiusa') {
+      return { ok: false, reason: 'la spedizione risulta già trasmessa a GLS, quindi non è più annullabile in automatico: va gestita direttamente col corriere' }
+    }
+    // Aperta (o registro non leggibile: due conti GLS non lo consentono): si chiede a GLS di toglierla, e
+    // conta solo la sua conferma "Eliminazione ... avvenuta".
+    if (su.stato === 'sconosciuto') console.error('[ANNULLO][GLS] registro non leggibile, decide DeleteSped:', numeroNudo, su.motivo)
+    if (await annullaSpedizioneGls(cred, numeroNudo)) return { ok: true }
+    return { ok: false, reason: 'GLS non ha confermato la cancellazione, riprova tra qualche minuto' }
   }
 
   // BRT diretto: l'annullo esiste (PUT /delete), ma va tentato DAVVERO — il ritorno generico ok:true
