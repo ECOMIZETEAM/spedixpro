@@ -225,6 +225,25 @@ export async function GET(req: NextRequest) {
     catch (e: any) { console.error('[RETTIFICHE] perche\' solo a tuo carico:', e?.message) }
   }
   const pesiMulti = await pesiMultiP
+  // DA CONTROLLARE SOLO SE SUL PACCO CI PERDI (lib/rettifiche-margine-pacco). Recuperare meno del fornitore e' normale
+  // quando lo scalino del listino di sotto e' piu' basso del suo: se a conti fatti sul pacco intero resti sopra zero,
+  // la rettifica e' giusta e va tra le buone (Lorenzo, 17/11/2026). Se il conto non riesce, la riga resta com'era.
+  let margini = new Map<string, number>()
+  const sottoRecupero = agente ? [] : righeGrezze.filter((r: any) => classeDi(r).classe === 'da_controllare')
+  if (sottoRecupero.length) {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { marginePacco } = await import('@/lib/rettifiche-margine-pacco')
+      margini = await marginePacco(createAdminSupabase(), utente!.master_id, sottoRecupero)
+    } catch (e: any) { console.error('[RETTIFICHE] margine sul pacco:', e?.message) }
+  }
+  const classeFinale = (r: any) => {
+    const c = classeDi(r)
+    const m = margini.get(r.id)
+    if (c.classe !== 'da_controllare' || m == null) return c
+    if (m >= -0.005) return { classe: 'buona', motivo: null, manca: 0, margine_pacco: m }
+    return { ...c, margine_pacco: m, motivo: `${c.motivo} Sul pacco intero ci perdi ${Math.abs(m).toFixed(2)}€.` }
+  }
   const righe = righeGrezze.map((r0: any) => {
     const r = agente ? { ...r0, costo_fornitore: null } : r0
     const b = baseDi(r)
@@ -242,7 +261,7 @@ export async function GET(req: NextRequest) {
       base_dopo: b.dopo,       // e su cosa si paga ora
       nota_peso: b.nota,       // perche' e' cambiato, quando cambia la base
       peso_pagato: pesiMulti.get(r.id) || null,   // multicollo: kg su cui si pagava e si paga, collo per collo
-      ...classeDi(r),          // classe: 'buona'|'da_controllare', motivo, manca (sotto-recupero)
+      ...classeFinale(r),      // classe: 'buona'|'da_controllare', motivo, manca (sotto-recupero), margine_pacco
     }
   })
   return NextResponse.json(righe)
