@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vedeLaRete } from '@/lib/perimetro'
 import { eTitolareOAdmin, gestisceLaRete } from '@/lib/ruoli'
-import { contabilitaAttiva, metodoValido, pulisciNome, ricordaPagatore } from '@/lib/contabilita-banca'
+import { contabilitaAttiva, metodoValido, pulisciNome, ricordaPagatore, sottoNelCheck, type SottoNelCheck } from '@/lib/contabilita-banca'
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { registraAudit } from '@/lib/audit'
 
@@ -11,7 +11,10 @@ import { registraAudit } from '@/lib/audit'
 // Ogni master vede SOLO le ricariche che ha fatto lui (master_id esatto): il bonifico arriva a lui.
 // Due soglie di alert (modificabili qui): giorni senza bonifico, giorni senza conferma d'arrivo.
 // Le righe NASCOSTE (nascosta_il) non si vedono e non suonano: Ecomize Solution ha voluto ripartire da zero
-// (12/11) senza cancellare le ricariche abbinate all'estratto conto. Vedi scripts/check-ricariche-nascoste-a-mano.sql.
+// (12/11) senza cancellare le ricariche abbinate all'estratto conto, poi lo stesso per Dg Express (17/11).
+// Vedi scripts/check-ricariche-nascoste-a-mano.sql.
+// Eccezione al "solo le proprie" (17/11): il master che segue il Check Ricariche dei suoi sotto-master (i loro
+// clienti pagano sul suo conto, lib/contabilita-banca sottoNelCheck) li vede in blocchi a parte e li spunta.
 const GIORNI_NO_BONIFICO = 3
 const GIORNI_NO_ARRIVO = 4
 const MS_G = 86400000
@@ -47,12 +50,24 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const p = req.nextUrl.searchParams
 
-  // Badge menu: quanti ALERT attivi (righe aperte in allarme). Leggo solo le aperte.
+  // I blocchi dei sotto-master che questo master segue (Ecomize Solution: Ecomize LL e Dg Express). Per tutti
+  // gli altri nessuno. Se non si riesce a leggerli il pallino conta solo le proprie, la pagina si ferma.
+  let sotto: SottoNelCheck[] = []
+  try { sotto = await sottoNelCheck(admin, s.master_id) } catch (e: any) {
+    if (!p.get('count')) return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 })
+  }
+
+  // Badge menu: quanti ALERT attivi (righe aperte in allarme). Leggo solo le aperte. Contano anche quelle dei
+  // sotto-master seguiti: chi le spunta adesso e' questo master.
   if (p.get('count')) {
-    const { data } = await admin.from('ricariche_check')
-      .select('ricaricato_il,bonifico_effettuato_il,bonifico_arrivato_il,metodo')
-      .eq('master_id', s.master_id).is('bonifico_arrivato_il', null).is('nascosta_il', null).limit(3000)
-    const n = (data || []).map(arricchisci).filter((r: any) => r.alert).length
+    const aperte = (masterId: string, dal?: string) => {
+      let q = admin.from('ricariche_check').select('ricaricato_il,bonifico_effettuato_il,bonifico_arrivato_il,metodo')
+        .eq('master_id', masterId).is('bonifico_arrivato_il', null).is('nascosta_il', null)
+      if (dal) q = q.gte('created_at', dal)
+      return q.limit(3000)
+    }
+    const letti = await Promise.all([aperte(s.master_id), ...sotto.map(x => aperte(x.id, x.dal))])
+    const n = letti.flatMap(({ data }: any) => data || []).map(arricchisci).filter((r: any) => r.alert).length
     return NextResponse.json({ count: n })
   }
 
@@ -71,46 +86,58 @@ export async function GET(req: NextRequest) {
     } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 }) }
   }
 
-  let q = admin.from('ricariche_check').select('*')
-    .eq('master_id', s.master_id).is('nascosta_il', null).order('ricaricato_il', { ascending: false }).limit(1000)
-  const dal = p.get('dal'), al = p.get('al')
-  if (dal) q = q.gte('ricaricato_il', dal)
-  if (al) q = q.lte('ricaricato_il', al + 'T23:59:59')
-  const { data, error } = await q
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  // Un blocco: le ricariche di un master (le proprie, o di un sotto-master seguito dal giorno in cui lo si segue),
+  // con gli stessi filtri e lo stesso riepilogo. I blocchi restano separati: non si mischiano in un elenco solo.
+  async function blocco(masterId: string, createDal?: string) {
+    let q = admin.from('ricariche_check').select('*')
+      .eq('master_id', masterId).is('nascosta_il', null).order('ricaricato_il', { ascending: false }).limit(1000)
+    if (createDal) q = q.gte('created_at', createDal)
+    const dal = p.get('dal'), al = p.get('al')
+    if (dal) q = q.gte('ricaricato_il', dal)
+    if (al) q = q.lte('ricaricato_il', al + 'T23:59:59')
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
 
-  // Le ricariche pagate a pezzi dall'estratto conto (400 € = 200 + 200): quanto e' gia' arrivato. I pezzi li scrive
-  // il master che ha il conto (anche per le ricariche dei suoi sotto-master), quindi qui si cercano per ricarica.
-  const pezzi = new Map<string, number>()
-  const ids = (data || []).map((r: any) => r.id)
-  for (let i = 0; i < ids.length; i += 300) {
-    const { data: pz, error: ep } = await admin.from('parti_bonifici').select('ricarica_id,importo').in('ricarica_id', ids.slice(i, i + 300))
-    if (ep) break   // senza la tabella (prima della migrazione) nessun pezzo
-    for (const x of pz || []) pezzi.set(x.ricarica_id, Math.round(((pezzi.get(x.ricarica_id) || 0) + Number(x.importo)) * 100) / 100)
-  }
-  let righe = (data || []).map((r: any) => ({ ...arricchisci(r), pagato_parti: pezzi.get(r.id) || 0 }))
-  const cerca = (p.get('q') || '').trim().toLowerCase()
-  if (cerca) righe = righe.filter((r: any) => (r.target_nome || '').toLowerCase().includes(cerca) || (r.mittente || '').toLowerCase().includes(cerca))
-  const filtro = p.get('stato')
-  if (filtro === 'alert') righe = righe.filter((r: any) => r.alert)
-  else if (filtro && ['in_attesa', 'effettuato', 'arrivato'].includes(filtro)) righe = righe.filter((r: any) => r.stato === filtro)
+    // Le ricariche pagate a pezzi dall'estratto conto (400 € = 200 + 200): quanto e' gia' arrivato. I pezzi li scrive
+    // il master che ha il conto (anche per le ricariche dei suoi sotto-master), quindi qui si cercano per ricarica.
+    const pezzi = new Map<string, number>()
+    const ids = (data || []).map((r: any) => r.id)
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data: pz, error: ep } = await admin.from('parti_bonifici').select('ricarica_id,importo').in('ricarica_id', ids.slice(i, i + 300))
+      if (ep) break   // senza la tabella (prima della migrazione) nessun pezzo
+      for (const x of pz || []) pezzi.set(x.ricarica_id, Math.round(((pezzi.get(x.ricarica_id) || 0) + Number(x.importo)) * 100) / 100)
+    }
+    let righe = (data || []).map((r: any) => ({ ...arricchisci(r), pagato_parti: pezzi.get(r.id) || 0 }))
+    const cerca = (p.get('q') || '').trim().toLowerCase()
+    if (cerca) righe = righe.filter((r: any) => (r.target_nome || '').toLowerCase().includes(cerca) || (r.mittente || '').toLowerCase().includes(cerca))
+    const filtro = p.get('stato')
+    if (filtro === 'alert') righe = righe.filter((r: any) => r.alert)
+    else if (filtro && ['in_attesa', 'effettuato', 'arrivato'].includes(filtro)) righe = righe.filter((r: any) => r.stato === filtro)
 
-  const riepilogo = {
-    scoperto: righe.filter((r: any) => r.stato !== 'arrivato' && r.stato !== 'altro_metodo').reduce((t: number, r: any) => t + Number(r.importo || 0), 0),
-    n_in_attesa: righe.filter((r: any) => r.stato === 'in_attesa').length,
-    n_effettuato: righe.filter((r: any) => r.stato === 'effettuato').length,
-    n_alert: righe.filter((r: any) => r.alert).length,
-    soglie: { no_bonifico: GIORNI_NO_BONIFICO, no_arrivo: GIORNI_NO_ARRIVO },
+    const riepilogo = {
+      scoperto: righe.filter((r: any) => r.stato !== 'arrivato' && r.stato !== 'altro_metodo').reduce((t: number, r: any) => t + Number(r.importo || 0), 0),
+      n_in_attesa: righe.filter((r: any) => r.stato === 'in_attesa').length,
+      n_effettuato: righe.filter((r: any) => r.stato === 'effettuato').length,
+      n_alert: righe.filter((r: any) => r.alert).length,
+      soglie: { no_bonifico: GIORNI_NO_BONIFICO, no_arrivo: GIORNI_NO_ARRIVO },
+    }
+    return { righe, riepilogo }
   }
-  // contabilita: la pagina mostra "chi ha pagato" anche da scrivere dopo (lib/contabilita-banca).
-  return NextResponse.json({ righe, riepilogo, contabilita: contabilitaAttiva(s.master_id), puoAggiungere: eTitolareOAdmin({ ruolo: s.ruolo }) })
+
+  try {
+    const [mio, ...altri] = await Promise.all([blocco(s.master_id), ...sotto.map(x => blocco(x.id, x.dal))])
+    // contabilita: la pagina mostra "chi ha pagato" anche da scrivere dopo (lib/contabilita-banca).
+    return NextResponse.json({ ...mio, contabilita: contabilitaAttiva(s.master_id), puoAggiungere: eTitolareOAdmin({ ruolo: s.ruolo }),
+      sotto: sotto.map((x, i) => ({ id: x.id, nome: x.nome, dal: x.dal, ...altri[i] })) })
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 400 }) }
 }
 
 // Le uniche azioni ammesse, con la GUARDIA sullo stato attuale (transizione rigida). L'update scatta
 // SOLO se lo stato di partenza e' quello giusto: cosi' due click, un doppio invio o una richiesta in
 // ritardo non possono "saltare" lo stato. È il cuore delle regole rigide sui bonifici.
 //   in_attesa --effettuato--> effettuato --arrivato--> arrivato   (+ le due annulla, un passo alla volta)
-const AZIONI = ['effettuato', 'arrivato', 'annulla_effettuato', 'annulla_arrivato', 'nota', 'elimina', 'mittente']
+const SPUNTE = ['effettuato', 'arrivato', 'annulla_effettuato', 'annulla_arrivato']
+const AZIONI = [...SPUNTE, 'nota', 'elimina', 'mittente']
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const giornoRoma = (d: Date | string) => new Date(d).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' })
 const spostaGiorno = (g: string, n: number) => new Date(Date.parse(g + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10)
@@ -196,9 +223,19 @@ export async function POST(req: NextRequest) {
 
   // La riga dev'essere del MIO master: conoscere un id qualsiasi non basta. E ogni scrittura ripete
   // il vincolo master (eq master_id) come cintura, oltre alla guardia di stato.
+  // Unica eccezione: una ricarica di un sotto-master che questo master segue (sottoNelCheck), nata dal giorno in cui
+  // lo segue. Su quella solo le spunte del bonifico: eliminarla, la nota e il nome di chi paga restano al sotto-master.
   const { data: riga } = await admin.from('ricariche_check')
-    .select('id,master_id,target_tipo,target_id,metodo,bonifico_effettuato_il,bonifico_arrivato_il,nascosta_il').eq('id', id).maybeSingle()
-  if (!riga || riga.master_id !== s.master_id) return NextResponse.json({ error: 'Riga non trovata nella tua rete' }, { status: 403 })
+    .select('id,master_id,target_tipo,target_id,metodo,bonifico_effettuato_il,bonifico_arrivato_il,nascosta_il,created_at').eq('id', id).maybeSingle()
+  if (!riga) return NextResponse.json({ error: 'Riga non trovata nella tua rete' }, { status: 403 })
+  let seguito: SottoNelCheck | null = null
+  if (riga.master_id !== s.master_id) {
+    let sotto: SottoNelCheck[] = []
+    try { sotto = await sottoNelCheck(admin, s.master_id) } catch (e: any) { return NextResponse.json({ error: e?.message || 'Errore' }, { status: 500 }) }
+    seguito = sotto.find(x => x.id === riga.master_id && Date.parse(riga.created_at) >= Date.parse(x.dal)) || null
+    if (!seguito) return NextResponse.json({ error: 'Riga non trovata nella tua rete' }, { status: 403 })
+    if (!SPUNTE.includes(azione)) return NextResponse.json({ error: `Su questa ricarica puoi solo segnare il bonifico: il resto lo fa ${seguito.nome}` }, { status: 403 })
+  }
   // Una riga nascosta non si tocca da qui: se e' abbinata a un bonifico, "elimina" si porterebbe via
   // l'abbinamento (on delete cascade) senza che nessuno la veda.
   if (riga.nascosta_il) return NextResponse.json({ error: 'Questa ricarica è stata tolta dal Check Ricariche' }, { status: 404 })
@@ -238,8 +275,11 @@ export async function POST(req: NextRequest) {
     else if (azione === 'arrivato') q = q.update({ bonifico_arrivato_il: now }).is('bonifico_arrivato_il', null).not('bonifico_effettuato_il', 'is', null)
     else if (azione === 'annulla_arrivato') q = q.update({ bonifico_arrivato_il: null }).not('bonifico_arrivato_il', 'is', null)
     else /* annulla_effettuato */ q = q.update({ bonifico_effettuato_il: null }).not('bonifico_effettuato_il', 'is', null).is('bonifico_arrivato_il', null)
-    const { error } = await q.eq('id', id).eq('master_id', s.master_id)
+    const { data: fatte, error } = await q.eq('id', id).eq('master_id', riga.master_id).select('id')
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    // Chi ha spuntato la ricarica di un altro master: il sotto-master la trova cambiata senza averla toccata.
+    if (seguito && fatte?.length) await registraAudit({ utenteId: s.user.id, ruolo: s.ruolo, azione: 'check_ricarica_spunta_sotto', risorsa: id,
+      dettaglio: `${azione} sulla ricarica di ${seguito.nome}` })
     // Se la guardia non ha trovato la riga (0 update) NON e' un errore: la riga era gia' in quello
     // stato o la transizione non era valida. Sotto rileggo e restituisco lo stato VERO: la UI si
     // allinea sempre alla realta', non a un click ottimistico.

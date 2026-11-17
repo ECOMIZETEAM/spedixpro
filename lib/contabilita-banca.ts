@@ -44,6 +44,26 @@ export async function sottoSulConto(admin: any, masterId: string): Promise<Sotto
   return data.map((x: any) => ({ id: x.sotto_master_id, nome: String(nomi.get(x.sotto_master_id) || '—'), giroDal: String(x.giro_dal).slice(0, 10) }))
 }
 
+export type SottoNelCheck = { id: string, nome: string, dal: string }
+/** I sotto-master di cui questo master segue anche il CHECK RICARICHE (Lorenzo, 17/11/2026): i loro clienti pagano
+ *  sul suo conto, quindi e' lui che vede arrivare i bonifici. Ecomize Solution vede le ricariche di Ecomize LL e di
+ *  Dg Express in due blocchi suoi e le spunta per loro: la riga e' la stessa, il sotto-master la trova spuntata.
+ *  Solo le ricariche nate da conti_condivisi.check_dal in poi ("da adesso in poi"). Senza la colonna (codice
+ *  rilasciato prima del database) nessun blocco: il Check Ricariche resta com'era. */
+export async function sottoNelCheck(admin: any, masterId: string): Promise<SottoNelCheck[]> {
+  const { data, error } = await admin.from('conti_condivisi').select('sotto_master_id,check_dal').eq('master_id', masterId).not('check_dal', 'is', null)
+  if (error) {
+    if (/conti_condivisi|check_dal/.test(error.message || '') && /does not exist|Could not find|schema cache/i.test(error.message || '')) return []
+    throw new Error(error.message)
+  }
+  if (!data?.length) return []
+  const { data: m, error: e2 } = await admin.from('masters').select('id,nome').in('id', data.map((x: any) => x.sotto_master_id))
+  if (e2) throw new Error(e2.message)
+  const nomi = new Map((m || []).map((x: any) => [x.id, x.nome || '—']))
+  return data.map((x: any) => ({ id: x.sotto_master_id, nome: String(nomi.get(x.sotto_master_id) || '—'), dal: new Date(x.check_dal).toISOString() }))
+    .sort((a: SottoNelCheck, b: SottoNelCheck) => a.nome.localeCompare(b.nome, 'it'))
+}
+
 /** Il nome come lo si salva: spazi in fila ridotti a uno, al massimo 140 caratteri (il limite della tabella). */
 export function pulisciNome(s: unknown): string {
   return String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 140)

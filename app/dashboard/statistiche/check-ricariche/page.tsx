@@ -25,9 +25,13 @@ const etichetta: any = { fontSize: '12px', fontWeight: 700, color: '#1a1a1a', ma
 
 const STATI: [string, string][] = [['', 'Tutti'], ['alert', '⚠ Solo alert'], ['in_attesa', 'In attesa bonifico'], ['effettuato', 'Bonifico effettuato'], ['arrivato', 'Arrivati']]
 
+// Un blocco del Check Ricariche: le proprie ricariche e, per il master che segue i suoi sotto-master (Ecomize
+// Solution con Ecomize LL e Dg Express, 17/11), uno per ognuno. Restano separati, non un elenco solo.
+type Blocco = { chiave: string, nome: string, righe: any[], riepilogo: any, sotto: boolean, dal?: string }
+
 export default function CheckRicariche() {
-  const [righe, setRighe] = useState<any[]>([])
-  const [riep, setRiep] = useState<any>(null)
+  const [blocchi, setBlocchi] = useState<Blocco[]>([])
+  const [scelto, setScelto] = useState('')
   const [loading, setLoading] = useState(true)
   const [stato, setStato] = useState('')
   const [cerca, setCerca] = useState('')
@@ -51,7 +55,13 @@ export default function CheckRicariche() {
     if (cerca.trim()) qs.set('q', cerca.trim())
     fetch(`/api/statistiche/check-ricariche?${qs.toString()}`)
       .then(r => r.json())
-      .then(d => { setRighe(Array.isArray(d?.righe) ? d.righe : []); setRiep(d?.riepilogo || null); setContabilita(d?.contabilita === true); setPuoAggiungere(d?.puoAggiungere === true); setLoading(false) })
+      .then(d => {
+        if (d?.error) { setLoading(false); setErr(d.error); return }
+        const tutti: Blocco[] = [{ chiave: '', nome: 'Le tue ricariche', righe: Array.isArray(d?.righe) ? d.righe : [], riepilogo: d?.riepilogo || null, sotto: false },
+          ...(Array.isArray(d?.sotto) ? d.sotto : []).map((x: any) => ({ chiave: x.id, nome: x.nome, righe: Array.isArray(x.righe) ? x.righe : [], riepilogo: x.riepilogo || null, sotto: true, dal: x.dal }))]
+        setBlocchi(tutti); setScelto(k => tutti.some(b => b.chiave === k) ? k : '')
+        setContabilita(d?.contabilita === true); setPuoAggiungere(d?.puoAggiungere === true); setLoading(false)
+      })
       .catch(() => { setLoading(false); setErr('Errore nel caricamento') })
   }
   useEffect(() => { carica() }, [stato])
@@ -76,8 +86,8 @@ export default function CheckRicariche() {
       // sembrare riuscito. Cosi' non si vede mai uno stato "segnato" che in realta' non e' salvato.
       if (!res.ok || d?.error) { setErr(d?.error || 'Operazione non riuscita — ricarica la pagina e riprova'); setFacendo(''); return }
       // La UI si allinea allo stato VERO restituito dal server (mai ottimistico), poi rinfresca il riepilogo.
-      if (d?.eliminata) setRighe(prev => prev.filter(r => r.id !== id))
-      else if (d?.riga) setRighe(prev => prev.map(r => (r.id === id ? d.riga : r)))
+      if (d?.eliminata) aggiornaRighe(l => l.filter(r => r.id !== id))
+      else if (d?.riga) aggiornaRighe(l => l.map(r => (r.id === id ? d.riga : r)))
       carica()
     } catch { setErr('Errore di rete — ricarica la pagina') } finally { setFacendo('') }
   }
@@ -133,9 +143,17 @@ export default function CheckRicariche() {
       const res = await fetch('/api/statistiche/check-ricariche', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: r.id, azione: 'mittente', mittente: nome }) })
       const d = await res.json().catch(() => ({}))
       if (!res.ok || d?.error) { setErr(d?.error || 'Non salvato'); return }
-      if (d?.riga) setRighe(prev => prev.map(x => (x.id === r.id ? d.riga : x)))
+      if (d?.riga) aggiornaRighe(l => l.map(x => (x.id === r.id ? d.riga : x)))
     } catch { setErr('Errore di rete') } finally { setFacendo('') }
   }
+
+  // Una riga cambiata si aggiorna nel suo blocco (l'id e' unico fra tutti i blocchi).
+  const aggiornaRighe = (f: (l: any[]) => any[]) => setBlocchi(prev => prev.map(b => ({ ...b, righe: f(b.righe) })))
+  const blocco = blocchi.find(b => b.chiave === scelto) || blocchi[0]
+  const righe = blocco?.righe || []
+  const riep = blocco?.riepilogo || null
+  const delSotto = !!blocco?.sotto
+  const giorno = (s?: string) => s ? new Date(s).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Rome' }) : ''
 
   const dataOra = (s: any) => { try { return new Date(s).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
   const soglie = riep?.soglie || { no_bonifico: 3, no_arrivo: 4 }
@@ -207,6 +225,35 @@ export default function CheckRicariche() {
 
       {err && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }}>{err}</div>}
 
+      {/* I blocchi: le proprie ricariche e quelle dei sotto-master seguiti. Ognuno col suo scoperto e i suoi alert. */}
+      {blocchi.length > 1 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+          {blocchi.map(b => {
+            const on = b.chiave === blocco?.chiave
+            const alert = b.riepilogo?.n_alert || 0
+            return (
+              <button key={b.chiave || 'mie'} onClick={() => setScelto(b.chiave)}
+                style={{ textAlign: 'left', cursor: 'pointer', borderRadius: '8px', padding: '12px 14px', background: on ? '#fff7ed' : '#fff',
+                  border: `1px solid ${on ? '#f97316' : '#e8e8e8'}`, boxShadow: on ? 'inset 0 -3px 0 #f97316' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a', flex: 1, minWidth: 0 }}>{b.nome}</span>
+                  {alert > 0 && <span style={{ background: '#fee2e2', color: '#b91c1c', fontSize: '11px', fontWeight: 700, padding: '1px 7px', borderRadius: '20px' }}>{alert} alert</span>}
+                </div>
+                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '3px' }}>
+                  {b.righe.length} {b.righe.length === 1 ? 'ricarica' : 'ricariche'} · da incassare <b style={{ color: '#1a1a1a' }}>{eur(b.riepilogo?.scoperto)}</b>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {delSotto && (
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 14px', fontSize: '12.5px', color: '#475569', marginBottom: '14px', lineHeight: 1.45 }}>
+          Le ricariche che <b>{blocco.nome}</b> fa ai suoi clienti dal {giorno(blocco.dal)}: i bonifici arrivano sul tuo conto.
+          Quello che segni qui lo vede anche {blocco.nome} nel suo Check Ricariche, e viceversa.
+        </div>
+      )}
+
       {/* Riepilogo */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         <div style={{ ...card, padding: '14px 16px' }}>
@@ -242,7 +289,9 @@ export default function CheckRicariche() {
           {loading ? 'Carico…' : `${righe.length} ricariche`}
         </div>
         {loading ? null : righe.length === 0 ? (
-          <div style={{ padding: '46px', textAlign: 'center', color: '#8a8a8a', fontSize: '13px' }}>Nessuna ricarica manuale. Compaiono qui appena ricaricate un cliente o un sotto-master.</div>
+          <div style={{ padding: '46px', textAlign: 'center', color: '#8a8a8a', fontSize: '13px' }}>{delSotto
+            ? `Nessuna ricarica di ${blocco.nome} dal ${giorno(blocco.dal)}. Compaiono qui appena ricarica un suo cliente.`
+            : 'Nessuna ricarica manuale. Compaiono qui appena ricaricate un cliente o un sotto-master.'}</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '840px' }}>
@@ -266,8 +315,8 @@ export default function CheckRicariche() {
                       {r.a_mano && <span title="Aggiunta a mano: solo registro, non c'è un movimento di credito" style={{ marginLeft: '6px', fontSize: '10px', fontWeight: 700, color: '#6b7280', background: '#f3f4f6', padding: '1px 6px', borderRadius: '4px' }}>aggiunta a mano</span>}
                       {r.note && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>{r.note}</div>}
                       {r.mittente && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>bonifico da {r.mittente}
-                        {contabilita && <button onClick={() => scriviMittente(r)} disabled={!!facendo} title="Cambia il nome" style={{ background: 'none', border: 'none', color: '#f97316', cursor: 'pointer', fontSize: '11px', padding: '0 4px' }}>✎</button>}</div>}
-                      {!r.mittente && contabilita && r.stato !== 'altro_metodo' && (
+                        {contabilita && !delSotto && <button onClick={() => scriviMittente(r)} disabled={!!facendo} title="Cambia il nome" style={{ background: 'none', border: 'none', color: '#f97316', cursor: 'pointer', fontSize: '11px', padding: '0 4px' }}>✎</button>}</div>}
+                      {!r.mittente && contabilita && !delSotto && r.stato !== 'altro_metodo' && (
                         <button onClick={() => scriviMittente(r)} disabled={!!facendo} style={{ display: 'block', background: 'none', border: 'none', color: '#f97316', cursor: 'pointer', fontSize: '11px', fontWeight: 600, padding: '2px 0 0' }}>+ chi ha fatto il bonifico?</button>
                       )}
                     </td>
@@ -297,8 +346,9 @@ export default function CheckRicariche() {
                         {r.stato === 'arrivato' && (
                           <button onClick={() => azione(r.id, 'annulla_arrivato')} disabled={!!facendo} style={btnSec} title="Annulla conferma arrivo">↶ annulla arrivo</button>
                         )}
-                        {/* Elimina dal monitoraggio (es. storno -€ sul credito). Conferma popup MoovExpress. */}
-                        <button onClick={() => azione(r.id, 'elimina')} disabled={!!facendo} title="Elimina dal Check Ricariche" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>🗑</button>
+                        {/* Elimina dal monitoraggio (es. storno -€ sul credito). Conferma popup MoovExpress. Le ricariche di
+                            un sotto-master le elimina solo lui: qui si segna il bonifico e basta. */}
+                        {!delSotto && <button onClick={() => azione(r.id, 'elimina')} disabled={!!facendo} title="Elimina dal Check Ricariche" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>🗑</button>}
                       </span>
                     </td>
                   </tr>

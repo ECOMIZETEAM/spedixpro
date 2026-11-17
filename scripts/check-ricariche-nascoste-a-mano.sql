@@ -25,3 +25,16 @@ create index if not exists ricariche_check_visibili_idx
 --
 -- update public.ricariche_check set nascosta_il = now()
 --  where master_id = '75b08143-26c8-4903-8091-cd03fbd635ed' and nascosta_il is null;
+
+-- ── DG EXPRESS (Lorenzo, 17/11/2026): Ecomize Solution vuole azzerare anche il Check Ricariche di Dg Express ─────────
+-- Stesso modo: nascoste, non cancellate. Diversamente da quelle di Solution, l'estratto conto di Solution le cerca
+-- ANCORA in banca (lib/contabilita-estratti toltaDalConto): se un cliente di Dg paga una ricarica nascosta sul conto
+-- di Solution, va abbinata e girata a Dg lo stesso. Da qui in poi le ricariche nuove di Dg le vede anche Solution.
+-- Eseguito DOPO il rilascio del codice, in una transazione col check_dal (scripts/contabilita-banca.sql passo 5):
+--
+-- begin;
+-- update public.ricariche_check set nascosta_il = now()
+--  where master_id = '394a68a7-c36b-4369-849b-31e0df8b206a' and nascosta_il is null;
+-- update public.conti_condivisi set check_dal = now()
+--  where master_id = '75b08143-26c8-4903-8091-cd03fbd635ed' and check_dal is null;
+-- commit;

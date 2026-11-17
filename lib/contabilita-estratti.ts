@@ -133,7 +133,7 @@ async function anagrafiche(admin: any, rete: Rete): Promise<Anagrafica[]> {
 /** Le ricariche che si aspettano un bonifico (bonifico, o di prima che esistesse il campo) intorno al periodo,
  *  con quelle gia' abbinate segnate. Le righe tolte dal Check Ricariche (nascosta_il: Ecomize ha ripulito
  *  l'elenco il 12/11) non si cercano piu' in banca, ma quelle gia' abbinate restano col loro bonifico: il
- *  lavoro fatto sull'estratto non si perde. */
+ *  lavoro fatto sull'estratto non si perde. Quelle nascoste di un sotto-master si cercano ancora (toltaDalConto). */
 const CAMPI_RICARICA = 'id,master_id,target_tipo,target_id,target_nome,importo,ricaricato_il,metodo,mittente,bonifico_effettuato_il,bonifico_arrivato_il,nascosta_il'
 async function ricariche(admin: any, rete: Rete, dal: string, al: string) {
   const tutte = await fetchAllStretto(() => admin.from('ricariche_check').select(CAMPI_RICARICA)
@@ -159,13 +159,18 @@ async function conAbbinamenti(admin: any, rete: Rete, tutte: any[]) {
   for (const a of await abbinamentiDi(admin, 'ricarica_id', ids)) abbinate.set(a.ricarica_id, a.riga_id)
   const pezzi = new Map<string, Parte[]>()
   for (const p of await partiDi(admin, rete.ids[0], 'ricarica_id', ids)) { if (!pezzi.has(p.ricarica_id)) pezzi.set(p.ricarica_id, []); pezzi.get(p.ricarica_id)!.push(p) }
-  return tutte.filter((r: any) => !r.nascosta_il || abbinate.has(r.id) || pezzi.has(r.id))
+  return tutte.filter((r: any) => !toltaDalConto(r, rete) || abbinate.has(r.id) || pezzi.has(r.id))
     .map((r: any) => {
       const parti = pezzi.get(r.id) || []
       return { ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il), riga_id: abbinate.get(r.id) || null,
-        parti, pagatoParti: r2(parti.reduce((t, p) => t + p.importo, 0)) }
+        parti, pagatoParti: r2(parti.reduce((t, p) => t + p.importo, 0)), tolta: toltaDalConto(r, rete) }
     })
 }
+/** Una ricarica nascosta che la banca non cerca piu': solo se e' del master che ha il conto (Ecomize Solution ha
+ *  ripulito il suo elenco il 12/11). Una nascosta di un sotto-master (Dg Express azzerato il 17/11) si cerca
+ *  ancora: nascondere ripulisce il SUO Check Ricariche, ma se il cliente la paga sul conto del master la ricarica
+ *  va abbinata e girata al sotto-master lo stesso, altrimenti il giro perde quei soldi. */
+const toltaDalConto = (r: any, rete: Rete) => !!r.nascosta_il && r.master_id === rete.ids[0]
 
 async function movimenti(admin: any, masterId: string, dal: string, al: string) {
   const righe = await fetchAllStretto(() => admin.from('estratti_righe')
@@ -305,7 +310,7 @@ async function pezziAutomatici(admin: any, masterId: string, righeTutte: any[], 
   })
   const prese = new Set(occupate)
   const libere = righe.filter((r: any) => !prese.has(r.id)).map((r: any) => ({ ...r, importo: Number(r.importo) }))
-  const aperte = ric.filter((r: any) => !r.riga_id && !usate.has(r.id) && (!r.nascosta_il || r.parti.length))
+  const aperte = ric.filter((r: any) => !r.riga_id && !usate.has(r.id) && (!r.tolta || r.parti.length))
   // Data e pagatore dei pezzi gia' scritti: quale bonifico chiude la ricarica, e chi deve pagare il resto.
   const giaIds = aperte.flatMap((r: any) => r.parti.map((p: Parte) => p.riga_id))
   const dataDi = new Map<string, string>(righe.map((r: any) => [r.id, r.data]))
@@ -376,7 +381,7 @@ export async function collegaParte(admin: any, masterId: string, userId: string,
   if (R.metodo && R.metodo !== 'bonifico') throw new Error('Questa ricarica non è stata pagata con bonifico')
   if (chiaveDi(R) !== chiaveDi(riga)) throw new Error('Questa ricarica è di un altro cliente')
   if (R.riga_id) throw new Error('Questa ricarica è già pagata')
-  if (R.nascosta_il && !R.parti.length) throw new Error('Questa ricarica è stata tolta dal Check Ricariche')
+  if (R.tolta && !R.parti.length) throw new Error('Questa ricarica è stata tolta dal Check Ricariche')
   const importo = Number(riga.importo), manca = r2(R.importo - R.pagatoParti)
   if (cent(importo) > cent(manca)) throw new Error(`Il bonifico (€ ${importo.toFixed(2)}) è più di quanto manca alla ricarica (€ ${manca.toFixed(2)})`)
   const { error: e2 } = await admin.from('parti_bonifici').insert({ master_id: masterId, riga_id: rigaId, ricarica_id: R.id, importo, modo: 'confermato', creato_da: userId })
@@ -710,9 +715,10 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
     const x = perVoce.get(v)!; x.n++; x.totale = r2(x.totale + r.importo); x.controparti.add(r.nome); x.righe.push(riga(r))
   }
   const somma = (l: any[]) => r2(l.reduce((t, r) => t + r.importo, 0))
-  const altri = await fetchAllStretto(() => admin.from('ricariche_check').select('id,master_id,importo,metodo,target_tipo,target_id,target_nome,ricaricato_il')
-    .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -1)).lte('ricaricato_il', spostaGiorni(al, 1)).not('metodo', 'is', null).neq('metodo', 'bonifico').is('nascosta_il', null).order('ricaricato_il').order('id'))
-  const altriNel = altri.map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il) })).filter((r: any) => r.giorno >= dal && r.giorno <= al)
+  const altri = await fetchAllStretto(() => admin.from('ricariche_check').select('id,master_id,importo,metodo,target_tipo,target_id,target_nome,ricaricato_il,nascosta_il')
+    .in('master_id', rete.ids).gte('ricaricato_il', spostaGiorni(dal, -1)).lte('ricaricato_il', spostaGiorni(al, 1)).not('metodo', 'is', null).neq('metodo', 'bonifico').order('ricaricato_il').order('id'))
+  const altriNel = altri.filter((r: any) => !toltaDalConto(r, rete))
+    .map((r: any) => ({ ...r, importo: Number(r.importo), giorno: giornoRoma(r.ricaricato_il) })).filter((r: any) => r.giorno >= dal && r.giorno <= al)
   // Una ricarica a un sotto-master sul conto, fatta dal master: si puo' segnare "giro dei bonifici dei suoi
   // clienti" (prima del pulsante il giro si faceva a mano: ottobre, 36.663 € a Ecomize LL).
   const sottoIds = new Set(rete.sotto.map(x => x.id))
@@ -748,7 +754,7 @@ export async function resoconto(admin: any, masterId: string, dal: string, al: s
   // "Di quale ricarica e'?" per i bonifici di un cliente senza ricarica: le sue ricariche ancora da pagare in cui
   // il bonifico ci sta (anche solo come pezzo), da 45 giorni prima a 5 dopo, le piu' vicine per prime.
   const larghe = ricLarghe
-  const candidate = (x: any) => larghe.filter((R: any) => !R.riga_id && !R.nascosta_il && chiaveDi(R) === chiaveDi(x)
+  const candidate = (x: any) => larghe.filter((R: any) => !R.riga_id && !R.tolta && chiaveDi(R) === chiaveDi(x)
       && cent(R.importo - R.pagatoParti) >= cent(x.importo) && giorniFra(x.data, R.giorno) >= -5 && giorniFra(x.data, R.giorno) <= 45)
     .sort((a: any, b: any) => Math.abs(giorniFra(x.data, a.giorno)) - Math.abs(giorniFra(x.data, b.giorno)))
     .slice(0, 8).map((R: any) => ({ id: R.id, giorno: R.giorno, importo: R.importo, manca: r2(R.importo - R.pagatoParti) }))

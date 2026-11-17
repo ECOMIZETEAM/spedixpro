@@ -317,3 +317,14 @@ revoke all on table public.parti_bonifici from public;
 revoke all on table public.parti_bonifici from anon;
 revoke all on table public.parti_bonifici from authenticated;
 grant select, insert, update, delete on table public.parti_bonifici to service_role;
+
+-- Passo 5: IL MASTER SEGUE IL CHECK RICARICHE DEI SOTTO-MASTER (Lorenzo, 17/11/2026). Ecomize Solution vuole vedere
+-- le ricariche di Ecomize LL e di Dg Express in due blocchi del suo Check Ricariche (i bonifici dei loro clienti
+-- arrivano sul suo conto) e spuntarle per loro: la riga e' la stessa, il sotto-master la trova spuntata.
+-- check_dal: da quando (solo le ricariche nate da li' in poi); vuota = non lo segue. lib/contabilita-banca sottoNelCheck.
+alter table public.conti_condivisi add column if not exists check_dal timestamptz;
+
+-- DA ESEGUIRE DOPO IL RILASCIO DEL CODICE, insieme all'azzeramento di Dg Express (scripts/check-ricariche-nascoste-
+-- a-mano.sql), nella stessa transazione: stesso now(), cosi' nessuna ricarica cade fra le due.
+-- update public.conti_condivisi set check_dal = now()
+--  where master_id = '75b08143-26c8-4903-8091-cd03fbd635ed' and check_dal is null;
