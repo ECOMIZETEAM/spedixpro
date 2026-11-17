@@ -231,7 +231,7 @@ export async function POST(req: NextRequest) {
     const { data: gia } = await q.limit(1).maybeSingle()
     if (gia) {
       if (perCliente && visibileCliente && (gia as any).cliente_id) {
-        return NextResponse.json({ error: `${record.aperto_da} ha già un ticket aperto su questa spedizione (${(gia as any).codice}): lo trovi in Assistenza. Scrivi lì e, se serve, inoltralo da lì al tuo master superiore.` }, { status: 400 })
+        return NextResponse.json({ error: `${record.aperto_da} ha già un ticket aperto su questa spedizione (${(gia as any).codice}): lo trovi in Assistenza. Scrivi lì e, se serve, inoltralo da lì a chi ti fornisce il contratto.` }, { status: 400 })
       }
       const cosa = categoria === 'pod' ? 'una richiesta POD aperta' : 'una richiesta di assistenza aperta'
       return NextResponse.json({ error: `Hai già ${cosa} su questa spedizione (${(gia as any).codice}): aspetta che sia risolta prima di aprirne un'altra.` }, { status: 400 })

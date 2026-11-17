@@ -52,7 +52,7 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
     // Il ticket aperto per il cliente resta al master: va detto, o lo si crede gia' arrivato sopra.
     if (j.per_cliente || j.riservato) {
       const chi = j.per_cliente ? `aperto per ${j.per_cliente}: lo vede in Assistenza` : `aperto: ${j.riservato} non lo vede`
-      setMsg({ t: 'ok', x: `Ticket ${j.codice || ''} ${chi}. Per girarlo al tuo master superiore aprilo da Assistenza e premi «Inoltra».` })
+      setMsg({ t: 'ok', x: `Ticket ${j.codice || ''} ${chi}. Per girarlo a chi ti fornisce il contratto aprilo da Assistenza e premi «Inoltra».` })
       setTimeout(() => chiudi(), 4000)
       return
     }
@@ -94,7 +94,7 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
                   {visibileCliente
                     ? <>👁 <b>{clienteDiretto}</b> vedrà questo ticket in Assistenza e leggerà quello che scrivi qui.</>
                     : <>🔒 <b>{clienteDiretto}</b> non vedrà questo ticket.</>}
-                  {' '}Resta a te: se serve, lo inoltri al tuo master superiore da Assistenza. Dopo l'invio non si può cambiare.</div>}
+                  {' '}Resta a te: se serve, da Assistenza lo inoltri a chi ti fornisce il contratto. Dopo l'invio non si può cambiare.</div>}
                 {modo === 'ticket' && <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '5px' }}>Descrizione del problema <span style={{ color: '#dc2626', fontWeight: 700 }}>fornire imballo e contenuto obbligatorio</span></label>
                   <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} autoFocus placeholder="Descrivi il problema su questa spedizione…" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} /></div>}
                 {modo === 'ticket' && <div>

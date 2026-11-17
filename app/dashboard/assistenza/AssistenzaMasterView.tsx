@@ -588,18 +588,18 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <label title="Allega foto, video o file (max 25 MB)" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: caricandoFile ? 'default' : 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1, opacity: caricandoFile ? 0.6 : 1 }}>{caricandoFile ? '⏳' : '📎'}
                       <input type="file" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip" multiple disabled={caricandoFile} onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
                     </label>
-                    <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : sel.tipo_apertura === 'master_riservato' ? (sel.rete_master_ids?.length ? 'Scrivi al master superiore (il cliente non lo vede)…' : 'Scrivi una nota (il cliente non la vede)…') : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
+                    <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : sel.tipo_apertura === 'master_riservato' ? (sel.rete_master_ids?.length ? 'Scrivi al master a cui l\'hai inoltrato (il cliente non lo vede)…' : 'Scrivi una nota (il cliente non la vede)…') : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
                     <button disabled={inviando || caricandoFile || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 'default' : 'pointer', opacity: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
                   </div>
                 </div>
               ))}
 
-              {/* Inoltro alla linea superiore: il ticket resta unico, il cliente non lo sa */}
+              {/* Inoltro a chi fornisce il contratto: il ticket resta unico, il cliente non lo sa */}
               {(ruoloChat === 'master' || ruoloChat === 'rete') && sel.stato !== 'chiuso' && (
                 <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
                   {inoltroCosto && (
                     <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600, background: '#fff7ed', border: '1px solid #fed7aa', color: '#c2410c' }}>
-                      <div style={{ marginBottom: '8px' }}>Inoltrando questa POD a {inoltroCosto.padre || 'il tuo master superiore'} ti vengono addebitati {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(inoltroCosto.prezzo)}.</div>
+                      <div style={{ marginBottom: '8px' }}>Inoltrando questa POD a {inoltroCosto.padre || 'chi ti fornisce il contratto'} ti vengono addebitati {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(inoltroCosto.prezzo)}.</div>
                       <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: '#1a1a1a', fontWeight: 500 }}>
                         <input type="checkbox" checked={inoltroOk} onChange={e => setInoltroOk(e.target.checked)} style={{ marginTop: '2px', accentColor: '#f97316' }} />
                         <span>Accetto l&apos;addebito di {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(inoltroCosto.prezzo)} subito, all&apos;inoltro.</span>
@@ -627,8 +627,8 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     const d = await fetch('/api/assistenza/' + sel.id).then(x => x.json()).catch(() => null)
                     if (d && !d.error) { setThread(d.messaggi || []); setSel((s: any) => ({ ...s, ...d.ticket })) }
                     carica(true)
-                  }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: salvando || (!!inoltroCosto && !inoltroOk) ? 'not-allowed' : 'pointer', opacity: salvando || (!!inoltroCosto && !inoltroOk) ? 0.5 : 1 }}>{inoltroCosto ? 'Conferma e inoltra' : '⤴ Inoltra al mio master superiore'}</button>
-                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>{isPod ? 'Se la POD non ce l\'hai tu, la carica il master superiore su QUESTA richiesta: arriva al cliente da sola, senza riaprire una seconda richiesta.' : 'Il master superiore vedrà tutta la conversazione; il cliente non ne saprà nulla.'}</span>
+                  }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: salvando || (!!inoltroCosto && !inoltroOk) ? 'not-allowed' : 'pointer', opacity: salvando || (!!inoltroCosto && !inoltroOk) ? 0.5 : 1 }}>{inoltroCosto ? 'Conferma e inoltra' : '⤴ Inoltra a chi mi fornisce il contratto'}</button>
+                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>{isPod ? 'Se la POD non ce l\'hai tu, la carica chi ti fornisce il contratto su QUESTA richiesta: arriva al cliente da sola, senza riaprire una seconda richiesta.' : 'Va a chi ti fornisce il contratto della spedizione (se il ticket non ha una spedizione, al tuo master superiore): vedrà tutta la conversazione, il cliente non ne saprà nulla.'}</span>
                 </div>
               )}
 
