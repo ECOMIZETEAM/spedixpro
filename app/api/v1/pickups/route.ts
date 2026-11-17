@@ -6,7 +6,8 @@ import { inviaRitiroSpedisci } from '@/lib/ritiro-spedisci'
 import { avvisoDataSpostata } from '@/lib/ritiro-giorno'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
 import { pickupTimeSpedisci } from '@/lib/spedisci'
-import { ritiroPrenotabileConPickups, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
+import { ritiroPrenotabileConPickups, messaggioRitiroNonPrenotabileViaApi, avvisoCodiceInArrivo } from '@/lib/ritiro-api'
+import { codiceRitiroValido } from '@/lib/easyparcel'
 
 // API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key
 // (SpediamoPro, Spedisci, Poste diretto, Dielle e i ponti che finiscono su uno di questi due, come SDA EXPRESS L e PDB L).
@@ -29,6 +30,50 @@ function fasciaOraria(from: any, to: any): { from: string; to: string } {
   return { from: '09:00', to: '18:00' }
 }
 
+// CONTRATTI "V" (easyparcel): il ritiro sta dentro l'ordine e si chiede SOLO alla creazione — il
+// fornitore non ha una chiamata per aggiungerlo dopo (lo scrive la sua documentazione). Qui quindi non
+// si prenota niente: si risponde per quello che c'e', con la stessa regola del dettaglio spedizione.
+// Prima rispondeva 400 a tutto, anche dove il ritiro era gia' prenotato alla creazione: il programma
+// di chi integra lo leggeva come un ritiro fallito e riprovava (CONTORNO SRL, 100 chiamate respinte il
+// 15-16/11/2026). Ora l'errore resta solo sulle spedizioni create davvero senza ritiro; le altre si
+// confermano col codice, come fa il portale (giaPrenotato).
+async function ritiroContrattoV(admin: any, ctx: { clienteId: string; corriereId: string }, body: any) {
+  const shipmentIds = body.shipmentIds
+  if (!Array.isArray(shipmentIds) || !shipmentIds.length) return NextResponse.json({ error: 'shipmentIds obbligatorio' }, { status: 400 })
+  const { data: spedizioni } = await admin.from('spedizioni')
+    .select('id,richiedi_ritiro,data_ritiro,cod_ritiro:raw_response->>_codiceRitiro')
+    .in('id', shipmentIds).eq('cliente_id', ctx.clienteId).eq('corriere_id', ctx.corriereId)
+  if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 400 })
+
+  const senzaRitiro: string[] = spedizioni.filter((s: any) => !s.richiedi_ritiro).map((s: any) => s.id)
+  if (senzaRitiro.length) {
+    const conRitiro = spedizioni.length - senzaRitiro.length
+    return NextResponse.json({
+      error: 'Per questo contratto il ritiro va richiesto al momento della creazione della spedizione: non puo\' essere aggiunto dopo. '
+        + (senzaRitiro.length === 1
+          ? 'Una spedizione e\' stata creata senza ritiro (indicata in senzaRitiro): per questa contatta l\'assistenza.'
+          : `${senzaRitiro.length} spedizioni sono state create senza ritiro (elencate in senzaRitiro): per queste contatta l'assistenza.`)
+        + (conRitiro ? ` ${conRitiro === 1 ? 'L\'altra ha' : `Le altre ${conRitiro} hanno`} gia\' il ritiro prenotato alla creazione.` : ''),
+      senzaRitiro,
+    }, { status: 400 })
+  }
+
+  const ritiri: { shipmentId: string; codice_ritiro: string | null; date: string | null }[] =
+    spedizioni.map((s: any) => ({ shipmentId: s.id, codice_ritiro: codiceRitiroValido(s.cod_ritiro), date: s.data_ritiro || null }))
+  // Ogni ordine ha il suo codice: in cima se ne mette uno solo quando e' lo stesso per tutte, per non
+  // far credere che un codice valga anche per spedizioni che ne hanno un altro.
+  const codici = new Set(ritiri.map(r => r.codice_ritiro))
+  const unico = codici.size === 1 ? ritiri[0].codice_ritiro : null
+  const avvisi = ['Il ritiro di queste spedizioni e\' stato prenotato alla creazione: non ne e\' stato prenotato un altro.']
+  if (body.date && ritiri.some(r => r.date && r.date !== String(body.date))) avvisi.push('La data del ritiro e\' quella scelta alla creazione e non si puo\' cambiare.')
+  const senzaCodice = ritiri.find(r => !r.codice_ritiro)
+  if (senzaCodice) avvisi.push(avvisoCodiceInArrivo(senzaCodice.shipmentId))
+  return NextResponse.json({
+    id: null, codice_ritiro: unico, pickupId: unico, stato: 'richiesto', date: ritiri[0].date,
+    giaPrenotato: true, ritiri, avviso: avvisi.join(' '),
+  })
+}
+
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
@@ -48,11 +93,9 @@ export async function POST(req: NextRequest) {
     // su tutte e 1.264) e rispondeva "Impossibile recuperare il corriere dalla spedizione", mandando
     // a cercare il guasto dalla parte sbagliata. Il fornitore non ha proprio una chiamata per
     // prenotare un ritiro dopo l'ordine: si chiede alla creazione o non si chiede piu'.
-    // Stesso rifiuto di /api/ritiri/crea. Chi l'ha chiesto alla creazione ce l'ha gia': lo dice il
-    // testo, perche' un integratore leggeva questo 400 come un ritiro perso (19/10/2026).
-    if (contratto?.tipo === 'easyparcel') {
-      return NextResponse.json({ error: 'Per questo contratto il ritiro va richiesto al momento della creazione della spedizione: non puo\' essere aggiunto dopo. Se lo hai chiesto alla creazione e\' gia\' prenotato (vedi GET /api/v1/shipments/{id}); per le spedizioni create senza ritiro contatta l\'assistenza.' }, { status: 400 })
-    }
+    // Chi l'ha chiesto alla creazione ce l'ha gia': si conferma; il rifiuto resta per chi l'ha creata
+    // senza (vedi ritiroContrattoV).
+    if (contratto?.tipo === 'easyparcel') return ritiroContrattoV(admin, ctx, body)
     if (contratto && !ritiroPrenotabileConPickups(contratto.tipo)) {
       return NextResponse.json({ error: messaggioRitiroNonPrenotabileViaApi(contratto.tipo) }, { status: 400 })
     }
