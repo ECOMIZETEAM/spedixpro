@@ -80,12 +80,20 @@ export async function riconciliaContiGls(
     }
 
     // Registro GLS, quattro giorni per volta: tutti insieme sarebbero quindici chiamate di colpo.
-    const registro = new Map<string, { stato: string; data: string }>()
+    // Per numero si tengono TUTTE le spedizioni GLS, ciascuna col suo giorno: GLS riusa i numeri.
+    // CK860108473 (QUICK, nostra del 16/11) nel registro c'è solo come spedizione del 23/10: cercando
+    // il solo numero su 35 giorni risultava "presente" e la sua sparizione da GLS non si vedeva.
+    const registro = new Map<string, { stato: string; giorno: string }[]>()
     let leggibile = true
     for (let i = 0; i < giorniRegistro.length && leggibile; i += 4) {
       const r = await registroSpedizioniGls(conto.cred, giorniRegistro.slice(i, i + 4))
       if (!r.ok) { leggibile = false; esito.contiNonLeggibili.push({ conto: conto.nome, motivo: r.motivo }); break }
-      for (const [n, v] of r.spedizioni) registro.set(n, v)
+      for (const [n, v] of r.spedizioni) {
+        const m = v.data.match(/^(\d{2})\/(\d{2})\/(\d{4})/)   // "23/10/2026 11:23"
+        const giorno = m ? `${m[3]}${m[2]}${m[1]}` : ''
+        if (!registro.has(n)) registro.set(n, [])
+        registro.get(n)!.push({ stato: v.stato, giorno })
+      }
     }
     if (!leggibile) continue
 
@@ -95,7 +103,7 @@ export async function riconciliaContiGls(
     for (const c of conto.corrieri) {
       for (let da = 0; ; da += 1000) {
         const { data, error } = await admin.from('spedizioni')
-          .select('id,tracking_number,stato,corriere_id')
+          .select('id,tracking_number,stato,corriere_id,created_at')
           .eq('corriere_id', c.id).gte('created_at', dal.toISOString())
           .order('created_at').order('id').range(da, da + 999)
         if (error) throw new Error(`lettura spedizioni ${c.nome_contratto}: ${error.message}`)
@@ -109,7 +117,10 @@ export async function riconciliaContiGls(
     for (const s of nostre) {
       const numero = String(s.tracking_number || '').replace(/\D/g, '')
       if (!numero || IN_ANNULLO.has(s.stato)) continue
-      const suGls = registro.get(numero)
+      // La stessa spedizione = stesso numero E nata lo stesso giorno (o quello accanto, a cavallo della
+      // mezzanotte): come statoSpedizioneSuGls in lib/gls, che decide i rimborsi.
+      const giorniOk = new Set([giornoGls(s.created_at, -1), giornoGls(s.created_at), giornoGls(s.created_at, 1)])
+      const suGls = (registro.get(numero) || []).find(r => giorniOk.has(r.giorno))
       const master_id = detentoreDi.get(s.corriere_id) as string
       if (s.stato === 'annullata' && suGls) {
         trovateConto.push({ spedizione_id: s.id, master_id, tipo: 'viva_su_gls', stato_gls: suGls.stato || null, tracking_number: s.tracking_number })
