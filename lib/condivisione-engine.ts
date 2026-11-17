@@ -504,9 +504,12 @@ export async function risincronizzaCondivisione(admin: any, linkId: string, opts
   if (!listinoIngrosso) return { ok: true, contratti: 0, creati: [], daAttivare: [], daConfermare: [], saltati: [] }
 
   const { seller, buyer, piano } = await pianoCondivisione(admin, link, listinoIngrosso)
-  // I collegamenti del vecchio tipo (un contratto solo, LOGIXIA → Wave) si riallineano nel costo, ma
-  // non ricevono contratti nuovi: il compratore ne aveva accettato uno.
-  const puoCreare = !!opts.creaMancanti && !link.corriere_id
+  // Anche il collegamento del vecchio tipo (LOGIXIA → Wave, col contratto SDA EXPRESS L scritto dentro il
+  // 3/10 solo per far funzionare il riallineamento del costo) riceve i contratti nuovi del listino. Prima
+  // restavano «da attivare»: LOGIXIA ha messo SDA EXPRESS L CONSEGNA DIRETTA nel listino di Wave il 10/11 e
+  // PDB L il 17/11, ha salvato, e Wave non li vedeva. La regola di Lorenzo vale per tutti i collegamenti:
+  // il venditore mette il corriere nel listino del collegato, salva, e il collegato lo vede.
+  const puoCreare = !!opts.creaMancanti
   let n = 0
   const creati: string[] = []
   const daAttivare: string[] = []

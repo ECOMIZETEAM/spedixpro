@@ -29,16 +29,16 @@ export async function propagaListinoModificato(admin: any, listinoId: string): P
   // Regola di Lorenzo: «una volta che salva Wave, in automatico MULTI li deve vedere» — è il listino del
   // venditore a dire cosa il collegato compra.
   // Restano fuori, come per Aggiorna: le copie del collegato da sostituire (tolgono righe di un altro
-  // master, solo dall'Assegna con conferma), i ponti spenti (non si riaccendono da qui) e i collegamenti
-  // del vecchio tipo (un contratto solo: solo costo). L'addebito era già live. Best-effort.
+  // master, solo dall'Assegna con conferma) e i ponti spenti (non si riaccendono da qui). L'addebito era
+  // già live. Best-effort.
   try {
     const { risincronizzaCondivisione } = await import('@/lib/condivisione-engine')
     const { data: ledgers } = await admin.from('clienti').select('id').eq('ledger', true).eq('listino_cliente_id', listinoId)
     // Tutti i collegamenti attivi del ledger, anche quello del vecchio tipo (un contratto solo, con
     // corriere_id valorizzato: LOGIXIA → Wave). Il filtro `corriere_id is null` lo escludeva, e dal 3/10
     // al 29/10 nessun salvataggio di LOGIXIA è arrivato a Wave: il secondo scaglione del contrassegno
-    // restava a 2.000 € mentre l'ingrosso diceva 5.000. risincronizzaCondivisione a quel tipo riallinea
-    // solo il costo, senza creargli contratti nuovi.
+    // restava a 2.000 € mentre l'ingrosso diceva 5.000. Dal 17/11 riceve anche i contratti nuovi, come
+    // gli altri collegamenti (lib/condivisione-engine, risincronizzaCondivisione).
     for (const l of (ledgers || [])) {
       const { data: links } = await admin.from('corrieri_condivisi').select('id').eq('cliente_ledger_id', (l as any).id).eq('stato', 'attiva')
       for (const link of (links || [])) {
