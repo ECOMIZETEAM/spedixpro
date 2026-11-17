@@ -856,8 +856,9 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         label_format: 'PDF', packages: packagesSpedisci,
         // EMAIL SCHERMO: al provider va l'email di servizio, mai quelle vere di mittente e destinatario
         // (le sue notifiche non devono arrivare al cliente finale). ECCEZIONE per contratto, decisa
-        // dall'owner e scritta in lib/email-corriere: su Crono BS gli avvisi del corriere DEVONO arrivare
-        // a mittente e destinatario, quindi li' passano le email vere (se mancano, resta quella di servizio).
+        // dall'owner e scritta in lib/email-corriere: su Crono gli avvisi del corriere DEVONO arrivare
+        // a mittente e destinatario, quindi li' passano le email vere. Se mancano il campo non parte:
+        // mai la nostra al posto della loro (sul pannello del fornitore risultava l'email di MULTI).
         shipFrom: { ...body.shipFrom, email: emailAlCorriere(corriereRecord.nome_contratto, body.shipFrom?.email) },
         shipTo: { ...body.shipTo, email: emailAlCorriere(corriereRecord.nome_contratto, body.shipTo?.email) },
         notes: String(body.notes || '').trim() || undefined,

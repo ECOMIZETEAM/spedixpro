@@ -20,11 +20,19 @@ export function emailVereAlCorriere(nomeContratto?: string | null): boolean {
   return CONTRATTI_EMAIL_VERE.some(r => r.test(n))
 }
 
-// L'email da mettere nel payload del fornitore: quella vera sui contratti dell'elenco (se c'e' ed e'
-// valida), altrimenti quella di servizio. Senza una email valida NON si manda niente di inventato: il
-// provider rifiuta la creazione con 422 su un indirizzo malformato.
-export function emailAlCorriere(nomeContratto: string | null | undefined, emailVera: any): string {
+// L'email da mettere nel payload del fornitore. Sui contratti dell'elenco: quella vera se c'e' ed e'
+// valida, altrimenti NESSUNA (undefined: JSON.stringify toglie il campo).
+//
+// Perche' nessuna e non quella di servizio: fino al 17/11/2026 qui ripiegava su EMAIL_PER_CORRIERE, e
+// sul pannello del fornitore il destinatario risultava con l'email di MULTIEXPRESS. MULTI se n'e'
+// accorto e Lorenzo ha deciso: su Crono passa l'email del destinatario vero, mai la nostra. In 14
+// giorni erano 179 Crono su 624 senza email del destinatario (QUICK 85 su 89, VTS 59 su 61) e 46
+// senza quella del mittente (VTS): tutte uscite col nostro indirizzo.
+// Il fornitore la accetta senza: provato il 17/11 riproducendo una Crono BS vera di VTS senza nessuna
+// delle due email → creata (HTTP 200) e annullata subito.
+// Una email piu' lunga di 50 caratteri non si tronca: troncata e' un indirizzo diverso, non il suo.
+export function emailAlCorriere(nomeContratto: string | null | undefined, emailVera: any): string | undefined {
+  if (!emailVereAlCorriere(nomeContratto)) return EMAIL_PER_CORRIERE
   const e = String(emailVera ?? '').trim()
-  if (emailVereAlCorriere(nomeContratto) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return e.substring(0, 50)
-  return EMAIL_PER_CORRIERE
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && e.length <= 50 ? e : undefined
 }

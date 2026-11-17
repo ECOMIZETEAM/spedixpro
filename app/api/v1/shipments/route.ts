@@ -450,7 +450,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
       // EMAIL SCHERMO: al provider va l'email di servizio, mai quelle vere (vedi lib/email-corriere).
-      // Su Crono BS fanno eccezione: gli avvisi del corriere devono arrivare a mittente e destinatario.
+      // Su Crono fanno eccezione: gli avvisi del corriere devono arrivare a mittente e destinatario.
+      // Se l'email vera manca il campo non parte proprio: mai la nostra al posto della loro.
       body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages,
         shipFrom: { ...spedFrom, email: emailAlCorriere(corriere.nome_contratto, body.shipFrom?.email) },
         shipTo: { ...spedTo, email: emailAlCorriere(corriere.nome_contratto, body.shipTo?.email) },
