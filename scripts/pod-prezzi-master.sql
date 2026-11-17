@@ -98,3 +98,58 @@ $$;
 
 revoke all on function public.addebita_pod_inoltro(uuid, uuid, uuid, numeric, uuid) from public, anon, authenticated;
 grant execute on function public.addebita_pod_inoltro(uuid, uuid, uuid, numeric, uuid) to service_role;
+
+-- POD INOLTRATA A CHI VENDE IL CONTRATTO FUORI DALL'ALBERO (17/11/2026). Dal 17/11 la POD non sale piu'
+-- al master superiore ma a chi vende il contratto della spedizione (api/assistenza/[id]/inoltra). Se lo
+-- vende il superiore vale addebita_pod_inoltro qui sopra. Se lo vende un master fuori dall'albero, il
+-- conto di quel salto e' il cliente "(ingrosso)" che il venditore ha per quel master
+-- (corrieri_condivisi.cliente_ledger_id), col listino POD CLIENTI del venditore (decisione del
+-- committente, 17/11/2026 — es. spedizioni 2000 → GTS EXPRESS, 3,30 €). Funzione a parte e non un
+-- parametro in piu' sull'altra: con due firme dello stesso nome il database non saprebbe quale
+-- chiamare, e il codice gia' in produzione continua a usare quella di prima senza accorgersene.
+-- Stessa presa in pod_inoltri, nella stessa transazione del movimento: una volta sola per master.
+create or replace function public.addebita_pod_inoltro_ingrosso(
+  p_ticket_id uuid, p_master_id uuid, p_venditore_id uuid, p_ingrosso_id uuid, p_prezzo numeric,
+  p_created_by uuid default null)
+returns numeric
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  t record;
+  v_ldv text;
+begin
+  if p_master_id is null or p_venditore_id is null or p_ingrosso_id is null then
+    return 0;
+  end if;
+  -- Il conto "(ingrosso)" dev'essere un cliente del venditore: un id sbagliato farebbe pagare il
+  -- conto di un altro.
+  if not exists (select 1 from public.clienti c where c.id = p_ingrosso_id and c.master_id = p_venditore_id) then
+    raise exception 'Il conto (ingrosso) % non e'' un cliente di chi riceve la POD.', p_ingrosso_id;
+  end if;
+  update public.tickets
+     set pod_inoltri = coalesce(pod_inoltri, '{}'::jsonb)
+           || jsonb_build_object(p_master_id::text,
+                jsonb_build_object('padre', p_venditore_id, 'ingrosso', p_ingrosso_id,
+                                   'prezzo', coalesce(p_prezzo, 0), 'il', now()))
+   where id = p_ticket_id
+     and categoria = 'pod'
+     and not (coalesce(pod_inoltri, '{}'::jsonb) ? p_master_id::text)
+  returning spedizione_id, oggetto into t;
+  if not found then
+    return 0;                                      -- gia' pagato da questo master, o non e' una POD
+  end if;
+  if coalesce(p_prezzo, 0) <= 0 then
+    return 0;                                      -- inoltro gratuito: segnato, nessun movimento
+  end if;
+  v_ldv := left(regexp_replace(coalesce(t.oggetto, ''), '^\s+|\s+$', '', 'g'), 40);
+  perform public.registra_movimento_cliente(
+    p_venditore_id, p_ingrosso_id, 'rettifica', 'POD ' || v_ldv, -p_prezzo,
+    'POD-' || v_ldv, t.spedizione_id, p_created_by, false);
+  return p_prezzo;
+end;
+$$;
+
+revoke all on function public.addebita_pod_inoltro_ingrosso(uuid, uuid, uuid, uuid, numeric, uuid) from public, anon, authenticated;
+grant execute on function public.addebita_pod_inoltro_ingrosso(uuid, uuid, uuid, uuid, numeric, uuid) to service_role;

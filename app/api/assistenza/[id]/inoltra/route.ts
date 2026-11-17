@@ -15,21 +15,24 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // una volta sola per ogni master che inoltra (scripts/pod-prezzi-master.sql, addebita_pod_inoltro).
 // Decisione del committente: l'inoltro era la strada piu' battuta (Velox 71, spedizioni 2000 62,
 // GTS 40 POD inoltrate a MULTIEXPRESS) e restava gratis.
-// Si paga solo se chi la riceve e' il master SUPERIORE: l'addebito (addebita_pod_inoltro →
-// registra_movimento_master) muove il conto del master verso il suo superiore. Verso chi gli vende
-// il contratto fuori dall'albero il conto di quel salto e' un altro (quello presso il venditore), e
-// l'addebito finirebbe sul conto sbagliato: finche' il committente non decide come farla pagare,
-// quella POD sale gratis. Oggi nessun master ha un listino POD per i master: costa 0 anche dentro.
-async function prezzoInoltroPod(admin: any, t: any, mio: string, dest: { id: string; superiore: boolean }): Promise<number> {
-  if (!dest.superiore) return 0
-  const padreId = dest.id
+// OGNI SALTO PAGA SUL SUO CONTO (17/11/2026). Dal superiore: listino POD del superiore per i master
+// sotto, sul conto verso di lui. Da chi vende il contratto FUORI dall'albero: il compratore per lui
+// e' un cliente, il suo "(ingrosso)" — listino POD CLIENTI del venditore, su quel conto (decisione
+// del committente, 17/11/2026: spedizioni 2000 → GTS EXPRESS 3,30 €, Wave ship → LOGIXIA su SDA
+// EXPRESS L 2,55 €). Nel listino clienti le regole per contratto sono sulle righe del VENDITORE,
+// quindi il prezzo si cerca sulla sua riga della fila, non su quella della spedizione.
+async function prezzoInoltroPod(admin: any, t: any, mio: string, dest: Inoltro): Promise<number> {
+  const { risolviPrezzoPod } = await import('@/lib/pod-prezzo')
+  if (dest.conto === 'ingrosso') {
+    return risolviPrezzoPod(admin, { masterId: dest.id, clienteId: dest.ingrossoId, corriereId: dest.corriereVenditore })
+  }
+  if (dest.conto !== 'superiore') return 0
   let corriereId: string | null = null
   if (t.spedizione_id) {
     const { data: sp } = await admin.from('spedizioni').select('corriere_id').eq('id', t.spedizione_id).maybeSingle()
     corriereId = sp?.corriere_id || null
   }
-  const { risolviPrezzoPod } = await import('@/lib/pod-prezzo')
-  return risolviPrezzoPod(admin, { masterId: padreId, sottoMasterId: mio, corriereId })
+  return risolviPrezzoPod(admin, { masterId: dest.id, sottoMasterId: mio, corriereId })
 }
 
 // ── A CHI SALE: A CHI TI HA VENDUTO IL CONTRATTO, NON AL MASTER SOPRA DI TE. ─────────────────────
@@ -49,7 +52,14 @@ async function prezzoInoltroPod(admin: any, t: any, mio: string, dest: { id: str
 // il ticket non sale oltre (prima lo si deduceva dal nome, ora dall'identita' della riga). Solo un
 // ticket da cui non si risale a nessun pacco va ancora al master superiore: non c'e' un contratto da
 // seguire.
-type Destinazione = { id: string; nome: string | null; superiore: boolean } | { errore: string }
+// conto: su quale conto si paga una POD inoltrata (vedi prezzoInoltroPod). 'superiore' = verso il
+// master superiore, che e' anche chi vende; 'ingrosso' = il cliente "(ingrosso)" presso un venditore
+// fuori dall'albero; null = nessun conto per quel salto (non si addebita).
+type Inoltro = {
+  id: string; nome: string | null
+  conto: 'superiore' | 'ingrosso' | null; ingrossoId: string | null; corriereVenditore: string | null
+}
+type Destinazione = Inoltro | { errore: string }
 async function destinazioneInoltro(admin: any, t: any, mio: string, padreId: string | null): Promise<Destinazione> {
   // I contratti del ticket: quello della spedizione collegata o, per i ticket aperti dal modulo
   // libero (in produzione parlano eccome di pacchi), quelli dei numeri scritti nel testo.
@@ -73,6 +83,8 @@ async function destinazioneInoltro(admin: any, t: any, mio: string, padreId: str
   }
 
   let destId: string | null = null
+  let salto: any = null                    // la riga di chi inoltra nella fila, e quella sopra
+  let su: any = null
   if (!corrieri.size) {
     if (!padreId) return { errore: 'Sei al vertice della rete: non c\'è un master superiore a cui inoltrare.' }
     destId = padreId
@@ -95,11 +107,12 @@ async function destinazioneInoltro(admin: any, t: any, mio: string, padreId: str
         return { errore: `Questo ticket riguarda un tuo contratto (${nome}): l'assistenza si ferma a te, che lo detieni. Sopra di te nessuno ha quel rapporto col fornitore — vedila col tuo fornitore diretto.` }
       }
       // 'interrotta' = la riga di chi lo vendeva non c'e' piu': si tratta come sospeso, mai come proprio.
-      const su = righe[i + 1]
-      if (righe[i].salto === 'interrotta' || !su?.master_id) {
+      const sopra = righe[i + 1]
+      if (righe[i].salto === 'interrotta' || !sopra?.master_id) {
         return { errore: `Non si riesce a risalire a chi ti fornisce il contratto ${nome}: il ticket non può salire. Segnalalo all'assistenza MoovExpress.` }
       }
-      venditori.add(su.master_id)
+      venditori.add(sopra.master_id)
+      if (!salto) { salto = righe[i]; su = sopra }
     }
     if (venditori.size > 1) {
       return { errore: 'Il ticket parla di pacchi su contratti forniti da master diversi: aprilo dalla singola spedizione per inoltrarlo.' }
@@ -107,7 +120,17 @@ async function destinazioneInoltro(admin: any, t: any, mio: string, padreId: str
     destId = Array.from(venditori)[0]
   }
   const { data: dest } = await admin.from('masters').select('nome').eq('id', destId).maybeSingle()
-  return { id: destId!, nome: dest?.nome || null, superiore: destId === padreId }
+  // Il venditore e' il superiore quando il contratto scende per l'albero (o non c'e' un contratto);
+  // fuori dall'albero il salto e' un collegamento, col suo conto "(ingrosso)" presso il venditore.
+  // Un salto d'albero che salta il superiore non ha un conto suo: non si addebita.
+  const conto: Inoltro['conto'] = salto?.salto === 'collegamento'
+    ? (salto.ledger_cliente_id ? 'ingrosso' : null)
+    : (destId === padreId ? 'superiore' : null)
+  return {
+    id: destId!, nome: dest?.nome || null, conto,
+    ingrossoId: conto === 'ingrosso' ? salto.ledger_cliente_id : null,
+    corriereVenditore: su?.corriere_id || null,
+  }
 }
 
 // GET: quanto costa a me inoltrare questa POD (la pagina lo mostra prima del si').
@@ -202,9 +225,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         return NextResponse.json({ error: `Il costo dell'inoltro è cambiato: ora è ${cifra}. Controlla e conferma di nuovo.`, pod_prezzo: prezzo }, { status: 409 })
       }
     }
-    const { data: addebitato, error: errAdd } = await admin.rpc('addebita_pod_inoltro', {
-      p_ticket_id: id, p_master_id: mio, p_padre_id: dest.id, p_prezzo: prezzo, p_created_by: user.id,
-    })
+    // Fuori dall'albero si paga sul conto "(ingrosso)" presso il venditore: funzione a parte
+    // (scripts/pod-prezzi-master.sql), stessa presa una volta sola per master.
+    const { data: addebitato, error: errAdd } = dest.conto === 'ingrosso'
+      ? await admin.rpc('addebita_pod_inoltro_ingrosso', {
+          p_ticket_id: id, p_master_id: mio, p_venditore_id: dest.id, p_ingrosso_id: dest.ingrossoId,
+          p_prezzo: prezzo, p_created_by: user.id,
+        })
+      : await admin.rpc('addebita_pod_inoltro', {
+          p_ticket_id: id, p_master_id: mio, p_padre_id: dest.id, p_prezzo: prezzo, p_created_by: user.id,
+        })
     if (errAdd) {
       console.error('[POD][INOLTRO] addebito non riuscito, inoltro fermato — ticket', id, errAdd.message)
       return NextResponse.json({ error: 'Addebito della POD non riuscito: l\'inoltro non è partito, riprova.' }, { status: 500 })
