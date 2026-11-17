@@ -6,6 +6,15 @@ import { LINK_COLLEGA_SHOPIFY } from '@/lib/shopify-scheda-app'
 
 const ACCENT = '#f97316'
 
+// La radice del sito come la vuole la rotta (woocommerce/connetti): senza /wp-admin/... in fondo, con
+// https://. Vuota se non sembra un indirizzo.
+function radiceNegozio(v: string): string {
+  let u = v.trim().replace(/\/wp-(admin|login\.php|json)\b.*$/i, '').replace(/\/+$/, '')
+  if (!u) return ''
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u
+  try { return new URL(u).hostname.includes('.') ? u : '' } catch { return '' }
+}
+
 type Integrazione = {
   id: string
   piattaforma: string
@@ -65,6 +74,10 @@ export default function IntegrazioniPage() {
   const [psForm, setPsForm] = useState({ nome_negozio: '', url: '', webservice_key: '' })
   const [wooForm, setWooForm] = useState({ nome_negozio: '', url: '', consumer_key: '', consumer_secret: '' })
   const [connecting, setConnecting] = useState(false)
+  // L'ERRORE DEL COLLEGAMENTO SI DICE NELLA FINESTRA. Scritto nel messaggio della pagina finiva sotto la
+  // finestra ancora aperta, coperto: il cliente vedeva il pulsante tornare «Collega» e basta (PrestaShop:
+  // 28 tentativi falliti su 35 in due settimane, 17/11/2026).
+  const [errFinestra, setErrFinestra] = useState('')
   const [statiEdit, setStatiEdit] = useState<Record<string, string>>({})
   const [salvandoStati, setSalvandoStati] = useState('')
 
@@ -122,11 +135,12 @@ export default function IntegrazioniPage() {
     window.history.replaceState(null, '', window.location.pathname + (resto ? '?' + resto : ''))
   }, [])
 
-  function openModal() { setStep('platforms'); setModal(true) }
-  function closeModal() { setModal(false) }
+  function openModal() { setStep('platforms'); setErrFinestra(''); setModal(true) }
+  function closeModal() { setModal(false); setErrFinestra('') }
 
   function pickPlatform(id: string, attivo: boolean) {
     if (!attivo) return
+    setErrFinestra('')
     if (id === 'shopify') setStep('shopify')
     if (id === 'prestashop') setStep('prestashop')
     if (id === 'woocommerce') setStep('woocommerce')
@@ -165,21 +179,25 @@ export default function IntegrazioniPage() {
   }
 
   async function connettiWoo() {
-    if (!wooForm.url || !wooForm.consumer_key || !wooForm.consumer_secret) { setMsg({ type: 'err', text: 'URL, Consumer Key e Secret obbligatori' }); return }
-    setConnecting(true)
+    // Gli stessi controlli della rotta, detti prima di chiamare il negozio.
+    let ck = wooForm.consumer_key.trim(), cs = wooForm.consumer_secret.trim()
+    if (!radiceNegozio(wooForm.url) || !ck || !cs) { setErrFinestra('Servono l\'indirizzo del negozio e i due codici della chiave: «Chiave Utente» (ck_…) e «Utente nascosto» (cs_…).'); return }
+    if (ck.startsWith('cs_') && cs.startsWith('ck_')) [ck, cs] = [cs, ck]   // incollati al contrario
+    if (!ck.startsWith('ck_') || !cs.startsWith('cs_')) { setErrFinestra('La «Chiave Utente» inizia con ck_ e l\'«Utente nascosto» con cs_: copiali dalla pagina che compare dopo «Genera chiave API».'); return }
+    setConnecting(true); setErrFinestra('')
     try {
       const res = await fetch('/api/integrazioni/woocommerce/connetti', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(wooForm),
+        body: JSON.stringify({ ...wooForm, consumer_key: ck, consumer_secret: cs }),
       })
       const d = await res.json()
       setConnecting(false)
-      if (d.error) { setMsg({ type: 'err', text: d.error }); return }
+      if (d.error) { setErrFinestra(d.error); return }
       setMsg({ type: 'ok', text: 'WooCommerce collegato con successo' })
       setWooForm({ nome_negozio: '', url: '', consumer_key: '', consumer_secret: '' })
       setModal(false); load()
     } catch {
-      setConnecting(false); setMsg({ type: 'err', text: 'Errore di connessione' })
+      setConnecting(false); setErrFinestra('Errore di connessione: riprova tra poco.')
     }
   }
 
@@ -192,8 +210,8 @@ export default function IntegrazioniPage() {
   }
 
   async function connettiPrestashop() {
-    if (!psForm.url || !psForm.webservice_key) { setMsg({ type: 'err', text: 'URL e Webservice Key obbligatori' }); return }
-    setConnecting(true)
+    if (!psForm.url || !psForm.webservice_key) { setErrFinestra('URL e Webservice Key obbligatori'); return }
+    setConnecting(true); setErrFinestra('')
     try {
       const res = await fetch('/api/integrazioni/prestashop/connetti', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -201,12 +219,12 @@ export default function IntegrazioniPage() {
       })
       const d = await res.json()
       setConnecting(false)
-      if (d.error) { setMsg({ type: 'err', text: d.error }); return }
+      if (d.error) { setErrFinestra(d.error); return }
       setMsg({ type: 'ok', text: 'PrestaShop collegato con successo' + (d.avviso ? '. Attenzione: ' + d.avviso : '') })
       setPsForm({ nome_negozio: '', url: '', webservice_key: '' })
       setModal(false); load()
     } catch {
-      setConnecting(false); setMsg({ type: 'err', text: 'Errore di connessione' })
+      setConnecting(false); setErrFinestra('Errore di connessione: riprova tra poco.')
     }
   }
 
@@ -510,21 +528,85 @@ export default function IntegrazioniPage() {
                 </>
               </div>
             ) : step === 'woocommerce' ? (
-              <div style={{ padding: '20px' }}>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Nome sito (opzionale)</label>
-                <input value={wooForm.nome_negozio} onChange={e => setWooForm(v => ({ ...v, nome_negozio: e.target.value }))} placeholder="Il mio negozio" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>URL sito *</label>
-                <input value={wooForm.url} onChange={e => setWooForm(v => ({ ...v, url: e.target.value }))} placeholder="https://ilmionegozio.com" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Consumer Key *</label>
-                <input value={wooForm.consumer_key} onChange={e => setWooForm(v => ({ ...v, consumer_key: e.target.value }))} placeholder="ck_..." style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none', marginBottom: '12px' }} />
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Consumer Secret *</label>
-                <input value={wooForm.consumer_secret} onChange={e => setWooForm(v => ({ ...v, consumer_secret: e.target.value }))} placeholder="cs_..." style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }} />
-                <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>Le chiavi API si generano in WooCommerce: Impostazioni &rarr; Avanzate &rarr; API REST &rarr; Aggiungi chiave (permessi Lettura/Scrittura).</p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
-                  <button onClick={() => setStep('platforms')} style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}>&larr; Indietro</button>
-                  <button onClick={connettiWoo} disabled={connecting} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, cursor: connecting ? 'default' : 'pointer', opacity: connecting ? .6 : 1 }}>{connecting ? 'Verifica…' : 'Collega'}</button>
-                </div>
-              </div>
+              // COME SI COLLEGA WOOCOMMERCE, PASSO PASSO. Prima c'era una riga sola («Impostazioni → Avanzate →
+              // API REST → Aggiungi chiave») e i campi «Consumer Key/Secret», che nel pannello WooCommerce in
+              // italiano si chiamano «Chiave Utente» e «Utente nascosto»: i clienti non trovavano dove creare
+              // la chiave ne' quali codici copiare (Lorenzo, 17/11/2026). Le parole fra «» sono quelle della
+              // traduzione ufficiale di WooCommerce (translate.wordpress.org). Il pulsante apre direttamente
+              // il modulo «Aggiungi chiave» del negozio scritto al passo 1.
+              (() => {
+                const radice = radiceNegozio(wooForm.url)
+                const paginaChiavi = radice ? radice + '/wp-admin/admin.php?page=wc-settings&tab=advanced&section=keys&create-key=1' : ''
+                const passo = (n: number, titolo: string) => (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 0 8px' }}>
+                    <span style={{ width: '22px', height: '22px', borderRadius: '50%', background: ACCENT, color: '#fff', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{n}</span>
+                    <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a' }}>{titolo}</span>
+                  </div>
+                )
+                // Etichette dei codici NON in maiuscolo: «ck_» e «cs_» si scrivono cosi', e in maiuscolo sembravano «CK_».
+                const etichetta = { display: 'block', fontSize: '12px', fontWeight: 600, color: '#6b7280', marginBottom: '6px' }
+                const campo = { width: '100%', boxSizing: 'border-box' as const, padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }
+                const testo = { fontSize: '12.5px', color: '#4b5563', lineHeight: 1.55, margin: '0 0 0 30px' }
+                return (
+                  <div style={{ padding: '20px' }}>
+                    {passo(1, 'Scrivi l\'indirizzo del tuo negozio')}
+                    <div style={{ marginLeft: '30px', marginBottom: '18px' }}>
+                      <input value={wooForm.url} onChange={e => setWooForm(v => ({ ...v, url: e.target.value }))} placeholder="https://www.ilmionegozio.it" style={campo} />
+                      <input value={wooForm.nome_negozio} onChange={e => setWooForm(v => ({ ...v, nome_negozio: e.target.value }))} placeholder="Nome da mostrare qui (facoltativo)" style={{ ...campo, marginTop: '8px' }} />
+                    </div>
+
+                    {passo(2, 'Crea la chiave su WooCommerce')}
+                    <div style={{ marginBottom: '18px' }}>
+                      <p style={testo}>
+                        {paginaChiavi
+                          ? <>Apri la pagina delle chiavi del tuo negozio ed entra con un utente <b>amministratore</b>:</>
+                          : <>Dal pannello di WordPress del negozio, con un utente <b>amministratore</b>, vai in <b>WooCommerce → Impostazioni → Avanzate → API REST</b> e premi <b>«Aggiungi chiave»</b> (la prima volta: «Crea una chiave API»). Se scrivi l&apos;indirizzo al passo 1 ti apriamo noi la pagina giusta.</>}
+                      </p>
+                      {paginaChiavi && (
+                        <a href={paginaChiavi} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', margin: '8px 0 8px 30px', background: '#fff', color: ACCENT, border: `1px solid ${ACCENT}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12.5px', fontWeight: 600, textDecoration: 'none' }}>
+                          Apri la pagina «Aggiungi chiave» del negozio ↗
+                        </a>
+                      )}
+                      <p style={testo}>Nel modulo «Dettagli chiave» scrivi:</p>
+                      <ul style={{ ...testo, margin: '4px 0 0 30px', paddingLeft: '18px', listStyle: 'disc' }}>
+                        <li><b>Descrizione</b>: MoovExpress</li>
+                        <li><b>Utente</b>: un amministratore del negozio (con un altro utente la chiave non vede gli ordini)</li>
+                        <li><b>Permessi</b>: <b>«Leggi/Scrivi»</b> (serve anche scrivere, per mandare al negozio il tracking)</li>
+                      </ul>
+                      <p style={{ ...testo, marginTop: '4px' }}>e premi <b>«Genera chiave API»</b>.</p>
+                    </div>
+
+                    {passo(3, 'Copia i due codici e incollali qui')}
+                    <div style={{ marginLeft: '30px', marginBottom: '6px' }}>
+                      <p style={{ fontSize: '12.5px', color: '#4b5563', lineHeight: 1.55, margin: '0 0 10px' }}>
+                        WooCommerce li mostra <b>una volta sola</b>: copiali subito. Se hai già chiuso la pagina, genera una nuova chiave.
+                      </p>
+                      <label style={etichetta}>«Chiave Utente» (Consumer key) — inizia con ck_</label>
+                      <input value={wooForm.consumer_key} onChange={e => setWooForm(v => ({ ...v, consumer_key: e.target.value }))} placeholder="ck_..." style={{ ...campo, marginBottom: '12px' }} />
+                      <label style={etichetta}>«Utente nascosto» (Consumer secret) — inizia con cs_</label>
+                      <input value={wooForm.consumer_secret} onChange={e => setWooForm(v => ({ ...v, consumer_secret: e.target.value }))} placeholder="cs_..." style={campo} />
+                    </div>
+
+                    <details style={{ margin: '14px 0 0 30px', fontSize: '12.5px', color: '#4b5563', lineHeight: 1.55 }}>
+                      <summary style={{ cursor: 'pointer', fontWeight: 600, color: '#374151' }}>Non si collega?</summary>
+                      <ul style={{ margin: '6px 0 0', paddingLeft: '18px', listStyle: 'disc' }}>
+                        <li><b>Chiave rifiutata</b>: rifai la chiave con «Utente» amministratore e «Permessi» «Leggi/Scrivi», e copia i due codici della stessa chiave.</li>
+                        <li><b>«Pagina web invece dei dati»</b>: controlla l&apos;indirizzo; poi in WordPress, Impostazioni → Permalink, scegli una struttura diversa da «Semplice».</li>
+                        <li><b>Sito protetto da Cloudflare</b>: in Cloudflare consenti il percorso /wp-json/wc/ (Security → WAF, regola «Skip»), oppure disattiva «Bot Fight Mode».</li>
+                        <li><b>Gli ordini non arrivano</b>: importiamo gli ordini «In lavorazione» e «In sospeso». Se usi stati tuoi, scrivili nel campo «Stati ordine da importare» del negozio, dopo il collegamento.</li>
+                      </ul>
+                    </details>
+
+                    {errFinestra && (
+                      <div style={{ marginTop: '14px', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', lineHeight: 1.5, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c' }}>{errFinestra}</div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
+                      <button onClick={() => { setStep('platforms'); setErrFinestra('') }} style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}>&larr; Indietro</button>
+                      <button onClick={connettiWoo} disabled={connecting} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, cursor: connecting ? 'default' : 'pointer', opacity: connecting ? .6 : 1 }}>{connecting ? 'Verifica…' : 'Collega'}</button>
+                    </div>
+                  </div>
+                )
+              })()
             ) : (
               <div style={{ padding: '20px' }}>
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Nome sito (opzionale)</label>
@@ -534,6 +616,9 @@ export default function IntegrazioniPage() {
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '6px' }}>Webservice Key *</label>
                 <input value={psForm.webservice_key} onChange={e => setPsForm(v => ({ ...v, webservice_key: e.target.value }))} placeholder="Chiave API PrestaShop" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: '13px', border: '1px solid #ddd', borderRadius: '8px', color: '#1a1a1a', outline: 'none' }} />
                 <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', lineHeight: 1.5 }}>La Webservice Key si genera in PrestaShop: Parametri Avanzati &rarr; Webservice &rarr; Aggiungi nuova chiave. Permessi da spuntare: <b>Visualizza (GET)</b> su orders, addresses, customers, states, countries, order_states, order_carriers; <b>Modifica (PUT)</b> su order_carriers; <b>Aggiungi (POST)</b> su order_histories.</p>
+                {errFinestra && (
+                  <div style={{ marginTop: '14px', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', lineHeight: 1.5, border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c' }}>{errFinestra}</div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginTop: '18px' }}>
                   <button onClick={() => setStep('platforms')} style={{ background: '#fff', color: '#555', border: '1px solid #ddd', borderRadius: '8px', padding: '9px 16px', fontSize: '13px', cursor: 'pointer' }}>&larr; Indietro</button>
                   <button onClick={connettiPrestashop} disabled={connecting} style={{ background: ACCENT, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '13px', fontWeight: 600, cursor: connecting ? 'default' : 'pointer', opacity: connecting ? .6 : 1 }}>{connecting ? 'Verifica…' : 'Collega'}</button>
