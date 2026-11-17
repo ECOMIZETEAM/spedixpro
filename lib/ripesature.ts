@@ -79,13 +79,17 @@ function normalizza(riga: any): Record<string, any> {
 // (ripesatura + eventuale fuori sagoma + eventuale reso, tutto insieme). Il CODICE non e' la LDV: e'
 // il codice provider (raw_response.code) — la rotta lo risolve in tracking_number.
 const RE_SP_CODE  = /Sovrapprezzo spedizione:\s*([0-9A-Za-z]+)/i
-const RE_SP_REALE = /peso reale:\s*([0-9]+(?:\.[0-9]+)?)/i
-const RE_SP_VOL   = /peso volumetrico:\s*([0-9]+(?:\.[0-9]+)?)/i
+// I PESI ARRIVANO COL PUNTO O CON LA VIRGOLA: «Peso reale: 14.9» ma anche «peso reale: 20,40 kg» (quasi tutti gli addebiti
+// del 28-29/10/2026). Letti col solo punto, 20,40 diventava 20: 229 sovrapprezzi su 1.516 riprezzati sotto in una fascia
+// piu' bassa di quella che il fornitore ci aveva fatto pagare (10,85 → 10, 5,6 → 5). Si accettano tutti e due (pesoSP).
+const RE_SP_REALE = /peso reale:\s*([0-9]+(?:[.,][0-9]+)?)/i
+const RE_SP_VOL   = /peso volumetrico:\s*([0-9]+(?:[.,][0-9]+)?)/i
 const RE_SP_DIM   = /(?:dim:|dimensioni:)\s*([0-9.]+x[0-9.]+x[0-9.]+)/i
 // UPS: il fornitore non scrive «peso reale» ne' «volumetrico» ma il PESO TASSATO, quello su cui UPS ha gia' fatto pagare
 // (il maggiore fra i due, arrotondato al mezzo chilo). Senza questa lettura il pacco restava senza peso e la riga finiva
 // tutta a carico di chi carica: sul file del 30/10/2026 di MULTI 65 pacchi UPS, 486,46 €.
-const RE_SP_TASSATO = /peso tassato:\s*([0-9]+(?:\.[0-9]+)?)/i
+const RE_SP_TASSATO = /peso tassato:\s*([0-9]+(?:[.,][0-9]+)?)/i
+const pesoSP = (v: any) => Number(String(v ?? '').replace(',', '.')) || 0
 // Amount di SpediamoPro: punto decimale ("7.45"), importi piccoli (nessuna migliaia).
 const importoSP = (v: any) => Math.abs(Number(String(v ?? '0').replace(',', '.')) || 0)
 
@@ -284,9 +288,9 @@ function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: numbe
     const details = g.details.join(' + ')
     const importo = Math.round(g.importo * 100) / 100
     const reale = RE_SP_REALE.exec(details); const vol = RE_SP_VOL.exec(details); const dim = RE_SP_DIM.exec(details)
-    const pesoReale = reale ? Number(reale[1]) : 0
-    const pesoVol   = vol ? Number(vol[1]) : 0
-    const tassati = g.details.map(d => RE_SP_TASSATO.exec(d)).filter(Boolean).map(m => Number((m as RegExpExecArray)[1]))
+    const pesoReale = reale ? pesoSP(reale[1]) : 0
+    const pesoVol   = vol ? pesoSP(vol[1]) : 0
+    const tassati = g.details.map(d => RE_SP_TASSATO.exec(d)).filter(Boolean).map(m => pesoSP((m as RegExpExecArray)[1]))
     const pesoTassato = tassati.length ? Math.max(...tassati) : 0
     const mis = dim ? misure(dim[1]) : { lunghezza: 0, larghezza: 0, altezza: 0 }
     const haDim = mis.lunghezza > 0 && mis.larghezza > 0 && mis.altezza > 0
@@ -311,7 +315,7 @@ function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: numbe
       // 0,55 e la ripesatura un'altra da 2,52; sommandole prima, la tariffa a chili dava 2,03 di supplemento e sotto si
       // sarebbe chiesto 1,48 € in piu' di quanto addebitato per quella voce.
       supplementi: Math.round(g.details.reduce((tot, d, i) => {
-        const kgRiga = Number(RE_SP_TASSATO.exec(d)?.[1]) || pesoTassato || collo.peso
+        const kgRiga = pesoSP(RE_SP_TASSATO.exec(d)?.[1]) || pesoTassato || collo.peso
         const tariffa = SUPPLEMENTI_SP.filter(s2 => s2.re.test(d)).reduce((a, s2) => a + (s2.euroKg ? s2.euroKg * kgRiga : s2.euro), 0)
         return tot + Math.min(Math.round(tariffa * 100) / 100, g.importi[i])
       }, 0) * 100) / 100,
