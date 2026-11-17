@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { frasePesoPagato } from '@/lib/peso-pagato-frase'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 
 const ACCENT = '#f97316'
@@ -121,11 +122,13 @@ export default function NetworkRicevutiPage() {
     // Anche le tue spedizioni proprie dello stesso addebito: il file deve tornare col totale del mittente.
     const righe = [...b.righe, ...(b.proprie || [])].map((r: any) => {
       const vol = Number(r.peso_volume_reale) || 0, reale = Number(r.peso_reale) || 0
+      // Multicollo: il peso su cui si paga, collo per collo (peso_pagato dalla rotta), non i totali.
+      const pp = r.peso_pagato
       return {
         'LDV': r.numero_spedizione,
-        'Peso dichiarato (kg)': Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0),
-        'Peso rilevato (kg)': Math.max(reale, vol),
-        'Volumetrico': vol > reale ? 'si' : '',
+        'Peso dichiarato (kg)': pp ? Math.round(Number(pp.prima) * 100) / 100 : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0),
+        'Peso rilevato (kg)': pp ? Math.round(Number(pp.dopo) * 100) / 100 : Math.max(reale, vol),
+        'Volumetrico': pp ? frasePesoPagato(pp) : vol > reale ? 'si' : '',
         'Costo prima (€)': Number(r.costo_iniziale) || 0,
         'Costo dopo (€)': Number(r.costo_finale) || 0,
         'Addebito (€)': Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100,
@@ -426,11 +429,19 @@ export default function NetworkRicevutiPage() {
                             {(() => {
                               const vol = Number(r.peso_volume_reale) || 0
                               const reale = Number(r.peso_reale) || 0
-                              const fatt = Math.max(reale, vol)
+                              // MULTICOLLO: si paga collo per collo (peso_pagato, dalla rotta), e i totali qui sotto
+                              // ingannano: 3UW1WLJ093303 diceva «27,2 → 27,9 kg (vol.)», sotto i 30, con 6,28 € di
+                              // addebito; si paga 28,88 → 30,60 kg, oltre i 30. Sulle monocollo il conto e' quello.
+                              const pp = r.peso_pagato
+                              const fatt = pp ? Number(pp.dopo) : Math.max(reale, vol)
                               // Il "prima" è il FATTURATO iniziale = max(reale, volume) dichiarati (non il solo
                               // peso_iniziale, che ora è il reale dichiarato): così è coerente col "dopo" (fatt).
-                              const iniz = Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0)
-                              return <td style={td}>{iniz.toFixed(1)} → <strong>{fatt.toFixed(1)}</strong> kg{vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
+                              const iniz = pp ? Number(pp.prima) : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0)
+                              const kg2 = (n: number) => (Math.round(n * 100) / 100).toLocaleString('it-IT')
+                              return <td style={td}>{pp ? kg2(iniz) : iniz.toFixed(1)} → <strong>{pp ? kg2(fatt) : fatt.toFixed(1)}</strong> kg
+                                {pp ? <span title={frasePesoPagato(pp)} style={{display:'block',fontSize:'10px',color:'#1e40af'}}>
+                                    collo per collo{(pp.colli || []).length > 1 ? `: ${pp.colli.map(kg2).join(' + ')}` : ''}</span>
+                                  : vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
                             })()}
                             <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
                             {(() => {

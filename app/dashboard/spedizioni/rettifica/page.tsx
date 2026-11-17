@@ -4,6 +4,7 @@ import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { giorniFaRoma, giornoRoma } from '@/lib/date-roma'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
+import { frasePesoPagato } from '@/lib/peso-pagato-frase'
 import { FERMA } from '@/lib/ripesature-controllo'
 import { descriviStessoPrezzo } from '@/lib/rettifiche-perche'
 
@@ -730,8 +731,12 @@ export default function RettificaCostiPage() {
     const pRe  = Number(r.peso_reale)||0,    pvRe  = Number(r.peso_volume_reale)||0
     const volIni = r.base_prima ? r.base_prima === 'volume' : pvIni > pIni
     const volRe  = r.base_dopo  ? r.base_dopo  === 'volume' : pvRe > pRe
-    const cIni = (on:boolean) => ({padding:'8px 10px', color: on?'#1a1a1a':'#b0b4bb', fontWeight: on?700:400})
-    const cRe  = (on:boolean) => ({padding:'8px 10px', color: on?'#dc2626':'#b0b4bb', fontWeight: on?700:400})
+    // MULTICOLLO: le quattro colonne sono i totali (somma dei pesi, somma dei volumi) e nessuno dei due e' il peso su
+    // cui si paga, che e' collo per collo (peso_pagato, dalla rotta). Restano tutte in grigio e il peso vero si scrive
+    // sotto la LDV: 3UW1WLJ093303 metteva in evidenza 27,17 → 27,91 kg, sotto i 30, mentre si paga 28,88 → 30,60.
+    const pp = r.peso_pagato && Number(r.peso_pagato.dopo) > 0 ? r.peso_pagato : null
+    const cIni = (on:boolean) => ({padding:'8px 10px', color: on && !pp?'#1a1a1a':'#b0b4bb', fontWeight: on && !pp?700:400})
+    const cRe  = (on:boolean) => ({padding:'8px 10px', color: on && !pp?'#dc2626':'#b0b4bb', fontWeight: on && !pp?700:400})
     return (
       <tr key={r.id} style={{borderBottom:'1px solid #d1d5db',background:isSelected?'#fff7ed':'#fff'}}>
         <td style={{padding:'8px 10px'}}>
@@ -790,6 +795,11 @@ export default function RettificaCostiPage() {
           )}
           {r.perche_mio?.tipo === 'stesso_prezzo' && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#475569',whiteSpace:'normal',maxWidth:'380px',lineHeight:1.4}}>= {descriviStessoPrezzo(r.perche_mio.conto)}</div>
+          )}
+          {pp && (
+            <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#1e40af',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'3px 7px',whiteSpace:'normal',maxWidth:'380px',lineHeight:1.4}}>
+              ⓘ <strong>{frasePesoPagato(pp)}</strong>{pp.nota ? <span>{pp.nota}</span> : null}
+            </div>
           )}
           {r.nota_peso && (
             <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:500,color:'#1e40af',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'2px 6px',whiteSpace:'normal',maxWidth:'300px'}}>

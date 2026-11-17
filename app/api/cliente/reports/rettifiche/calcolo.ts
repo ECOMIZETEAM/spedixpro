@@ -15,6 +15,7 @@ export type RigaRettifica = {
   pesoVolDichiarato: number | null
   pesoReale: number | null
   pesoVolReale: number | null
+  notaPeso: string                // multicollo: il peso su cui si paga, collo per collo ('' sulle altre)
   costoIniziale: number | null
   costoFinale: number | null
   differenza: number              // addebito positivo, accredito negativo
@@ -83,13 +84,28 @@ export async function righeRettificheCliente(
   // senza costo_fornitore: le colonne si scelgono qui. La regola di lettura del database (al 30/10/2026)
   // lascerebbe al cliente le sue righe con TUTTE le colonne, costo del fornitore compreso.
   const rett = await leggiPerBlocchi<any>(ids, (b) => adminDb.from('rettifiche')
-    .select('id,spedizione_id,numero_spedizione,costo_iniziale,costo_finale,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,created_at')
+    .select('id,spedizione_id,cliente_id,numero_spedizione,costo_iniziale,costo_finale,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,colli_ripesati,fattore_volume,created_at')
     .eq('cliente_id', clienteId).eq('confermata', true).in('spedizione_id', b)
     .order('created_at', { ascending: true }).order('id', { ascending: true }))
   // Piu' righe confermate sulla stessa spedizione (es. 3UW1WLJ008099, ripesata due volte): vale
   // l'ultima per data, che e' quella del prezzo rimasto.
   const rettDi = new Map<string, any>()
   for (const r of rett) rettDi.set(r.spedizione_id, r)
+  // MULTICOLLO: il peso su cui si paga e' collo per collo (lib/rettifiche-peso-pagato), e le quattro colonne dei
+  // totali non lo dicono. 3UW1WLJ093303 (MD CONSULTING): volume 27,17 → 27,91 kg, sotto i 30, con 7,92 € di
+  // rettifica; si paga 28,88 → 30,60 kg, oltre i 30. Solo chili: lo legge il cliente.
+  const notaPesoDi = new Map<string, string>()
+  {
+    const multi = [...rettDi.values()].filter((r: any) => Array.isArray(r.colli_ripesati) && r.colli_ripesati.length > 1)
+    if (multi.length) {
+      try {
+        const { pesiPagati } = await import('@/lib/rettifiche-peso-pagato')
+        const { frasePesoPagato } = await import('@/lib/peso-pagato-frase')
+        const { pesiDi } = await pesiPagati(adminDb, multi)
+        for (const r of multi) { const fr = frasePesoPagato(pesiDi.get(r.id)); if (fr) notaPesoDi.set(r.id, fr) }
+      } catch (e: any) { console.error('[REPORT RETTIFICHE CLIENTE] peso su cui si paga:', e?.message) }
+    }
+  }
 
   const num = (v: any) => (v === null || v === undefined ? null : Number(v))
   const righe: RigaRettifica[] = []
@@ -112,6 +128,7 @@ export async function righeRettificheCliente(
       pesoVolDichiarato: r ? num(r.peso_volume_iniziale) : null,
       pesoReale: r ? num(r.peso_reale) : null,
       pesoVolReale: r ? num(r.peso_volume_reale) : null,
+      notaPeso: r ? notaPesoDi.get(r.id) || '' : '',
       costoIniziale: r ? num(r.costo_iniziale) : null,
       costoFinale: r ? num(r.costo_finale) : null,
       // Il segno resta: l'addebito (movimento negativo) esce positivo, l'ACCREDITO esce negativo e

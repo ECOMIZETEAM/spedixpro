@@ -48,7 +48,7 @@ export default function ReportRettificheCliente() {
           'Peso reale': r.pesoReale ?? '', 'Peso/volume reale': r.pesoVolReale ?? '',
           'Costo iniziale': r.costoIniziale ?? '', 'Costo finale': r.costoFinale ?? '',
           'Differenza': r.differenza,
-          'Note': r.dettaglio ? '' : r.descrizione,
+          'Note': r.dettaglio ? (r.notaPeso || '') : r.descrizione,
         }))
         rows.push({})
         rows.push({ 'N. Spedizione': 'TOTALE', 'Differenza': totale })
@@ -86,14 +86,15 @@ export default function ReportRettificheCliente() {
           headStyles: { fillColor: [255,255,255], textColor: [80,80,80], fontStyle: 'bold', lineWidth: 0 },
           head: [['N. Spedizione','Data','Peso dich.','Peso/vol dich.','Peso reale','Peso/vol reale','Costo iniziale','Costo finale','Differenza']],
           body: [
-            ...righe.map((r: any) => r.dettaglio ? [
+            // Multicollo: sotto la riga, il peso su cui si paga davvero (i quattro pesi sono i totali dei colli).
+            ...righe.flatMap((r: any) => r.dettaglio ? [[
               r.numero, dataIt(r.data),
               kg(r.pesoDichiarato), kg(r.pesoVolDichiarato), kg(r.pesoReale), kg(r.pesoVolReale),
               euro(r.costoIniziale), euro(r.costoFinale), euro(r.differenza),
-            ] : [
+            ], ...(r.notaPeso ? [['', { content: r.notaPeso, colSpan: 8, styles: { fontSize: 6.5, textColor: [30,64,175] } }]] : [])] : [[
               // Nessuna ripesatura dietro (supplemento, correzione): la descrizione dell'addebito.
               r.numero, dataIt(r.data), { content: r.descrizione || 'Rettifica', colSpan: 6 }, euro(r.differenza),
-            ]),
+            ]]),
             [{ content: 'TOTALE', colSpan: 8, styles: { fontStyle: 'bold', halign: 'right' } }, { content: euro(totale), styles: { fontStyle: 'bold' } }],
           ] as any,
         })

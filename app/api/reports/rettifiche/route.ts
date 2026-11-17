@@ -126,7 +126,7 @@ async function righeRettifiche(admin: any, viewerId: string, sogg: Soggetti, dal
     // Righe di `rettifiche` CONFERMATE (quelle aperte non hanno mosso un euro). Mai costo_fornitore: e'
     // il costo a monte, non quello del destinatario.
     aBlocchi(spedIds, (b) => fetchAllStretto(() => admin.from('rettifiche')
-      .select('id,spedizione_id,master_id,cliente_id,target_master_id,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,supplementi_nomi,created_at')
+      .select('id,spedizione_id,master_id,cliente_id,target_master_id,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,colli_ripesati,fattore_volume,costo_iniziale,costo_finale,differenza,fuori_sagoma,supplementi_nomi,created_at')
       .eq('confermata', true).in('spedizione_id', b).order('created_at', { ascending: true }).order('id', { ascending: true }))),
     // Numero e contratto della spedizione (MAI colli_dettaglio: contiene le etichette in base64).
     aBlocchi(spedIds, async (b) => {
@@ -142,6 +142,21 @@ async function righeRettifiche(admin: any, viewerId: string, sogg: Soggetti, dal
     rettPerSped.get(r.spedizione_id)!.push(r)
   }
   const spedById = new Map<string, any>(speds.map((s: any) => [s.id, s]))
+  // MULTICOLLO: il peso su cui si paga e' collo per collo (lib/rettifiche-peso-pagato), e le quattro colonne dei
+  // totali non lo dicono: va nella causale. 3UW1WLJ093303 (MD CONSULTING di Ecomize Solution): volume 27,17 → 27,91
+  // kg, sotto i 30, con 7,92 € di rettifica; si paga 28,88 → 30,60 kg, oltre i 30.
+  const notaPesoDi = new Map<string, string>()
+  {
+    const multi = (rett as any[]).filter((r: any) => Array.isArray(r.colli_ripesati) && r.colli_ripesati.length > 1)
+    if (multi.length) {
+      try {
+        const { pesiPagati } = await import('@/lib/rettifiche-peso-pagato')
+        const { frasePesoPagato } = await import('@/lib/peso-pagato-frase')
+        const { pesiDi } = await pesiPagati(admin, multi)
+        for (const r of multi) { const fr = frasePesoPagato(pesiDi.get(r.id)); if (fr) notaPesoDi.set(r.id, fr) }
+      } catch (e: any) { console.error('[REPORT RETTIFICHE] peso su cui si paga:', e?.message) }
+    }
+  }
 
   const righe: any[] = []
   for (const g of gruppi.values()) {
@@ -175,6 +190,7 @@ async function righeRettifiche(admin: any, viewerId: string, sogg: Soggetti, dal
     // peso/misure, POD) e' la descrizione del movimento; con la riga, il supplemento fuori sagoma e gli
     // eventuali altri movimenti dello stesso pacco. Senza nomi dei fornitori tecnici: il file va al cliente.
     const causali: string[] = []
+    if (dett && notaPesoDi.has(dett.id)) causali.push(notaPesoDi.get(dett.id)!)
     if (dett && Number(dett.fuori_sagoma) > 0) {
       const n = String(dett.supplementi_nomi || '').trim()
       causali.push(`Supplemento${n ? ' ' + n : ''} € ${Number(dett.fuori_sagoma).toFixed(2)}`)

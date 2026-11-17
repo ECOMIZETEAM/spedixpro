@@ -39,7 +39,7 @@ export async function GET(_req: NextRequest) {
     }
   } catch { /* best-effort: non deve mai bloccare la lista */ }
 
-  const COLONNE = 'id,master_id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,confermata_il,stato,propagazione,perche,created_at,masters:master_id(nome)'
+  const COLONNE = 'id,master_id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,colli_ripesati,fattore_volume,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,confermata_il,stato,propagazione,perche,created_at,masters:master_id(nome)'
   const TETTO_STORICHE = 500
   const [rett, cod, resi] = await Promise.all([
     // SI VEDE SOLO QUELLO CHE E' GIA' STATO ADDEBITATO.
@@ -127,6 +127,20 @@ export async function GET(_req: NextRequest) {
     for (const s of (ss || [])) if ((s as any).cliente_id == null && (s as any).master_id === mio) proprieSet.add((s as any).id)
   }
   for (const r of rettRows) r.propria = !!(r.spedizione_id && proprieSet.has(r.spedizione_id))
+
+  // IL PESO SU CUI SI PAGA, SULLE MULTICOLLO (lib/rettifiche-peso-pagato, lo stesso della Conferma e di Rettifica
+  // Costi): i totali della riga non lo dicono, perche' si paga collo per collo. 3UW1WLJ093303 arrivava a Ecomize
+  // Solution come «27,2 → 27,9 kg (vol.)» con 6,28 € di addebito; si paga 28,88 → 30,60 kg, oltre i 30.
+  // I colli ripesati servono solo a questo conto: non escono dalla rotta.
+  const multi = rettRows.filter(r => Array.isArray(r.colli_ripesati) && r.colli_ripesati.length > 1)
+  if (multi.length) {
+    try {
+      const { pesiPagati } = await import('@/lib/rettifiche-peso-pagato')
+      const { pesiDi } = await pesiPagati(adminDb, multi)
+      for (const r of multi) { const p = pesiDi.get(r.id); if (p && p.dopo > 0) r.peso_pagato = p }
+    } catch (e: any) { console.error('[NETWORK] peso su cui si paga:', e?.message) }
+  }
+  for (const r of rettRows) delete r.colli_ripesati
 
   return NextResponse.json({
     rettifiche: raggruppaPerInvio(rettRows, !!(rett as any).storicheTagliate),
