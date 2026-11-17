@@ -39,6 +39,10 @@
       "schedule": "40 5 * * *"
     },
     {
+      "path": "/api/cron/gls-riconciliazione",
+      "schedule": "15 4 * * *"
+    },
+    {
       "path": "/api/cron/addebiti-code",
       "schedule": "5,15,25,35,45,55 * * * *"
     },
