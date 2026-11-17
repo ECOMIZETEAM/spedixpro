@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 
 // PAGINA DEL CODICE (verifica in due passaggi). Ci arriva:
@@ -38,6 +38,14 @@ function salvaAttivazione(a: Attivazione | null) {
     if (a) sessionStorage.setItem(CHIAVE_ATTIVAZIONE, JSON.stringify(a))
     else sessionStorage.removeItem(CHIAVE_ATTIVAZIONE)
   } catch { /* senza memoria della scheda si perde solo il QR al ricaricamento: resta la ripresa */ }
+}
+
+// Le attivazioni iniziate e non concluse, la piu' recente per prima.
+type Fattore = { id: string; status: string; factor_type: string; created_at: string }
+function inSospeso(tutti: Fattore[] | undefined): Fattore[] {
+  return (tutti || [])
+    .filter(f => f.status === 'unverified' && f.factor_type === 'totp')
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
 }
 
 // Una sola attivazione alla volta: quelle lasciate a meta' si tolgono (con lo stesso nome Supabase
@@ -89,8 +97,13 @@ export default function VerificaDuePassaggi() {
     setFactorId(a.id); setQr(a.qr); setSegreto(a.segreto); setUri(a.uri); setFase('attiva')
   }
 
+  // Un avvio solo per pagina: due avvii insieme si cancellavano l'attivazione a vicenda (React in
+  // sviluppo lo fa sempre, montando due volte; trovato provando questa pagina il 17/11/2026).
+  const avviata = useRef(false)
   useEffect(() => {
-    (async () => {
+    if (avviata.current) return
+    avviata.current = true
+    ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { setFase('senza-sessione'); return }
       try {
@@ -105,16 +118,19 @@ export default function VerificaDuePassaggi() {
 
       // Da attivare. Se c'e' gia' un'attivazione iniziata si riprende quella (vedi sopra): con il suo
       // QR se questa scheda lo ricorda, altrimenti chiedendo il codice che l'app gia' mostra.
-      const inCorso = (data?.all || [])
-        .filter(f => f.status === 'unverified' && f.factor_type === 'totp')
-        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      const inCorso = inSospeso(data?.all)
       const ricordata = leggiAttivazione()
       if (ricordata && inCorso.some(f => f.id === ricordata.id)) { mostra(ricordata); return }
       if (inCorso.length) { setFactorId(inCorso[0].id); setFase('ripresa'); return }
 
       const nuova = await creaAttivazione(supabase)
-      if (!nuova) { setErrore('Non riesco a preparare la verifica. Ricarica la pagina tra qualche secondo.'); setFase('errore'); return }
-      mostra(nuova)
+      if (nuova) { mostra(nuova); return }
+      // Un'altra pagina l'ha creata nello stesso istante (con lo stesso nome Supabase rifiuta la
+      // seconda): si riprende quella invece di dare errore.
+      const { data: dopo } = await supabase.auth.mfa.listFactors()
+      const altra = inSospeso(dopo?.all)[0]
+      if (altra) { setFactorId(altra.id); setFase('ripresa'); return }
+      setErrore('Non riesco a preparare la verifica. Ricarica la pagina tra qualche secondo.'); setFase('errore')
     })()
   }, [supabase])
 
