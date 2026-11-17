@@ -23,6 +23,9 @@ const moduloVuoto = (): Modulo => ({ target: '', importo: '', giorno: oggiRoma()
 const campo: any = { width: '100%', padding: '9px 12px', border: '1px solid #ddd', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box', color: '#1a1a1a', background: '#fff' }
 const etichetta: any = { fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '6px', display: 'block' }
 
+const PER_PAGINA = 10
+const bottonePagina: any = { padding: '5px 10px', border: '1px solid #d1d5db', borderRadius: '5px', background: '#fff', fontSize: '12px', cursor: 'pointer' }
+
 const STATI: [string, string][] = [['', 'Tutti'], ['alert', '⚠ Solo alert'], ['in_attesa', 'In attesa bonifico'], ['effettuato', 'Bonifico effettuato'], ['arrivato', 'Arrivati']]
 
 // Un blocco del Check Ricariche: le proprie ricariche e, per il master che segue i suoi sotto-master (Ecomize
@@ -32,6 +35,8 @@ type Blocco = { chiave: string, nome: string, righe: any[], riepilogo: any, sott
 export default function CheckRicariche() {
   const [blocchi, setBlocchi] = useState<Blocco[]>([])
   const [scelto, setScelto] = useState('')
+  // Pagine da 10 (Lorenzo, 17/11): ogni blocco tiene la sua, cosi' passando da un blocco all'altro non si perde il punto.
+  const [pagine, setPagine] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [stato, setStato] = useState('')
   const [cerca, setCerca] = useState('')
@@ -64,7 +69,9 @@ export default function CheckRicariche() {
       })
       .catch(() => { setLoading(false); setErr('Errore nel caricamento') })
   }
-  useEffect(() => { carica() }, [stato])
+  // Un filtro nuovo riparte dalla prima pagina; una spunta no (carica() dopo un'azione lascia la pagina dov'e').
+  useEffect(() => { setPagine({}); carica() }, [stato])
+  const cercaOra = () => { setPagine({}); carica() }
 
   async function azione(id: string, az: string) {
     if (facendo) return   // guardia anti doppio-click: un'azione alla volta
@@ -153,6 +160,10 @@ export default function CheckRicariche() {
   const righe = blocco?.righe || []
   const riep = blocco?.riepilogo || null
   const delSotto = !!blocco?.sotto
+  const totalePagine = Math.max(1, Math.ceil(righe.length / PER_PAGINA))
+  const paginaCorr = Math.min(pagine[blocco?.chiave ?? ''] || 1, totalePagine)
+  const vaiA = (n: number) => setPagine(p => ({ ...p, [blocco?.chiave ?? '']: Math.max(1, Math.min(totalePagine, n)) }))
+  const visibili = righe.slice((paginaCorr - 1) * PER_PAGINA, paginaCorr * PER_PAGINA)
   const giorno = (s?: string) => s ? new Date(s).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Rome' }) : ''
 
   const dataOra = (s: any) => { try { return new Date(s).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch { return '' } }
@@ -279,9 +290,9 @@ export default function CheckRicariche() {
         {STATI.map(([v, l]) => (
           <button key={v} onClick={() => setStato(v)} style={{ ...btnSec, background: stato === v ? '#1a1a1a' : '#fff', color: stato === v ? '#fff' : '#555', borderColor: stato === v ? '#1a1a1a' : '#d5d5d5', padding: '7px 12px' }}>{l}</button>
         ))}
-        <input value={cerca} onChange={e => setCerca(e.target.value)} onKeyDown={e => e.key === 'Enter' && carica()} placeholder="🔍 cerca cliente / sotto-master…"
+        <input value={cerca} onChange={e => setCerca(e.target.value)} onKeyDown={e => e.key === 'Enter' && cercaOra()} placeholder="🔍 cerca cliente / sotto-master…"
           style={{ marginLeft: 'auto', padding: '7px 11px', border: '1px solid #d5d5d5', borderRadius: '6px', fontSize: '13px', minWidth: '220px' }} />
-        <button onClick={carica} style={btnSec}>Cerca</button>
+        <button onClick={cercaOra} style={btnSec}>Cerca</button>
       </div>
 
       <div style={card}>
@@ -304,7 +315,7 @@ export default function CheckRicariche() {
                 <th style={{ ...th, textAlign: 'right' }}>Azioni</th>
               </tr></thead>
               <tbody>
-                {righe.map(r => (
+                {visibili.map(r => (
                   <tr key={r.id} style={{ background: r.alert ? '#fff7f7' : undefined }}>
                     <td style={{ ...td, whiteSpace: 'nowrap', color: '#555' }}>{dataOra(r.ricaricato_il)}</td>
                     <td style={td}>
@@ -355,6 +366,22 @@ export default function CheckRicariche() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && righe.length > PER_PAGINA && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '1px solid #f0f0f0', flexWrap: 'wrap', gap: '8px' }}>
+            <span style={{ fontSize: '12px', color: '#666' }}>{(paginaCorr - 1) * PER_PAGINA + 1}–{Math.min(paginaCorr * PER_PAGINA, righe.length)} di {righe.length}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+              <button onClick={() => vaiA(paginaCorr - 1)} disabled={paginaCorr <= 1} style={{ ...bottonePagina, color: paginaCorr <= 1 ? '#ccc' : '#1a1a1a', cursor: paginaCorr <= 1 ? 'default' : 'pointer' }}>Precedente</button>
+              {Array.from({ length: totalePagine }, (_, i) => i + 1).filter(n => n === 1 || n === totalePagine || Math.abs(n - paginaCorr) <= 1).map((n, i, l) => (
+                <span key={n} style={{ display: 'flex', alignItems: 'center' }}>
+                  {i > 0 && l[i - 1] !== n - 1 && <span style={{ padding: '0 4px', color: '#bbb', fontSize: '12px' }}>…</span>}
+                  <button onClick={() => vaiA(n)} style={{ ...bottonePagina, minWidth: '30px', borderColor: n === paginaCorr ? '#f97316' : '#d1d5db',
+                    background: n === paginaCorr ? '#f97316' : '#fff', color: n === paginaCorr ? '#fff' : '#1a1a1a', fontWeight: n === paginaCorr ? 700 : 400 }}>{n}</button>
+                </span>
+              ))}
+              <button onClick={() => vaiA(paginaCorr + 1)} disabled={paginaCorr >= totalePagine} style={{ ...bottonePagina, color: paginaCorr >= totalePagine ? '#ccc' : '#1a1a1a', cursor: paginaCorr >= totalePagine ? 'default' : 'pointer' }}>Successivo</button>
+            </div>
           </div>
         )}
       </div>
