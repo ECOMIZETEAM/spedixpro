@@ -5,6 +5,22 @@ import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
 import { clientiAutodistintaSpenta, righeFermePerAutodistinta, righeDaRiprendereDopoChiusuraAMano } from '@/lib/autodistinta'
+import { giornoRoma, giorniFaRoma, istanteDaOraRoma } from '@/lib/date-roma'
+
+// IL GIRO E' ALLE 23 DI ROMA, d'estate e d'inverno. Vercel conosce solo l'ora UTC: il calendario
+// (vercel.json) chiama ogni 15 minuti dalle 21:00 alle 23:45 UTC, e qui si lavora solo fra le 23:00 e
+// l'1:00 di Roma — 8 passaggi a sera in entrambe le stagioni. Fino al 17/11/2026 l'ora era scritta in
+// UTC (21:00): d'estate erano le 23, ma dal cambio d'ora del 25/10 il giro partiva alle 22 e le
+// etichette create fra le 22 e le 23 slittavano alla distinta della sera dopo.
+const ORA_GIRO_ROMA = 23
+const FMT_ORA_ROMA = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Rome', hour: '2-digit', hourCycle: 'h23' })
+function finestraDelGiro(ora: Date): { dentro: boolean; taglio: Date } {
+  const h = Number(FMT_ORA_ROMA.format(ora))
+  // Dopo mezzanotte il giro e' ancora quello della sera prima: il taglio resta alle 23 di ieri.
+  const giorno = h >= ORA_GIRO_ROMA ? giornoRoma(ora) : giorniFaRoma(1, ora)
+  const [a, m, g] = giorno.split('-').map(Number)
+  return { dentro: h >= ORA_GIRO_ROMA || h < 1, taglio: istanteDaOraRoma(a, m, g, ORA_GIRO_ROMA) }
+}
 
 // Una sera porta ~7.000 spedizioni da chiudere in ~700 distinte (20/10/2026), e ogni distinta parla col
 // corriere: in un passaggio solo non ci stanno. Il giro gira piu' volte a sera (vercel.json) e ogni
@@ -25,6 +41,8 @@ export async function GET(req: NextRequest) {
 
   const avvio = Date.now()
   const ora = new Date()
+  const { dentro, taglio } = finestraDelGiro(ora)
+  if (!dentro) return NextResponse.json({ ok: true, saltato: 'fuori dal giro delle 23 di Roma' })
   // Finestra dei RESI (sotto): gli ultimi 30 giorni, sono solo documenti.
   const inizio = new Date(ora)
   inizio.setDate(inizio.getDate() - 30)
@@ -36,10 +54,8 @@ export async function GET(req: NextRequest) {
   // 05/10). L'arretrato piu' vecchio NON si chiude da solo: trasmetterebbe oggi ai corrieri etichette di
   // settimane fa, e una GLS trasmessa non si annulla piu' in automatico (scelta di Lorenzo, 21/10/2026).
   const inizioSpedizioni = new Date(ora.getTime() - 3 * 864e5)
-  // Solo le create prima delle 21:00 UTC di stasera (l'ora del primo passaggio): i passaggi successivi
-  // non prendono le etichette fatte nel frattempo, che restano per la sera dopo come sempre.
-  const taglio = new Date(Date.UTC(ora.getUTCFullYear(), ora.getUTCMonth(), ora.getUTCDate(), 21))
-  if (taglio > ora) taglio.setUTCDate(taglio.getUTCDate() - 1)
+  // Solo le create prima delle 23:00 di Roma di stasera (l'ora del primo passaggio, `taglio` qui sopra):
+  // i passaggi successivi non prendono le etichette fatte nel frattempo, che restano per la sera dopo.
 
   const speds: any[] = []
   for (let da = 0; ; da += 1000) {

@@ -12,7 +12,7 @@
   "crons": [
     {
       "path": "/api/distinte/chiusura-automatica",
-      "schedule": "*/15 21-22 * * *"
+      "schedule": "*/15 21-23 * * *"
     },
     {
       "path": "/api/abbonamento/rinnovo-mensile",
