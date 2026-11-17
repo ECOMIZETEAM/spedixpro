@@ -4,7 +4,8 @@
 // accorge finché il cliente non chiama. Il 17/11/2026, su circa 4.800 spedizioni GLS di un mese:
 // - 10 valide e pagate sul portale ma cancellate su GLS. Quasi tutte di DOLCE LUNA (Wave): il secondo
 //   pacco allo stesso destinatario faceva cancellare da noi il primo (corretto il 16/11);
-// - NI665682165 (MSM STUDIO), annullata e rimborsata sul portale, su GLS chiusa e in viaggio verso Foggia.
+// - NI665682165 (MSM STUDIO), annullata e rimborsata sul portale, su GLS chiusa e in viaggio verso Foggia;
+// - 15 con i COLLI diversi (su 35 giorni): GLS che ne aspetta 2 dove il pacco è uno, e la spedizione ferma.
 // Wave lo ha scoperto confrontando a mano l'elenco di Weblabeling con il portale.
 //
 // Qui si legge il registro di ogni conto GLS (lib/gls registroSpedizioniGls, sola lettura), giorno per
@@ -20,9 +21,11 @@ const IN_ANNULLO = new Set(['annullamento_pending', 'annullamento_manuale', 'sto
 export type DisallineamentoGls = {
   spedizione_id: string
   master_id: string            // detentore del contratto
-  tipo: 'cancellata_su_gls' | 'viva_su_gls'
+  tipo: 'cancellata_su_gls' | 'viva_su_gls' | 'colli_diversi'
   stato_gls: string | null
   tracking_number: string
+  colli_portale: number | null
+  colli_gls: number | null
 }
 
 export type EsitoRiconciliazioneGls = {
@@ -83,7 +86,7 @@ export async function riconciliaContiGls(
     // Per numero si tengono TUTTE le spedizioni GLS, ciascuna col suo giorno: GLS riusa i numeri.
     // CK860108473 (QUICK, nostra del 16/11) nel registro c'è solo come spedizione del 23/10: cercando
     // il solo numero su 35 giorni risultava "presente" e la sua sparizione da GLS non si vedeva.
-    const registro = new Map<string, { stato: string; giorno: string }[]>()
+    const registro = new Map<string, { stato: string; giorno: string; colli: number }[]>()
     let leggibile = true
     for (let i = 0; i < giorniRegistro.length && leggibile; i += 4) {
       const r = await registroSpedizioniGls(conto.cred, giorniRegistro.slice(i, i + 4))
@@ -92,7 +95,7 @@ export async function riconciliaContiGls(
         const m = v.data.match(/^(\d{2})\/(\d{2})\/(\d{4})/)   // "23/10/2026 11:23"
         const giorno = m ? `${m[3]}${m[2]}${m[1]}` : ''
         if (!registro.has(n)) registro.set(n, [])
-        registro.get(n)!.push({ stato: v.stato, giorno })
+        registro.get(n)!.push({ stato: v.stato, giorno, colli: v.colli })
       }
     }
     if (!leggibile) continue
@@ -103,7 +106,7 @@ export async function riconciliaContiGls(
     for (const c of conto.corrieri) {
       for (let da = 0; ; da += 1000) {
         const { data, error } = await admin.from('spedizioni')
-          .select('id,tracking_number,stato,corriere_id,created_at')
+          .select('id,tracking_number,stato,corriere_id,created_at,colli')
           .eq('corriere_id', c.id).gte('created_at', dal.toISOString())
           .order('created_at').order('id').range(da, da + 999)
         if (error) throw new Error(`lettura spedizioni ${c.nome_contratto}: ${error.message}`)
@@ -122,10 +125,15 @@ export async function riconciliaContiGls(
       const giorniOk = new Set([giornoGls(s.created_at, -1), giornoGls(s.created_at), giornoGls(s.created_at, 1)])
       const suGls = (registro.get(numero) || []).find(r => giorniOk.has(r.giorno))
       const master_id = detentoreDi.get(s.corriere_id) as string
+      const colliPortale = Number(s.colli) || 0
       if (s.stato === 'annullata' && suGls) {
-        trovateConto.push({ spedizione_id: s.id, master_id, tipo: 'viva_su_gls', stato_gls: suGls.stato || null, tracking_number: s.tracking_number })
+        trovateConto.push({ spedizione_id: s.id, master_id, tipo: 'viva_su_gls', stato_gls: suGls.stato || null, tracking_number: s.tracking_number, colli_portale: colliPortale, colli_gls: suGls.colli })
       } else if (s.stato !== 'annullata' && !suGls) {
-        trovateConto.push({ spedizione_id: s.id, master_id, tipo: 'cancellata_su_gls', stato_gls: null, tracking_number: s.tracking_number })
+        trovateConto.push({ spedizione_id: s.id, master_id, tipo: 'cancellata_su_gls', stato_gls: null, tracking_number: s.tracking_number, colli_portale: colliPortale, colli_gls: null })
+      } else if (s.stato !== 'annullata' && suGls && suGls.colli && colliPortale && suGls.colli !== colliPortale) {
+        // GLS aspetta colli che non arriveranno (o ne ha meno di quelli partiti): la spedizione si ferma.
+        // NI665570288 e NI665581717 (DOLCE LUNA), 2 colli per GLS e 1 pacco vero, ferme dall'11-12/11.
+        trovateConto.push({ spedizione_id: s.id, master_id, tipo: 'colli_diversi', stato_gls: suGls.stato || null, tracking_number: s.tracking_number, colli_portale: colliPortale, colli_gls: suGls.colli })
       }
     }
     esito.trovate.push(...trovateConto)
@@ -144,7 +152,7 @@ export async function riconciliaContiGls(
       for (const r of data || []) esistenti.set(r.spedizione_id, r)
     }
     const daInserire = trovateConto.filter(t => !esistenti.has(t.spedizione_id))
-      .map(t => ({ spedizione_id: t.spedizione_id, master_id: t.master_id, tipo: t.tipo, stato_gls: t.stato_gls, rilevata_il: ora, controllata_il: ora }))
+      .map(t => ({ spedizione_id: t.spedizione_id, master_id: t.master_id, tipo: t.tipo, stato_gls: t.stato_gls, colli_portale: t.colli_portale, colli_gls: t.colli_gls, rilevata_il: ora, controllata_il: ora }))
     if (daInserire.length) {
       const { error } = await admin.from('gls_disallineamenti').insert(daInserire)
       if (error) throw new Error(`scrittura gls_disallineamenti: ${error.message}`)
@@ -155,7 +163,7 @@ export async function riconciliaContiGls(
       if (!e || e.risolta_come === 'verificata') continue
       const riapri = !!e.risolta_il   // era tornata a posto da sola e ora di nuovo no
       const { error } = await admin.from('gls_disallineamenti').update({
-        master_id: t.master_id, tipo: t.tipo, stato_gls: t.stato_gls, controllata_il: ora,
+        master_id: t.master_id, tipo: t.tipo, stato_gls: t.stato_gls, colli_portale: t.colli_portale, colli_gls: t.colli_gls, controllata_il: ora,
         ...(riapri ? { risolta_il: null, risolta_come: null, risolta_da: null, rilevata_il: ora } : {}),
       }).eq('spedizione_id', t.spedizione_id)
       if (error) throw new Error(`aggiornamento gls_disallineamenti: ${error.message}`)

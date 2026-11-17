@@ -22,7 +22,7 @@ export async function GET() {
   if (u.errore) return u.errore.status === 403 ? NextResponse.json([]) : u.errore
   const { admin, utente } = u
   const { data: righe, error } = await admin.from('gls_disallineamenti')
-    .select('spedizione_id,tipo,stato_gls,rilevata_il').eq('master_id', utente.master_id).is('risolta_il', null)
+    .select('spedizione_id,tipo,stato_gls,colli_portale,colli_gls,rilevata_il').eq('master_id', utente.master_id).is('risolta_il', null)
     .order('rilevata_il', { ascending: false }).limit(500)
   if (error) { console.error('[GLS][DISALLINEAMENTI] lettura:', error.message); return NextResponse.json([]) }
   if (!righe?.length) return NextResponse.json([])

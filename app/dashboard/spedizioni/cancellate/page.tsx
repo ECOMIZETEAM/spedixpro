@@ -243,6 +243,7 @@ export default function SpedizioniCancellatePage() {
                 {disGls.map(d => {
                   const s = d.spedizione || {}
                   const cancellataSuGls = d.tipo === 'cancellata_su_gls'
+                  const colliDiversi = d.tipo === 'colli_diversi'
                   return (
                     <tr key={d.spedizione_id} style={{borderBottom:'1px solid #fef3c7'}}>
                       <td style={{padding:'9px 16px',verticalAlign:'top'}}>
@@ -254,7 +255,9 @@ export default function SpedizioniCancellatePage() {
                         <div style={{fontSize:'12px',color:'#6b7280'}}>{s.dest_nome || ''}{s.dest_citta ? ` · ${s.dest_citta}` : ''}{Number(s.contrassegno) > 0 ? ` · contrassegno ${Number(s.contrassegno).toFixed(2).replace('.', ',')} €` : ''}</div>
                       </td>
                       <td style={{padding:'9px 16px',verticalAlign:'top',color:'#92400e',maxWidth:'420px'}}>
-                        {cancellataSuGls
+                        {colliDiversi
+                          ? <><b>Colli diversi: {d.colli_portale} sul portale, {d.colli_gls} su GLS.</b> {Number(d.colli_gls) > Number(d.colli_portale) ? 'GLS aspetta colli che non arriveranno e la spedizione può fermarsi: chiedi a GLS di correggerla.' : 'GLS ne ha meno di quelli partiti: chiedi a GLS di correggerla.'}</>
+                          : cancellataSuGls
                           ? <><b>Cancellata su GLS, valida sul portale.</b> Sul portale risulta {s.stato ? `"${String(s.stato).replace(/_/g, ' ')}"` : 'valida'} e pagata; nel registro GLS non c&apos;è più.</>
                           : <><b>Annullata sul portale, ancora attiva su GLS.</b> Il cliente è stato rimborsato, ma GLS la ha {/CHIUSA/i.test(d.stato_gls || '') ? 'già trasmessa (chiusa): il pacco può partire e GLS addebitarla' : 'ancora in attesa di chiusura'}.</>}
                       </td>

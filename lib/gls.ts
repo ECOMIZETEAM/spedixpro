@@ -502,7 +502,7 @@ export async function annullaSpedizioneGls(cred: CredenzialiGls, numeroSpedizion
 //   come un conto senza la funzione: per noi è la stessa cosa, il registro non si legge.
 // - Giorni in formato AAAAMMGG, ora italiana (vedi giornoGls).
 export type RegistroGls =
-  | { ok: true; spedizioni: Map<string, { stato: string; data: string }> }
+  | { ok: true; spedizioni: Map<string, { stato: string; data: string; colli: number }> }
   | { ok: false; motivo: string }
 
 export function giornoGls(quando: string | Date, deltaGiorni = 0): string {
@@ -512,7 +512,7 @@ export function giornoGls(quando: string | Date, deltaGiorni = 0): string {
 }
 
 export async function registroSpedizioniGls(cred: CredenzialiGls, giorni: string[]): Promise<RegistroGls> {
-  const spedizioni = new Map<string, { stato: string; data: string }>()
+  const spedizioni = new Map<string, { stato: string; data: string; colli: number }>()
   const risposte = await Promise.all(giorni.map(async (g) => {
     const inner =
       tag('SedeGls', cred.sigla_sede) +
@@ -539,6 +539,7 @@ export async function registroSpedizioniGls(cred: CredenzialiGls, giorni: string
       spedizioni.set(numero, {
         stato: ((m[1].match(/<StatoSpedizione>([^<]*)</) || [])[1] || '').trim(),
         data: ((m[1].match(/<Data>([^<]*)</) || [])[1] || '').trim(),
+        colli: Number((m[1].match(/<TotaleColli>([^<]*)</) || [])[1]) || 0,
       })
     }
     if (righe >= 5000) return { ok: false, motivo: `registro GLS del ${g} incompleto (5.000 righe)` }
