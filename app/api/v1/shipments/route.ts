@@ -657,6 +657,18 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       // Ordine accettato col blocco ritiro dentro: il ritiro e' prenotato, anche se il codice arriva dopo.
       if (_ritiroAlCorriere) ritiroPrenotato = true
       let ldv: string | null = null
+      // IL DETTAGLIO DEI COLLI SI SALVA SUBITO, come fa il portale (app/api/spedizioni/crea), anche se la lettera di
+      // vettura non e' ancora pronta. Prima si scriveva solo con le etichette in mano: col numero provvisorio i pesi dei
+      // colli andavano persi e il recupero delle etichette metteva a ogni collo le misure della spedizione. 3UW1WLJ114071
+      // (CONTORNO, 18/11/2026): mandati 10 kg 50x30x35 + 20 kg 40x2x37, da noi due colli 50x30x35 senza peso, e la
+      // spedizione pagata su 30,5 kg (fascia 30-50) non si spiegava. Le etichette le aggiungono poi tmp-completa e
+      // tmp-recupero collo per collo, lasciando peso e misure.
+      if (packages.length > 1) {
+        colliDettaglio = packages.map((p: any, i: number) => ({
+          numero: i + 1, lunghezza: p?.length || null, larghezza: p?.width || null, altezza: p?.height || null, peso: p?.weight || null,
+          etichetta_url: null,
+        }))
+      }
       try {
         // QUANTO SI ASPETTA LA LETTERA DI VETTURA.
         // Su questo fornitore il numero non torna insieme all'ordine: se entro l'attesa non c'e', la
