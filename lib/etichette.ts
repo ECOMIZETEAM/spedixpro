@@ -241,9 +241,13 @@ async function sorgentiGrezze(
 // che il cliente scarica sta sul contratto condiviso; su 'poste' ci sono solo le gambe interne, che
 // nessun cliente apre (13/10: 11.934 righe cliente in una settimana, tutte su 'moovexpress'). Guardando
 // solo 'poste' la nuova resa non arrivava a nessuno. L'etichetta e' la stessa 1011 in entrambi i casi.
+// SDA EXPRESS L2 (18/11/2026) e' lo stesso contratto di LOGIXIA con le stesse credenziali, venduto a Wave a
+// un altro prezzo: stessa LDV, stesso A4 di KSync. Fuori da questo elenco usciva l'A4 con tre copie per
+// pagina, e sulla Zebra al 47%. CONSEGNA DIRETTA resta fuori come prima.
+const NOMI_SDA_EXPRESS_L = new Set(['SDA EXPRESS L', 'SDA EXPRESS L2'])
 export function contrattoSdaExpressL(corr: { tipo?: string | null; nome_contratto?: string | null } | null | undefined): boolean {
   return (corr?.tipo === 'poste' || corr?.tipo === 'moovexpress')
-    && String(corr?.nome_contratto || '').trim().toUpperCase() === 'SDA EXPRESS L'
+    && NOMI_SDA_EXPRESS_L.has(String(corr?.nome_contratto || '').trim().toUpperCase())
 }
 
 // INTERRUTTORE della resa pulita SDA EXPRESS L. PER SPEGNERLA: false e rilascio; da quel momento
