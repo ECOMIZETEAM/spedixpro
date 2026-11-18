@@ -1,6 +1,6 @@
 import { siglaProvincia } from '@/lib/province-it'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
-import { dataDaRiprovare, oggiRoma, prossimoGiornoLavorativo } from '@/lib/ritiro-giorno'
+import { dataDaRiprovare, oggiRoma, primaDataUtile, prossimoGiornoLavorativo } from '@/lib/ritiro-giorno'
 
 // IL RITIRO SU POSTE DIRETTO (KSync): una regola sola per il portale e per l'API pubblica.
 //
@@ -110,8 +110,17 @@ export async function prenotaRitiroPoste(admin: any, p: {
       // Il motivo prima non si scriveva da nessuna parte: arrivava solo a chi era davanti alla pagina,
       // e per capire perche' falliva un ritiro su otto c'e' voluto un incrocio di log a mano.
       console.error('[RITIRO][POSTE] KSync ha rifiutato il ritiro del', data, '-', String(ris.errore || '').slice(0, 200))
-      const nuova = dataDaRiprovare(ris.errore, data) || (data === oggiRoma() ? prossimoGiornoLavorativo(data) : null)
+      // "La data impostata e' inferiore alla data odierna. La prima data utile è 18-11-2026" chiedendo
+      // proprio il 18: KSync si contraddice (17/11/2026 21:34, 282343J095129, pacco rimasto senza
+      // ritiro). Un'ora dopo lo stesso cliente, stesso mittente e stesso giorno, ha avuto il ritiro
+      // (CP129364845), e su 873 ritiri SDA EXPRESS L e' successo una volta sola. Quando il corriere
+      // indica come primo giorno utile proprio quello chiesto, si riprova quel giorno, una volta, dopo
+      // una breve attesa: il ritiro era chiesto due secondi dopo la nascita della LDV.
+      const stessoGiorno = primaDataUtile(ris.errore) === data
+      const nuova = stessoGiorno ? data
+        : dataDaRiprovare(ris.errore, data) || (data === oggiRoma() ? prossimoGiornoLavorativo(data) : null)
       if (nuova) {
+        if (stessoGiorno) await new Promise(r => setTimeout(r, 2000))
         const ris2 = await prenota(nuova)
         if (ris2.ok && ris2.bookingId) { ris = ris2; data = nuova }
         else console.error('[RITIRO][POSTE] rifiutato anche il', nuova, '-', String(ris2.errore || '').slice(0, 200))
