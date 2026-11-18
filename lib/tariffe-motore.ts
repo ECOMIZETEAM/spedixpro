@@ -21,7 +21,7 @@ import { EMAIL_PER_CORRIERE,
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
-import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti, TIPO_MINIMO_COLLO, minimoACollo, noloMulticollo, regoleMulticollo, noloMulticolloZone, type RegolaMulticollo } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, importoSponda, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti, TIPO_MINIMO_COLLO, minimoACollo, noloMulticollo, regoleMulticollo, noloMulticolloZone, type RegolaMulticollo } from '@/lib/pricing'
 import { TIPO_MULTICOLLO_SUPPLEMENTI } from '@/lib/multicollo-zone'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
@@ -139,26 +139,19 @@ export async function calcolaTariffeCliente(
     }
   }
 
-  // Sponda idraulica: sopra soglia_kg si aggiunge prezzo_kg € per ogni kg oltre la soglia (peso fatturato).
-  const spondaPerCorriere = new Map<string, { soglia: number; prezzoKg: number }>()
+  // Sponda idraulica: la regola e' una sola, in lib/pricing importoSponda — sul peso REALE, come la fa
+  // pagare il fornitore. Qui si contava sul peso della fascia (il volumetrico), e il preventivo mostrava
+  // una sponda che poi il fornitore non chiedeva.
+  const spondaPerCorriere = new Map<string, any>()
   if (cliente.listino_cliente_id) {
     const { data: supplS } = await supabase
       .from('listini_clienti_supplementi')
       .select('corriere_id, descrizione, valore')
       .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'sponda')
-    for (const s of (supplS || [])) {
-      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
-      const soglia = Number(d?.soglia_kg) || 0
-      const prezzoKg = Number(s.valore) || 0
-      if (soglia > 0 && prezzoKg > 0) spondaPerCorriere.set(s.corriere_id, { soglia, prezzoKg })
-    }
+    for (const s of (supplS || [])) spondaPerCorriere.set(s.corriere_id, s)
   }
-  function calcolaSponda(corriereId: string, pesoFatt: number): number {
-    const cfg = spondaPerCorriere.get(corriereId)
-    if (!cfg) return 0
-    // La soglia è solo il trigger: da lì in su il prezzo/kg si applica sul TOTALE dei kg.
-    if (pesoFatt < cfg.soglia) return 0
-    return Math.round(pesoFatt * cfg.prezzoKg * 100) / 100
+  function calcolaSponda(corriereId: string, pesoRealeTot: number): number {
+    return Math.round(importoSponda(spondaPerCorriere.get(corriereId), pesoRealeTot) * 100) / 100
   }
 
   // Extra / servizi accessori per corriere (dal listino cliente): opzioni che il cliente
@@ -558,11 +551,12 @@ export async function calcolaTariffeCliente(
     const noloMC = esitoTab ? esitoTab.nolo : noloMulticollo(Number(fasciaGiusta.prezzo), tuttiColli.length, minimoCollo.get(corriereId) || 0, regoleMC.get(corriereId), paeseDest)
     if (noloMC === null) { esclusiQuota++; ultimoErroreQuota = 'multicollo non prezzato per questo corriere'; continue }
     const minimoVince = !esitoTab && noloMC > Number(fasciaGiusta.prezzo)
-    // Sponda e peso fatturato usano il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico).
+    // Il peso fatturato usa il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico);
+    // la sponda invece si paga sul peso REALE (lib/pricing importoSponda).
     const nolo = noloMC
     const fuelPct = esitoTab ? esitoTab.fuelPct : (Number((fasciaGiusta as any).fuel) || 0)
     const costoFuel = nolo * fuelPct / 100
-    const sponda = calcolaSponda(corriereId, pesoPerFascia)
+    const sponda = calcolaSponda(corriereId, pesoReale)
     // Supplemento ORIGINE (zona mittente disagiato) di QUESTO corriere. 0 se non configurato.
     // Con la tabella multicollo la partenza remota e' gia' nel nolo.
     const mittSupp = esitoTab ? 0 : await supplementoMittente(

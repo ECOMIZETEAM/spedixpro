@@ -20,7 +20,23 @@
 // quanto avevamo fatturato e pagava lo stesso — perche' misurava di piu'. Per questo le misure
 // riscontrate contano quanto il peso e vanno portate fino al ricalcolo.
 
-export type ColloRipesato = { peso: number; lunghezza: number; larghezza: number; altezza: number }
+// pesoReale: solo quando il fornitore scrive i pesi senza le misure. Allora `peso` porta il volumetrico (il riprezzo
+// non deve perdere il volume) e il reale sta qui, per le voci che si pagano sul reale come la sponda (lib/pricing).
+export type ColloRipesato = { peso: number; lunghezza: number; larghezza: number; altezza: number; pesoReale?: number }
+
+// Un collo salvato in rettifiche.colli_ripesati (forma del motore prezzi: weight/length/…) di nuovo come
+// ColloRipesato. Lo usano il ricalcolo e la propagazione: senza il peso reale del fornitore, rifacendo il conto la
+// sponda tornerebbe sul volumetrico.
+export function colloDaSalvato(c: any): ColloRipesato {
+  const reale = Number(c?.pesoRealeFornitore)
+  return {
+    peso: Number(c?.weight ?? c?.peso) || 0,
+    lunghezza: Number(c?.length ?? c?.lunghezza) || 0,
+    larghezza: Number(c?.width ?? c?.larghezza) || 0,
+    altezza: Number(c?.height ?? c?.altezza) || 0,
+    ...(reale > 0 ? { pesoReale: reale } : {}),
+  }
+}
 
 export type Ripesatura = {
   idOrdine: string          // chiave del raggruppamento e anti-doppione
@@ -298,9 +314,11 @@ function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: numbe
     // nostro listino). Senza dimensioni (~22 casi su 500) non puo': si usa come peso il MAX(reale,
     // volumetrico del fornitore) cosi' il riprezzo non perde il volume su cui il fornitore ci ha
     // addebitato. Col solo peso tassato (UPS) quello e' gia' il peso pagato: niente misure da rifare.
+    // Il reale, se il fornitore lo scrive, si tiene a parte: la sponda si paga sul reale, e col solo
+    // volumetrico nel peso 050038152961262 (50 kg reali, 297 di volume) pagava 11,88 € di sponda mai addebitata.
     const collo: ColloRipesato = haDim && !(pesoTassato > 0 && !(pesoReale > 0))
       ? { peso: pesoReale, ...mis }
-      : { peso: Math.max(pesoReale, pesoVol, pesoTassato), lunghezza: 0, larghezza: 0, altezza: 0 }
+      : { peso: Math.max(pesoReale, pesoVol, pesoTassato), lunghezza: 0, larghezza: 0, altezza: 0, ...(pesoReale > 0 ? { pesoReale } : {}) }
     const voci = SUPPLEMENTI_SP.filter(s2 => s2.re.test(details))
     out.push({
       idOrdine: code, idVerifiche: [], ldv: code,   // ldv=code TEMPORANEO: la rotta lo rimappa in tracking_number

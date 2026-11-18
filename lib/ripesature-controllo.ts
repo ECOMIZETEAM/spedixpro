@@ -34,8 +34,9 @@ export type Controllo = {
 // Fermano la riga: il fornitore fa pagare piu' di quello che dice OneTracking.
 export const FERMA = new Set<EsitoControllo>(['senza_agevolazione', 'peso_sbagliato'])
 
-// Solo i contratti del gruppo Poste (anche SDA): sono quelli che OneTracking misura.
-const DI_POSTE = /^(poste|sda)\b|\bpdb\b/i
+// Solo i contratti del gruppo Poste (anche SDA): sono quelli che OneTracking misura. La usa anche il caricamento per
+// decidere quali multicollo aspettano le misure collo per collo (app/api/rettifiche/upload).
+export const DI_POSTE = /^(poste|sda)\b|\bpdb\b/i
 
 // Acceso per master, dalle sue impostazioni. Per ora lo ha solo MULTIEXPRESS (Lorenzo, 05/11/2026).
 export async function controlloAttivo(admin: any, masterId: string): Promise<boolean> {

@@ -122,6 +122,17 @@ export async function creaRettificaDaEsito(
 ): Promise<EsitoCrea> {
   if (!esito.trovata || !esito.spedizioneId) return { creata: false, motivo: 'spedizione non trovata' }
 
+  // SUI PACCHI SPEDITI CON SPEDIAMOPRO LA RETTIFICA NASCE SOLO DAL SUO ADDEBITO. Chi paga la ripesatura e' il conto
+  // del fornitore, non la misura di Poste: fatta prima con OneTracking, sotto si chiedeva una cifra diversa da quella
+  // che il fornitore poi addebitava, o che non addebitava mai. Nella rete Ecomize (confronto col conto del fornitore
+  // del 18/11/2026, Poste Delivery Business S): 445 pacchi rettificati che il fornitore non ha mai fatto pagare
+  // (+862 €), 272 su un peso piu' alto del suo (+1.030 €), e 266 dove il suo addebito piu' alto e' rimasto «solo a
+  // carico» di chi carica perche' il pacco era gia' rettificato (−336 €). Il file del fornitore passa comunque dal
+  // controllo OneTracking al caricamento (lib/ripesature-controllo).
+  // Sta qui perche' da qui passano tutte e due le porte del flusso continuo (giro automatico e misure dal Mac).
+  const { data: sp } = await admin.from('spedizioni').select('code:raw_response->>code').eq('id', esito.spedizioneId).maybeSingle()
+  if (/^6A/i.test(String((sp as any)?.code || ''))) return { creata: false, motivo: 'contratto SpediamoPro: si rettifica dal suo addebito' }
+
   const cat = esito.catenaDalBasso || []
   const mio = cat.indexOf(masterId)
   // "non sono nella catena" (idx -1) o catena interrotta: non si scrive, altrimenti cadrebbe sul

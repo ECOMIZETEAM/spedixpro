@@ -157,7 +157,9 @@ export async function GET(req: NextRequest) {
           continue
         }
         const motivo = cr.motivo || ''
-        if (motivo.includes('gia')) { gia++; await segna('gia-rettificata', { dettaglio: motivo }) }
+        // pacco SpediamoPro: la rettifica arrivera' dal suo addebito (lib/ripesature-crea). Controllata, non si torna.
+        if (motivo.includes('SpediamoPro')) { nessunRecupero++; await segna('ok', { dettaglio: motivo }) }
+        else if (motivo.includes('gia')) { gia++; await segna('gia-rettificata', { dettaglio: motivo }) }
         // "nessun recupero" = il collo vero costa uguale a quello dichiarato con il listino di quel
         // livello: e' la risposta giusta, non un buco. Si segna come controllata e non si torna piu'.
         else if (motivo.includes('nessun recupero')) { nessunRecupero++; await segna('ok', { dettaglio: 'stesso prezzo col suo listino' }) }

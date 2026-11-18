@@ -1,5 +1,6 @@
 import { qualcunoSottoDeve, volumiDelLivello, type EsitoRipesatura, type LivelloRettifica } from '@/lib/ripesature-calcolo'
 import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
+import { colloDaSalvato } from '@/lib/ripesature'
 import type { ContoSotto } from '@/lib/rettifiche-perche'
 
 // ── COSA SUCCEDE A UNA RETTIFICA RICEVUTA QUANDO SI PREME «CARICA» ──
@@ -28,10 +29,8 @@ export function ingressoMotore(r: any) {
   return {
     idOrdine: r.rif_fornitore || r.id, idVerifiche: [], ldv: r.numero_spedizione,
     addebitoFornitore: 0,
-    colli: (r.colli_ripesati as any[]).map((c: any) => ({
-      peso: Number(c.weight) || 0, lunghezza: Number(c.length) || 0,
-      larghezza: Number(c.width) || 0, altezza: Number(c.height) || 0,
-    })),
+    // col peso reale del fornitore, se c'era: senza, al livello sotto la sponda tornerebbe sul volumetrico
+    colli: (r.colli_ripesati as any[]).map(colloDaSalvato),
     dataChiusura: '', mittente: '', destinatario: '',
   }
 }

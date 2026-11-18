@@ -98,9 +98,10 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
     corriereId: sped?.corriere_id,
   })
   if (!ris || !(ris.prezzo > 0)) return null
-  // Il motore somma la sponda al prezzo di fascia: qui si riscorpora e si toglie.
-  const sponda = await spondaListinoCliente(admin, listinoId, ris.corriere_id, ris.peso_fatturato)
-  return Math.max(0, r2(ris.prezzo - sponda)) || null
+  // Il motore somma la sponda al prezzo di fascia: si toglie quella che ha sommato lui (ris.sponda).
+  // Prima la si ricalcolava qui con una formula copiata, sul peso fatturato: quando la regola e' passata
+  // al peso reale (18/11/2026) la copia avrebbe tolto una sponda diversa da quella sommata.
+  return Math.max(0, r2(ris.prezzo - (Number(ris.sponda) || 0))) || null
 }
 
 // IL NOLO DEL CLIENTE PER CIO' CHE SUCCEDE DOPO LA PARTENZA (reso, riconsegna, nuovo destinatario):
@@ -121,20 +122,6 @@ export async function noloClienteDopoPartenza(admin: any, sped: any, listinoId: 
   return (await noloCliente(admin, sped, listinoId)) ?? 0
 }
 
-// Sponda idraulica del listino cliente: sopra la soglia, tot € per ogni kg fatturato.
-// Serve solo per RIMUOVERLA dalla base del reso (stessa formula del motore prezzi).
-async function spondaListinoCliente(admin: any, listinoId: string, corriereId: string | null, pesoFatturato: number): Promise<number> {
-  if (!corriereId) return 0
-  try {
-    const { data: sp } = await admin.from('listini_clienti_supplementi')
-      .select('descrizione,valore').eq('listino_id', listinoId).eq('corriere_id', corriereId).eq('tipo', 'sponda').maybeSingle()
-    if (!sp) return 0
-    let d: any = null; try { d = JSON.parse(sp.descrizione) } catch { /* descrizione non JSON */ }
-    const soglia = Number(d?.soglia_kg) || 0
-    const prezzoKg = Number(sp.valore) || 0
-    return soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia ? r2(pesoFatturato * prezzoKg) : 0
-  } catch { return 0 }
-}
 
 // NOLO di un MASTER per quella spedizione, dal SUO listino corrieri: fascia + fuel, e nient'altro.
 // Stessa regola del cliente — sul ritorno non si paga ne' contrassegno ne' assicurazione ne'

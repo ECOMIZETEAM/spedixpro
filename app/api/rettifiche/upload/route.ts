@@ -97,17 +97,18 @@ export async function POST(req: NextRequest) {
       // agganciata". E' il guasto vero del "non riesco a caricarlo": il vecchio batch da 100 andava
       // SEMPRE in timeout (verificato: 5/5 batch a 500, 0 codici agganciati su 500).
       const attesaMisureLdv = new Set<string>()
-      const spPerCode = new Map<string, { id: string; colli: number }>()
+      const spPerCode = new Map<string, { id: string; colli: number; contratto?: string }>()
       if (isSP) {
         const codiciFetta = Array.from(new Set(fetta.map(r => r.codiceProvider || r.ldv)))
         const codeToTrack = new Map<string, string>()
         const { data: sp } = await adminRip.from('spedizioni')
-          .select('id,colli,tracking_number,code:raw_response->>code')
+          .select('id,colli,tracking_number,code:raw_response->>code,corrieri(nome_contratto)')
           .in('raw_response->>code', codiciFetta)
         for (const s of (sp || [])) {
           const code = (s as any).code, tn = (s as any).tracking_number
+          const corr: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
           if (code && tn) codeToTrack.set(code, tn)
-          if (code) spPerCode.set(code, { id: (s as any).id, colli: Number((s as any).colli || 1) })
+          if (code) spPerCode.set(code, { id: (s as any).id, colli: Number((s as any).colli || 1), contratto: String(corr?.nome_contratto || '') })
         }
         for (const r of fetta) { const t = codeToTrack.get(r.codiceProvider || r.ldv); if (t) r.ldv = t }
       }
@@ -142,8 +143,16 @@ export async function POST(req: NextRequest) {
       // domani la riga ritorna e verra' caricata giusta. Dopo tre tentativi a vuoto (spedizioni
       // che il portale filiali non copre) si rinuncia e si torna a fare come prima, col totale in
       // un collo solo: meglio recuperare meno che non recuperare niente.
+      // SOLO I CONTRATTI POSTE/SDA ASPETTANO LE MISURE: il Mac le legge dal portale filiali di Poste, e un pacco BRT o
+      // UPS li' non c'e'. Dal 29/09 al 17/11/2026 i multicollo BRT Express messi in coda sono stati 228 e nessuno ha mai
+      // avuto una misura: restavano fermi tre giri e poi si caricavano lo stesso col totale (97 il 17/11, 591 € di
+      // sovrapprezzi). Per BRT il totale e' anche il conto giusto: il multicollo si paga sul peso complessivo.
       const { colliDaMisure } = await import('@/lib/misure-colli')
-      const multi = nuove.filter(r => (spPerCode.get(r.codiceProvider || '')?.colli || 1) > 1)
+      const { DI_POSTE } = await import('@/lib/ripesature-controllo')
+      const multi = nuove.filter(r => {
+        const sp = spPerCode.get(r.codiceProvider || '')
+        return (sp?.colli || 1) > 1 && DI_POSTE.test(sp?.contratto || '')
+      })
       if (multi.length) {
         const idsMulti = multi.map(r => spPerCode.get(r.codiceProvider || '')!.id)
         const misurePerSped = new Map<string, any[]>()

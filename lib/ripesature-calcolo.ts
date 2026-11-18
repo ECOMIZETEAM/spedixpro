@@ -257,9 +257,11 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     base.pesoRealePrima = Number(s.peso_reale || 0)
     base.pesoVolumePrima = Number(s.peso_volume || 0)
 
-    // Il collo come lo ha misurato il fornitore, nella forma che vuole il motore dei prezzi.
+    // Il collo come lo ha misurato il fornitore, nella forma che vuole il motore dei prezzi. Il peso reale del
+    // fornitore (solo se ha scritto i pesi senza misure) segue il collo: lo usa la sponda (lib/pricing pesoRealeSponda).
     const packages = r.colli.map(c => ({
       weight: c.peso, length: c.lunghezza, width: c.larghezza, height: c.altezza,
+      ...(Number(c.pesoReale) > 0 ? { pesoRealeFornitore: Number(c.pesoReale) } : {}),
     }))
     base.colli_ripesati = packages
     // IL VOLUME DOPO LA RIPESATURA. Serve perche' mostrare solo i 14 kg reali quando il volume ne fa

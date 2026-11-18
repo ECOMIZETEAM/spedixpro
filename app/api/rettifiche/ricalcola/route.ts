@@ -44,14 +44,11 @@ export async function POST(req: NextRequest) {
   if (sp.stato === 'annullata') return NextResponse.json({ error: 'Spedizione annullata: non si rettifica' }, { status: 400 })
 
   const { calcolaRipesature, volumiDelLivello } = await import('@/lib/ripesature-calcolo')
-  // I colli ripesati salvati sulla riga; se mancano, un collo unico col peso reale (niente volume).
+  const { colloDaSalvato } = await import('@/lib/ripesature')
+  // I colli ripesati salvati sulla riga (col peso reale del fornitore, se c'era); se mancano, un collo unico
+  // col peso reale (niente volume).
   const colli = Array.isArray(r.colli_ripesati) && r.colli_ripesati.length
-    ? r.colli_ripesati.map((c: any) => ({
-        peso: Number(c?.weight ?? c?.peso) || 0,
-        lunghezza: Number(c?.length ?? c?.lunghezza) || 0,
-        larghezza: Number(c?.width ?? c?.larghezza) || 0,
-        altezza: Number(c?.height ?? c?.altezza) || 0,
-      }))
+    ? r.colli_ripesati.map(colloDaSalvato)
     : [{ peso: Number(r.peso_reale) || 0, lunghezza: 0, larghezza: 0, altezza: 0 }]
   const rip: any = {
     idOrdine: r.rif_fornitore || r.id,

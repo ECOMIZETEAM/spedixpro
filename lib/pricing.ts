@@ -387,6 +387,32 @@ export function commissioneSupp(suppl: any[], tipo: string, importo: number, pes
   return s.prezzo_fisso + (s.perc / 100) * base
 }
 
+// SPONDA IDRAULICA: SI PAGA SUL PESO REALE, non sul fatturato. La sponda serve a scaricare un pacco PESANTE, e un
+// volume grande con dentro poco peso non ne ha bisogno. Verificato coi preventivi del fornitore il 18/11/2026 (BRT
+// Express, divisore 5000): 199 kg reali e 297 di volume → nessuna sponda; 201 reali → 8,04 = 201 × 0,04; 250 reali
+// → 10,00; 200 reali → 8,00 (la soglia e' compresa). Si contava sul fatturato: caso vero 050038152961262 (Lampedusa,
+// 50 kg reali, 297 di volume), 11,88 € di sponda chiesti sotto che il fornitore non ha mai preso; nella rete Ecomize
+// 48 pacchi e 492 € in tre mesi. La soglia resta il GRILLETTO: superata, il prezzo al kg vale su tutto il peso
+// reale (e' la regola che l'editor dichiara: «soglia 200 kg, 0,03 €/kg → 220 kg = +6,60»).
+export function importoSponda(riga: { descrizione?: any; valore?: any } | null | undefined, pesoReale: number): number {
+  if (!riga) return 0
+  let d: any = null; try { d = JSON.parse(riga.descrizione) } catch { /* descrizione non JSON */ }
+  const soglia = Number(d?.soglia_kg) || 0
+  const prezzoKg = Number(riga.valore) || 0
+  const kg = Number(pesoReale) || 0
+  return soglia > 0 && prezzoKg > 0 && kg >= soglia ? kg * prezzoKg : 0
+}
+
+// Il peso reale su cui contare la sponda. Nelle RETTIFICHE il fornitore a volte scrive solo i pesi, senza misure
+// («Peso reale: 50 Peso volumetrico: 297»): il collo allora porta come peso il volumetrico, perche' il riprezzo non
+// perda il volume, e il reale viaggia a parte in `pesoRealeFornitore` (lib/ripesature). Se ce l'hanno tutti i colli
+// vale quello; altrimenti il peso reale normale.
+export function pesoRealeSponda(packages: any[] | null | undefined, pesoReale: number): number {
+  const lista = Array.isArray(packages) ? packages : []
+  const forn = lista.map((p: any) => Number(p?.pesoRealeFornitore)).filter(n => n > 0)
+  return lista.length && forn.length === lista.length ? forn.reduce((a, b) => a + b, 0) : pesoReale
+}
+
 // Presente/max per un tipo, ristretto alla banda di peso (serve al gate "COD/assic oltre il max → escludi").
 export function supplPresenteMax(suppl: any[], tipo: string, pesoReale?: number | null): { presente: boolean; max: number } {
   const scal = scaglioniPerPeso(parseScaglioniSupp(suppl, tipo), pesoReale)
@@ -497,6 +523,7 @@ export async function noloMulticolloZone(supabase: any, p: {
 
 export type RisultatoPrezzo = {
   prezzo: number
+  sponda?: number           // parte del prezzo che e' sponda (gia' compresa in `prezzo`)
   zona: string
   peso_reale: number
   peso_volume: number
@@ -809,21 +836,15 @@ export async function calcolaPrezzoListino(
 
   if (!miglior) return null
 
-  // Sponda: la soglia e' solo il GRILLETTO. Superata, prezzo_kg si applica a TUTTO il peso
-  // fatturato, non ai soli chili in eccesso — e' la regola che l'editor del master dichiara a chi la
-  // imposta ("soglia 200kg, 0,03 €/kg → 220kg = +6,60"), ed e' quella che fa il conto qui sotto.
-  // Il commento diceva "per ogni kg oltre la soglia": su una spedizione a 100 kg con soglia 50
-  // sarebbe la meta', e chi leggeva questa riga per controllare una fattura trovava un'altra regola.
+  // Sponda: sul peso REALE (importoSponda). La soglia e' solo il GRILLETTO: superata, prezzo_kg si
+  // applica a TUTTO il peso, non ai soli chili in eccesso — il commento diceva "per ogni kg oltre la
+  // soglia": su una spedizione a 100 kg con soglia 50 sarebbe la meta', e chi leggeva questa riga per
+  // controllare una fattura trovava un'altra regola.
   let sponda = 0
   try {
     const { data: sp } = await supabase.from('listini_clienti_supplementi')
       .select('descrizione,valore').eq('listino_id', listinoId).eq('corriere_id', miglior.corriereId).eq('tipo', 'sponda').maybeSingle()
-    if (sp) {
-      let d:any = null; try { d = JSON.parse(sp.descrizione) } catch {}
-      const soglia = Number(d?.soglia_kg) || 0
-      const prezzoKg = Number(sp.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) sponda = pesoFatturato * prezzoKg
-    }
+    sponda = importoSponda(sp, pesoRealeSponda(packages, pesoReale))
   } catch {}
 
   const zonaRisolta = (fascePerCorriere.get(miglior.corriereId)?.[0]?.zone as any)?.nome || zonaNome
@@ -834,6 +855,9 @@ export async function calcolaPrezzoListino(
 
   return {
     prezzo: Math.round((miglior.prezzo + sponda + mittAmt) * 100) / 100,
+    // quanto del prezzo e' sponda: chi deve toglierla (il nolo del reso, lib/reso-prezzi) la legge da qui
+    // invece di rifare il conto con una regola sua
+    sponda: Math.round(sponda * 100) / 100,
     zona: zonaRisolta,
     peso_reale: pesoReale,
     peso_volume: Math.round(pesoVolume * 100) / 100,
@@ -1080,15 +1104,8 @@ export async function calcolaPrezzoCorriereDettaglio(
   const ass = Number(params.assicurazione) || 0
 
   // Scaglioni contrassegno/assicurazione: logica UNICA in commissioneSupp (con banda-peso).
-  // Sponda: sopra soglia_kg, +prezzo_kg € per ogni kg (peso fatturato).
-  let spondaAmt = 0
-  const spondaRow = (suppl || []).find((s: any) => s.tipo === 'sponda')
-  if (spondaRow) {
-    let d: any = null; try { d = JSON.parse(spondaRow.descrizione) } catch {}
-    const soglia = Number(d?.soglia_kg) || 0
-    const prezzoKg = Number(spondaRow.valore) || 0
-    if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
-  }
+  // Sponda: sul peso reale (importoSponda).
+  const spondaAmt = importoSponda((suppl || []).find((s: any) => s.tipo === 'sponda'), pesoRealeSponda(packages, pesoReale))
   // COMMISSIONE sul PESO REALE: la banda-peso del contrassegno la sceglie il peso reale (vedi commissioneSupp).
   const feeCod = commissioneSupp(suppl || [], 'contrassegno', cod, pesoReale)
   const feeAss = commissioneSupp(suppl || [], 'assicurazione', ass, pesoReale)
@@ -1350,16 +1367,9 @@ async function creaCalcolatoreCorriereBase(
     const nolo = prezzo
     const supplList = supplPerCorriere.get(s.corriere_id) || []
     const cod = Number(s.contrassegno) || 0, ass = Number(s.assicurazione) || 0
-    // Sponda: la soglia è solo il trigger, poi prezzo/kg sul TOTALE dei kg (peso fatturato).
+    // Sponda: sul peso reale (importoSponda).
     const noloBase = prezzo
-    let spondaAmt = 0
-    const spRow = supplList.find((x: any) => x.tipo === 'sponda')
-    if (spRow) {
-      let sd: any = null; try { sd = JSON.parse(spRow.descrizione) } catch {}
-      const soglia = Number(sd?.soglia_kg) || 0
-      const prezzoKg = Number(spRow.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
-    }
+    const spondaAmt = importoSponda(supplList.find((x: any) => x.tipo === 'sponda'), pesoReale)
     // Commissione COD/assic: logica UNICA, banda-peso sul PESO REALE.
     const feeContr = commissioneSupp(supplList, 'contrassegno', cod, pesoReale)
     const feeAss = commissioneSupp(supplList, 'assicurazione', ass, pesoReale)
@@ -1522,16 +1532,9 @@ async function creaCalcolatoreListinoClienteBase(
 
     const supplList = supplPerCorriere.get(s.corriere_id) || []
     const cod = Number(s.contrassegno) || 0, ass = Number(s.assicurazione) || 0
-    // Sponda: la soglia è solo il trigger, poi prezzo/kg sul TOTALE dei kg (peso fatturato).
+    // Sponda: sul peso reale (importoSponda).
     const noloBase = prezzo
-    let spondaAmt = 0
-    const spRow = supplList.find((x: any) => x.tipo === 'sponda')
-    if (spRow) {
-      let sd: any = null; try { sd = JSON.parse(spRow.descrizione) } catch {}
-      const soglia = Number(sd?.soglia_kg) || 0
-      const prezzoKg = Number(spRow.valore) || 0
-      if (soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia) spondaAmt = pesoFatturato * prezzoKg
-    }
+    const spondaAmt = importoSponda(supplList.find((x: any) => x.tipo === 'sponda'), pesoReale)
     // Commissione COD/assic: logica UNICA, banda-peso sul PESO REALE.
     const feeContr = commissioneSupp(supplList, 'contrassegno', cod, pesoReale)
     const feeAss = commissioneSupp(supplList, 'assicurazione', ass, pesoReale)
