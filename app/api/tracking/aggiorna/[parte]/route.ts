@@ -341,7 +341,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         const brtParcel = (s as any).brt_parcel
         if (!brtParcel || !cred?.user || !cred?.password) return
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const { stati, consegnata: brtConseg, eventi: brtEventi } = await trackingBrt(cred, String(brtParcel))
+        const { stati, consegnata: brtConseg, eventi: brtEventi, giacenzaInCorso: brtGiacenza, motivoGiacenza: brtMotivo } = await trackingBrt(cred, String(brtParcel))
         for (const str of stati) {
           const m = mapStatoBrt(str)
           if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
@@ -349,6 +349,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // Consegna dal campo dedicato di BRT (non serve l'evento testuale "CONSEGNATA").
         if (brtConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
         if (stati.some((str) => mapStatoBrt(str) === 'in_giacenza')) vistaGiacenza = true
+        // La giacenza BRT sta nello stato della bolla, non negli eventi (lib/brt trackingBrt): è lo stato
+        // ATTUALE del pacco, quindi vale come "in corso" e non si chiede all'ultimo evento salvato, che
+        // per BRT è la mancata consegna ("RIFIUTA…", "LASCIATO AVVISO") e non la parola giacenza.
+        if (brtGiacenza) {
+          vistaGiacenza = true
+          giacenzaInCorso = true
+          if (brtMotivo) motivoGiacenza = brtMotivo.slice(0, 200)
+        }
         // ...ma se il pacco e' tornato al mittente, quella consegna e' il RITORNO: vince il reso.
         if (stati.some((str) => mapStatoBrt(str) === 'reso_mittente')) nuovo = 'reso_mittente'
 

@@ -321,7 +321,7 @@ function trovaNodoTracking(j: any): any {
   return null
 }
 
-export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; consegnata: boolean; raw: string; spedizioneId?: string }> {
+export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeoutMs = 15000): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; consegnata: boolean; raw: string; spedizioneId?: string; giacenzaInCorso?: boolean; motivoGiacenza?: string | null }> {
   const id = String(parcelID || '').trim()
   // Header userID+password OBBLIGATORI (vedi sopra): senza credenziali non ha senso chiamare.
   if (!id || !cred?.user || !cred?.password) return { stati: [], eventi: [], consegnata: false, raw: '' }
@@ -358,7 +358,20 @@ export async function trackingBrt(cred: CredenzialiBrt, parcelID: string, timeou
     const consegnata = !!String(bolla?.dati_consegna?.data_consegna_merce || '').trim()
     // spedizione_id = "numero spedizione" lato BRT (quello mostrato su brt.it). Per ora solo per verifica.
     const spedizioneId = String(bolla?.dati_spedizione?.spedizione_id || '').trim()
-    return { stati, eventi, consegnata, spedizioneId, raw: (txt || '').substring(0, 2000) }
+    // GIACENZA. BRT non scrive mai "giacenza" negli eventi: scrive il perché ("RIFIUTA SENZA MOTIVAZIONE",
+    // "Destin.Assente:LASCIATO AVVISO", "INDIRIZ.INESISTENTE/INCOMPLETO"…) e mette la giacenza nello stato
+    // sintetico della bolla: stato_sped_parte1 "Mancata consegna" + descrizione "In attesa di disposizioni",
+    // cioè fermo in filiale finché il mittente non dà istruzioni. Leggendo solo gli eventi, sui contratti
+    // BRT diretti non si era mai aperta una giacenza (Wave il 18/11: 14 pacchi così, zero in elenco).
+    // "Riconsegna stimata il …" invece è il secondo tentativo già fissato, non una giacenza.
+    const ds: any = bolla?.dati_spedizione || {}
+    const giacenzaInCorso = /mancata consegna/i.test(String(ds.stato_sped_parte1 || ''))
+      && /attesa di disposizioni/i.test(`${ds.descrizione_stato_sped_parte1 || ''} ${ds.descrizione_stato_sped_parte2 || ''}`)
+    // Il motivo è l'ultima mancata consegna fra gli eventi (BRT li dà dal più recente).
+    const motivoGiacenza = giacenzaInCorso
+      ? (eventi.find((e: any) => mapStatoBrt(e.descrizione) === 'non_consegnato')?.descrizione || null)
+      : null
+    return { stati, eventi, consegnata, spedizioneId, giacenzaInCorso, motivoGiacenza, raw: (txt || '').substring(0, 2000) }
   } catch {
     return { stati: [], eventi: [], consegnata: false, raw: '' }
   } finally {
@@ -375,6 +388,10 @@ export function mapStatoBrt(testo: string): string | null {
   if (/giacenz/.test(x)) return 'in_giacenza'
   if (/in consegna|in distribuzione|out for delivery|consegna prevista/.test(x)) return 'in_consegna'
   if (/mancata|non riuscit|assente|rifiut|indirizzo errato|indirizzo incompleto/.test(x)) return 'non_consegnato'
+  // Le causali BRT arrivano abbreviate: "INDIRIZ.INESISTENTE/INCOMPLETO", "DESTINATAR.SCONOSC./INCOMPLETO",
+  // "RIMANDA LA CONSEGNA". Non riconosciute, il pacco fermo restava "in consegna" (5 di Wave il 18/11,
+  // tutti in giacenza su BRT). "CHIESTA CONSEGNA ALTRO INDIR." no: è una richiesta, non una mancata consegna.
+  if (/indiriz\.?\s*inesistent|inesistente\/incomplet|destinatar\.?\s*sconosc|sconosciut|rimanda la consegna/.test(x)) return 'non_consegnato'
   if (/in transito|transito|partit|arrivat|smistament|hub|in viaggio|filiale/.test(x)) return 'in_transito'
   if (/presa in carico|ritiro|accettat|spedit|creata|registrat|partenza/.test(x)) return 'spedita'
   return null
