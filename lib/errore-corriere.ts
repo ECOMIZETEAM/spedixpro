@@ -204,6 +204,19 @@ export function erroreCorrierePulito(raw: any): string {
   const nostro = MSG_PONTE.find(m => String(raw || '').includes(m))
   if (nostro) return nostro
   const t = String(raw || '').toLowerCase()
+  // CAMPO TROPPO LUNGO. GLS Europa: "Indirizzo maggiore di 40 caratteri" (e il nostro controllo prima di
+  // chiamarlo, lib/gls erroreParcelGls). Senza questa regola diventava "Indirizzo non valido: controlla
+  // nome, indirizzo, citta', provincia e CAP", che manda a cercare l'errore dove non c'e': il 18/11/2026
+  // BOTTEGA PAESANO ha riprovato quattro volte cambiando la provincia. Il testo contiene di proposito
+  // "massimo N caratteri" e il nome del campo: al salto di condivisione dopo esce identico.
+  const troppoLungo = String(raw || '').match(/(?:maggiore di|oltre i?|massimo|max\.?)\s*(\d+)\s*caratteri/i)
+  if (troppoLungo && /indiriz|localit|citt|ragione sociale|\bnome\b/.test(t)) {
+    const campo = /indiriz/.test(t) ? 'Indirizzo' : /localit|citt/.test(t) ? 'Località' : 'Nome'
+    const lungo = campo === 'Località' ? 'troppo lunga' : 'troppo lungo'
+    const chi = /mittent/.test(t) && !/destinat/.test(t) ? 'del mittente' : 'del destinatario'
+    const ora = String(raw || '').match(/\(ora (\d+)\)/i)
+    return `${campo} ${chi} ${lungo} per il corriere: massimo ${troppoLungo[1]} caratteri${ora ? ` (ora ${ora[1]})` : ''}. Accorcialo e riprova; il resto puoi scriverlo nelle note.`
+  }
   // CARATTERE NON AMMESSO (POSTE: "Mittente : Campo obbligatorio! Non sono ammessi i caratteri escape e
   // simboli speciali"). Va PRIMA della regola "Campo obbligatorio": il 15/10/2026 un trattino lungo nel
   // nome mittente arrivava al cliente come "Indirizzo non valido" e lo mandava a ricontrollare CAP e

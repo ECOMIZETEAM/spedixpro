@@ -320,7 +320,8 @@ function campiParcel(cred: CredenzialiGls, p: ParcelGls, peso: number, idx: numb
   return [
     tag('CodiceContrattoGls', cred.codice_contratto),
     tag('RagioneSociale', (p.ragioneSociale || '').substring(0, 70)),
-    tag('Indirizzo', (p.indirizzo || '').substring(0, 70)),
+    // Indirizzo: sul Parcel GLS ne accetta al massimo 40 (oltre, erroreParcelGls ferma prima di chiamarlo).
+    tag('Indirizzo', (p.indirizzo || '').trim().substring(0, 70)),
     tag('Localita', (p.localita || '').substring(0, 50)),
     tag('Zipcode', capParcel(p.cap)),        // estero: alfanumerico, max 7 (oltre, erroreParcelGls ferma)
     tag('Provincia', SIGLA_GLS_PARCEL_UE[normalizzaPaese(p.paese)] || ''),   // il PAESE, non la provincia
@@ -350,6 +351,12 @@ export function erroreParcelGls(p: ParcelGls): string | null {
   if (String(p.telefono || '').replace(/\D/g, '').length < 6) return 'Per GLS Europa serve il telefono del destinatario.'
   if (!String(p.bda || '').trim()) return 'Per GLS Europa serve un riferimento della spedizione.'
   if (!capParcel(p.cap) || capParcel(p.cap).length > 7) return 'CAP del destinatario non valido per GLS Europa (al massimo 7 caratteri).'
+  // INDIRIZZO OLTRE I 40 CARATTERI: GLS rifiuta il Parcel ("Indirizzo maggiore di 40 caratteri"; il manuale
+  // MU162 dice 35, GLS ne accetta 40). Il 18/11/2026 BOTTEGA PAESANO → Nice, "61 Bis Corniche Fleurie
+  // Bâtiment Les Lilas 2" (44): quattro tentativi rifiutati, al cliente solo un messaggio generico. Lo si
+  // dice prima, col numero. Non si taglia: un pezzo d'indirizzo perso e' un pacco che non arriva.
+  const indirizzo = String(p.indirizzo || '').trim()
+  if (indirizzo.length > 40) return `Indirizzo del destinatario troppo lungo per GLS Europa: massimo 40 caratteri (ora ${indirizzo.length}). Accorcialo e riprova; il resto puoi scriverlo nelle note.`
   return null
 }
 
@@ -405,7 +412,12 @@ export async function creaSpedizioneGls(cred: CredenzialiGls, parcel: ParcelGls)
   const prefisso = (siglaMittente || (cred.sigla_sede || '')).trim()
   const tracking = numeroSpedizione ? (prefisso + numeroSpedizione) : null
   const errGls = estraiTag(inner, 'DescrizioneErrore') || estraiTag(inner, 'Errore')
-  const errore = numeroSpedizione ? null : (fault || errGls || 'GLS non ha restituito un numero spedizione')
+  // IL MOTIVO DEL RIFIUTO GLS lo scrive in <NoteSpedizione> (senza NumeroSpedizione, o col 999999999).
+  // Non lo si leggeva: ogni rifiuto arrivava al cliente come "GLS non ha restituito un numero
+  // spedizione", e nei log la risposta era tagliata prima della nota. Caso vero 18/11/2026, Nice:
+  // "Indirizzo maggiore di 40 caratteri". Con il numero, la nota e' un'altra cosa (GLS Check, "CONTANTE").
+  const notaGls = (estraiTag(inner, 'NoteSpedizione') || '').replace(/\s+/g, ' ').trim()
+  const errore = numeroSpedizione ? null : (fault || errGls || (notaGls ? `GLS: ${notaGls}` : 'GLS non ha restituito un numero spedizione'))
   const numeroColli = (parcel.pesiColli && parcel.pesiColli.length) ? parcel.pesiColli.length : 1
   return { numeroSpedizione, tracking, siglaMittente, siglaSedeDestino, glsCheck, numeroColli, pdfBase64: null, errore, raw: (soap || '').substring(0, 2000) }
 }
