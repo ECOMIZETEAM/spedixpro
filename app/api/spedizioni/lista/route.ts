@@ -523,6 +523,23 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // NUMERO DELLA DISTINTA in cui sta la riga, sotto lo stato. "Spedita" lo diventa anche solo chiudendo la
+  // distinta, e un pacco fermo in magazzino non si distingueva da uno partito (QUICK, NI860104843, 16/11:
+  // «risultano spedite ma non sono partite, non so in che distinta stanno»). E' la distinta di QUESTA riga,
+  // cioe' del livello che la vede: le righe di chi vende il contratto qui non arrivano (nascondi-fornitori),
+  // e con loro le loro distinte. Client di servizio perche' le distinte della rete non passano dalla RLS
+  // del master, ma gli id sono solo quelli delle righe che l'utente sta gia' guardando.
+  const distintaNumero = new Map<string, string>()
+  const caricaDistinte = async () => {
+    const ids = Array.from(new Set((spedizioni || []).map((s: any) => s.distinta_id).filter(Boolean))) as string[]
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data, error } = await admin.from('distinte').select('id,numero').in('id', ids.slice(i, i + 300))
+      // Se la lettura non riesce manca solo il numero: l'elenco esce lo stesso.
+      if (error) { console.error('[LISTA] numeri distinta:', error.message); return }
+      for (const d of (data || [])) if (d.numero) distintaNumero.set(String(d.id), String(d.numero))
+    }
+  }
+
   // Ticket APERTI collegati a queste spedizioni (badge "ticket aperto" sulla LDV). Mostrato solo a
   // chi può davvero aprire il ticket (cliente proprietario / master della rete), coerente con la RLS
   // del dettaglio: chi non è parte del ticket non vede il badge.
@@ -554,7 +571,7 @@ export async function GET(req: NextRequest) {
 
   // I blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
   // In LIGHT si saltano del tutto: chi la chiede mostra solo i campi base.
-  if (!light) { await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()]); segna('arricchimento') }
+  if (!light) { await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket(), caricaDistinte()]); segna('arricchimento') }
 
   // CAP DELLA PAGINA: i calcolatori qui sotto devono prezzare SOLO queste righe, quindi si portano
   // dietro i loro CAP e leggono le zone mirate invece di tutte quelle del listino (per un master vero
@@ -785,8 +802,9 @@ export async function GET(req: NextRequest) {
       : null
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
     const distinta_reso = distintaReso.get(s.id) || null
+    const distinta_numero = (s as any).distinta_id ? distintaNumero.get(String((s as any).distinta_id)) || null : null
     const no_annullo_15gg = corrTipo.get(s.corriere_id) === 'spediamopro' && !!s.created_at && new Date(s.created_at).getTime() < OLTRE_15GG
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, costo_in_calcolo: costoInCalcolo, rettifica, id_ordine, distinta_reso, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, costo_in_calcolo: costoInCalcolo, rettifica, id_ordine, distinta_reso, distinta_numero, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
   })
   // ── CONTRASSEGNO PER-LIVELLO: il badge è verde solo se IO ho incassato. ──
   // Per un MASTER: verde se la rimessa indirizzata a ME (target_master_id) è pagata; arancio se

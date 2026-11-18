@@ -727,7 +727,11 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px'}}>
                         <span style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
-                        {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta {s.distinta_reso}</div>}
+                        {/* "Spedita" puo' voler dire solo "chiusa in distinta": il numero dice in quale, e porta alla
+                            distinta, da cui la spedizione si toglie (QUICK, 16/11). */}
+                        {s.distinta_numero && <div style={{marginTop:'3px'}}><a href={`/dashboard/distinte/${s.distinta_id}`} title="Apri la distinta"
+                          style={{fontSize:'10px',color:'#374151',fontWeight:'600',whiteSpace:'nowrap' as const,textDecoration:'underline'}}>Distinta {s.distinta_numero}</a></div>}
+                        {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta reso {s.distinta_reso}</div>}
                         {s.annullamento_errore && s.stato!=='annullamento_pending' && s.stato!=='annullamento_manuale' && <div title={s.annullamento_errore} style={{fontSize:'10px',color:'#b91c1c',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const,cursor:'help'}}>⚠ Non annullabile</div>}
                       </td>
                       <td style={{padding:'9px 12px 3px'}}>

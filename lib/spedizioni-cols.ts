@@ -40,4 +40,7 @@ export const SPED_COLS_LISTA = [
   'contrassegno', 'stato_contrassegno', 'assicurazione',
   'costo_totale',
   'annullamento_richiesto_at', 'annullamento_errore', 'dogana_bloccata_at',
+  // Il numero della distinta sotto lo stato: la rotta lo legge da qui (spedizioni non ha la chiave esterna
+  // verso distinte, niente embed).
+  'distinta_id',
 ].join(',')
