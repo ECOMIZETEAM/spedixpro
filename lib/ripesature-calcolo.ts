@@ -544,7 +544,25 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // CONDIVISIONE (corriere ponte): catena-fornitore, un passo solo (zone coerenti, stesso contratto).
     const condivisa = corr?.tipo === 'moovexpress' ? await costruisciLivelliCondivisione() : null
     let res = condivisa || await costruisciLivelli()
+    // Il collo come era stato dichiarato (colliDichiarati), letto una volta sola: serve alla scelta della zona e al
+    // conto «solo chili».
+    let dichiaratiCache: any[] | null = null
+    const colliDichiaratiDi = async () => {
+      if (dichiaratiCache) return dichiaratiCache
+      let rawResponse: any = null
+      if (Math.max(1, Number(s.colli) || 1) > 1 && !(Array.isArray(s.colli_dettaglio) && s.colli_dettaglio.length)) {
+        const { data: sr } = await admin.from('spedizioni').select('raw_response').eq('id', s.id).maybeSingle()
+        rawResponse = sr?.raw_response ?? null
+      }
+      dichiaratiCache = colliDichiarati(s, rawResponse)
+      return dichiaratiCache
+    }
     let zonaUsata: string | undefined
+    // I livelli che tengono la LORO zona anche quando il conto passa alla zona unica (vedi sotto, «ogni livello tiene la
+    // sua zona»): per loro anche il dichiarato si rifà sulla loro zona, se no il salto metterebbe insieme due zone.
+    const tieneSuaZona = new Set<string>()
+    const chiaveLiv = (l: LivelloRettifica) => `${l.clienteId || ''}|${l.masterId || ''}|${l.ledgerClienteId || ''}`
+    let detentoreSuaZona = false
     const zoneValide = res.zone.filter((z): z is string => !!z)
     const incoerente = new Set(zoneValide).size > 1
     // LA ZONA UNICA E' PRIMA QUELLA DEL PACCO, POI «ITALIA». 1ZF4328R6814924086 (UPS Italia, Curinga CZ, 02/09/2026):
@@ -563,7 +581,40 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         const f = await costruisciLivelli('Italia')
         if (!f.bloccato) { forzato = f; zonaUsata = 'Italia' }
       }
-      if (forzato) res = forzato
+      if (forzato) {
+        // OGNI LIVELLO SI RIFA' SULLA ZONA CON CUI HA PAGATO LA PARTENZA. La zona unica serve a chi nella sua non trova
+        // un prezzo; ma chi lo trova puo' aver pagato la partenza proprio su quella zona, e rifargli il conto altrove
+        // lo sfalsa. Quale delle due e' quella della partenza lo dice il collo DICHIARATO: la zona in cui il suo
+        // prezzo e' piu' vicino a quanto il livello ha pagato. Casi veri (prova sulle 526 righe in attesa di MULTI, 18/11):
+        // - 050148152972343 (BRT Express, 19/10): Ecomize aveva pagato 18,43 €, il prezzo Zone Disagiate (oggi 18,80);
+        //   sulla zona unica (Sicilia) il dichiarato vale 10,39 e la rettifica usciva 0, coi 5,33 € del fornitore a MULTI.
+        //   Sulla sua zona sono 5,48 €.
+        // - 050227152946957: Ecomize aveva pagato a prezzo Italia; la sua zona di oggi (Venezia/Laguna) avrebbe chiesto
+        //   48,68 € su 13,22 di fornitore. Resta sulla zona unica: 13,37.
+        // - 1ZF4328R6814924086 (Curinga): GENIUS aveva pagato la Calabria, oggi il suo listino lo mette nelle Zone
+        //   Disagiate Remote. Resta sulla Calabria: 1,58 € (vedi sopra).
+        // A pari distanza vince la zona unica, come prima.
+        const naturali = new Map(res.livelli.filter(l => l.dovuto != null).map(l => [chiaveLiv(l), l]))
+        const detNat = res.costoDetentore
+        const dichiaratiZ = naturali.size ? await colliDichiaratiDi() : []
+        const dichNat = dichiaratiZ.length ? await costruisciLivelli(undefined, dichiaratiZ) : null
+        const dichForz = dichiaratiZ.length ? await costruisciLivelli(zonaUsata, dichiaratiZ) : null
+        const dovutoIn = (r0: typeof res | null, l: LivelloRettifica) => r0?.livelli.find(x => chiaveLiv(x) === chiaveLiv(l))?.dovuto ?? null
+        res = {
+          ...forzato,
+          livelli: forzato.livelli.map(lf => {
+            const ln = naturali.get(chiaveLiv(lf))
+            if (!ln) return lf
+            const pn = dovutoIn(dichNat, lf), pf = dovutoIn(dichForz, lf)
+            const suaZona = pn != null && (pf == null || Math.abs(pn - lf.pagato) < Math.abs(pf - lf.pagato) - 0.005)
+            if (!suaZona) return lf
+            tieneSuaZona.add(chiaveLiv(lf))
+            if (detNat && ln.masterId === detNat.masterId) detentoreSuaZona = true
+            return ln
+          }),
+          costoDetentore: detentoreSuaZona ? detNat : forzato.costoDetentore,
+        }
+      }
     }
 
     // LA RETTIFICA CONTA I CHILI, NON I CAMBI DI PREZZO. `dovuto` e' il listino di OGGI sul collo
@@ -577,24 +628,25 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
     // dichiarato non si conosce con certezza, il conto resta quello di prima.
     const deveQualcosa = res.livelli.some(l => (l.differenza ?? 0) >= 0.01) || (res.costoDetentore?.differenza ?? 0) >= 0.01
     if (deveQualcosa) {
-      let rawResponse: any = null
-      if (Math.max(1, Number(s.colli) || 1) > 1 && !(Array.isArray(s.colli_dettaglio) && s.colli_dettaglio.length)) {
-        const { data: sr } = await admin.from('spedizioni').select('raw_response').eq('id', s.id).maybeSingle()
-        rawResponse = sr?.raw_response ?? null
-      }
-      const dichiarati = colliDichiarati(s, rawResponse)
+      const dichiarati = await colliDichiaratiDi()
       const resDich = !dichiarati.length ? null
         : condivisa && res === condivisa ? await costruisciLivelliCondivisione(dichiarati)
         : await costruisciLivelli(zonaUsata, dichiarati)
+      // il dichiarato sulla loro zona per i livelli che l'hanno tenuta (vedi «ogni livello tiene la sua zona»)
+      const resDichSua = resDich && zonaUsata && tieneSuaZona.size ? await costruisciLivelli(undefined, dichiarati) : null
       if (resDich) {
-        const chiave = (l: LivelloRettifica) => `${l.clienteId || ''}|${l.masterId || ''}|${l.ledgerClienteId || ''}`
-        const dovutoDich = new Map(resDich.livelli.filter(l => l.dovuto != null).map(l => [chiave(l), l.dovuto as number]))
+        const chiave = chiaveLiv
+        const daDich = (l: LivelloRettifica) => (resDichSua && tieneSuaZona.has(chiave(l)) ? resDichSua : resDich).livelli
+        const dovutoDich = new Map([...resDich.livelli, ...(resDichSua?.livelli || [])].filter(l => l.dovuto != null)
+          .filter(l => daDich(l).includes(l)).map(l => [chiave(l), l.dovuto as number]))
         // Il volume del dichiarato, livello per livello col suo divisore: il giro sul dichiarato lo ha gia'.
-        const volumeDich = new Map(resDich.livelli.filter(l => l.pesoVolumeDopo != null).map(l => [chiave(l), l.pesoVolumeDopo as number]))
+        const volumeDich = new Map([...resDich.livelli, ...(resDichSua?.livelli || [])].filter(l => l.pesoVolumeDopo != null)
+          .filter(l => daDich(l).includes(l)).map(l => [chiave(l), l.pesoVolumeDopo as number]))
         const conDichiarato = (l: LivelloRettifica): LivelloRettifica =>
           volumeDich.has(chiave(l)) ? { ...l, pesoVolumePrima: volumeDich.get(chiave(l)) } : l
         // Solo per la frase (vedi dovutoListino nel tipo): i soldi restano quelli di soloIlSalto.
-        const fatturatoDich = new Map(resDich.livelli.filter(l => l.pesoFatturato != null).map(l => [chiave(l), l.pesoFatturato as number]))
+        const fatturatoDich = new Map([...resDich.livelli, ...(resDichSua?.livelli || [])].filter(l => l.pesoFatturato != null)
+          .filter(l => daDich(l).includes(l)).map(l => [chiave(l), l.pesoFatturato as number]))
         const perDirePerche = (prima: LivelloRettifica, dopo: LivelloRettifica): LivelloRettifica => ({
           ...dopo, dovutoListino: prima.dovuto, dovutoDichiarato: dovutoDich.get(chiave(prima)) ?? null,
           ...(fatturatoDich.has(chiave(prima)) ? { pesoFatturatoPrima: fatturatoDich.get(chiave(prima)) } : {}),
@@ -614,7 +666,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         res = {
           ...res,
           livelli: res.livelli.map(l => perDirePerche(l, conDichiarato(senzaSalto(l) ? l : soloIlSalto(l, dovutoDich.get(chiave(l)))))),
-          costoDetentore: res.costoDetentore ? soloIlSalto(res.costoDetentore, resDich.costoDetentore?.dovuto) : res.costoDetentore,
+          costoDetentore: res.costoDetentore ? soloIlSalto(res.costoDetentore, ((detentoreSuaZona && resDichSua) ? resDichSua : resDich).costoDetentore?.dovuto) : res.costoDetentore,
         }
       }
     }
