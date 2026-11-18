@@ -121,7 +121,9 @@ const importoSP = (v: any) => Math.abs(Number(String(v ?? '0').replace(',', '.')
 //   consegna su appuntamento 2,46 € — 5 righe esatte a 2,46
 // Non entrano nel listino: si addebitano in aggiunta alla differenza e cascatano INVARIATI lungo la
 // catena. Se il fornitore li cambia, si tocca solo questa tabella.
-export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number; euroKg?: number }[] = [
+// euro: fisso · euroKg: al kg di peso tassato · per100kg: ogni 100 kg iniziati di peso tassato quando il peso reale supera
+// sogliaRealeKg (sotto vale `euro`). Il conto lo fa tariffaSupplementoSP.
+export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number; euroKg?: number; per100kg?: number; sogliaRealeKg?: number }[] = [
   { nome: 'fuori sagoma', re: /fuori\s*sagoma/i, euro: 16.39 },
   { nome: 'non sovrapponibile', re: /non\s*sovrapponibile/i, euro: 16.39 },
   { nome: 'consegna su appuntamento', re: /consegna\s*su\s*appuntamento/i, euro: 2.46 },
@@ -134,7 +136,11 @@ export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number; euroKg?: 
   //                             52,58 di reso = 78,40, e il reso costa quanto l'andata
   //   super gdo         7,37  — due righe danno 7,25, cioe' 7,37 meno 0,12 di aggiornamento
   { nome: 'fuori dimensione', re: /fuori\s*dimensione/i, euro: 25.82 },
-  { nome: 'super gdo', re: /super\s*gdo/i, euro: 7.37 },
+  // SUPER GDO NON E' UNA CIFRA FISSA. Rifatto il 18/11/2026 su tutte le 28 righe del conto: 7,37 € quando il collo e'
+  // del servizio a peso reale (fino a 5 kg reali); sopra, 5,73 € ogni 100 kg iniziati del peso tassato (il maggiore fra
+  // reale e volumetrico). 151,4 kg → 11,46; 360 kg di volume → 22,92; 43,8 kg → 5,73; 1-5 kg reali → 7,37. Con la cifra
+  // fissa 050220152957691 girava 7,37 su 11,46 e 050062152944717 7,37 su 22,92: MULTI pagava la differenza.
+  { nome: 'super gdo', re: /super\s*gdo/i, euro: 7.37, per100kg: 5.73, sogliaRealeKg: 5 },
   // UPS (Lorenzo, 05/11/2026: «si certo», da girare sotto come gli altri). Misurate sulle righe del file del 30/10 di MULTI
   // in cui sono l'unica cosa, col peso tassato nella stessa fascia del dichiarato:
   //   imballaggio speciale 15,58 €  — 11 righe esatte (5 di fine agosto a 7,79: l'importo della riga fa da tetto)
@@ -145,6 +151,12 @@ export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number; euroKg?: 
   { nome: 'correzione indirizzo', re: /correzione\s*indirizzo/i, euro: 11.47 },
   { nome: 'surge emergency fee', re: /surge\s*emergency\s*fee/i, euro: 0, euroKg: 0.162 },
 ]
+
+export function tariffaSupplementoSP(s2: (typeof SUPPLEMENTI_SP)[number], kgTassato: number, kgReale: number): number {
+  if (s2.per100kg && kgReale > (s2.sogliaRealeKg ?? 0)) return s2.per100kg * Math.max(1, Math.ceil(kgTassato / 100 - 1e-9))
+  if (s2.euroKg) return s2.euroKg * kgTassato
+  return s2.euro
+}
 
 // Nessuna voce del conto e' piu' senza tariffa. Il meccanismo resta: il giorno che il fornitore ne
 // inventa una nuova, finisce qui e viene segnalata a chi carica invece di sparire dentro il costo.
@@ -334,7 +346,11 @@ function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: numbe
       // sarebbe chiesto 1,48 € in piu' di quanto addebitato per quella voce.
       supplementi: Math.round(g.details.reduce((tot, d, i) => {
         const kgRiga = pesoSP(RE_SP_TASSATO.exec(d)?.[1]) || pesoTassato || collo.peso
-        const tariffa = SUPPLEMENTI_SP.filter(s2 => s2.re.test(d)).reduce((a, s2) => a + (s2.euroKg ? s2.euroKg * kgRiga : s2.euro), 0)
+        // il peso della riga: reale e tassato (il maggiore fra reale, volumetrico e tassato scritti), per le voci a 100 kg
+        const realeRiga = pesoSP(RE_SP_REALE.exec(d)?.[1]) || pesoReale
+        const tassRiga = Math.max(realeRiga, pesoSP(RE_SP_VOL.exec(d)?.[1]) || pesoVol, kgRiga)
+        const tariffa = SUPPLEMENTI_SP.filter(s2 => s2.re.test(d))
+          .reduce((a, s2) => a + tariffaSupplementoSP(s2, s2.per100kg ? tassRiga : kgRiga, realeRiga), 0)
         return tot + Math.min(Math.round(tariffa * 100) / 100, g.importi[i])
       }, 0) * 100) / 100,
       supplementiNomi: voci.map(s2 => s2.nome),

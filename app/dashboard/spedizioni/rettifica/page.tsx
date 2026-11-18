@@ -609,11 +609,14 @@ export default function RettificaCostiPage() {
   }
   // BUONE (il da-girare copre il costo fornitore) in alto, DA CONTROLLARE (sotto-recupero) sotto, col
   // MOTIVO su ogni riga. classe/motivo/manca li calcola la rotta GET (costo_fornitore vs da-girare).
-  const rettBuone = nonFerme.filter((r: any) => r.classe !== 'da_controllare' && r.classe !== 'solo_mio')
+  const rettBuone = nonFerme.filter((r: any) => r.classe !== 'da_controllare' && r.classe !== 'solo_mio' && r.classe !== 'contestata')
   // SOLO A TUO CARICO: chi ha il contratto paga il fornitore, ma sotto di lui nessuno deve niente.
   // Si confermano per registrare il costo; non addebitano nessuno.
   const rettSoloMie = nonFerme.filter((r: any) => r.classe === 'solo_mio')
   const rettCtrl  = nonFerme.filter((r: any) => r.classe === 'da_controllare')
+  // IN CONTESTAZIONE COL FORNITORE: chiesto il rimborso, non si confermano finche' non risponde (classe dalla rotta GET).
+  const rettContestate = nonFerme.filter((r: any) => r.classe === 'contestata')
+  const gruppiContestate = raggruppa(rettContestate)
   const daAddebitare = [...rettBuone, ...rettCtrl]
   const gruppiFermeAgev = raggruppa(rettFermeAgev)
   const gruppiFermePeso = raggruppa(rettFermePeso)
@@ -1091,18 +1094,19 @@ export default function RettificaCostiPage() {
         {/* NON DA ADDEBITARE (Lorenzo, 05/11/2026: «quelle sbagliate, senza agevolazione e già addebitate.. non devono stare in
             primo piano»): le ferme da contestare, le già fatte pagare prima e quelle a tuo carico. Chiuse di serie: una riga dice
             quante sono e perché; si aprono solo se servono (contestare, caricare lo stesso, registrare il tuo costo). */}
-        {!loading && (ferme.length + rettSoloMie.length) > 0 && (
+        {!loading && (ferme.length + rettSoloMie.length + rettContestate.length) > 0 && (
           <div style={{borderTop:'1px solid #e5e7eb'}}>
             <div onClick={()=>setAltreAperte(!altreAperte)} style={{padding:'11px 16px',cursor:'pointer',background:'#f8fafc',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'10px',flexWrap:'wrap' as const}}>
               <span style={{fontSize:'12.5px',fontWeight:700,color:'#334155'}}>
                 <span style={{display:'inline-block',width:'14px',color:'#6b7280'}}>{altreAperte?'▾':'▸'}</span>
-                Non da addebitare: {ferme.length + rettSoloMie.length} righe
+                Non da addebitare: {ferme.length + rettSoloMie.length + rettContestate.length} righe
                 <span style={{fontWeight:500,color:'#64748b',marginLeft:'8px'}}>
-                  {[ferme.length ? `${ferme.length} ferme da contestare` : '', rettSoloGia.length ? `${rettSoloGia.length} già fatte pagare prima` : '',
+                  {[ferme.length ? `${ferme.length} ferme da contestare` : '', rettContestate.length ? `${rettContestate.length} in contestazione col fornitore` : '',
+                    rettSoloGia.length ? `${rettSoloGia.length} già fatte pagare prima` : '',
                     (rettSoloMie.length - rettSoloGia.length) ? `${rettSoloMie.length - rettSoloGia.length} a tuo carico` : ''].filter(Boolean).join(' · ')}
                 </span>
               </span>
-              <span style={{fontSize:'12px',color:'#475569',fontWeight:600}}>tuo costo € {(costoSoloMie + costoDi(ferme)).toFixed(2)}</span>
+              <span style={{fontSize:'12px',color:'#475569',fontWeight:600}}>tuo costo € {(costoSoloMie + costoDi(ferme) + costoDi(rettContestate)).toFixed(2)}</span>
             </div>
             {altreAperte && (
               <>
@@ -1170,6 +1174,15 @@ export default function RettificaCostiPage() {
                   </tr>
                 )}
                 {gruppiFermePeso.flatMap(renderGruppo)}
+                {gruppiContestate.length > 0 && (
+                  <tr key="sez-contestate" id="sez-contestate" style={{background:'#fef3c7'}}>
+                    <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#92400e'}}>
+                      ⏸ In contestazione col fornitore — addebitate sopra il suo listino, chiesto il rimborso: non si confermano finché non risponde <span style={{fontWeight:600}}>({rettContestate.length})</span>
+                      <span style={{float:'right'}}>costo € {costoDi(rettContestate).toFixed(2)}</span>
+                    </td>
+                  </tr>
+                )}
+                {gruppiContestate.flatMap(renderGruppo)}
                 {gruppiSoloMie.length > 0 && (
                   <tr key="sez-solo-mie" id="sez-solo" style={{background:'#e2e8f0'}}>
                     <td colSpan={11} style={{padding:'10px 12px',fontWeight:800,fontSize:'12.5px',color:'#1e293b'}}>

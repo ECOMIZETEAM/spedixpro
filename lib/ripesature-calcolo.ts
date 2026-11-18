@@ -229,6 +229,20 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
   // tempi diversi: chi legge si aspetta la riga 1 al posto 1.
   const out: EsitoRipesatura[] = new Array(righe.length)
 
+  // CHI PAGA ANCHE GLI AUMENTI (masters.impostazioni.rettifica_paga_aumenti). Per lui la rettifica non si ferma al salto
+  // di fascia: paga il listino di oggi sul ripesato meno quello che ha pagato, aumenti compresi. Deciso da Lorenzo il
+  // 18/11/2026 per Ecomize Solution, che compra a costo + 0,10: quando il fornitore rifà il pacco vecchio coi prezzi
+  // nuovi (BRT +2% e carburante dal 02/11), con la regola «solo chili» la differenza restava a MULTI su ogni pacco
+  // (112 righe rosse in Rettifica Costi, in media 0,12 € l'una). Per tutti gli altri la regola del 02/11 resta.
+  const pagaAumenti = new Map<string, boolean>()
+  const leggiPagaAumenti = async (ids: string[]) => {
+    const mancano = [...new Set(ids)].filter(id => id && !pagaAumenti.has(id))
+    if (!mancano.length) return
+    const { data } = await admin.from('masters').select('id,impostazioni').in('id', mancano)
+    for (const id of mancano) pagaAumenti.set(id, false)
+    for (const m of (data || []) as any[]) pagaAumenti.set(m.id, m.impostazioni?.rettifica_paga_aumenti === true)
+  }
+
   const elabora = async (r: Ripesatura): Promise<EsitoRipesatura> => {
     const base: EsitoRipesatura = {
       ldv: r.ldv, idOrdine: r.idOrdine, trovata: false, destinatario: r.destinatario,
@@ -588,9 +602,11 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         // Il detentore col contratto proprio non ha un listino qui: il suo dovuto e' pagato + addebito del
         // fornitore, uguale nei due giri, e il salto verrebbe zero.
         const detentori = new Set(res.detentori)
+        await leggiPagaAumenti(res.livelli.map(l => l.masterId).filter(Boolean) as string[])
+        const senzaSalto = (l: LivelloRettifica) => (l.masterId && detentori.has(l.masterId)) || (l.masterId && pagaAumenti.get(l.masterId))
         res = {
           ...res,
-          livelli: res.livelli.map(l => perDirePerche(l, conDichiarato((l.masterId && detentori.has(l.masterId)) ? l : soloIlSalto(l, dovutoDich.get(chiave(l)))))),
+          livelli: res.livelli.map(l => perDirePerche(l, conDichiarato(senzaSalto(l) ? l : soloIlSalto(l, dovutoDich.get(chiave(l)))))),
           costoDetentore: res.costoDetentore ? soloIlSalto(res.costoDetentore, resDich.costoDetentore?.dovuto) : res.costoDetentore,
         }
       }

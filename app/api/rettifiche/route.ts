@@ -238,6 +238,12 @@ export async function GET(req: NextRequest) {
     } catch (e: any) { console.error('[RETTIFICHE] margine sul pacco:', e?.message) }
   }
   const classeFinale = (r: any) => {
+    // IN CONTESTAZIONE COL FORNITORE (non fermata dal controllo Poste, che ha la sua sezione): il fornitore ha addebitato
+    // sopra il suo listino e gli si e' chiesto il rimborso. Non si conferma finche' non risponde, e non e' un listino da
+    // sistemare: stava tra le «da controllare» e la pagina sembrava sbagliata (Lorenzo 18/11/2026, PDB S di SpediamoPro
+    // del 28-29/10).
+    if (r.stato === 'in_contestazione' && !FERMA.has(r.controllo?.esito))
+      return { classe: 'contestata', motivo: r.controllo?.motivo || 'In contestazione col fornitore: non si conferma finché non risponde.', manca: 0 }
     const c = classeDi(r)
     const m = margini.get(r.id)
     if (c.classe !== 'da_controllare' || m == null) return c
