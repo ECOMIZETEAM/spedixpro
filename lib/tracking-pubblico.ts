@@ -49,8 +49,3 @@ export function eventoPubblico(descrizione: string | null, luogo: string | null)
   }
   return { descrizione: d || 'Aggiornamento', luogo: l ? luogoLeggibile(l) : '' }
 }
-
-// Il colore del marchio del master, se è un esadecimale pulito: entra in uno stile, non si fida del resto.
-export function colorePubblico(c: unknown): string | null {
-  return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c.trim()) ? c.trim() : null
-}

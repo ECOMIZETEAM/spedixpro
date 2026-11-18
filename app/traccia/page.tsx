@@ -29,9 +29,8 @@ export default function CercaSpedizione() {
     try { const p = new URLSearchParams(window.location.search).get('n'); if (p) { setNumero(p); cerca(p) } } catch {}
   }, [])
 
-  // La ricerca è della piattaforma: il marchio del master compare solo col risultato.
   return (
-    <GuscioTracking brand={stato === 'ok' && dati ? dati.brand : null} lingua={lingua}>
+    <GuscioTracking lingua={lingua}>
       <div className="tk-card tk-cerca tk-unica" style={{ marginBottom: 18 }}>
         <h1>{t.cercaTitolo}</h1>
         <p>{t.cercaTesto}</p>

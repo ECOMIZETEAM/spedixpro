@@ -3,13 +3,17 @@ import React, { useEffect, useState } from 'react'
 
 // Pagina di tracking pubblica, condivisa fra la pagina per-token (/traccia/[token], aperta da SMS, email e
 // dal link che il negozio Shopify manda al compratore) e il portale di ricerca (/traccia, dove si digita il
-// numero). Mostra solo stato, città ed eventi (nessun dato personale), col marchio del master (white-label)
-// o MoovExpress di ripiego.
+// numero). Mostra solo stato, città ed eventi (nessun dato personale), col marchio MoovExpress.
 //
 // Rifatta il 22/10/2026 («quella brutta schermata», Lorenzo): era la pagina che il revisore Shopify apre dal
 // link di tracciamento, e a pacco appena creato mostrava solo «In lavorazione» e cinque pallini. Ora dice a
-// parole cosa sta succedendo, si tinge del colore del master, e parla inglese a chi non ha il browser in
-// italiano (gli eventi restano nella lingua del corriere).
+// parole cosa sta succedendo e parla inglese a chi non ha il browser in italiano (gli eventi restano nella
+// lingua del corriere).
+//
+// IL MARCHIO E' SEMPRE MOOVEXPRESS (Lorenzo, 18/11/2026). Prima la testata prendeva il master della riga a
+// cui apparteneva il link, e su un contratto condiviso quella riga e' spesso la gamba di chi vende il
+// contratto: i compratori di altri master aprivano il link e leggevano «LOGIXIA SRLS» (282343J098115, SDA
+// EXPRESS L). Un marchio solo, quello della piattaforma, non puo' sbagliare master.
 
 export const ARANCIO = '#FD5304'
 const INDICE_FASE: Record<string, number> = {
@@ -20,7 +24,6 @@ const STATI_PROBLEMA = new Set(['in_giacenza', 'non_consegnato', 'reso_mittente'
 const STATI_ANNULLO = new Set(['annullata', 'annullamento_manuale', 'storno_richiesto'])
 
 export interface DatiTracking {
-  brand: { nome: string; logo: string | null; colore?: string | null }
   stato: string
   stato_label: string
   riferimento: string | null
@@ -137,7 +140,7 @@ function luminanza(hex: string): number {
   const [r, g, b] = rgb(hex).map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4 })
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
-// Il colore del master fa da accento; se è troppo chiaro per stare sul bianco come testo, lo si scurisce.
+// Il colore fa da accento; se è troppo chiaro per stare sul bianco come testo, lo si scurisce.
 function variabiliColore(colore: string): React.CSSProperties {
   const testo = luminanza(colore) > 0.3 ? mescola(colore, '#000000', 0.32) : colore
   return {
@@ -212,7 +215,6 @@ const CSS = `
 .tk-testata{position:relative;width:100%;border-bottom:1px solid rgba(255,255,255,.08)}
 .tk-testata-in{max-width:1040px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:12px}
 .tk-logo{height:34px;max-width:170px;object-fit:contain}
-.tk-marchio{font-weight:800;font-size:19px;letter-spacing:-.3px;color:#fff}
 .tk-etichetta{margin-left:auto;font-size:12.5px;font-weight:600;color:#a3a3a3;display:flex;align-items:center;gap:7px}
 .tk-etichetta i{width:7px;height:7px;border-radius:50%;background:var(--tk-accento);display:inline-block}
 .tk-corpo{position:relative;width:100%;max-width:1040px;padding:26px 20px 20px;flex:1}
@@ -291,22 +293,21 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.tk *{animation:none!important;transition:none!important}}
 `
 
-// Il guscio: sfondo, testata col marchio, piede. Il colore arriva con i dati della spedizione.
-export function GuscioTracking({ brand, lingua, children }: { brand: { nome: string; logo: string | null; colore?: string | null } | null; lingua: Lingua; children: React.ReactNode }) {
-  const nome = brand?.nome || 'MoovExpress'
-  const colore = brand?.colore || ARANCIO
+// Il guscio: sfondo, testata col marchio, piede. Il logo (public/logo-moovexpress.png, scritta bianca e
+// arancione) e' disegnato per il fondo scuro della testata: su bianco «MOOV» sparirebbe.
+export function GuscioTracking({ lingua, children }: { lingua: Lingua; children: React.ReactNode }) {
   return (
-    <div className="tk" style={variabiliColore(colore)}>
+    <div className="tk" style={variabiliColore(ARANCIO)}>
       <style>{CSS}</style>
       <div className="tk-alone" />
       <header className="tk-testata">
         <div className="tk-testata-in">
-          {brand?.logo ? <img className="tk-logo" src={brand.logo} alt={nome} /> : <span className="tk-marchio">{nome}</span>}
+          <img className="tk-logo" src="/logo-moovexpress.png" alt="MoovExpress" />
           <span className="tk-etichetta"><i />{TESTI[lingua].titolo}</span>
         </div>
       </header>
       <main className="tk-corpo">{children}</main>
-      <footer className="tk-piede">{TESTI[lingua].fornito(nome)}</footer>
+      <footer className="tk-piede">{TESTI[lingua].fornito('MoovExpress')}</footer>
     </div>
   )
 }
@@ -351,7 +352,7 @@ export function CardTracking({ dati, lingua = 'it' }: { dati: DatiTracking; ling
   const annullata = STATI_ANNULLO.has(dati.stato)
   const consegnata = dati.stato === 'consegnata'
   const fase = INDICE_FASE[dati.stato] ?? 0
-  // Verde a pacco consegnato, ambra se c'è un intoppo, grigio se annullata: per il resto il colore del master.
+  // Verde a pacco consegnato, ambra se c'è un intoppo, grigio se annullata: per il resto l'arancio MoovExpress.
   const stileStato: React.CSSProperties | undefined = annullata ? variabiliColore('#6b7280') : problema ? variabiliColore('#d97706') : consegnata ? variabiliColore('#16a34a') : undefined
   const dove = dati.citta ? dati.citta + (dati.provincia ? ` (${dati.provincia})` : '') : null
   const ultimoEvento = dati.eventi[0]?.data || null
