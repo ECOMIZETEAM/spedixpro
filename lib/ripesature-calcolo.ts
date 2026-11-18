@@ -603,7 +603,14 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         // fornitore, uguale nei due giri, e il salto verrebbe zero.
         const detentori = new Set(res.detentori)
         await leggiPagaAumenti(res.livelli.map(l => l.masterId).filter(Boolean) as string[])
-        const senzaSalto = (l: LivelloRettifica) => (l.masterId && detentori.has(l.masterId)) || (l.masterId && pagaAumenti.get(l.masterId))
+        // chi paga gli aumenti li paga solo quando il pacco cambia fascia: il fornitore rifà il prezzo del pacco quando lo
+        // ripesa, non quando addebita un supplemento a peso invariato (050220152957691, 151,4 kg prima e dopo: SpediamoPro
+        // ha preso solo gli 11,46 € di super gdo, e la regola senza questa condizione chiedeva anche 0,84 € di «aumento»)
+        const conSalto = (l: LivelloRettifica) => {
+          const dich = dovutoDich.get(chiave(l))
+          return l.dovuto != null && dich != null && l.dovuto - dich >= 0.01
+        }
+        const senzaSalto = (l: LivelloRettifica) => (l.masterId && detentori.has(l.masterId)) || (l.masterId && pagaAumenti.get(l.masterId) && conSalto(l))
         res = {
           ...res,
           livelli: res.livelli.map(l => perDirePerche(l, conDichiarato(senzaSalto(l) ? l : soloIlSalto(l, dovutoDich.get(chiave(l)))))),
