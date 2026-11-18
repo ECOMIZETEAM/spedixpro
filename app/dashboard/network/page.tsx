@@ -173,7 +173,7 @@ export default function NetworkRicevutiPage() {
         })
         const d = await res.json()
         if (d.error) setMsg('Errore: ' + d.error)
-        else setMsg(`✓ ${d.assorbite ?? ids.length} rettifiche assorbite: restano a tuo carico, la tua rete non viene toccata.`)
+        else setMsg(`✓ ${d.assorbite ?? ids.length} rettifiche tenute a tuo carico: non le chiedi a nessuno.`)
         carica(); setPropagando(''); return
       }
       // ACCETTA/PROPAGA: ognuna ricostruisce la cascata (lento). Si lavora A LOTTI con una barra,
@@ -202,12 +202,12 @@ export default function NetworkRicevutiPage() {
         setAvanz(a => a ? { ...a, fatti: Math.min(i + BATCH, ids.length) } : a)
       }
       const parti: string[] = []
-      if (create > 0) parti.push(`✓ Caricate ${create}: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master — da lì scegli a chi caricarle (fino ad allora non scende niente a nessuno).`)
+      if (create > 0) parti.push(`✓ Girate ${create} ai tuoi clienti: sono in Spedizioni › Rettifica Costi, divise per cliente e sotto-master. I clienti pagano solo quando le confermi.`)
       // A zero: il livello sotto non deve niente, ma chi sta sotto di lui si'. Si dice perche' esistono.
-      if (aZero > 0) parti.push(`✓ Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma più sotto qualcuno deve ancora pagare la differenza — caricale insieme alle altre, servono a farla arrivare fin lì.`)
+      if (aZero > 0) parti.push(`✓ Di queste, ${aZero} sono a zero: a chi le riceve non costano niente, ma più sotto qualcuno deve ancora pagare la differenza — confermale insieme alle altre, servono a farla arrivare fin lì.`)
       // Scartate = il cliente pagherebbe uguale (stesso scaglione): niente da recuperare. NON è un
       // problema né una perdita da sistemare — si dice con calma, non fra gli avvisi ⚠️.
-      if (scart) parti.push(`✓ ${scart} scartate: col suo listino il cliente pagherebbe uguale (stesso scaglione di peso) — niente da recuperare, niente da fare.`)
+      if (scart) parti.push(`✓ ${scart} restano a te: col suo listino il cliente paga uguale (stessa fascia di peso), non c'è niente da chiedergli.`)
       if (nonProp) {
         // TUTTE, non solo le prime 30: oltre il taglio "sparivano" e sembravano perse. Cap alto + conteggio.
         // Il motivo è per RIGA (il listino non copre quel peso/zona, misure mancanti, catena incompleta):
@@ -217,7 +217,7 @@ export default function NetworkRicevutiPage() {
         const CAP = 10
         const elenco = dettaglio.slice(0, CAP).map((x: any) => `${x.ldv} — ${x.perche}`).join('\n• ')
         const extra = dettaglio.length > CAP ? `\n• … e altre ${dettaglio.length - CAP}` : ''
-        parti.push(`⚠️ ${nonProp} non girate. Le trovi tutte nel riquadro «Cosa devi fare» qui sotto, con cosa sistemare; resta lì finché non passano:\n• ${elenco}${extra}`)
+        parti.push(`⚠️ ${nonProp} bloccate. Le trovi tutte nel riquadro «Cosa devi fare» qui sotto, con cosa sistemare; resta lì finché non passano:\n• ${elenco}${extra}`)
       }
       if (inAttesa) parti.push(`⏳ ${inAttesa} in attesa che il livello sopra le confermi: NON sono perse — riprova quando saranno confermate.`)
       if (!create && !nonProp && !inAttesa && !scart) parti.push(giaDecise ? 'Queste rettifiche erano già state decise.' : 'Nessuna rettifica da decidere.')
@@ -269,14 +269,109 @@ export default function NetworkRicevutiPage() {
     ['resi', 'Resi ricevuti', (dati.resi||[]).filter((r:any)=>!r.accettata_target).length],
   ]
 
+  // ── LA PAGINA SI LEGGE IN TRE PASSI (Lorenzo, 18/11/2026: «la grafica dal mio network è fatta proprio male.. si capisce
+  // di merda»; bozza approvata lo stesso giorno). Prima ogni addebito era un riquadro con quattro numeri per riga («girate
+  // sotto · chiedi € 205,17 · incassati € 96,67 · € 108,50 da confermare · le hai pagate € 166,08»), quelli da fare
+  // mescolati a quelli gia' fatti, e parole del portale («Carica», «Assorbi»). Ora: in cima quanto c'e' da girare, da
+  // confermare, bloccato e a tuo carico; sotto due tabelle, «Da girare ai tuoi clienti» e «Già girate ai clienti». I
+  // conti sono gli stessi di prima (lib/network-sintesi), cambia solo come si leggono.
+  // Il punto delle migliaia a mano: in italiano toLocaleString lo mette solo da 10.000 in su («€ 2762,86»).
+  const eurIt = (n: number) => '€ ' + Math.abs(n).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  const nSped = (n: number) => `${n.toLocaleString('it-IT')} ${n === 1 ? 'spedizione' : 'spedizioni'}`
+  const conSintesi = blocchi.map((b: any) => ({ b, s: sintesi(b.righe, b.proprie) }))
+  const daGirare = conSintesi.filter(x => x.b.daDecidere.length > 0)
+  const giaGirate = conSintesi.filter(x => x.s.girate.n + x.s.uguale.n + x.s.assorbite.n + x.s.cancellate.n > 0)
+  const tot = daGirare.reduce((t, { s }) => ({
+    chiede: t.chiede + s.recupera.chiede, nRecupera: t.nRecupera + s.recupera.n, pagateRecupera: t.pagateRecupera + s.recupera.euro,
+    nFerme: t.nFerme + s.ferme.n, ferme: t.ferme + s.ferme.euro, nUguale: t.nUguale + s.ugualeStima.n, uguale: t.uguale + s.ugualeStima.euro,
+    nCalcolo: t.nCalcolo + s.inCalcolo.n,
+  }), { chiede: 0, nRecupera: 0, pagateRecupera: 0, nFerme: 0, ferme: 0, nUguale: 0, uguale: 0, nCalcolo: 0 })
+  const daConfermare = conSintesi.reduce((t, { s }) => t + s.girate.daConfermare, 0)
+  const restanoN = tot.nUguale + proprie.length, restanoEuro = tot.uguale + Math.abs(totaleProprie)
+  const mittenti = Array.from(new Set(blocchi.map((b: any) => b.da)))
+  const chiSopra = mittenti.length === 1 ? mittenti[0] : 'Il livello sopra'
+  const tuttiDaDecidere: string[] = daGirare.flatMap(x => x.b.daDecidere)
+  const thR = { ...th, textAlign: 'right' as const }
+  const tdR = { ...td, textAlign: 'right' as const, whiteSpace: 'nowrap' as const }
+  const btnPrimario = { background: '#ea580c', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }
+  const btnSecondario = { background: '#fff', color: '#1a1a1a', border: '1px solid #d4d4d8', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }
+
+  // Il dettaglio di un addebito, riga per riga: come prima, si apre solo se uno lo vuole vedere.
+  const dettaglio = (b: any) => (
+    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
+      <thead><tr style={{background:'#f9fafb'}}>
+        <th style={th}>LDV</th><th style={th}>Peso fatturato (vol.)</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Ai tuoi clienti</th><th style={th}>Stato</th>
+      </tr></thead>
+      <tbody>
+        {b.righe.map((r:any)=>(
+          <tr key={r.id}>
+            <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
+            {/* Si mostra il peso che FATTURA (max fra reale e volume): con un collo leggero ma ingombrante e' il volume a
+                far salire il costo, e va scritto — altrimenti "14 kg" sembra un peso sceso e la rettifica pare un furto. */}
+            {(() => {
+              const vol = Number(r.peso_volume_reale) || 0
+              const reale = Number(r.peso_reale) || 0
+              // MULTICOLLO: si paga collo per collo (peso_pagato, dalla rotta), e i totali ingannano: 3UW1WLJ093303 diceva
+              // «27,2 → 27,9 kg (vol.)», sotto i 30, con 6,28 € di addebito; si paga 28,88 → 30,60 kg, oltre i 30.
+              const pp = r.peso_pagato
+              const fatt = pp ? Number(pp.dopo) : Math.max(reale, vol)
+              // Il "prima" è il FATTURATO iniziale = max(reale, volume) dichiarati, coerente col "dopo".
+              const iniz = pp ? Number(pp.prima) : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0)
+              const kg2 = (n: number) => (Math.round(n * 100) / 100).toLocaleString('it-IT')
+              return <td style={td}>{pp ? kg2(iniz) : iniz.toFixed(1)} → <strong>{pp ? kg2(fatt) : fatt.toFixed(1)}</strong> kg
+                {pp ? <span title={frasePesoPagato(pp)} style={{display:'block',fontSize:'10px',color:'#1e40af'}}>
+                    collo per collo{(pp.colli || []).length > 1 ? `: ${pp.colli.map(kg2).join(' + ')}` : ''}</span>
+                  : vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
+            })()}
+            <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
+            {(() => {
+              // Addebito vero = ripesatura (differenza) + fuori sagoma (fisso, in aggiunta).
+              const add = Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100
+              return (
+                <td style={{...td,fontWeight:700,color:add<0?'#dc2626':'#16a34a'}}>
+                  € {add.toFixed(2)}
+                  {Number(r.fuori_sagoma || 0) > 0 && (
+                    <span style={{display:'block',fontSize:'10px',fontWeight:600,color:'#7c2d12'}}>di cui supplementi € {Number(r.fuori_sagoma).toFixed(2)}</span>
+                  )}
+                </td>
+              )
+            })()}
+            {(() => { const x = sottoDi(r)
+              return <td style={{...td,color:x.euro != null ? '#166534' : '#475569',fontWeight:x.euro != null ? 700 : 400,maxWidth:'260px'}}>{x.testo}</td> })()}
+            <td style={td}>
+              {r.propagazione === 'propagata' ? (
+                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Girata — è in Rettifica Costi</span>
+              ) : r.propagazione === 'assorbita' ? (
+                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>{r.perche?.tipo === 'paga_uguale' ? 'Niente da chiedere' : 'Tenuta a tuo carico'}</span>
+              ) : r.propagazione === 'annullata' ? (
+                // ANNULLATA non e' a carico: l'addebito e' stato restituito con uno storno (22/10/2026). Scriverla
+                // "assorbita" diceva che il costo era rimasto a lui.
+                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#f3f4f6',color:'#4b5563'}}>✕ Annullata — addebito restituito</span>
+              ) : (
+                <>
+                  <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fef3c7',color:'#92400e'}}>Da girare</span>
+                  {daFare.righe[r.id] && <span style={{display:'block',fontSize:'11px',fontWeight:600,color:'#dc2626',marginTop:'3px'}}>⚠ {daFare.righe[r.id]}</span>}
+                </>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
         <h1 style={{fontSize:'20px',fontWeight:700,color:'#1a1a1a',margin:0}}>Dal mio network</h1>
-        <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Rettifiche, rimesse contrassegni e resi ricevuti dal livello superiore. Qui si ACCETTA: a chi caricarli si decide dopo, dalle rispettive pagine — e solo allora il credito scende di un gradino.</p>
+        <p style={{color:'#52525b',fontSize:'13px',marginTop:'4px'}}>
+          {tab==='rettifiche'
+            ? `Le rettifiche che ${mittenti.length === 1 ? mittenti[0] : 'il livello sopra'} ti ha addebitato. Le hai già pagate: qui le giri ai tuoi clienti.`
+            : 'Rimesse contrassegni e resi ricevuti dal livello sopra. Qui si accettano: a chi caricarli si decide dopo, dalle rispettive pagine.'}
+        </p>
       </div>
 
-      <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
+      <div style={{display:'flex',gap:'8px',marginBottom:'16px',flexWrap:'wrap'}}>
         {tabs.map(([k, label, n]) => (
           <button key={k} onClick={()=>setTab(k)} style={{background:tab===k?ACCENT:'#fff',color:tab===k?'#fff':'#1a1a1a',border:'1px solid '+(tab===k?ACCENT:'#e8e8e8'),borderRadius:'8px',padding:'8px 16px',fontSize:'13px',fontWeight:700,cursor:'pointer'}}>
             {label}{n>0?` (${n})`:''}
@@ -286,246 +381,264 @@ export default function NetworkRicevutiPage() {
 
       {msg && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#ea580c',whiteSpace:'pre-line' as const}}>{msg}</div>}
 
-      <div style={card}>
-        {loading ? <div style={{padding:'40px',textAlign:'center',color:'#999'}}>Caricamento…</div> : (
-          <>
-          {tab==='rettifiche' && (
-            (blocchi.length===0 && proprie.length===0) ? <div style={{padding:'32px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna rettifica ricevuta</div> :
-            <div>
-              {/* COSA DEVI FARE: appare solo se c'e' qualcosa da sistemare perche' le rettifiche scendano. Una riga per cosa da
-                  fare (per cliente o sotto-master e contratto), col peso che serve e gli euro fermi; dal listino di un tuo
-                  cliente si va dritti alla sua pagina. Resta finche' non e' sistemato. */}
-              {(daFare.azioni.length > 0 || daFare.pronte > 0) && (
-                <div style={{borderTop:'1px solid #f0f0f0',background:'#fef2f2',padding:'14px 16px'}}>
-                  {daFare.azioni.length > 0 && <>
-                    <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
-                      ⚠ Cosa devi fare · {daFare.totaleRighe} {daFare.totaleRighe===1?'rettifica ferma':'rettifiche ferme'} · <span style={{color:'#dc2626'}}>€ {daFare.totaleEuro.toFixed(2)}</span>
-                    </div>
-                    <div style={{fontSize:'12px',color:'#7f1d1d',marginTop:'3px',maxWidth:'720px'}}>
-                      Queste rettifiche non si possono girare a chi sta sotto finché non sistemi quello che c'è scritto. Te le hanno già scalate: finché restano qui sono a tuo carico.
-                    </div>
-                    <div style={{marginTop:'10px',display:'flex',flexDirection:'column',gap:'6px'}}>
-                      {(tutteAzioni ? daFare.azioni : daFare.azioni.slice(0, 6)).map((g:any,i:number)=>(
-                        <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',background:'#fff',border:'1px solid #fecaca',borderRadius:'8px',padding:'9px 12px'}}>
-                          <div style={{fontSize:'13px',color:'#1a1a1a',maxWidth:'760px'}}>
-                            {g.testo}
-                            <div style={{fontSize:'11.5px',color:'#8a8a8a',marginTop:'2px'}}>
-                              {g.righe} {g.righe===1?'rettifica':'rettifiche'} · € {g.euro.toFixed(2)} · {g.esempi.join(', ')}{g.righe>g.esempi.length?'…':''}
-                            </div>
-                          </div>
-                          {g.link && (
-                            <a href={g.link} style={{background:ACCENT,color:'#fff',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' as const}}>
-                              Apri il listino
-                            </a>
-                          )}
+      {loading ? <div style={card}><div style={{padding:'40px',textAlign:'center',color:'#999'}}>Caricamento…</div></div> : tab==='rettifiche' ? (
+        (blocchi.length===0 && proprie.length===0) ? <div style={card}><div style={{padding:'32px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna rettifica ricevuta</div></div> :
+        <div style={{display:'flex',flexDirection:'column',gap:'16px'}}>
+          {/* I TRE PASSI: chi riceve una rettifica deve sapere che l'ha gia' pagata e che il cliente paga solo alla conferma. */}
+          <div style={{...card,display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))'}}>
+            {([['1', `${chiSopra} ti addebita`, 'L\'importo è già scalato dal tuo credito.'],
+               ['2', 'Tu la giri ai tuoi clienti', 'Si fa qui: ogni cliente paga col suo listino.'],
+               ['3', 'La confermi in Rettifica Costi', 'Solo allora il cliente paga.']] as [string, string, string][]).map(([n, titolo, testo]) => (
+              <div key={n} style={{padding:'14px 18px',display:'flex',gap:'12px',alignItems:'flex-start',background:n==='2'?'#fff7ed':'#fff',borderRight:'1px solid #f0f0f0'}}>
+                <span style={{flex:'none',width:'26px',height:'26px',borderRadius:'999px',background:n==='2'?'#ea580c':'#1a1a1a',color:'#fff',fontSize:'13px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center'}}>{n}</span>
+                <div><div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>{titolo}</div><div style={{fontSize:'12.5px',color:'#52525b',marginTop:'2px'}}>{testo}</div></div>
+              </div>
+            ))}
+          </div>
+
+          {/* QUATTRO NUMERI: quanto si puo' ancora chiedere, quanto aspetta la conferma, quanto e' fermo e perche', quanto resta
+              a te perche' sotto non c'e' niente da chiedere. */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',gap:'12px'}}>
+            <div style={{...card,border:'2px solid #ea580c',padding:'16px 18px'}}>
+              <div style={{fontSize:'11.5px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.04em',color:'#9a3412'}}>Da girare ai clienti</div>
+              <div style={{fontSize:'28px',fontWeight:800,color:'#1a1a1a',marginTop:'4px'}}>{eurIt(tot.chiede)}</div>
+              <div style={{fontSize:'12.5px',color:'#3f3f46',marginTop:'4px'}}>{nSped(tot.nRecupera)} · le hai pagate {eurIt(tot.pagateRecupera)}{tot.nCalcolo ? ` · ${tot.nCalcolo} ancora in calcolo` : ''}</div>
+            </div>
+            <div style={{...card,padding:'16px 18px'}}>
+              <div style={{fontSize:'11.5px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.04em',color:'#52525b'}}>Da confermare</div>
+              <div style={{fontSize:'28px',fontWeight:800,color:'#1a1a1a',marginTop:'4px'}}>{eurIt(daConfermare)}</div>
+              <div style={{fontSize:'12.5px',color:'#3f3f46',marginTop:'4px'}}>già girate, aspettano te in <a href="/dashboard/spedizioni/rettifica" style={{color:'#c2410c'}}>Rettifica Costi</a></div>
+            </div>
+            <div style={{...card,padding:'16px 18px'}}>
+              <div style={{fontSize:'11.5px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.04em',color:'#92400e'}}>Bloccate</div>
+              <div style={{fontSize:'28px',fontWeight:800,color:'#1a1a1a',marginTop:'4px'}}>{eurIt(tot.ferme)}</div>
+              <div style={{fontSize:'12.5px',color:'#3f3f46',marginTop:'4px'}}>{nSped(tot.nFerme)}{tot.nFerme ? (daFare.azioni.length ? ' · cosa sistemare qui sotto' : ' · apri «Vedi» per il motivo') : ''}</div>
+            </div>
+            <div style={{...card,padding:'16px 18px'}}>
+              <div style={{fontSize:'11.5px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.04em',color:'#52525b'}}>Restano a te</div>
+              <div style={{fontSize:'28px',fontWeight:800,color:'#1a1a1a',marginTop:'4px'}}>{eurIt(restanoEuro)}</div>
+              <div style={{fontSize:'12.5px',color:'#3f3f46',marginTop:'4px'}}>{nSped(restanoN)} · sotto paga uguale, o sono spedizioni tue</div>
+            </div>
+          </div>
+
+          {/* COSA DEVI FARE: appare solo se c'e' qualcosa da sistemare perche' le rettifiche scendano. Una riga per cosa da
+              fare (per cliente o sotto-master e contratto), col peso che serve e gli euro fermi; dal listino di un tuo
+              cliente si va dritti alla sua pagina. Resta finche' non e' sistemato. */}
+          {(daFare.azioni.length > 0 || daFare.pronte > 0) && (
+            <div style={{...card,background:'#fef2f2',border:'1px solid #fecaca',padding:'14px 16px'}}>
+              {daFare.azioni.length > 0 && <>
+                <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
+                  ⚠ Cosa devi fare · {daFare.totaleRighe} {daFare.totaleRighe===1?'rettifica bloccata':'rettifiche bloccate'} · <span style={{color:'#dc2626'}}>€ {daFare.totaleEuro.toFixed(2)}</span>
+                </div>
+                <div style={{fontSize:'12px',color:'#7f1d1d',marginTop:'3px',maxWidth:'720px'}}>
+                  Queste rettifiche non si possono girare ai tuoi clienti finché non sistemi quello che c'è scritto. Te le hanno già scalate: finché restano qui sono a tuo carico.
+                </div>
+                <div style={{marginTop:'10px',display:'flex',flexDirection:'column',gap:'6px'}}>
+                  {(tutteAzioni ? daFare.azioni : daFare.azioni.slice(0, 6)).map((g:any,i:number)=>(
+                    <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',background:'#fff',border:'1px solid #fecaca',borderRadius:'8px',padding:'9px 12px'}}>
+                      <div style={{fontSize:'13px',color:'#1a1a1a',maxWidth:'760px'}}>
+                        {g.testo}
+                        <div style={{fontSize:'11.5px',color:'#8a8a8a',marginTop:'2px'}}>
+                          {g.righe} {g.righe===1?'rettifica':'rettifiche'} · € {g.euro.toFixed(2)} · {g.esempi.join(', ')}{g.righe>g.esempi.length?'…':''}
                         </div>
-                      ))}
-                    </div>
-                    {daFare.azioni.length > 6 && (
-                      <button onClick={()=>setTutteAzioni(v=>!v)}
-                        style={{marginTop:'8px',background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'5px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
-                        {tutteAzioni ? 'Mostra meno' : `Mostra tutte (${daFare.azioni.length})`}
-                      </button>
-                    )}
-                  </>}
-                  {daFare.pronte > 0 && (
-                    <div style={{marginTop:daFare.azioni.length?'10px':0,fontSize:'13px',color:'#166534',fontWeight:600}}>
-                      ✓ {daFare.pronte} {daFare.pronte===1?'rettifica adesso passa':'rettifiche adesso passano'}: il listino è stato sistemato. Ripremi «Carica» sul {daFare.pronte===1?'suo blocco':'loro blocco'}.
-                    </div>
-                  )}
-                </div>
-              )}
-              {/* LE TUE SPEDIZIONI PROPRIE: non è una scelta, sono tue. Riconosciute in automatico
-                  (senza cliente + spedite da te), mostrate come tali, un solo tasto per chiuderle. */}
-              {proprie.length>0 && (
-                <div style={{borderTop:'1px solid #f0f0f0',background:'#fff7ed',padding:'14px 16px'}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
-                    <div>
-                      <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
-                        📦 Tue spedizioni proprie · {proprie.length} · <span style={{color:'#dc2626'}}>€ {Math.abs(totaleProprie).toFixed(2)}</span>
                       </div>
-                      <div style={{fontSize:'12px',color:'#8a5a2b',marginTop:'3px',maxWidth:'640px'}}>
-                        Le hai spedite <strong>tu</strong>, senza cliente finale: la ripesatura è <strong>già a tuo carico</strong> (te l'hanno scalata). Non c'è nessuno a valle a cui girarla — è tua e basta, niente da propagare.
-                      </div>
-                    </div>
-                    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                      <button onClick={()=>setApertoBlocco(apertoBlocco==='__proprie__'?'':'__proprie__')}
-                        style={{background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
-                        {apertoBlocco==='__proprie__'?'Nascondi':'Vedi le '+proprie.length}
-                      </button>
-                      <button onClick={()=>chiudiProprie(proprie.map((r:any)=>r.id))} disabled={propagando==='__proprie__'}
-                        style={{background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:propagando==='__proprie__'?.6:1}}>
-                        {propagando==='__proprie__'?'…':'✓ Ho capito, chiudile'}
-                      </button>
-                    </div>
-                  </div>
-                  {apertoBlocco==='__proprie__' && (
-                    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc',marginTop:'10px'}}>
-                      <thead><tr style={{background:'#f9fafb'}}><th style={th}>LDV</th><th style={th}>Addebito</th></tr></thead>
-                      <tbody>
-                        {proprie.map((r:any)=>(
-                          <tr key={r.id}>
-                            <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
-                            <td style={{...td,fontWeight:700,color:'#dc2626'}}>€ {(Math.round(((Number(r.differenza)||0)-(Number(r.fuori_sagoma)||0))*100)/100).toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              )}
-              {blocchi.map((b:any)=>(
-                <div key={b.k} style={{borderTop:'1px solid #f0f0f0'}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap',padding:'14px 16px'}}>
-                    {(() => {
-                      const s = sintesi(b.righe, b.proprie)
-                      const eu = (n: number) => `€ ${(Math.round(n * 100) / 100).toFixed(2)}`
-                      const sp = (n: number) => `${n} ${n === 1 ? 'spedizione' : 'spedizioni'}`
-                      const ferme = b.daDecidere.filter((id:string)=>daFare.righe[id]).length
-                      // Una riga per cosa e' successo (o succedera') sotto: quante spedizioni, quanto ti e' costato, e
-                      // per quelle che scendono quanto chiedi. Solo le voci che ci sono.
-                      const voci: [string, string, string, string][] = [
-                        s.recupera.n ? ['Da recuperare sotto', sp(s.recupera.n), `chiedi ${eu(s.recupera.chiede)}`, `le hai pagate ${eu(s.recupera.euro)} · con «Carica» vanno nella tua Rettifica Costi`] : null,
-                        s.ugualeStima.n ? ['Sotto paga uguale', sp(s.ugualeStima.n), `${eu(s.ugualeStima.euro)} restano a te`, 'stessa fascia anche col collo rimisurato: niente da chiedere'] : null,
-                        s.ferme.n ? ['Ferme', sp(s.ferme.n), `${eu(s.ferme.euro)} restano a te`, ferme ? 'finché non sistemi: vedi «Cosa devi fare»' : 'apri il dettaglio per il motivo'] : null,
-                        s.inCalcolo.n ? ['In calcolo', sp(s.inCalcolo.n), eu(s.inCalcolo.euro), stimando ? 'sto calcolando quanto recuperi…' : 'fra qualche minuto si vede quanto recuperi'] : null,
-                        s.girate.n ? ['Girate sotto', sp(s.girate.n), `chiedi ${eu(s.girate.chiede)}`, `incassati ${eu(s.girate.incassato)}${s.girate.daConfermare > 0.005 ? ` · ${eu(s.girate.daConfermare)} da confermare in Rettifica Costi` : ''} · le hai pagate ${eu(s.girate.euro)}`] : null,
-                        s.uguale.n ? ['Sotto paga uguale', sp(s.uguale.n), `${eu(s.uguale.euro)} restano a te`, 'stessa fascia anche col collo rimisurato'] : null,
-                        s.assorbite.n ? ['Assorbite da te', sp(s.assorbite.n), `${eu(s.assorbite.euro)} restano a te`, ''] : null,
-                        s.cancellate.n ? ['Girate e poi cancellate', sp(s.cancellate.n), `${eu(s.cancellate.euro)} restano a te`, ''] : null,
-                        s.proprie.n ? ['Tue spedizioni senza cliente', sp(s.proprie.n), `${eu(s.proprie.euro)} restano a te`, 'le trovi in «Tue spedizioni proprie»'] : null,
-                      ].filter(Boolean) as [string, string, string, string][]
-                      return (
-                    <div style={{flex:'1 1 420px',minWidth:0}}>
-                      <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
-                        Da {b.da} · addebitate il {b.giorno}{orarioBlocco(b)}
-                        {b.daDecidere.length > 0
-                          ? <span style={{color:ACCENT}}> · {b.daDecidere.length} da caricare</span>
-                          : <span style={{color:'#999',fontWeight:600}}> · già decise</span>}
-                      </div>
-                      {/* QUANTO TI E' STATO ADDEBITATO, come lo vede chi te l'ha mandato: e' il numero da confrontare col
-                          mittente. Su un blocco a meta' (il giorno piu' vecchio dello storico, vedi lib/network-invii) il
-                          totale intero non si scrive: sarebbe sbagliato. */}
-                      <div style={{fontSize:'13px',color:'#1a1a1a',marginTop:'4px'}}>
-                        {b.parziale
-                          ? <>Ti hanno scalato queste rettifiche dal credito <span style={{color:'#8a8a8a'}}>(qui c'è solo una parte di quel giorno)</span></>
-                          : <>Ti hanno scalato <strong style={{color:'#dc2626'}}>{eu(Math.abs(b.totale + b.totaleProprie))}</strong> su <strong>{sp(s.spedizioni)}</strong> · già tolti dal tuo credito</>}
-                      </div>
-                      {voci.length > 0 && (
-                        <table style={{borderCollapse:'collapse',marginTop:'6px',fontSize:'12.5px'}}>
-                          <tbody>
-                            {voci.map(([nome, quante, soldi, nota], i) => (
-                              <tr key={i}>
-                                <td style={{padding:'2px 12px 2px 0',color:'#334155',fontWeight:600,whiteSpace:'nowrap'}}>▸ {nome}</td>
-                                <td style={{padding:'2px 12px 2px 0',color:'#1a1a1a',whiteSpace:'nowrap'}}>{quante}</td>
-                                <td style={{padding:'2px 12px 2px 0',fontWeight:700,whiteSpace:'nowrap',color:nome.includes('recuperare') || nome === 'Girate sotto' ? '#166534' : '#1a1a1a'}}>{soldi}</td>
-                                <td style={{padding:'2px 0',color:'#8a8a8a'}}>{nota}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                      {g.link && (
+                        <a href={g.link} style={{background:ACCENT,color:'#fff',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' as const}}>
+                          Apri il listino
+                        </a>
                       )}
                     </div>
-                      )
-                    })()}
-                    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                      <button onClick={()=>setApertoBlocco(apertoBlocco===b.k?'':b.k)}
-                        style={{background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
-                        {apertoBlocco===b.k?'Nascondi il dettaglio':'Vedi le '+b.righe.length}
-                      </button>
-                      {b.daDecidere.length>0 && <>
-                        <button onClick={()=>decidiBlocco(b,'propagata')} disabled={propagando===b.k}
-                          style={{background:ACCENT,color:'#fff',border:'none',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:700,cursor:'pointer',opacity:propagando===b.k?.6:1}}>
-                          {propagando===b.k?(avanz&&avanz.k===b.k?`${avanz.fatti}/${avanz.totale}…`:'…'):'Carica ('+b.daDecidere.length+')'}
-                        </button>
-                        <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={propagando===b.k}
-                          style={{background:'#f0fdf4',color:'#166534',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
-                          ✓ Assorbi
-                        </button>
-                      </>}
-                      <button onClick={()=>scaricaBlocco(b)}
-                        style={{background:'#fff',color:'#1a1a1a',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'7px 14px',fontSize:'12.5px',fontWeight:600,cursor:'pointer'}}>
-                        ⬇ Scarica
-                      </button>
-                    </div>
-                  </div>
-                  {propagando===b.k && avanz && avanz.k===b.k && (
-                    <div style={{padding:'0 16px 14px'}}>
-                      <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da}
-                        etichetta="Carico le rettifiche"
-                        sottotitolo="Ogni spedizione viene riprezzata sul listino del livello sotto." />
-                    </div>
-                  )}
-                  {apertoBlocco===b.k && (
-                    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
-                      <thead><tr style={{background:'#f9fafb'}}>
-                        <th style={th}>LDV</th><th style={th}>Peso fatturato (vol.)</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Sotto</th><th style={th}>Stato</th>
-                      </tr></thead>
-                      <tbody>
-                        {b.righe.map((r:any)=>(
-                          <tr key={r.id}>
-                            <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
-                            {/* Si mostra il peso che FATTURA (max fra reale e volume): con un collo
-                                leggero ma ingombrante e' il volume a far salire il costo, e va scritto
-                                — altrimenti "14 kg" sembra un peso sceso e la rettifica pare un furto. */}
-                            {(() => {
-                              const vol = Number(r.peso_volume_reale) || 0
-                              const reale = Number(r.peso_reale) || 0
-                              // MULTICOLLO: si paga collo per collo (peso_pagato, dalla rotta), e i totali qui sotto
-                              // ingannano: 3UW1WLJ093303 diceva «27,2 → 27,9 kg (vol.)», sotto i 30, con 6,28 € di
-                              // addebito; si paga 28,88 → 30,60 kg, oltre i 30. Sulle monocollo il conto e' quello.
-                              const pp = r.peso_pagato
-                              const fatt = pp ? Number(pp.dopo) : Math.max(reale, vol)
-                              // Il "prima" è il FATTURATO iniziale = max(reale, volume) dichiarati (non il solo
-                              // peso_iniziale, che ora è il reale dichiarato): così è coerente col "dopo" (fatt).
-                              const iniz = pp ? Number(pp.prima) : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0)
-                              const kg2 = (n: number) => (Math.round(n * 100) / 100).toLocaleString('it-IT')
-                              return <td style={td}>{pp ? kg2(iniz) : iniz.toFixed(1)} → <strong>{pp ? kg2(fatt) : fatt.toFixed(1)}</strong> kg
-                                {pp ? <span title={frasePesoPagato(pp)} style={{display:'block',fontSize:'10px',color:'#1e40af'}}>
-                                    collo per collo{(pp.colli || []).length > 1 ? `: ${pp.colli.map(kg2).join(' + ')}` : ''}</span>
-                                  : vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
-                            })()}
-                            <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
-                            {(() => {
-                              // Addebito vero = ripesatura (differenza) + fuori sagoma (fisso, in aggiunta).
-                              const add = Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100
-                              return (
-                                <td style={{...td,fontWeight:700,color:add<0?'#dc2626':'#16a34a'}}>
-                                  € {add.toFixed(2)}
-                                  {Number(r.fuori_sagoma || 0) > 0 && (
-                                    <span style={{display:'block',fontSize:'10px',fontWeight:600,color:'#7c2d12'}}>di cui supplementi € {Number(r.fuori_sagoma).toFixed(2)}</span>
-                                  )}
-                                </td>
-                              )
-                            })()}
-                            {(() => { const x = sottoDi(r)
-                              return <td style={{...td,color:x.euro != null ? '#166534' : '#475569',fontWeight:x.euro != null ? 700 : 400,maxWidth:'260px'}}>{x.testo}</td> })()}
-                            <td style={td}>
-                              {r.propagazione === 'propagata' ? (
-                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Caricata — è in Rettifica Costi</span>
-                              ) : r.propagazione === 'assorbita' ? (
-                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>✓ Assorbita da me</span>
-                              ) : r.propagazione === 'annullata' ? (
-                                // ANNULLATA non e' ASSORBITA: chi l'ha ricevuta non la paga affatto, l'addebito gli e' stato
-                                // restituito con uno storno (file di rettifiche sbagliato, 22/10/2026). Scriverla "assorbita"
-                                // diceva che il costo era rimasto a lui.
-                                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#f3f4f6',color:'#4b5563'}}>✕ Annullata — addebito restituito</span>
-                              ) : (
-                                <>
-                                  <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fef3c7',color:'#92400e'}}>Da decidere</span>
-                                  {daFare.righe[r.id] && <span style={{display:'block',fontSize:'11px',fontWeight:600,color:'#dc2626',marginTop:'3px'}}>⚠ {daFare.righe[r.id]}</span>}
-                                </>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
+                  ))}
                 </div>
-              ))}
+                {daFare.azioni.length > 6 && (
+                  <button onClick={()=>setTutteAzioni(v=>!v)}
+                    style={{marginTop:'8px',background:'#fff',color:'#666',border:'1px solid #e8e8e8',borderRadius:'6px',padding:'5px 12px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                    {tutteAzioni ? 'Mostra meno' : `Mostra tutte (${daFare.azioni.length})`}
+                  </button>
+                )}
+              </>}
+              {daFare.pronte > 0 && (
+                <div style={{marginTop:daFare.azioni.length?'10px':0,fontSize:'13px',color:'#166534',fontWeight:600}}>
+                  ✓ {daFare.pronte} {daFare.pronte===1?'rettifica adesso passa':'rettifiche adesso passano'}: il listino è stato sistemato. Ripremi «Gira ai clienti» sulla {daFare.pronte===1?'sua riga':'loro riga'}.
+                </div>
+              )}
             </div>
           )}
+
+          {/* DA GIRARE AI TUOI CLIENTI: una riga per addebito con qualcosa ancora da decidere. «Gira ai clienti» e' il vecchio
+              «Carica» (le righe vanno in Rettifica Costi, riprezzate col listino di ognuno: nessuno paga finche' non confermi);
+              «Tienile a carico tuo» e' il vecchio «Assorbi», dentro «Vedi» perche' e' la scelta rara. */}
+          {daGirare.length > 0 && (
+            <div style={card}>
+              <div style={{padding:'14px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px',flexWrap:'wrap',borderBottom:'1px solid #f0f0f0'}}>
+                <div>
+                  <div style={{fontSize:'16px',fontWeight:700,color:'#1a1a1a'}}>Da girare ai tuoi clienti</div>
+                  <div style={{fontSize:'12.5px',color:'#52525b',marginTop:'2px'}}>Una riga per ogni volta che {mittenti.length === 1 ? mittenti[0] : 'il livello sopra'} ti ha addebitato.</div>
+                </div>
+                {daGirare.length > 1 && (
+                  <button onClick={()=>decidiBlocco({ k: '__tutte__', daDecidere: tuttiDaDecidere }, 'propagata')} disabled={!!propagando}
+                    style={{...btnPrimario,fontSize:'14px',padding:'10px 18px',opacity:propagando?.6:1}}>
+                    {propagando==='__tutte__' ? (avanz&&avanz.k==='__tutte__'?`${avanz.fatti}/${avanz.totale}…`:'…') : 'Gira tutte ai clienti'}
+                  </button>
+                )}
+              </div>
+              {propagando==='__tutte__' && avanz && avanz.k==='__tutte__' && (
+                <div style={{padding:'12px 16px'}}>
+                  <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da} etichetta="Giro le rettifiche ai tuoi clienti" sottotitolo="Ogni spedizione viene riprezzata col listino del tuo cliente." />
+                </div>
+              )}
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',minWidth:'860px'}}>
+                  <thead><tr style={{background:'#f9fafb'}}>
+                    <th style={th}>Addebitate il</th><th style={thR}>Spedizioni</th><th style={thR}>Hai pagato</th><th style={thR}>Chiedi ai clienti</th><th style={th}>Note</th><th style={th}></th>
+                  </tr></thead>
+                  <tbody>
+                    {daGirare.map(({ b, s }) => {
+                      const aperto = apertoBlocco === 'g:' + b.k
+                      const ferme = b.daDecidere.filter((id:string)=>daFare.righe[id]).length
+                      const gia = b.righe.length - b.daDecidere.length
+                      const note = [
+                        s.ugualeStima.n ? `${s.ugualeStima.n} restano a te: stessa fascia del cliente (${eurIt(s.ugualeStima.euro)})` : '',
+                        s.ferme.n ? `${s.ferme.n} ${s.ferme.n === 1 ? 'bloccata' : 'bloccate'}: ${ferme ? 'vedi «Cosa devi fare»' : 'apri «Vedi» per il motivo'}` : '',
+                        s.inCalcolo.n ? `${s.inCalcolo.n} in calcolo${stimando ? '…' : ': fra qualche minuto si vede quanto chiedi'}` : '',
+                        gia ? `le altre ${gia} di quel giorno sono già girate` : '',
+                        b.proprie.length ? `${b.proprie.length} ${b.proprie.length === 1 ? 'tua spedizione' : 'tue spedizioni'} senza cliente` : '',
+                        b.parziale ? 'qui c\'è solo una parte di quel giorno' : '',
+                      ].filter(Boolean).join(' · ')
+                      const soloFerme = !s.recupera.n && s.ferme.n > 0
+                      return [
+                        <tr key={b.k} style={{background:soloFerme?'#fffbeb':'#fff'}}>
+                          <td style={{...td,fontWeight:600,whiteSpace:'nowrap'}}>{b.giorno}{orarioBlocco(b)}{mittenti.length > 1 && <span style={{display:'block',fontSize:'11px',color:'#71717a',fontWeight:500}}>da {b.da}</span>}</td>
+                          <td style={tdR}>{b.daDecidere.length}</td>
+                          <td style={tdR}>{eurIt(b.totaleDaDecidere)}</td>
+                          <td style={{...tdR,fontWeight:700,color:s.recupera.n ? '#166534' : soloFerme ? '#92400e' : '#52525b'}}>
+                            {s.recupera.n ? eurIt(s.recupera.chiede) : soloFerme ? 'bloccata' : s.inCalcolo.n ? 'in calcolo' : 'niente da chiedere'}
+                          </td>
+                          <td style={{...td,color:soloFerme?'#92400e':'#52525b',maxWidth:'420px'}}>{note}</td>
+                          <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
+                            {/* Bloccata: «Riprova» dopo aver sistemato il listino, non l'azione principale. */}
+                            <button onClick={()=>decidiBlocco(b,'propagata')} disabled={!!propagando} style={{...(soloFerme ? btnSecondario : btnPrimario),opacity:propagando===b.k?.6:1}}>
+                              {propagando===b.k?(avanz&&avanz.k===b.k?`${avanz.fatti}/${avanz.totale}…`:'…'):soloFerme?'Riprova':'Gira ai clienti'}
+                            </button>{' '}
+                            <button onClick={()=>setApertoBlocco(aperto?'':'g:'+b.k)} style={btnSecondario}>{aperto?'Chiudi':'Vedi'}</button>
+                          </td>
+                        </tr>,
+                        propagando===b.k && avanz && avanz.k===b.k ? (
+                          <tr key={b.k + ':barra'}><td colSpan={6} style={{padding:'0 16px 12px'}}>
+                            <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da} etichetta="Giro le rettifiche ai tuoi clienti" sottotitolo="Ogni spedizione viene riprezzata col listino del tuo cliente." />
+                          </td></tr>
+                        ) : null,
+                        aperto ? (
+                          <tr key={b.k + ':dettaglio'}><td colSpan={6} style={{padding:0,borderTop:'1px solid #f0f0f0'}}>
+                            <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center',padding:'10px 16px',background:'#fafafa'}}>
+                              <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={!!propagando} style={btnSecondario}>Tienile a carico tuo ({b.daDecidere.length})</button>
+                              <button onClick={()=>scaricaBlocco(b)} style={btnSecondario}>⬇ Scarica in Excel</button>
+                              <span style={{fontSize:'12px',color:'#71717a'}}>«Tienile a carico tuo»: non le chiedi a nessuno, restano un tuo costo.</span>
+                            </div>
+                            {dettaglio(b)}
+                          </td></tr>
+                        ) : null,
+                      ]
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* LE TUE SPEDIZIONI PROPRIE: non è una scelta, sono tue. Riconosciute in automatico (senza cliente + spedite da te),
+              un solo tasto per chiuderle: non muove un euro, le toglie solo da quelle da girare. */}
+          {proprie.length>0 && (
+            <div style={{...card,background:'#fff7ed',border:'1px solid #fed7aa',padding:'14px 16px'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'12px',flexWrap:'wrap'}}>
+                <div>
+                  <div style={{fontSize:'14px',fontWeight:700,color:'#1a1a1a'}}>
+                    Tue spedizioni senza cliente · {proprie.length} · {eurIt(totaleProprie)}
+                  </div>
+                  <div style={{fontSize:'12.5px',color:'#8a5a2b',marginTop:'3px',maxWidth:'640px'}}>
+                    Le hai spedite tu, senza un cliente: non c'è nessuno a cui girarle, sono già un tuo costo.
+                  </div>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                  <button onClick={()=>setApertoBlocco(apertoBlocco==='__proprie__'?'':'__proprie__')} style={btnSecondario}>
+                    {apertoBlocco==='__proprie__'?'Chiudi':'Vedi le '+proprie.length}
+                  </button>
+                  <button onClick={()=>chiudiProprie(proprie.map((r:any)=>r.id))} disabled={propagando==='__proprie__'}
+                    style={{...btnPrimario,background:'#1a1a1a',opacity:propagando==='__proprie__'?.6:1}}>
+                    {propagando==='__proprie__'?'…':'Ho capito, chiudile'}
+                  </button>
+                </div>
+              </div>
+              {apertoBlocco==='__proprie__' && (
+                <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc',marginTop:'10px'}}>
+                  <thead><tr style={{background:'#f9fafb'}}><th style={th}>LDV</th><th style={th}>Addebito</th></tr></thead>
+                  <tbody>
+                    {proprie.map((r:any)=>(
+                      <tr key={r.id}>
+                        <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
+                        <td style={{...td,fontWeight:700,color:'#dc2626'}}>€ {(Math.round(((Number(r.differenza)||0)-(Number(r.fuori_sagoma)||0))*100)/100).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* GIA' GIRATE AI CLIENTI: per ogni addebito quanto hai chiesto, quanto hai gia' incassato (confermate) e quanto
+              aspetta la tua conferma in Rettifica Costi; sotto la data, quelle rimaste a te. */}
+          {giaGirate.length > 0 && (
+            <div style={card}>
+              <div style={{padding:'14px 16px',borderBottom:'1px solid #f0f0f0'}}>
+                <div style={{fontSize:'16px',fontWeight:700,color:'#1a1a1a'}}>Già girate ai clienti</div>
+                <div style={{fontSize:'12.5px',color:'#52525b',marginTop:'2px'}}>Quello che hai chiesto, quanto hai già incassato e quanto aspetta la tua conferma.</div>
+              </div>
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',minWidth:'860px'}}>
+                  <thead><tr style={{background:'#f9fafb'}}>
+                    <th style={th}>Addebitate il</th><th style={thR}>Spedizioni</th><th style={thR}>Hai pagato</th><th style={thR}>Chiesto ai clienti</th><th style={thR}>Incassato</th><th style={thR}>Da confermare</th><th style={th}></th>
+                  </tr></thead>
+                  <tbody>
+                    {giaGirate.map(({ b, s }) => {
+                      const aperto = apertoBlocco === 'd:' + b.k
+                      const restaN = s.uguale.n + s.assorbite.n + s.cancellate.n
+                      const restaEuro = s.uguale.euro + s.assorbite.euro + s.cancellate.euro
+                      return [
+                        <tr key={b.k}>
+                          <td style={{...td,fontWeight:600,whiteSpace:'nowrap'}}>
+                            {b.giorno}{orarioBlocco(b)}
+                            {mittenti.length > 1 && <span style={{display:'block',fontSize:'11px',color:'#71717a',fontWeight:500}}>da {b.da}</span>}
+                            {restaN > 0 && <span style={{display:'block',fontSize:'11px',color:'#71717a',fontWeight:500}}>+ {restaN} {restaN === 1 ? 'rimasta' : 'rimaste'} a te ({eurIt(restaEuro)})</span>}
+                          </td>
+                          <td style={tdR}>{s.girate.n}</td>
+                          <td style={tdR}>{eurIt(s.girate.euro)}</td>
+                          <td style={tdR}>{eurIt(s.girate.chiede)}</td>
+                          <td style={{...tdR,color:'#166534',fontWeight:600}}>{eurIt(s.girate.incassato)}</td>
+                          <td style={{...tdR,color:s.girate.daConfermare > 0.005 ? '#9a3412' : '#a1a1aa',fontWeight:700}}>{s.girate.daConfermare > 0.005 ? eurIt(s.girate.daConfermare) : '—'}</td>
+                          <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
+                            {s.girate.daConfermare > 0.005 && <a href="/dashboard/spedizioni/rettifica" style={{color:'#c2410c',fontWeight:700,fontSize:'13px',marginRight:'10px'}}>Conferma</a>}
+                            <button onClick={()=>setApertoBlocco(aperto?'':'d:'+b.k)} style={btnSecondario}>{aperto?'Chiudi':'Vedi'}</button>
+                          </td>
+                        </tr>,
+                        aperto ? (
+                          <tr key={b.k + ':dettaglio'}><td colSpan={7} style={{padding:0,borderTop:'1px solid #f0f0f0'}}>
+                            <div style={{display:'flex',gap:'8px',alignItems:'center',padding:'10px 16px',background:'#fafafa'}}>
+                              <button onClick={()=>scaricaBlocco(b)} style={btnSecondario}>⬇ Scarica in Excel</button>
+                            </div>
+                            {dettaglio(b)}
+                          </td></tr>
+                        ) : null,
+                      ]
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+      <div style={card}>
+          <>
           {tab==='contrassegni' && (
             <table style={{width:'100%',borderCollapse:'collapse'}}>
               <thead><tr style={{background:'#f9fafb'}}>
@@ -590,8 +703,8 @@ export default function NetworkRicevutiPage() {
             </table>
           )}
           </>
-        )}
       </div>
+      )}
     </div>
   )
 }
