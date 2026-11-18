@@ -15,7 +15,13 @@ import { useDialog } from '@/app/components/DialogProvider'
 // e «ci guadagni comunque sembra che non ha recuperato la rettifica». Su Ecomize Solution le 138 righe di quei due gruppi
 // erano: 103 clienti nella stessa fascia anche col collo rimisurato, 26 assorbite, 4 listini che non arrivano al collo,
 // 5 girate e poi cancellate. Nessuna era un errore della piattaforma.
-const ELIM_ORDINE = ['listino', 'cancellate', 'assorbite', 'uguale', 'gia', 'senza', 'altre']
+// DUE RIQUADRI, NON UNO (Lorenzo, 18/11/2026, sulle 2.729 righe di MULTI: «queste allora separale»): in cima quelle da
+// cui si puo' ancora recuperare qualcosa, a parte quelle dove sotto non c'era niente da chiedere. Tutte insieme, le
+// 2.685 di MULTI senza un euro da chiedere sembravano 4.590 € persi.
+const ELIM_DA_RECUPERARE = ['listino', 'cancellate', 'assorbite', 'altre']
+const ELIM_NIENTE = ['uguale', 'gia', 'senza']
+// Filtri che non sono un gruppo: '' = tutte quelle da recuperare, 'niente' = tutte quelle senza niente da recuperare.
+const ELIM_NIENTE_SPIEGA = 'Rettifiche che hai pagato e che sotto non c\'era niente da chiedere: chi sta sotto paga uguale col listino che gli hai dato, oppure l\'aveva già pagata con un\'altra rettifica, oppure la spedizione è tua senza un cliente. Sono qui solo per controllo.'
 const ELIM_GRUPPI: Record<string, { nome: string; colore: string; sfondo: string; spiega: string }> = {
   listino: { nome: 'Listino da sistemare', colore: '#92400e', sfondo: '#fffbeb',
     spiega: 'Il listino che hai dato a chi sta sotto non ha un prezzo per il collo rimisurato: si ferma prima di quel peso, e per questo la rettifica non si poteva girare. Ogni riga dice quale listino, su che contratto e zona, fin dove arriva e quanti chili servivano. Alzalo, così le prossime passano.' },
@@ -863,7 +869,7 @@ export default function RettificaCostiPage() {
   // RETTIFICHE ELIMINATE: filtro "cerca" (LDV, da chi, motivo), totali sul filtrato, pagine.
   const elimQ = elimCerca.trim().toLowerCase()
   const elimFiltrate: any[] = (elim?.righe || []).filter((r: any) =>
-    (!elimFiltro || r.gruppo === elimFiltro) && (!elimQ
+    (elimFiltro === 'niente' ? ELIM_NIENTE.includes(r.gruppo) : elimFiltro ? r.gruppo === elimFiltro : ELIM_DA_RECUPERARE.includes(r.gruppo)) && (!elimQ
     || String(r.ldv || '').toLowerCase().includes(elimQ) || String(r.da || '').toLowerCase().includes(elimQ)
     || String(r.chi || '').toLowerCase().includes(elimQ) || String(r.frase || '').toLowerCase().includes(elimQ)))
   const elimTotPagine = Math.max(1, Math.ceil(elimFiltrate.length / elimPerPage))
@@ -1404,20 +1410,30 @@ export default function RettificaCostiPage() {
               <>
                 {elim?.gruppi && (
                   <div style={{padding:'10px 16px',borderBottom:'1px solid #f0f0f0'}}>
-                    <div style={{display:'flex',gap:'6px',flexWrap:'wrap' as const}}>
-                      {(['', ...ELIM_ORDINE.filter(g => elim.gruppi[g]?.n)] as string[]).map(v => {
-                        const g = v ? ELIM_GRUPPI[v] : { nome: 'Tutte', colore: '#334155', sfondo: '#fff' }
-                        const n = v ? elim.gruppi[v]?.n || 0 : (elim.righe || []).length
-                        const cifra = `€ ${Number(v ? elim.gruppi[v]?.euro || 0 : elim.totale || 0).toFixed(2)}`
-                        return (
-                          <button key={v || 'tutte'} onClick={() => { setElimFiltro(v as any); setElimPagina(1) }} title={v ? ELIM_GRUPPI[v].spiega : 'Tutte le rettifiche pagate da te e non girate sotto'}
-                            style={{padding:'5px 12px',borderRadius:'999px',fontSize:'12px',fontWeight:600,cursor:'pointer',color:g.colore,background:g.sfondo,border:`1px solid ${elimFiltro === v ? g.colore : '#e5e7eb'}`,boxShadow:elimFiltro === v ? `0 0 0 1px ${g.colore}` : 'none'}}>
-                            {g.nome} <strong>{Number(n).toLocaleString('it-IT')}</strong> · {cifra}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    {elimFiltro && ELIM_GRUPPI[elimFiltro] && (
+                    {([['', 'Da recuperare', ELIM_DA_RECUPERARE, '#334155', '#fff', 'Le rettifiche pagate da te che sotto si possono ancora recuperare'],
+                       ['niente', 'Niente da recuperare', ELIM_NIENTE, '#166534', '#f0fdf4', ELIM_NIENTE_SPIEGA]] as [string, string, string[], string, string, string][]).map(([tutte, titolo, gruppi, colore, sfondo, spiega], i) => {
+                      const n = gruppi.reduce((t, g) => t + Number(elim.gruppi[g]?.n || 0), 0)
+                      const euro = gruppi.reduce((t, g) => t + Number(elim.gruppi[g]?.euro || 0), 0)
+                      if (i > 0 && !n) return null
+                      return (
+                        <div key={titolo} style={{display:'flex',gap:'6px',flexWrap:'wrap' as const,alignItems:'center',marginTop:i ? '8px' : 0,paddingTop:i ? '8px' : 0,borderTop:i ? '1px dashed #e5e7eb' : 'none'}}>
+                          {([tutte, ...gruppi.filter(g => elim.gruppi[g]?.n)] as string[]).map(v => {
+                            const g = v === tutte ? { nome: titolo, colore, sfondo } : ELIM_GRUPPI[v]
+                            const nn = v === tutte ? n : elim.gruppi[v]?.n || 0
+                            const cifra = `€ ${Number(v === tutte ? euro : elim.gruppi[v]?.euro || 0).toFixed(2)}`
+                            return (
+                              <button key={v || 'tutte'} onClick={() => { setElimFiltro(v as any); setElimPagina(1) }} title={v === tutte ? spiega : ELIM_GRUPPI[v].spiega}
+                                style={{padding:'5px 12px',borderRadius:'999px',fontSize:'12px',fontWeight:v === tutte ? 700 : 600,cursor:'pointer',color:g.colore,background:g.sfondo,border:`1px solid ${elimFiltro === v ? g.colore : '#e5e7eb'}`,boxShadow:elimFiltro === v ? `0 0 0 1px ${g.colore}` : 'none'}}>
+                                {g.nome} <strong>{Number(nn).toLocaleString('it-IT')}</strong> · {cifra}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )
+                    })}
+                    {elimFiltro === 'niente' ? (
+                      <div style={{fontSize:'12px',color:'#334155',lineHeight:1.5,marginTop:'8px'}}>{ELIM_NIENTE_SPIEGA}</div>
+                    ) : elimFiltro && ELIM_GRUPPI[elimFiltro] && (
                       <div style={{fontSize:'12px',color:'#334155',lineHeight:1.5,marginTop:'8px'}}>{ELIM_GRUPPI[elimFiltro].spiega}</div>
                     )}
                   </div>
@@ -1436,7 +1452,7 @@ export default function RettificaCostiPage() {
                 </div>
                 {!elimFiltrate.length ? (
                   <div style={{padding:'24px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>
-                    {elimQ ? 'Nessuna rettifica corrisponde alla ricerca.' : 'Nessuna rettifica in questo gruppo.'}
+                    {elimQ ? 'Nessuna rettifica corrisponde alla ricerca.' : !elimFiltro ? 'Niente da recuperare in questo periodo: quello che hai pagato è sceso sotto, oppure sotto non c\'era niente da chiedere (le trovi in «Niente da recuperare»).' : 'Nessuna rettifica in questo gruppo.'}
                   </div>
                 ) : (<>
                 <div style={{overflowX:'auto' as const}}>

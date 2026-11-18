@@ -431,6 +431,7 @@ export async function GET(req: NextRequest) {
     if (!(mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length)) return
     const adminMov = admin
     const spedIds = (spedizioni || []).map((s: any) => s.id)
+    const clienteDellaSped = new Map<string, string>((spedizioni || []).map((s: any) => [s.id, s.cliente_id]))
     // Importi SIGNED: charge = negativo, credito = positivo; il totale addebitato è -(somma).
     // Prezzo, costo e margine sono SOLO quelli del movimento 'spedizione'; le 'rettifica' (ripesature,
     // allineamenti) si sommano a parte. Prima entravano nel margine della riga: una ripesatura
@@ -453,7 +454,11 @@ export async function GET(req: NextRequest) {
           const imp = Number(mv.importo || 0)   // SIGNED
           const rett = (mv as any).tipo === 'rettifica'
           if (mv.cliente_id) {
-            if (rett) rettCli.set(mv.spedizione_id, (rettCli.get(mv.spedizione_id) || 0) - imp)
+            // Solo la rettifica del CLIENTE DELLA SPEDIZIONE. Sulla riga di un sotto-master c'e' anche quella che il
+            // fornitore di condivisione ha fatto al suo cliente «(ingrosso)» di sopra, ed entrava come incassata dal
+            // cliente. 282343J060918 (SDA EXPRESS L, 18/11/2026): Ecomize Solution vedeva «rettifica € 3,85 (margine
+            // € 0,00)», cioe' i 3,85 che Wave ha preso a MULTIEXPRESS contro i 3,85 che MULTIEXPRESS ha preso a lei.
+            if (rett) { if (mv.cliente_id === clienteDellaSped.get(mv.spedizione_id)) rettCli.set(mv.spedizione_id, (rettCli.get(mv.spedizione_id) || 0) - imp) }
             else sumCli.set(mv.spedizione_id, (sumCli.get(mv.spedizione_id) || 0) + imp)
           } else if (mv.master_target_id) {
             const k = mv.spedizione_id + '|' + mv.master_target_id

@@ -20,6 +20,9 @@ import { contoSulPacco } from '@/lib/conto-pacco'
 //   gia        gia' fatta pagare sotto con un'altra rettifica
 //   senza      spedizione fatta dal suo account senza un cliente
 //   altre      sue righe di detentore: resi, importi senza una voce
+// Da recuperare: listino, cancellate, assorbite, altre. Niente da recuperare: uguale, gia, senza — la pagina le tiene in
+// un riquadro a parte (Lorenzo, 18/11/2026: «queste allora separale»). Rifatta su tutte le 2.729 righe di MULTI la
+// decisione di «Carica» col motore: in quelle tre non c'era un euro da chiedere sotto.
 
 const eur = (n: number) => '€ ' + (Math.round(n * 100) / 100).toFixed(2).replace('.', ',')
 const giorno = (s: string) => new Date(s).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' })
@@ -72,7 +75,13 @@ export async function rettificheNonGirate(admin: any, mio: string, dal: string, 
   const fraseGia = (g: any) => `Già fatta pagare a ${g.a} il ${giorno(g.il)}: ${eur(Number(g.euro || 0))}${g.confermata ? '' : ' (ancora da confermare)'}. Qui c'è solo il costo arrivato dopo, che sotto non si chiede una seconda volta.`
   const SENZA = 'Spedizione fatta dal tuo account senza un cliente: non c\'è nessuno a cui girarla, è il costo di una tua spedizione.'
   const righe: any[] = []
+  // CHIUSE: righe che Lorenzo ha deciso di non recuperare piu' (perche.tipo 'chiusa'). Il 18/11/2026, sulle 44 di
+  // MULTI rimaste con qualcosa da chiedere sotto (68,12 €: 35 SDA EXPRESS L la cui prima ripesatura del 15/10 era stata
+  // annullata sopra mentre quella verso il figlio restava, 9 Poste Delivery Business S rettificate a meta' ottobre per
+  // meno dell'addebito arrivato dopo): «queste ormai levale». Escono dall'elenco; la riga e i soldi restano com'erano.
+  const chiusa = (r: any) => r?.perche?.tipo === 'chiusa'
   for (const r of ricevuteNonGirate) {
+    if (chiusa(r)) continue
     // Quanto mi e' stato scalato: ripesatura (differenza, negativa = addebito) + supplementi fissi.
     const pagato = arr(-(Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)))
     if (pagato < 0.005) continue
@@ -87,6 +96,7 @@ export async function rettificheNonGirate(admin: any, mio: string, dal: string, 
     })
   }
   for (const r of mie) {
+    if (chiusa(r)) continue
     const costo = arr(Number(r.costo_fornitore || 0))
     if (costo < 0.005) continue
     const p: any = percheMie.get(r.id)
