@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { nonStaffMaster } from '@/lib/permessi'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 
 // «La giornata» della Plancia nuova (v11): le spedizioni CREATE OGGI ora per ora, e di quelle quante sono ancora fuori
 // distinta. Stessa rete e stesso filtro dei contratti di /api/dashboard (sé + sotto-albero, solo i contratti posseduti),
@@ -34,6 +35,9 @@ export async function GET() {
   const admin = createAdminSupabase()
   const reteIds = await sottoAlberoMasterIds(admin, masterId)
   const ownNomi = await contrattiPossedutiNomi(admin, masterId)
+  // UN PACCO CONTA UNA VOLTA: le gambe interne alla rete tolte con la regola unica del database, come la home dal
+  // 19/11 (lib/gambe-visibilita.ts). Senza, per MULTIEXPRESS lo stesso pacco contava fino a tre volte.
+  const gambe = await ledgerGambeInterne(admin, masterId)
   const da = inizioOggiRoma().toISOString()
 
   const ore = Array.from({ length: 24 }, (_, h) => ({ ora: h, create: 0, fuoriDistinta: 0 }))
@@ -42,8 +46,9 @@ export async function GET() {
     const q = ownNomi.length
       ? admin.from('spedizioni').select('created_at,distinta_id,stato,corrieri!inner(nome_contratto)').in('corrieri.nome_contratto', ownNomi)
       : admin.from('spedizioni').select('created_at,distinta_id,stato')
-    const { data, error } = await q.in('master_id', reteIds.length ? reteIds : [masterId]).gte('created_at', da)
-      .order('created_at', { ascending: true }).range(from, from + 999)
+    const qq = q.in('master_id', reteIds.length ? reteIds : [masterId]).gte('created_at', da)
+    const { data, error } = await (gambe.length ? qq.or(`cliente_id.is.null,cliente_id.not.in.(${gambe.join(',')})`) : qq)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, from + 999)
     if (error) return NextResponse.json({ error: 'Lettura non riuscita' }, { status: 500 })
     for (const s of (data || []) as any[]) {
       if (s.stato === 'annullata') continue

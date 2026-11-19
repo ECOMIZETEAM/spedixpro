@@ -311,6 +311,7 @@ a { color: inherit; text-decoration: none; }
 .grande > b { font-family: var(--mono); font-weight: 200; font-size: clamp(40px, 3.6vw, 54px); line-height: 1; letter-spacing: -.05em; color: var(--inchiostro); font-variant-numeric: tabular-nums; }
 .grande > span { font-size: 13px; color: var(--attenuato); }
 .grande > span > b { font-weight: 500; color: var(--bene); }
+.grande > span > b.giu { color: var(--problema); }
 .traccia { display: block; width: 100%; height: auto; margin-top: 10px; overflow: visible; }
 .traccia text { font-family: var(--mono); font-size: 10.5px; fill: var(--attenuato); }
 .traccia .traccia__eti { fill: var(--accento-testo); font-size: 11.5px; }
@@ -352,7 +353,8 @@ a { color: inherit; text-decoration: none; }
 .credito { display: grid; gap: 4px; }
 .credito > i { position: relative; height: 4px; border-radius: 2px; background: var(--incavo-forte); overflow: hidden; }
 .credito > i::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--q) * 100%); border-radius: 2px; background: color-mix(in srgb, var(--inchiostro) 60%, transparent); transition: width .8s var(--facile); }
-.credito > small { display: flex; justify-content: space-between; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--attenuato); white-space: nowrap; }
+.credito > small { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 6px; font-family: var(--mono); font-size: 10.5px; color: var(--attenuato); }
+.credito > small > * { white-space: nowrap; }
 .credito--basso > i::after { background: var(--problema); }
 .credito--basso > small > b { font-weight: 400; color: var(--problema); }
 .appello { margin: 10px 0 0; padding: 0; list-style: none; }
@@ -366,6 +368,11 @@ a { color: inherit; text-decoration: none; }
 .sette > i.oggi-vuoto { height: 30px !important; background: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--problema) 70%, transparent); border-radius: 2px; }
 .appello > li > p { grid-column: 1 / -1; margin: 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: .02em; color: var(--problema); }
 .nota { margin: 2px 0 0; font-size: 12.5px; color: var(--attenuato); }
+.prova--male { color: var(--problema); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--problema) 50%, transparent); }
+.sette--ore { gap: 1.5px; }
+.sette--ore > i { width: 3px; }
+.sette--ore > i.dopo { background: color-mix(in srgb, var(--inchiostro) 12%, transparent); }
+.tabella__vuoto, .appello__vuoto, .righe__vuoto { display: block !important; padding: 14px 2px; font-size: 12.5px; color: var(--attenuato); border-top: 1px solid var(--filo); }
 
 /* 03 i master */
 .mastri { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
@@ -472,7 +479,7 @@ a { color: inherit; text-decoration: none; }
         <h1>Ecomize LL</h1>
         <p class="orologio" id="orologio">&nbsp;</p>
         <div class="comandi">
-          <span class="prova">Anteprima · dati di prova</span>
+          <span class="prova" id="stato-dati">&nbsp;</span>
           <div class="tema" role="group" aria-label="Giorno o notte">
             <button type="button" data-v="giorno" aria-pressed="true" title="Giorno"><svg class="ico"><use href="#i-sole"/></svg></button>
             <button type="button" data-v="notte" aria-pressed="false" title="Notte"><svg class="ico"><use href="#i-luna"/></svg></button>
@@ -504,25 +511,21 @@ a { color: inherit; text-decoration: none; }
         <div class="ultima-luce" id="ultima-luce"></div>
       </div>
 
-      <aside class="comp vetro" aria-label="Cosa stanno facendo i clienti">
-        <div class="pan__testa"><span>Spedizioni, passo per passo</span><em><i class="vivo"></i>ora</em></div>
+      <aside class="comp vetro" aria-label="Le spedizioni di oggi, passo per passo">
+        <div class="pan__testa"><span>Passo per passo</span><em><i class="vivo"></i>oggi</em></div>
         <div class="comp__fase comp__fase--viva">
-          <div class="comp__n"><b id="c-crea">0</b><span>In creazione</span></div>
-          <p>clienti con la spedizione a metà, adesso</p>
-          <div class="comp__chi" id="c-chi"></div>
+          <div class="comp__n"><b id="c-fatte">0</b><span>Create</span></div>
+          <p>dalla mezzanotte, nella tua rete</p>
         </div>
-        <div class="comp__freccia"><i></i><span><b id="c-conv">—</b> di quelle iniziate oggi arriva in fondo</span></div>
+        <div class="comp__freccia"><i></i><span><b id="c-conv1">—</b> delle create</span></div>
         <div class="comp__fase">
-          <div class="comp__n"><b id="c-fatte">0</b><span>Completate oggi</span></div>
-          <div class="porte">
-            <div class="porte__barra" id="c-porte-barra"></div>
-            <ul id="c-porte"></ul>
-          </div>
+          <div class="comp__n"><b id="c-dentro">0</b><span>In distinta</span></div>
+          <p id="c-fuori">&nbsp;</p>
         </div>
-        <div class="comp__fase comp__fase--ko">
-          <div class="comp__n"><b id="c-ko">0</b><span>Non riuscite</span></div>
-          <p id="c-causa">&nbsp;</p>
-          <ul class="cause" id="c-cause"></ul>
+        <div class="comp__freccia"><i></i><span><b id="c-conv2">—</b> delle create</span></div>
+        <div class="comp__fase">
+          <div class="comp__n"><b id="c-viaggio">0</b><span>Già in viaggio</span></div>
+          <p id="c-consegnate">&nbsp;</p>
         </div>
       </aside>
 
@@ -545,7 +548,7 @@ a { color: inherit; text-decoration: none; }
 
   <div class="sezioni" id="sezioni">
     <section id="soldi">
-      <div class="mod"><span class="mod__n">01</span><h2>I soldi di oggi</h2><i class="mod__filo"></i><span class="mod__meta"><i class="vivo"></i>si aggiorna a ogni spedizione</span></div>
+      <div class="mod"><span class="mod__n">01</span><h2>I soldi di oggi</h2><i class="mod__filo"></i><span class="mod__meta"><i class="vivo"></i>ogni minuto · gli stessi numeri del Report Guadagno</span></div>
       <div class="due due--7-5">
         <div class="pan vetro">
           <div class="pan__testa"><span>Incassato dalla mezzanotte</span><em>oggi contro ieri</em></div>
@@ -554,16 +557,14 @@ a { color: inherit; text-decoration: none; }
           <ul class="chiave-traccia"><li><i></i>oggi</li><li><i class="tr-ieri"></i>ieri</li></ul>
         </div>
         <div class="pan vetro">
-          <div class="pan__testa"><span>Da dove arrivano</span><em>oggi</em></div>
+          <div class="pan__testa"><span>In cifre</span><em>oggi e ieri</em></div>
           <dl class="letture">
-            <div><dt>Dai tuoi clienti</dt><dd id="s-clienti">0<small>&nbsp;</small></dd></div>
-            <div><dt>Dai tuoi master</dt><dd id="s-rete">0<small>&nbsp;</small></dd></div>
-            <div><dt>Prezzo medio</dt><dd id="s-medio">0<small>a spedizione</small></dd></div>
-            <div><dt>Ultima ora</dt><dd id="s-ora">0<small>&nbsp;</small></dd></div>
-            <div><dt>A mezzanotte</dt><dd id="s-proiezione">0<small>se il ritmo resta questo</small></dd></div>
+            <div><dt>Quest'ora</dt><dd id="s-ora">0<small>&nbsp;</small></dd></div>
+            <div><dt>Ieri a quest'ora</dt><dd id="s-ieri-ora">0<small>&nbsp;</small></dd></div>
+            <div><dt>A mezzanotte</dt><dd id="s-proiezione">0<small>&nbsp;</small></dd></div>
             <div><dt>Ieri, tutto il giorno</dt><dd id="s-ieri">0<small>&nbsp;</small></dd></div>
           </dl>
-          <div class="utile"><span>Il tuo guadagno oggi<small>quello che resta a te, tolti i costi</small></span><b id="s-utile">0</b></div>
+          <div class="utile"><span>Il tuo guadagno oggi<small>tolti i costi, come nel Report Guadagno</small></span><b id="s-utile">0</b></div>
         </div>
       </div>
     </section>
@@ -574,12 +575,12 @@ a { color: inherit; text-decoration: none; }
         <div class="pan vetro">
           <div class="pan__testa"><span>Chi sta spedendo</span><em>in ordine di attività</em></div>
           <ul class="tabella" id="cl-tabella">
-            <li class="tabella__testa"><span></span><span>Cliente</span><span>Ultima</span><span>Oggi</span><span>Incassato</span><span>Credito</span></li>
+            <li class="tabella__testa"><span></span><span>Cliente</span><span>Ultima</span><span>Oggi</span><span>Ha speso</span><span>Credito</span></li>
           </ul>
         </div>
         <div class="pan vetro">
-          <div class="pan__testa"><span>Chi manca all'appello</span><em>ultimi 7 giorni</em></div>
-          <p class="nota">Clienti che di solito a quest'ora hanno già spedito e oggi ancora no.</p>
+          <div class="pan__testa"><span>Chi manca all'appello</span><em>rispetto a ieri</em></div>
+          <p class="nota">Clienti che ieri a quest'ora avevano già spedito, e oggi ancora no.</p>
           <ul class="appello" id="cl-appello"></ul>
         </div>
       </div>
@@ -606,7 +607,7 @@ a { color: inherit; text-decoration: none; }
       </div>
     </section>
   </div>
-  <p class="piede">Anteprima · i numeri sono di prova e si muovono da soli · nessun dato vero</p>
+  <p class="piede">I dati della tua rete · spedizioni nuove ogni 20 secondi, soldi ogni minuto · incassato e guadagno come nel Report Guadagno</p>
 </div>
 
 <script>// https://d3js.org/d3-array/ v3.2.4 Copyright 2010-2023 Mike Bostock
@@ -632,19 +633,13 @@ const calmo = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const due = n => String(n).padStart(2, '0');
 const intero = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const dec = (n, k = 1) => n.toFixed(k).replace('.', ',');
-const euro = (v, cent = true) => { const s = Math.abs(v).toFixed(2).split('.'); return `<span class="eu"><small>€</small>${intero(+s[0])}${cent ? `<small>,${s[1]}</small>` : ''}</span>`; };
-const euroTesto = v => '€ ' + intero(Math.floor(v)) + ',' + Math.abs(v).toFixed(2).split('.')[1];
+const euro = (v, cent = true) => { const s = Math.abs(v).toFixed(2).split('.'); return `<span class="eu">${v <= -0.005 ? '−' : ''}<small>€</small>${intero(+s[0])}${cent ? `<small>,${s[1]}</small>` : ''}</span>`; };
+const euroTesto = v => (v <= -0.005 ? '−' : '') + '€ ' + intero(+Math.abs(v).toFixed(2).split('.')[0]) + ',' + Math.abs(v).toFixed(2).split('.')[1];
 const GIORNI = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
 const MESI = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
 const hhmm = d => due(d.getHours()) + ':' + due(d.getMinutes());
 const fa = d => { const m = Math.round((Date.now() - d) / 60000); return m < 1 ? 'adesso' : m < 60 ? m + ' min fa' : Math.floor(m / 60) + ' h ' + due(m % 60) + ' fa'; };
 const temaOra = () => document.documentElement.dataset.tema || 'giorno';
-
-// il caso con un seme: la prima schermata è sempre la stessa (si confronta bene nelle foto)
-let seme = 18112026;
-const r = () => { seme = (seme * 1664525 + 1013904223) >>> 0; return seme / 4294967296; };
-const tra = (a, b, rr = r) => a + (b - a) * rr();
-const pesca = (lista, peso, rr = r) => { let tot = 0; for (const x of lista) tot += peso(x); let k = rr() * tot; for (const x of lista) { k -= peso(x); if (k <= 0) return x; } return lista[lista.length - 1]; };
 
 // un numero che conta fino al valore nuovo
 function conta(el, v, fmt = intero) {
@@ -661,96 +656,74 @@ function conta(el, v, fmt = intero) {
   el._raf = requestAnimationFrame(passo);
 }
 
-// ───────────────────────── i dati di prova ─────────────────────────
+// il testo che arriva dal database (nomi di clienti e master) non entra mai nell'HTML così com'è
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ───────────────────────── i dati veri: la giornata della rete, da /api/dashboard/live ─────────────────────────
 const SIGLE = TOPO.objects.prov.geometries.map(g => String(g.properties.prov_acr).toUpperCase());
 const NOME_PROV = Object.fromEntries(TOPO.objects.prov.geometries.map(g => [String(g.properties.prov_acr).toUpperCase(), String(g.properties.prov_name)]));
-const PESO_PROV = { MI: 10, RM: 11, NA: 9, TO: 6, BA: 4.5, PA: 4, BG: 3, BS: 3, CT: 3.5, SA: 3.6, FI: 3.2, BO: 3, VR: 2.5, PD: 2.6, VA: 2.4, MB: 2.4, CE: 2.8, GE: 2.2, TV: 2.4, VI: 2.3, LE: 2.4, TA: 1.9, ME: 1.8, CA: 1.8, MO: 1.9, RE: 1.6, PG: 1.7, AN: 1.4, CO: 1.7, LT: 1.6, FG: 1.8, CS: 1.9, RC: 1.6, AV: 1.2, BN: 1, PE: 1.1, CH: 1.1, PR: 1.4, VE: 2, UD: 1.4, TN: 1.2, BZ: 1.1, PV: 1.4, NO: 1.1, AL: 1.2, CN: 1.6, FR: 1.3, BR: 1.1, BT: 1.2, SR: 1.1, TP: 1.2, SS: 1, PU: 1, PZ: 1, CZ: 1, AG: 1, PO: 1.1, PI: 1.2, LU: 1.1, FC: 1.1 };
-const pesoProv = s => PESO_PROV[s] ?? .55;
-const nomeCitta = s => NOME_PROV[s] || s;
-const ESTERO = [['DE', 'Germania'], ['FR', 'Francia'], ['ES', 'Spagna'], ['AT', 'Austria'], ['BE', 'Belgio'], ['NL', 'Paesi Bassi'], ['CH', 'Svizzera'], ['PL', 'Polonia'], ['PT', 'Portogallo']];
-const CORRIERI = [['GLS', 30], ['BRT', 24], ['POSTE', 14], ['SDA', 12], ['UPS', 8], ['INPOST', 7], ['FEDEX', 3], ['DHL', 2]];
-const PORTE = [['Portale', 44, 't-pieno'], ['Negozi online', 31, 't-righe'], ['API', 18, 't-punti'], ['Import file', 7, 't-tenue']];
-const CAUSE = [['indirizzo non valido', 9], ['CAP non servito dal corriere', 6], ['credito finito', 4], ['peso oltre il limite', 3], ['il corriere non ha risposto', 2]];
-const CLIENTI = [
-  ['Oleificio Del Sole', 'BA', 7], ['Casa del Ricambio', 'NA', 9], ['Moda Luna', 'NA', 8], ['Profumeria Elisir', 'RM', 6],
-  ['Vini Collina d’Oro', 'VR', 4], ['TechPoint Store', 'MI', 8], ['Erboristeria Il Melograno', 'FI', 4], ['Calzature Ferri', 'MC', 5],
-  ['Pet Planet', 'TO', 6], ['Ceramiche Costiera', 'SA', 3], ['Libreria Il Faro', 'GE', 2], ['Gioielli Aurora', 'VI', 3],
-  ['Sport Mania 24', 'CT', 5], ['Casa Linda Tessili', 'PO', 4], ['Torrefazione Marino', 'NA', 4], ['Ottica Visione', 'BO', 3],
-  ['Arredo Facile', 'TV', 2], ['Bimbi & Co', 'PA', 4], ['Elettro Sud', 'CE', 6], ['Biofarma Natura', 'PD', 5],
-  ['Pastificio Antico', 'NA', 3], ['Ricambi Moto Veloce', 'BS', 3], ['Cosmetica Bella Vita', 'RM', 5], ['Dolci di Sicilia', 'CT', 3],
-].map(([nome, prov, peso]) => ({ nome, prov, peso, oggi: 0, euro: 0, guadagno: 0, credito: 0, ultima: null, ore: Array(24).fill(0) }));
-const ASSENTI = [
-  { nome: 'Integratori Forza', prov: 'MI', solito: 46, ultima: 'ieri alle 18:12', sette: [52, 48, 0, 44, 50, 47, 41] },
-  { nome: 'Atelier Sposa Bianca', prov: 'NA', solito: 34, ultima: 'ieri alle 17:40', sette: [30, 36, 33, 0, 38, 35, 31] },
-  { nome: 'Fiori & Piante Online', prov: 'PT', solito: 21, ultima: 'domenica alle 11:05', sette: [22, 19, 24, 20, 0, 0, 18] },
-  { nome: 'Maglieria Valle', prov: 'BI', solito: 12, ultima: 'ieri alle 16:58', sette: [11, 14, 12, 13, 0, 15, 12] },
-];
-const MASTER = [['Spedizioni Sud', 'NA', 8], ['Logistica Adriatica', 'BA', 6], ['Pacchi Express Roma', 'RM', 7], ['NordShip', 'MI', 6],
-  ['Isola Spedizioni', 'PA', 4], ['Centro Pack', 'FI', 3], ['Delta Log', 'PD', 3], ['Etna Express', 'CT', 3]]
-  .map(([nome, prov, peso]) => ({ nome, prov, peso, oggi: 0, euro: 0, guadagno: 0, ultima: null, ore: Array(24).fill(0) }));
-const CLIENTI_TOTALI = 148, CLIENTI_RETE = 214;
-
-// la forma di una giornata: poco la notte, il grosso fra le 9 e le 12, una coda il pomeriggio
-const FORMA = [.35, .12, .05, .04, .06, .18, .7, 2.4, 6.2, 9.6, 11, 10.4, 8.1, 7, 5.6, 5.5, 6, 5.2, 3.6, 2.1, 1.1, .6, .4, .3];
-const SOMMA = FORMA.reduce((a, b) => a + b, 0), GIORNATA = 1680;
+const nomeCitta = s => s ? (NOME_PROV[s] || s) : '—';
+const PAESI = { DE: 'Germania', FR: 'Francia', ES: 'Spagna', AT: 'Austria', BE: 'Belgio', NL: 'Paesi Bassi', CH: 'Svizzera', PL: 'Polonia',
+  PT: 'Portogallo', SM: 'San Marino', VA: 'Vaticano', GB: 'Regno Unito', UK: 'Regno Unito', IE: 'Irlanda', LU: 'Lussemburgo', DK: 'Danimarca',
+  SE: 'Svezia', FI: 'Finlandia', NO: 'Norvegia', CZ: 'Cechia', SK: 'Slovacchia', SI: 'Slovenia', HR: 'Croazia', HU: 'Ungheria', RO: 'Romania',
+  BG: 'Bulgaria', GR: 'Grecia', MT: 'Malta', CY: 'Cipro', EE: 'Estonia', LV: 'Lettonia', LT: 'Lituania', US: 'Stati Uniti' };
+const nomePaese = c => PAESI[c] || c;
+// le ore si contano a Roma, qualunque sia il fuso del computer di chi guarda
+const FMT_ORA = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', hourCycle: 'h23' });
+const oraDi = t => +FMT_ORA.format(new Date(t)) % 24;
+const oraAdesso = () => oraDi(Date.now());
 
 const S = {
-  ore: Array.from({ length: 24 }, (_, i) => ({ ora: i, create: 0, dentro: 0, ieri: 0, euro: 0, euroIeri: 0 })),
-  prov: new Map(), corrieri: new Map(CORRIERI.map(c => [c[0], 0])), porte: new Map(PORTE.map(p => [p[0], 0])),
-  estero: new Map(), euro: 0, euroClienti: 0, euroRete: 0, guadagno: 0, fatte: 0, ko: 0, lasciate: 0,
-  cod: 0, codEuro: 0, cause: new Map(CAUSE.map(c => [c[0], 0])), creano: new Set(), creanoRete: 0, reteAttivi: 0, nastro: [],
+  da: 0, ora: null, righe: new Map(), chi: new Map(),
+  ore: Array.from({ length: 24 }, (_, i) => ({ ora: i, create: 0, dentro: 0, ieri: 0, euro: 0, guad: 0, euroIeri: 0 })),
+  prov: new Map(), corrieri: new Map(), estero: new Map(),
+  fatte: 0, dentro: 0, viaggio: 0, consegnate: 0, cod: 0, codEuro: 0,
+  euro: 0, guad: 0, soldiOre: [], ieriSoldi: [], ieriDieci: [], ieriFinOra: null,
+  assenti: [], totali: { clienti: 0, master: 0 },
 };
 
-function prezzo(rr) { return Math.min(28, 4.9 + -Math.log(1 - rr()) * 2.15); }
-
-// una spedizione: chi la fa, da dove, per dove, con chi, quanto
-function nuovaSpedizione(rr, quando) {
-  const rete = rr() < .3;
-  const chi = rete ? pesca(MASTER, m => m.peso, rr) : pesca(CLIENTI, c => c.peso, rr);
-  const fuori = rr() < .022, paese = fuori ? pesca(ESTERO, () => 1, rr) : null;
-  const a = fuori ? null : pesca(SIGLE, pesoProv, rr);
-  const vettore = pesca(CORRIERI, c => c[1], rr)[0];
-  const porta = pesca(PORTE, p => p[1], rr)[0];
-  const p = prezzo(rr) * (fuori ? 2.6 : 1), cod = !fuori && rr() < .12 ? Math.round(18 + -Math.log(1 - rr()) * 46) : 0;
-  // dai master incassi il loro prezzo d'ingrosso; il tuo guadagno è la differenza col costo
-  const incasso = rete ? p * .86 : p, guadagno = rete ? .6 + rr() * .7 : p * (.13 + rr() * .06);
-  return { tipo: 'sped', t: quando, rete, chi, da: chi.prov, a, paese, vettore, porta, euro: incasso, guadagno, cod };
+// chi ha fatto la spedizione: 'c…' un tuo cliente, 'm…' il tuo master di prima linea da cui passa, 'io' le tue
+function chiDi(k) {
+  let c = S.chi.get(k);
+  if (!c) { c = { k, nome: '—', tipo: k === 'io' ? 'io' : k[0], credito: null, scalare: false, oggi: 0, euro: 0, ultima: null, ore: Array(24).fill(0), prov: null }; S.chi.set(k, c); }
+  return c;
 }
-function registra(s) {
-  const h = s.t.getHours(), o = S.ore[h];
-  o.create++; o.euro += s.euro;
-  S.fatte++; S.euro += s.euro; S.guadagno += s.guadagno;
-  if (s.rete) S.euroRete += s.euro; else S.euroClienti += s.euro;
-  if (s.a) S.prov.set(s.a, (S.prov.get(s.a) || 0) + 1); else S.estero.set(s.paese[1], (S.estero.get(s.paese[1]) || 0) + 1);
-  S.corrieri.set(s.vettore, S.corrieri.get(s.vettore) + 1);
-  S.porte.set(s.porta, S.porte.get(s.porta) + 1);
-  if (s.cod) { S.cod++; S.codEuro += s.cod; }
-  const c = s.chi; c.oggi++; c.euro += s.euro; c.guadagno += s.guadagno; c.ore[h]++;
-  if (!c.ultima || s.t > c.ultima) c.ultima = s.t;
-  if (!s.rete) c.credito = Math.max(0, c.credito - s.euro);
+function prendiChi(diz) {
+  for (const [k, v] of Object.entries(diz || {})) { const c = chiDi(k); c.nome = v.n; c.tipo = v.t; if (v.cr != null) c.credito = v.cr; c.scalare = !!v.sc; }
+}
+// una riga compatta della rotta → una spedizione
+function daRiga(r) {
+  const t = S.da + r[1] * 1000;
+  return { id: r[0], t: new Date(t), h: oraDi(t), k: r[2], da: r[3], a: r[4], paese: r[5], vettore: r[6], euro: r[7], cod: r[8], dentro: r[9], viaggio: r[10] };
+}
+// ieri fino a quest'ora, dai blocchi di dieci minuti
+function ieriFinOra() {
+  const pass = (Date.now() - S.da) / 600000, k = Math.floor(pass);
+  let n = 0; for (let i = 0; i < Math.min(k, 144); i++) n += S.ieriDieci[i] || 0;
+  return n + (k < 144 ? (S.ieriDieci[k] || 0) * (pass - k) : 0);
 }
 
-// la giornata fin qui
-const ORA0 = new Date(), H0 = ORA0.getHours() + ORA0.getMinutes() / 60;
-for (let h = 0; h < 24; h++) {
-  const pieno = GIORNATA * FORMA[h] / SOMMA * tra(.9, 1.1);
-  S.ore[h].ieri = Math.round(pieno * tra(.84, 1.0));
-  S.ore[h].euroIeri = S.ore[h].ieri * tra(6.6, 7.1);
-  const quante = h < Math.floor(H0) ? Math.round(pieno) : h === Math.floor(H0) ? Math.round(pieno * (H0 % 1)) : 0;
-  const finoA = h === Math.floor(H0) ? ORA0.getMinutes() : 60;
-  for (let k = 0; k < quante; k++) registra(nuovaSpedizione(r, new Date(ORA0.getFullYear(), ORA0.getMonth(), ORA0.getDate(), h, Math.floor(r() * finoA), Math.floor(r() * 60))));
-  // le più vecchie sono già in distinta, le ultime ore ancora no
-  const eta = H0 - h;
-  S.ore[h].dentro = Math.round(S.ore[h].create * (eta > 4 ? tra(.14, .24) : eta > 1.5 ? tra(.05, .12) : 0));
+// i conti si rifanno da capo sulle righe: con qualche migliaio di righe è un attimo, e un conto rifatto non si sbaglia
+function ricalcola() {
+  for (const o of S.ore) { o.create = 0; o.dentro = 0; }
+  S.prov = new Map(); S.corrieri = new Map(); S.estero = new Map();
+  S.fatte = S.dentro = S.viaggio = S.consegnate = S.cod = S.codEuro = 0;
+  for (const c of S.chi.values()) { c.oggi = 0; c.euro = 0; c.ultima = null; c.ore = Array(24).fill(0); c.partenze = new Map(); }
+  for (const s of S.righe.values()) {
+    const o = S.ore[s.h]; o.create++; if (s.dentro) o.dentro++;
+    S.fatte++; if (s.dentro) S.dentro++; if (s.viaggio) S.viaggio++; if (s.viaggio === 2) S.consegnate++;
+    if (s.a) S.prov.set(s.a, (S.prov.get(s.a) || 0) + 1); else if (s.paese) S.estero.set(s.paese, (S.estero.get(s.paese) || 0) + 1);
+    S.corrieri.set(s.vettore, (S.corrieri.get(s.vettore) || 0) + 1);
+    if (s.cod > 0) { S.cod++; S.codEuro += s.cod; }
+    const c = chiDi(s.k); c.oggi++; c.euro += s.euro || 0; c.ore[s.h]++;
+    if (!c.ultima || s.t > c.ultima) c.ultima = s.t;
+    if (s.da) c.partenze.set(s.da, (c.partenze.get(s.da) || 0) + 1);
+  }
+  for (const c of S.chi.values()) c.prov = [...c.partenze.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  // i soldi sono quelli del Report Guadagno, ora per ora: qui si sommano, non si calcolano
+  S.ore.forEach((o, i) => { o.euro = S.soldiOre[i]?.euro || 0; o.guad = S.soldiOre[i]?.guad || 0; o.euroIeri = S.ieriSoldi[i]?.euro || 0; });
+  S.euro = S.soldiOre.reduce((a, o) => a + o.euro, 0); S.guad = S.soldiOre.reduce((a, o) => a + o.guad, 0);
 }
-// il credito è quello che resta adesso; tre clienti sono quasi a secco
-for (const c of CLIENTI) c.credito = tra(240, 2600);
-CLIENTI[3].credito = 74; CLIENTI[12].credito = 58; CLIENTI[18].credito = 41;
-for (const c of CLIENTI) if (c.ultima && Date.now() - c.ultima > 25 * 60000 && r() < .5) c.ultima = new Date(Date.now() - tra(1, 22) * 60000);
-S.ko = Math.round(S.fatte * .014); for (let i = 0; i < S.ko; i++) { const c = pesca(CAUSE, x => x[1])[0]; S.cause.set(c, S.cause.get(c) + 1); }
-S.lasciate = Math.round(S.fatte * .019);
-for (const c of CLIENTI) if (r() < .22) S.creano.add(c);
-S.creanoRete = 6; S.reteAttivi = 19;
 
 // ───────────────────────── l'orologio ─────────────────────────
 function orologio() { const t = new Date(); $('#orologio').innerHTML = `${GIORNI[t.getDay()]} ${t.getDate()} ${MESI[t.getMonth()]} · <b>${due(t.getHours())}:${due(t.getMinutes())}<span>:${due(t.getSeconds())}</span></b>`; }
@@ -995,85 +968,54 @@ function misura() {
   MIS = nuova; disegnaCarta(); return true;
 }
 
-// ───────────────────────── IL PALCO: numeri, nastro, comportamento, linea del giorno ─────────────────────────
-function attiviOra() { const dieci = Date.now() - 15 * 60000; return CLIENTI.filter(c => S.creano.has(c) || (c.ultima && c.ultima > dieci)); }
-function inUltimaOra(campo = 'create') {
-  const d = new Date(), h = d.getHours(), m = d.getMinutes() / 60;
-  return S.ore[h][campo] + (h > 0 ? S.ore[h - 1][campo] * (1 - m) : 0);
-}
-function aQuestOraIeri(campo) {
-  const d = new Date(), h = d.getHours(), m = d.getMinutes() / 60;
-  let t = 0; for (let i = 0; i < h; i++) t += S.ore[i][campo]; return t + S.ore[h][campo] * m;
-}
+// ───────────────────────── IL PALCO: numeri, nastro, passo per passo, linea del giorno ─────────────────────────
+const QUINDICI = 15 * 60000;
+const attivi = tipo => [...S.chi.values()].filter(c => c.tipo === tipo && c.ultima && Date.now() - c.ultima < QUINDICI);
 function variazione(oggi, ieri) {
   if (!ieri) return '';
   const v = (oggi - ieri) / ieri * 100, giu = v < 0;
   return `<b class="${giu ? 'giu' : ''}">${giu ? '−' : '+'}${dec(Math.abs(v))}%</b> su ieri a quest'ora`;
 }
 function disegnaOggi() {
-  const attivi = attiviOra().length + S.reteAttivi;
-  conta($('#o-clienti'), attivi);
-  $('#o-clienti-s').innerHTML = `su ${intero(CLIENTI_TOTALI + CLIENTI_RETE)} · <b style="color:var(--accento-testo)">${S.creano.size + S.creanoRete}</b> creano adesso`;
-  const oraFa = Date.now() - 60 * 60000, mAttivi = MASTER.filter(m => m.ultima && m.ultima > Date.now() - 15 * 60000).length, mOra = MASTER.filter(m => m.ultima && m.ultima > oraFa).length;
-  conta($('#o-master'), mAttivi);
-  $('#o-master-s').innerHTML = `su ${MASTER.length} · ${mOra} hanno spedito nell'ultima ora`;
+  // «attivi» = hanno creato una spedizione negli ultimi 15 minuti: chi ha il modulo aperto adesso il portale non lo registra
+  conta($('#o-clienti'), attivi('c').length);
+  $('#o-clienti-s').innerHTML = `su ${intero(S.totali.clienti)} · spedito negli ultimi 15 min`;
+  const oraFa = Date.now() - 3600000, mOra = [...S.chi.values()].filter(c => c.tipo === 'm' && c.ultima && c.ultima > oraFa).length;
+  conta($('#o-master'), attivi('m').length);
+  $('#o-master-s').innerHTML = S.totali.master ? `su ${S.totali.master} · ${mOra} hanno spedito nell'ultima ora` : 'non hai master sotto di te';
   conta($('#o-euro'), S.euro, v => euro(v));
-  $('#o-euro-s').innerHTML = variazione(S.euro, aQuestOraIeri('euroIeri'));
+  $('#o-euro-s').innerHTML = variazione(S.euro, S.ieriFinOra?.euro);
   conta($('#o-sped'), S.fatte);
-  $('#o-sped-s').innerHTML = variazione(S.fatte, aQuestOraIeri('ieri'));
+  $('#o-sped-s').innerHTML = variazione(S.fatte, ieriFinOra());
   conta($('#l-sped'), S.fatte);
   conta($('#l-prov'), S.prov.size);
 }
 
 const nastro = $('#nastro');
-function nelNastro(ev, nuova = true) {
-  const li = document.createElement('li');
-  const t = `<time>${hhmm(ev.t)}</time>`;
-  if (ev.tipo === 'sped') {
-    const chi = ev.rete ? `<i>via</i> ${ev.chi.nome}` : ev.chi.nome;
-    const verso = ev.a ? `${nomeCitta(ev.da)} → ${nomeCitta(ev.a)}` : `${nomeCitta(ev.da)} → ${ev.paese[1]}`;
-    li.innerHTML = `<i class="punto punto--corso"></i>${t}<b>${chi}</b><strong>${euroTesto(ev.euro)}</strong><span>${verso}</span><em>${ev.vettore}</em>`;
-  } else if (ev.tipo === 'ko') {
-    li.className = 'n-ko';
-    li.innerHTML = `<i class="punto punto--problema"></i>${t}<b>${ev.chi.nome}</b><strong></strong><span>Non riuscita · ${ev.causa}</span><em>${ev.vettore}</em>`;
-  } else {
-    li.className = 'n-distinta';
-    li.innerHTML = `<i class="punto punto--scuro"></i>${t}<b>${ev.chi.nome}</b><strong></strong><span>Distinta chiusa · ${ev.n} spedizioni</span><em>${ev.vettore}</em>`;
-  }
+function nelNastro(s, nuova = true) {
+  const li = document.createElement('li'), c = chiDi(s.k);
+  const chi = c.tipo === 'm' ? `<i>via</i> ${esc(c.nome)}` : esc(c.nome);
+  const verso = `${esc(nomeCitta(s.da))} → ${esc(s.a ? nomeCitta(s.a) : s.paese ? nomePaese(s.paese) : '—')}`;
+  li.innerHTML = `<i class="punto punto--corso"></i><time>${hhmm(s.t)}</time><b>${chi}</b><strong>${s.euro != null ? euroTesto(s.euro) : ''}</strong><span>${verso}</span><em>${esc(s.vettore)}</em>`;
   if (nuova) li.classList.add('n-nuova');
   nastro.insertBefore(li, nastro.firstChild);
   while (nastro.children.length > 14) nastro.lastChild.remove();
 }
 
+// le spedizioni di oggi, passo per passo: create → in distinta → già in viaggio (stato e distinta della riga, veri)
 function disegnaComp() {
-  conta($('#c-crea'), S.creano.size + S.creanoRete);
-  const chi = $('#c-chi'), lista = [...S.creano].slice(0, 6), dentro = new Set(lista.map(c => c.nome));
-  chi.querySelectorAll('i').forEach(i => { if (!dentro.has(i.title)) i.remove(); });
-  for (const c of lista) if (!chi.querySelector(`i[title="${CSS.escape(c.nome)}"]`)) {
-    const i = document.createElement('i'); i.title = c.nome; i.textContent = c.nome.split(/\s+/).filter(w => /^[A-Za-zÀ-ú]/.test(w)).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-    chi.insertBefore(i, chi.querySelector('small'));
-  }
-  let piu = chi.querySelector('small'); if (!piu) { piu = document.createElement('small'); chi.appendChild(piu); }
-  const altri = S.creano.size + S.creanoRete - lista.length;
-  piu.textContent = altri > 0 ? `+${altri} ${altri === 1 ? 'altro' : 'altri'}` : '';
-  const iniziate = S.fatte + S.ko + S.lasciate;
-  $('#c-conv').textContent = dec(S.fatte / Math.max(1, iniziate) * 100) + '%';
-  conta($('#c-fatte'), S.fatte);
-  const tot = Math.max(1, S.fatte);
-  $('#c-porte-barra').innerHTML = PORTE.map(([n, , t]) => `<i class="${t}" style="flex-grow:${S.porte.get(n)}"></i>`).join('');
-  $('#c-porte').innerHTML = PORTE.map(([n, , t]) => `<li><i class="${t}"></i>${n}<b>${Math.round(S.porte.get(n) / tot * 100)}%</b></li>`).join('');
-  conta($('#c-ko'), S.ko);
-  const prima = [...S.cause.entries()].sort((a, b) => b[1] - a[1])[0];
-  $('#c-causa').innerHTML = `e <b>${intero(S.lasciate)}</b> lasciate a metà, senza errori`;
-  const cause = [...S.cause.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), cm = Math.max(1, cause[0][1]);
-  $('#c-cause').innerHTML = cause.map(([n, v]) => `<li><span>${n}</span><b>${v}</b><i style="--q:${(v / cm).toFixed(3)}"></i></li>`).join('');
+  conta($('#c-fatte'), S.fatte); conta($('#c-dentro'), S.dentro); conta($('#c-viaggio'), S.viaggio);
+  const q = n => S.fatte ? dec(n / S.fatte * 100) + '%' : '—';
+  $('#c-conv1').textContent = q(S.dentro); $('#c-conv2').textContent = q(S.viaggio);
+  $('#c-fuori').innerHTML = `<b>${intero(S.fatte - S.dentro)}</b> ancora fuori distinta`;
+  $('#c-consegnate').innerHTML = S.consegnate ? `il corriere le ha scansionate · <b>${intero(S.consegnate)}</b> già consegnate` : 'il corriere le ha già scansionate';
 }
 
 const oreEl = $('#g-ore');
 oreEl.innerHTML = S.ore.map((o, i) => `<div class="ora" style="--i:${i}"><div class="ora__barra"><i class="ora__fuori"></i><i class="ora__dentro"></i></div><span>${i % 3 === 0 ? due(i) : ''}</span></div>`).join('')
   + `<svg class="ieri" viewBox="0 0 240 100" preserveAspectRatio="none" aria-hidden="true"><path/></svg><div class="lancetta"><span></span></div>`;
 function disegnaGiorno() {
-  const d = new Date(), adesso = d.getHours() + d.getMinutes() / 60;
+  const d = new Date(), adesso = oraAdesso() + d.getMinutes() / 60;
   const max = Math.max(4, ...S.ore.map(o => Math.max(o.create, o.ieri)));
   let fuori = 0, picco = S.ore[0];
   oreEl.querySelectorAll('.ora').forEach((el, i) => {
@@ -1097,17 +1039,17 @@ function disegnaGiorno() {
 // ───────────────────────── SOTTO: le sezioni ─────────────────────────
 function disegnaSoldi() {
   conta($('#s-euro'), S.euro, v => euro(v));
-  $('#s-euro-s').innerHTML = variazione(S.euro, aQuestOraIeri('euroIeri'));
+  $('#s-euro-s').innerHTML = variazione(S.euro, S.ieriFinOra?.euro);
   // la traccia: il cumulato di oggi fino ad adesso, quello di ieri per tutta la giornata
-  const d = new Date(), adesso = d.getHours() + d.getMinutes() / 60, h = d.getHours();
+  const d = new Date(), h = oraAdesso(), adesso = h + d.getMinutes() / 60;
   let c = 0; const ieri = [[0, 0]]; for (let i = 0; i < 24; i++) { c += S.ore[i].euroIeri; ieri.push([i + 1, c]); }
   c = 0; const oggi = [[0, 0]]; for (let i = 0; i < h; i++) { c += S.ore[i].euro; oggi.push([i + 1, c]); } oggi.push([adesso, S.euro]);
-  const top = Math.max(100, ieri[24][1], S.euro) * 1.08, X = v => 46 + v / 24 * 650, Y = v => 196 - v / top * 176;
+  const top = Math.max(100, ieri[24][1], S.euro) * 1.08, X = v => 46 + v / 24 * 650, Y = v => 196 - Math.max(0, v) / top * 176;
   const linea = pts => 'M' + pts.map(p => X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join('L');
   const passi = [.25, .5, .75, 1].map(k => top / 1.08 * k);
   const fine = oggi[oggi.length - 1];
   $('#s-traccia').innerHTML = `<defs><linearGradient id="g-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accento)" stop-opacity=".22"/><stop offset="1" stop-color="var(--accento)" stop-opacity="0"/></linearGradient></defs>
-    ${passi.map(v => `<line class="traccia__riga" x1="46" x2="696" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text x="40" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end">${v >= 10000 ? intero(v / 1000) : dec(v / 1000)}k</text>`).join('')}
+    ${passi.map(v => `<line class="traccia__riga" x1="46" x2="696" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text x="40" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end">${v >= 10000 ? intero(v / 1000) + 'k' : v >= 1000 ? dec(v / 1000) + 'k' : intero(v)}</text>`).join('')}
     <line class="traccia__zero" x1="46" x2="696" y1="196" y2="196"/>
     ${[0, 3, 6, 9, 12, 15, 18, 21, 24].map(o => `<text x="${X(o).toFixed(1)}" y="216" text-anchor="middle">${due(o % 24)}</text>`).join('')}
     <path class="traccia__ieri" d="${linea(ieri)}"/>
@@ -1116,139 +1058,181 @@ function disegnaSoldi() {
     <line class="traccia__ora" x1="${X(fine[0]).toFixed(1)}" x2="${X(fine[0]).toFixed(1)}" y1="${Y(fine[1]).toFixed(1)}" y2="196"/>
     <circle class="traccia__nodo" r="4" cx="${X(fine[0]).toFixed(1)}" cy="${Y(fine[1]).toFixed(1)}"/>
     <text class="traccia__eti" x="${(X(fine[0]) + (fine[0] > 19 ? -10 : 10)).toFixed(1)}" y="${(Y(fine[1]) - 10).toFixed(1)}" text-anchor="${fine[0] > 19 ? 'end' : 'start'}">${euroTesto(S.euro)}</text>`;
-  const quota = S.euro ? S.euroClienti / S.euro : 0;
-  $('#s-clienti').innerHTML = `${euro(S.euroClienti)}<small>${Math.round(quota * 100)}% del totale</small>`;
-  $('#s-rete').innerHTML = `${euro(S.euroRete)}<small>${Math.round((1 - quota) * 100)}% · da ${MASTER.filter(m => m.oggi).length} master</small>`;
-  $('#s-medio').innerHTML = `${euro(S.euro / Math.max(1, S.fatte))}<small>a spedizione</small>`;
-  $('#s-ora').innerHTML = `${euro(inUltimaOra('euro'), false)}<small>${intero(inUltimaOra('create'))} spedizioni negli ultimi 60 minuti</small>`;
-  // la proiezione: quello che manca, con la forma di ieri dalle ore che restano
-  let resto = 0; for (let i = h; i < 24; i++) resto += S.ore[i].euroIeri * (i === h ? 1 - d.getMinutes() / 60 : 1);
-  const ritmo = S.euro / Math.max(1, aQuestOraIeri('euroIeri'));
-  $('#s-proiezione').innerHTML = `${euro(S.euro + resto * ritmo, false)}<small>se il ritmo resta questo</small>`;
-  $('#s-ieri').innerHTML = `${euro(ieri[24][1], false)}<small>${intero(S.ore.reduce((a, o) => a + o.ieri, 0))} spedizioni</small>`;
-  conta($('#s-utile'), S.guadagno, v => euro(v));
+  const qo = S.ore[h];
+  $('#s-ora').innerHTML = `${euro(qo.euro)}<small>dalle ${due(h)}:00 · ${intero(qo.create)} spedizioni</small>`;
+  $('#s-ieri-ora').innerHTML = S.ieriFinOra ? `${euro(S.ieriFinOra.euro)}<small>entro le ${hhmm(d)} · ${intero(ieriFinOra())} spedizioni</small>` : '—';
+  // la proiezione: quello che ieri e' arrivato dopo quest'ora, col ritmo di oggi rispetto a ieri
+  const ieriTot = ieri[24][1], base = S.ieriFinOra?.euro || 0;
+  $('#s-proiezione').innerHTML = base > 0 ? `${euro(S.euro + (ieriTot - base) * (S.euro / base), false)}<small>se il resto va come ieri</small>` : `—<small>manca la giornata di ieri</small>`;
+  $('#s-ieri').innerHTML = `${euro(ieriTot, false)}<small>${intero(S.ore.reduce((a, o) => a + o.ieri, 0))} spedizioni</small>`;
+  conta($('#s-utile'), S.guad, v => euro(v));
 }
 
 // i clienti: una riga per cliente, riordinata con «order» (spostarle nel DOM farebbe ripartire i puntini che respirano)
 const tabella = $('#cl-tabella'), righe = new Map();
 function disegnaClienti() {
-  const ora = Date.now(), ordinati = CLIENTI.slice().sort((a, b) => (S.creano.has(b) - S.creano.has(a)) || ((b.ultima || 0) - (a.ultima || 0))).slice(0, 10);
-  const viste = new Set(ordinati);
+  const ora = Date.now(), oggi = [...S.chi.values()].filter(c => c.tipo === 'c' && c.oggi > 0);
+  const ordinati = oggi.slice().sort((a, b) => (b.ultima || 0) - (a.ultima || 0)).slice(0, 10), viste = new Set(ordinati);
   for (const [c, li] of righe) if (!viste.has(c)) { li.remove(); righe.delete(c); }
-  const oreDaInizio = Math.max(1, (Date.now() - new Date().setHours(7, 0, 0, 0)) / 3600000);
+  const oreDaInizio = Math.max(1, (ora - (S.da + 7 * 3600000)) / 3600000);
+  const scala = Math.max(100, ...ordinati.filter(c => c.scalare).map(c => c.credito || 0));
   ordinati.forEach((c, k) => {
     let li = righe.get(c);
-    if (!li) { li = document.createElement('li'); li.innerHTML = `<i class="punto"></i><div><b>${c.nome}</b><small></small></div><span></span><strong></strong><em></em><div class="credito"><i></i><small></small></div>`; tabella.appendChild(li); righe.set(c, li); }
+    if (!li) { li = document.createElement('li'); li.innerHTML = `<i class="punto"></i><div><b></b><small></small></div><span></span><strong></strong><em></em><div class="credito"><i></i><small></small></div>`; tabella.appendChild(li); righe.set(c, li); }
     li.style.order = k;
-    const crea = S.creano.has(c), fermo = !crea && (!c.ultima || ora - c.ultima > 15 * 60000);
-    li.className = crea ? 'cl--crea' : '';
-    li.children[0].className = 'punto ' + (crea ? 'punto--crea' : fermo ? 'punto--fermo' : 'punto--bene');
-    li.children[1].querySelector('small').textContent = `${nomeCitta(c.prov)} · ${crea ? 'sta creando una spedizione' : fermo ? 'fermo da ' + fa(c.ultima).replace(' fa', '') : 'attivo'}`;
+    const vivo = c.ultima && ora - c.ultima < QUINDICI;
+    li.children[0].className = 'punto ' + (vivo ? 'punto--bene' : 'punto--fermo');
+    li.children[1].querySelector('b').textContent = c.nome;
+    li.children[1].querySelector('small').textContent = `${c.prov ? nomeCitta(c.prov) + ' · ' : ''}${vivo ? 'attivo' : 'fermo da ' + fa(c.ultima).replace(' fa', '')}`;
     li.children[2].textContent = c.ultima ? fa(c.ultima) : '—';
     li.children[3].textContent = intero(c.oggi);
     li.children[4].textContent = euroTesto(c.euro);
-    // il credito: quanto resta e, se al ritmo di oggi finisce presto, fra quanto
-    const spesaOra = c.euro / oreDaInizio, oreRestano = spesaOra ? c.credito / spesaOra : Infinity, basso = oreRestano < 3;
-    const cr = li.children[5]; cr.className = 'credito' + (basso ? ' credito--basso' : '');
-    cr.style.setProperty('--q', Math.min(1, c.credito / 2600).toFixed(3));
-    const quando = c.credito < 1 ? 'finito' : oreRestano < 1 ? `finisce in ~${Math.max(5, Math.round(oreRestano * 60 / 5) * 5)} min` : `finisce in ~${dec(oreRestano)} h`;
+    // il credito: a scalare, quanto resta e — se al ritmo di oggi finisce presto — fra quanto; a fattura il saldo e basta
+    const cr = li.children[5];
+    if (c.credito == null) { cr.className = 'credito'; cr.style.setProperty('--q', 0); cr.querySelector('small').innerHTML = '<span>—</span>'; return; }
+    if (!c.scalare) { cr.className = 'credito'; cr.style.setProperty('--q', 0); cr.querySelector('small').innerHTML = `<span>${euroTesto(c.credito)}</span><span>a fattura</span>`; return; }
+    const spesaOra = c.euro / oreDaInizio, oreRestano = c.credito <= 0 ? 0 : spesaOra ? c.credito / spesaOra : Infinity, basso = oreRestano < 3;
+    cr.className = 'credito' + (basso ? ' credito--basso' : '');
+    cr.style.setProperty('--q', Math.max(0, Math.min(1, c.credito / scala)).toFixed(3));
+    const quando = c.credito <= 0 ? 'finito' : oreRestano < 1 ? `fra ~${Math.max(5, Math.round(oreRestano * 60 / 5) * 5)} min` : `fra ~${dec(oreRestano)} h`;
+    cr.title = c.credito <= 0 ? 'credito finito: a credito a scalare non può spedire finché non ricarica' : basso ? `al ritmo di oggi il credito finisce ${quando.replace('~', 'circa ')}` : '';
     cr.querySelector('small').innerHTML = `<span>${euroTesto(c.credito)}</span>${basso ? `<b>${quando}</b>` : ''}`;
   });
-  $('#cl-meta').innerHTML = `<i class="vivo"></i>${attiviOra().length} attivi su ${CLIENTI_TOTALI} tuoi clienti`;
+  let vuoto = tabella.querySelector('.tabella__vuoto');
+  if (!ordinati.length && !vuoto) { vuoto = document.createElement('li'); vuoto.className = 'tabella__vuoto'; vuoto.textContent = 'Nessuno dei tuoi clienti ha ancora spedito oggi.'; tabella.appendChild(vuoto); }
+  if (ordinati.length && vuoto) vuoto.remove();
+  $('#cl-meta').innerHTML = `<i class="vivo"></i>${attivi('c').length} attivi adesso · ${oggi.length} hanno spedito oggi, su ${intero(S.totali.clienti)}`;
 }
 function disegnaAppello() {
-  const h = new Date().getHours();
-  $('#cl-appello').innerHTML = ASSENTI.map(a => {
-    const max = Math.max(...a.sette), entro = Math.round(a.solito * Math.min(1, Math.max(.15, (h - 7) / 6)));
-    return `<li><div><b>${a.nome}</b><small>${nomeCitta(a.prov)} · ultima ${a.ultima}</small></div>
-      <div class="sette" title="ultimi 7 giorni e oggi">${a.sette.map(v => `<i style="height:${Math.max(2, v / max * 30).toFixed(1)}px"></i>`).join('')}<i class="oggi-vuoto"></i></div>
-      <p>di solito ${entro} entro quest'ora · oggi 0</p></li>`;
+  const h = oraAdesso();
+  if (!S.assenti.length) { $('#cl-appello').innerHTML = `<li class="appello__vuoto">Nessun assente: chi ieri a quest'ora aveva già spedito, oggi ha spedito.</li>`; return; }
+  $('#cl-appello').innerHTML = S.assenti.map(a => {
+    const c = chiDi(a.k), max = Math.max(1, ...a.ore), ultima = a.ore.reduce((u, v, i) => v ? i : u, -1);
+    return `<li><div><b>${esc(c.nome)}</b><small>ieri ${intero(a.tot)} spedizioni${ultima >= 0 ? ` · l'ultima fra le ${due(ultima)} e le ${due((ultima + 1) % 24)}` : ''}</small></div>
+      <div class="sette sette--ore" title="ieri, ora per ora">${a.ore.map((v, i) => `<i class="${i > h ? 'dopo' : ''}" style="height:${Math.max(2, v / max * 30).toFixed(1)}px"></i>`).join('')}</div>
+      <p>ieri entro quest'ora ${intero(a.entro)} · oggi 0</p></li>`;
   }).join('');
 }
 function disegnaMaster() {
-  const box = $('#mastri'), h = new Date().getHours();
-  if (!box.children.length) box.innerHTML = MASTER.map(() => `<div class="ms vetro"><div class="ms__testa"><i class="punto"></i><b></b><small></small></div><div class="ms__n"><b></b><span>spedizioni oggi</span></div><div class="ms__eu"><span>incassato</span><b></b></div><div class="ms__eu"><span>il tuo guadagno</span><b class="acc"></b></div><div class="ms__ore">${'<i></i>'.repeat(24)}</div><small></small></div>`).join('');
-  const ordinati = MASTER.slice().sort((a, b) => b.oggi - a.oggi), max = Math.max(1, ...MASTER.flatMap(m => m.ore));
-  ordinati.forEach((m, k) => {
-    const el = box.children[k], vivo = m.ultima && Date.now() - m.ultima < 15 * 60000;
-    el.querySelector('.punto').className = 'punto ' + (vivo ? 'punto--bene' : 'punto--fermo');
-    el.querySelector('.ms__testa > b').textContent = m.nome; el.querySelector('.ms__testa > small').textContent = m.prov;
-    conta(el.querySelector('.ms__n > b'), m.oggi);
-    const [e1, e2] = el.querySelectorAll('.ms__eu > b'); e1.textContent = euroTesto(m.euro); e2.textContent = euroTesto(m.guadagno);
-    el.querySelectorAll('.ms__ore > i').forEach((i, o) => { i.style.height = (m.ore[o] / max * 100).toFixed(1) + '%'; i.className = o === h ? 'adesso' : o > h ? 'dopo' : ''; });
-    el.querySelector(':scope > small').textContent = m.ultima ? `ultima spedizione ${fa(m.ultima)}` : 'ancora nessuna oggi';
-  });
-  $('#ms-meta').innerHTML = `<i class="vivo"></i>${MASTER.filter(m => m.ultima && Date.now() - m.ultima < 15 * 60000).length} attivi adesso su ${MASTER.length}`;
+  const sez = $('#master'), box = $('#mastri'), h = oraAdesso();
+  sez.style.display = S.totali.master ? '' : 'none';
+  if (!S.totali.master) return;
+  const lista = [...S.chi.values()].filter(c => c.tipo === 'm' && c.oggi > 0).sort((a, b) => b.oggi - a.oggi).slice(0, 8);
+  if (!lista.length) { box.innerHTML = `<p class="nota">Nessuno dei tuoi master ha ancora spedito oggi.</p>`; }
+  else {
+    if (box.children.length !== lista.length || box.querySelector('.nota')) box.innerHTML = lista.map(() => `<div class="ms vetro"><div class="ms__testa"><i class="punto"></i><b></b><small></small></div><div class="ms__n"><b></b><span>spedizioni oggi</span></div><div class="ms__eu"><span>ti ha pagato</span><b></b></div><div class="ms__eu"><span>delle tue di oggi</span><b class="acc"></b></div><div class="ms__ore">${'<i></i>'.repeat(24)}</div><small></small></div>`).join('');
+    const max = Math.max(1, ...lista.flatMap(m => m.ore));
+    lista.forEach((m, k) => {
+      const el = box.children[k], vivo = m.ultima && Date.now() - m.ultima < QUINDICI;
+      el.querySelector('.punto').className = 'punto ' + (vivo ? 'punto--bene' : 'punto--fermo');
+      el.querySelector('.ms__testa > b').textContent = m.nome; el.querySelector('.ms__testa > small').textContent = m.prov || '';
+      conta(el.querySelector('.ms__n > b'), m.oggi);
+      const [e1, e2] = el.querySelectorAll('.ms__eu > b'); e1.textContent = euroTesto(m.euro); e2.textContent = dec(m.oggi / Math.max(1, S.fatte) * 100) + '%';
+      el.querySelectorAll('.ms__ore > i').forEach((i, o) => { i.style.height = (m.ore[o] / max * 100).toFixed(1) + '%'; i.className = o === h ? 'adesso' : o > h ? 'dopo' : ''; });
+      el.querySelector(':scope > small').textContent = m.ultima ? `ultima spedizione ${fa(m.ultima)}` : 'ancora nessuna oggi';
+    });
+  }
+  $('#ms-meta').innerHTML = `<i class="vivo"></i>${attivi('m').length} attivi adesso · ${lista.length} hanno spedito oggi, su ${S.totali.master}`;
 }
 const tacche = (q, acc) => `<span class="tacche${acc ? ' tacche--acc' : ''}">${Array.from({ length: 30 }, (_, k) => `<i class="${k < Math.round(q * 30) ? 'su' : ''}"></i>`).join('')}</span>`;
 function disegnaCorrieri() {
-  const tot = Math.max(1, S.fatte), lista = [...S.corrieri.entries()].sort((a, b) => b[1] - a[1]), max = Math.max(1, lista[0][1]);
-  $('#cr-corrieri').innerHTML = lista.map(([n, v], i) => `<li><b>${n}</b>${tacche(v / max, i === 0)}<strong>${intero(v)}</strong><em>${dec(v / tot * 100)}%</em></li>`).join('');
+  const tot = Math.max(1, S.fatte), lista = [...S.corrieri.entries()].sort((a, b) => b[1] - a[1]), max = Math.max(1, lista[0]?.[1] || 0);
+  $('#cr-corrieri').innerHTML = lista.length ? lista.map(([n, v], i) => `<li><b>${esc(n)}</b>${tacche(v / max, i === 0)}<strong>${intero(v)}</strong><em>${dec(v / tot * 100)}%</em></li>`).join('') : '<li class="righe__vuoto">ancora nessuna spedizione oggi</li>';
   const prov = [...S.prov.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8), pm = Math.max(1, prov[0]?.[1] || 0);
-  $('#cr-province').innerHTML = prov.map(([s, v], i) => `<li><b>${s}</b><div><span>${nomeCitta(s)}</span>${tacche(v / pm, i === 0)}</div><strong>${intero(v)}</strong><em>${dec(v / tot * 100)}%</em></li>`).join('');
+  $('#cr-province').innerHTML = prov.map(([s, v], i) => `<li><b>${esc(s)}</b><div><span>${esc(nomeCitta(s))}</span>${tacche(v / pm, i === 0)}</div><strong>${intero(v)}</strong><em>${dec(v / tot * 100)}%</em></li>`).join('');
   $('#cr-cod').innerHTML = `<b>${intero(S.cod)}</b> in contrassegno · ${euroTesto(S.codEuro)} che i destinatari pagheranno alla consegna`;
   const est = [...S.estero.values()].reduce((a, b) => a + b, 0);
-  $('#cr-estero').innerHTML = `<b>${intero(est)}</b> all'estero, in ${S.estero.size} paesi · ${[...S.estero.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0]).join(', ')}`;
+  $('#cr-estero').innerHTML = est ? `<b>${intero(est)}</b> all'estero, in ${S.estero.size} ${S.estero.size === 1 ? 'paese' : 'paesi'} · ${[...S.estero.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => esc(nomePaese(e[0]))).join(', ')}` : 'nessuna all\'estero, oggi';
 }
 
 function ultimaLuce(sp) {
-  const el = $('#ultima-luce');
-  el.innerHTML = `<span>ultima spedizione · ${hhmm(sp.t)}</span><b>${sp.a ? sp.da + ' <i>→</i> ' + sp.a : sp.da + ' <i>→</i> ' + sp.paese[0]}</b>`;
+  $('#ultima-luce').innerHTML = `<span>ultima spedizione · ${hhmm(sp.t)}</span><b>${esc(sp.da || '—')} <i>→</i> ${esc(sp.a || sp.paese || '—')}</b>`;
 }
 
 function disegnaTutto() { disegnaOggi(); disegnaComp(); disegnaGiorno(); disegnaSoldi(); disegnaClienti(); disegnaMaster(); disegnaCorrieri(); }
 
-// ───────────────────────── LA DIRETTA: arriva qualcosa ogni pochi secondi ─────────────────────────
-const caso = Math.random;
-function battito() {
-  const d = new Date(), x = caso();
-  // gente che apre e chiude il modulo
-  if (caso() < .45) { const c = pesca(CLIENTI, c => c.peso, caso); if (!S.creano.has(c)) S.creano.add(c); }
-  if (caso() < .2 && S.creano.size > 4) { const c = [...S.creano][Math.floor(caso() * S.creano.size)]; S.creano.delete(c); S.lasciate++; }
-  S.creanoRete = Math.max(2, Math.min(11, S.creanoRete + Math.round(tra(-1.4, 1.4, caso))));
-  S.reteAttivi = Math.max(10, Math.min(30, S.reteAttivi + Math.round(tra(-1.5, 1.5, caso))));
-  if (x < .045) {
-    const c = S.creano.size ? [...S.creano][Math.floor(caso() * S.creano.size)] : pesca(CLIENTI, c => c.peso, caso), causa = pesca(CAUSE, x => x[1], caso)[0];
-    S.ko++; S.cause.set(causa, S.cause.get(causa) + 1);
-    nelNastro({ tipo: 'ko', t: d, chi: c, causa, vettore: pesca(CORRIERI, c => c[1], caso)[0] });
-  } else if (x < .1) {
-    const pieni = CLIENTI.filter(c => c.oggi > 5); if (!pieni.length) { disegnaTutto(); setTimeout(battito, 2500); return; }
-    const c = pesca(pieni, c => c.peso, caso); let n = Math.round(tra(8, 42, caso)), mossi = 0;
-    for (const o of S.ore) { if (o.ora >= d.getHours()) break; const f = o.create - o.dentro, k = Math.min(f, n - mossi); o.dentro += k; mossi += k; if (mossi >= n) break; }
-    if (mossi) nelNastro({ tipo: 'distinta', t: d, chi: c, n: mossi, vettore: pesca(CORRIERI, c => c[1], caso)[0] });
-  } else {
-    const sp = nuovaSpedizione(caso, d);
-    // chi crea di solito è uno di quelli col modulo aperto
-    if (!sp.rete && S.creano.size && caso() < .7) { sp.chi = [...S.creano][Math.floor(caso() * S.creano.size)]; sp.da = sp.chi.prov; }
-    if (!sp.rete && sp.chi.credito < sp.euro) {
-      S.ko++; S.cause.set('credito finito', S.cause.get('credito finito') + 1); S.creano.delete(sp.chi);
-      nelNastro({ tipo: 'ko', t: d, chi: sp.chi, causa: 'credito finito', vettore: sp.vettore }); disegnaTutto(); setTimeout(battito, tra(1700, 4300, caso)); return;
-    }
-    registra(sp);
-    if (!sp.rete && caso() < .55) S.creano.delete(sp.chi);
-    nelNastro(sp); vola(sp); ultimaLuce(sp);
-    setTimeout(() => coloraProvince(false), calmo() ? 0 : 1100);
-  }
-  disegnaTutto();
-  setTimeout(battito, tra(1700, 4300, caso));
+// ───────────────────────── LA DIRETTA: i dati veri, letti a intervalli ─────────────────────────
+// la giornata intera ogni 5 minuti (distinte chiuse, pacchi partiti, crediti), i soldi ogni minuto, le spedizioni nuove
+// ogni 20 secondi. A scheda nascosta non si legge niente: il database non lavora per una pagina che nessuno guarda.
+const API = '/api/dashboard/live';
+const statoDati = $('#stato-dati');
+function segna(testo, male) { statoDati.textContent = testo; statoDati.classList.toggle('prova--male', !!male); }
+async function leggi(q) {
+  const r = await fetch(API + (q || ''), { cache: 'no-store', credentials: 'same-origin' });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error(d.error || ('risposta ' + r.status));
+  return d;
+}
+function applicaSoldi(d) { if (d.soldi) S.soldiOre = d.soldi.ore || []; if (d.ieriFinOra) S.ieriFinOra = d.ieriFinOra; }
+function applicaGiornata(d) {
+  S.da = Date.parse(d.da); S.ora = d.ora;
+  prendiChi(d.chi);
+  S.righe = new Map(d.righe.map(r => { const s = daRiga(r); return [s.id, s]; }));
+  S.ieriSoldi = d.ieri.soldi || []; S.ieriDieci = d.ieri.dieci || [];
+  (d.ieri.ore || []).forEach((v, i) => { S.ore[i].ieri = v; });
+  S.assenti = d.assenti || []; S.totali = d.totali || S.totali;
+  applicaSoldi(d);
+}
+const aggiornato = () => { const t = hhmm(new Date()); segna('in diretta · aggiornato alle ' + t); $('#n-agg').textContent = 'alle ' + t; };
+
+let primaVolta = true;
+async function tutto() {
+  if (document.hidden && !primaVolta) return;
+  try {
+    const d = await leggi('');
+    applicaGiornata(d); ricalcola();
+    if (primaVolta) { primaVolta = false; apri(); } else { disegnaTutto(); disegnaAppello(); coloraProvince(false); disegnaPrismi(); }
+    aggiornato();
+  } catch (e) { console.error('[live] giornata', e); segna(primaVolta ? 'non riesco a leggere la giornata · riprovo' : 'dati di qualche minuto fa · riprovo', true); if (primaVolta) setTimeout(tutto, 15000); }
+}
+async function soldi() {
+  if (document.hidden || primaVolta) return;
+  try { const d = await leggi('?solo=soldi'); applicaSoldi(d); ricalcola(); disegnaOggi(); disegnaSoldi(); } catch { /* restano quelli di prima */ }
+}
+async function nuove() {
+  if (document.hidden || primaVolta || !S.ora) return;
+  try {
+    const d = await leggi('?dopo=' + encodeURIComponent(S.ora));
+    if (Date.parse(d.da) !== S.da) return tutto();      // e' passata la mezzanotte: si ricomincia da capo
+    S.ora = d.ora; prendiChi(d.chi);
+    const arrivate = [];
+    for (const r of d.righe) { const s = daRiga(r); if (S.righe.has(s.id)) S.righe.set(s.id, s); else arrivate.push(s); }
+    arrivate.sort((a, b) => a.t - b.t);
+    // le nuove entrano una alla volta nei venti secondi che seguono, nell'ordine in cui sono nate: la mappa si accende
+    // a ogni spedizione. Se sono tante, si accendono le ultime quaranta e le altre entrano nei conti in silenzio.
+    const dentro = arrivate.slice(0, Math.max(0, arrivate.length - 40)), accese = arrivate.slice(-40);
+    for (const s of dentro) S.righe.set(s.id, s);
+    const passo = accese.length ? Math.min(2500, 18000 / accese.length) : 0;
+    accese.forEach((s, i) => setTimeout(() => {
+      S.righe.set(s.id, s); ricalcola(); nelNastro(s); vola(s); ultimaLuce(s); disegnaTutto();
+      setTimeout(() => coloraProvince(false), calmo() ? 0 : 1100);
+    }, calmo() ? 0 : i * passo));
+    if (!accese.length) { ricalcola(); disegnaTutto(); }
+    aggiornato();
+  } catch (e) { console.error('[live] nuove', e); segna('dati di qualche minuto fa · riprovo', true); }
 }
 
 // ───────────────────────── l'apertura ─────────────────────────
 misura();
 new ResizeObserver(() => { if (misura()) { coloraProvince(true); disegnaPrismi(); } }).observe(palco);
 new ResizeObserver(() => { if (misura()) { coloraProvince(true); disegnaPrismi(); } }).observe(finestra);
-coloraProvince('accendi');
-disegnaTutto(); disegnaAppello();
-setTimeout(() => { passata(); accendi(); }, calmo() ? 0 : 500);
-setTimeout(salgono, calmo() ? 0 : 1900);
-setInterval(() => disegnaPrismi(), 5000);
-setTimeout(() => { $('#palco').classList.remove('entra'); $('#giorno').classList.remove('giorno--entra'); }, 4000);
-
-// il nastro si riempie una riga alla volta, poi parte la diretta
-const passate = [];
-for (let k = 9; k >= 1; k--) { const t = new Date(Date.now() - k * tra(40, 95) * 1000); const sp = nuovaSpedizione(r, t); passate.push(sp); }
-passate.forEach((sp, i) => setTimeout(() => nelNastro(sp, i === passate.length - 1), calmo() ? 0 : 900 + i * 260));
-setTimeout(battito, calmo() ? 1500 : 900 + passate.length * 260 + 1600);
+segna('leggo la giornata…');
+function apri() {
+  coloraProvince('accendi');
+  disegnaTutto(); disegnaAppello();
+  setTimeout(() => { passata(); accendi(); }, calmo() ? 0 : 500);
+  setTimeout(salgono, calmo() ? 0 : 1900);
+  setInterval(() => disegnaPrismi(), 5000);
+  setTimeout(() => { $('#palco').classList.remove('entra'); $('#giorno').classList.remove('giorno--entra'); }, 4000);
+  // il nastro si riempie con le ultime spedizioni vere, una riga alla volta
+  const ultime = [...S.righe.values()].sort((a, b) => a.t - b.t).slice(-9);
+  ultime.forEach((s, i) => setTimeout(() => nelNastro(s, i === ultime.length - 1), calmo() ? 0 : 900 + i * 260));
+  if (ultime.length) ultimaLuce(ultime[ultime.length - 1]);
+  setInterval(nuove, 20000); setInterval(soldi, 60000); setInterval(tutto, 5 * 60000);
+  setInterval(() => { disegnaOggi(); disegnaGiorno(); disegnaClienti(); disegnaMaster(); }, 30000);   // «fa», attivi e lancetta che scorrono
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) nuove(); });
+}
+tutto();
 
 // le sezioni sotto entrano quando ci si arriva (?foto=<sezione> le mostra una alla volta, ferme: serve solo alle foto)
 const sez = $('#sezioni'), foto = new URLSearchParams(location.search).get('foto');
@@ -1263,7 +1247,7 @@ else if ('IntersectionObserver' in window && !calmo()) {
 <script>
 // Dentro il portale (anteprima 18/11): il nome in testa è quello di chi guarda e il giorno/notte lo decide la cornice,
 // che lo manda con un messaggio; il tasto sole/luna della pagina sparisce ma resta lui a cambiare il tema, perché
-// ricolora anche la mappa. Il cartellino «Anteprima · dati di prova» resta: i numeri qui non sono veri.
+// ricolora anche la mappa. I numeri sono quelli veri della rete di chi guarda (/api/dashboard/live).
 (function () {
   var q = new URLSearchParams(location.search)
   var nome = q.get('nome'); if (nome) { var h = document.querySelector('.intesta h1'); if (h) h.textContent = nome }

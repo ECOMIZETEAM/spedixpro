@@ -1,6 +1,7 @@
 'use client'
-// Live View (anteprima 18/11, Lorenzo: «inseriscila sull'anteprima così la faccio vedere»). È la pagina di prova di
-// esempi-v6/live, dentro la cornice nuova: i numeri sono DI PROVA e la pagina lo dice (cartellino «dati di prova»).
+// Live View (18/11, Lorenzo: «inseriscila sull'anteprima così la faccio vedere»; 19/11 coi dati veri). È la pagina di
+// esempi-v6/live dentro la cornice nuova: i numeri li legge da sola da /api/dashboard/live, con la sessione di chi guarda
+// (stessa origine), e sono quelli della sua rete.
 // Il nome in testa è quello di chi guarda, e il giorno/notte segue la cornice: all'apertura dall'indirizzo, dopo con un
 // messaggio, così la pagina non si ricarica e la mappa non riparte da capo.
 import { useContext, useEffect, useRef } from 'react'
