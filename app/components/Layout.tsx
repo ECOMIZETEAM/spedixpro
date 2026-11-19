@@ -125,6 +125,7 @@ const NAV: NavItem[] = [
     { label: 'Check Ricariche', href: '/dashboard/statistiche/check-ricariche' },
     // Solo titolare e admin dei master dove la contabilita' e' accesa (lib/contabilita-banca).
     { label: 'Estratto conto', href: '/dashboard/statistiche/estratto-conto', soloContabilita: true },
+    { label: 'Salute del conto', href: '/dashboard/statistiche/salute-conto', soloContabilita: true },
     { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto', soloMultiexpress: true },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
