@@ -42,7 +42,8 @@ export async function GET(req: NextRequest) {
     .in('cliente_id', clienteIds)
     .gte('created_at', dal).lte('created_at', alEnd)
     .not('stato', 'in', '(annullata)')
-    .order('created_at', { ascending: false }))
+    // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
 
   const calcCosto = await creaCalcolatoreListinoCliente(supabase, listinoAg)
 

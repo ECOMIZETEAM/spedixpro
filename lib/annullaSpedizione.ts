@@ -1,5 +1,6 @@
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
-import { spediamoproCancelShipment } from '@/lib/spediamopro'
+import { spediamoproCancelShipment, spediamoproGetTracking } from '@/lib/spediamopro'
+import type { GambaSpedizione } from '@/lib/condivisione-catena'
 
 // Il corriere considera la spedizione GIÀ eliminata/inesistente → possiamo cancellarla anche da Moove.
 export function giaEliminataSulCorriere(text: string, status?: number): boolean {
@@ -40,6 +41,15 @@ export async function annullaSpedizioneSulCorriere(
     if (spid && cred.authcode) {
       const r = await spediamoproCancelShipment(cred.authcode, Number(spid))
       if (!r.ok && !giaEliminataSulCorriere(r.error || '')) {
+        // GIA' ANNULLATA DAL FORNITORE: il rifiuto ha la stessa frase di un pacco partito ("Shipment
+        // status is not valid for cancellation"), quindi decide lo stato. Caso vero 050228152996379
+        // (4/11/2026): annullata sul pannello del fornitore alle 9:25, il nostro annullo delle 9:30
+        // respinto con quella frase, e la spedizione rimessa "in lavorazione" col cliente addebitato.
+        // Status 0 = annullata, la stessa lettura del giro del tracking (mapStatoSpediamopro).
+        try {
+          const tr = await spediamoproGetTracking(cred.authcode, Number(spid))
+          if (tr.status === 0) return { ok: true }
+        } catch {}
         return { ok: false, reason: (r.error || '').slice(0, 160) }
       }
     }
@@ -86,23 +96,37 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: 'l\'annullo di questo contratto va gestito dall\'assistenza' }
   }
 
-  // GLS diretto: prima della chiusura (CloseWorkDay) la spedizione NON è ancora trasmessa a GLS, quindi
-  // annullarla lato Moove è già sicuro (GLS non passa a ritirarla). La si rimuove comunque da GLS con
-  // DeleteSped (best-effort) per non lasciare numeri appesi. L'esito NON blocca il rimborso: il modello
-  // GLS (attesa-chiusura) lo rende sicuro, a differenza di BRT (auto-conferma) qui sotto.
+  // GLS diretto: si rimborsa SOLO se GLS non ha più la spedizione, o se conferma di averla tolta adesso.
+  // Prima l'annullo lato Moove valeva comunque, con DeleteSped "best-effort" e l'esito ignorato, perché si
+  // pensava che prima della NOSTRA chiusura GLS non passasse a ritirare. Non è così: il conto GLS si chiude
+  // anche da Weblabeling (su quello di Wave il 17/11 c'erano 649 spedizioni create e chiuse fuori dal
+  // portale), e il cliente consegna il pacco con l'etichetta in mano. NI665682165 (MSM STUDIO): cancellata
+  // il 12/11 alle 10:29 e rimborsata, su GLS era CHIUSA e il pacco il giorno dopo era a Foggia.
   if (corr.tipo === 'gls') {
     // GIÀ TRASMESSA (distinta chiusa = confermata_vettore): GLS consegna il pacco → non annullare a vuoto,
     // mai rimborso su merce che parte. La porta elimina lo blocca già prima; questa è la rete di sicurezza
     // anche per il cron e i percorsi legacy che dovessero passare di qui.
     if ((sped as any).confermata_vettore) return { ok: false, reason: 'GLS già trasmessa (distinta chiusa): non annullabile in automatico' }
-    const numeroNudo = raw.numero ? String(raw.numero) : ''
-    // Pre-chiusura la spedizione NON è trasmessa a GLS: l'annullo lato Moove è già sicuro anche se DeleteSped
-    // non risponde (GLS non passa a ritirarla). DeleteSped best-effort, per non lasciare numeri appesi.
-    if (numeroNudo) {
-      try { const { annullaSpedizioneGls } = await import('@/lib/gls'); await annullaSpedizioneGls(cred, numeroNudo) }
-      catch (e) { console.error('[ANNULLO][GLS] DeleteSped:', e) }
+    const { numeroNudoGls, statoSpedizioneSuGls, annullaSpedizioneGls } = await import('@/lib/gls')
+    const numeroNudo = numeroNudoGls(sped as any)
+    // Senza numero GLS non ha mai assegnato la spedizione: su GLS non c'è niente da togliere.
+    if (!numeroNudo) return { ok: true }
+    // Il registro si cerca nel giorno di nascita: il cron e i pacchi condivisi non passano la data.
+    let creata: string | null = (sped as any).created_at || null
+    if (!creata && (sped as any).id) {
+      const { data: c } = await admin.from('spedizioni').select('created_at').eq('id', (sped as any).id).maybeSingle()
+      creata = c?.created_at || null
     }
-    return { ok: true }
+    const su = creata ? await statoSpedizioneSuGls(cred, numeroNudo, creata) : { stato: 'sconosciuto' as const, motivo: 'data di creazione mancante' }
+    if (su.stato === 'assente') return { ok: true }   // già tolta da GLS: nessun pacco parte, il rimborso è giusto
+    if (su.stato === 'chiusa') {
+      return { ok: false, reason: 'la spedizione risulta già trasmessa a GLS, quindi non è più annullabile in automatico: va gestita direttamente col corriere' }
+    }
+    // Aperta (o registro non leggibile: due conti GLS non lo consentono): si chiede a GLS di toglierla, e
+    // conta solo la sua conferma "Eliminazione ... avvenuta".
+    if (su.stato === 'sconosciuto') console.error('[ANNULLO][GLS] registro non leggibile, decide DeleteSped:', numeroNudo, su.motivo)
+    if (await annullaSpedizioneGls(cred, numeroNudo)) return { ok: true }
+    return { ok: false, reason: 'GLS non ha confermato la cancellazione, riprova tra qualche minuto' }
   }
 
   // BRT diretto: l'annullo esiste (PUT /delete), ma va tentato DAVVERO — il ritorno generico ok:true
@@ -130,6 +154,18 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: (a.errore || 'FedEx non consente l\'annullo in questo momento').slice(0, 160) }
   }
 
+  // ECOSMOS: annullabile via API finche' non e' stata validata per il giro di ritiro. Il rimborso parte
+  // SOLO su un annullo confermato da loro: senza questo ramo si cadeva nell'`ok: true` qui sotto, e si
+  // rimborsava un pacco che Ecosmos avrebbe ritirato e fatturato lo stesso.
+  if (corr.tipo === 'ecosmos') {
+    const numero = raw.numero || sped.tracking_number
+    if (!numero) return { ok: false, reason: 'numero Ecosmos mancante per l\'annullo' }
+    const { annullaEcosmos } = await import('@/lib/ecosmos')
+    const a = await annullaEcosmos({ api_key: String(cred.api_key || '') }, String(numero))
+    if (a.annullata) return { ok: true }
+    return { ok: false, reason: a.messaggio.slice(0, 160) }
+  }
+
   // CIRCUITO INTERNO: non c'e' nessuno a cui mandare l'annullo, il corriere siamo noi. Basta non
   // farlo partire — ma se e' gia' stato consegnato non c'e' piu' niente da fermare, e dire ok
   // qui vorrebbe dire rimborsare cliente e catena per un pacco che il destinatario ha in casa.
@@ -137,6 +173,16 @@ export async function annullaSpedizioneSulCorriere(
     const { data: s } = await admin.from('spedizioni').select('stato').eq('tracking_number', sped.tracking_number).maybeSingle()
     if (s?.stato === 'consegnata') return { ok: false, reason: 'la spedizione risulta già consegnata' }
     return { ok: true }
+  }
+
+  // DIELLE: non c'e' un annullo via API (la guida non ne ha) e dal loro portale l'utente del detentore non
+  // puo' eliminare nemmeno le spedizioni appena create ("Spedizione NON Eliminabile", provato il 12/11 sul
+  // conto di LOGIXIA): la cancellazione la fa il fornitore su richiesta. Qui NON si puo' dire ok: senza
+  // questo ramo si cadeva nell'`ok: true` qui sotto e si rimborsavano cliente e catena per un pacco che
+  // partiva lo stesso. Le porte (elimina, API v1, cron) la mandano nella coda manuale del detentore, che
+  // conferma quando il fornitore l'ha cancellata; solo allora parte il rimborso.
+  if (corr.tipo === 'dielle') {
+    return { ok: false, reason: 'questo corriere non consente l\'annullo automatico: lo richiede il detentore del contratto' }
   }
 
   return { ok: true }
@@ -216,4 +262,32 @@ export async function rimborsaAnnulloSpedizione(
       } catch (e) { console.error('Errore storno movimento su annullo:', e) }
     }
   } catch (e) { console.error('Errore rimborso su annullo:', e) }
+}
+
+// ANNULLO DI UN PACCO A PIU' GAMBE (contratto condiviso fra reti): tutte le gambe annullate, poi lo storno
+// di ciascuna con rimborsaAnnulloSpedizione. Sui pacchi condivisi stornare la sola gamba del cliente
+// lascerebbe addebitati i master sopra: e' la trappola del 5/10 (Epos Caffe').
+// Chi annulla sul corriere lo decide il chiamante (Poste: niente, GLS: DeleteSped): qui solo il portale.
+// `richiestoAt` resta sulla riga annullata: da li' partono i 30 giorni di sorveglianza delle Poste.
+export async function annullaGambePacco(
+  admin: any, gambe: GambaSpedizione[], rich: { richiestoAt?: string | null; da?: string | null },
+): Promise<{ gambe: number }> {
+  const ids = gambe.map(g => g.spedizioneId)
+  const { data: righe } = await admin.from('spedizioni').select('id,numero,dest_nome,stato,stato_precedente').in('id', ids)
+  const quando = rich.richiestoAt || new Date().toISOString()
+  for (const r of (righe || [])) {
+    if (r.stato === 'annullata') continue
+    await admin.from('spedizioni').update({
+      stato: 'annullata',
+      // Della gamba in attesa conta lo stato di prima della richiesta; le altre non erano in attesa.
+      stato_precedente: r.stato === 'annullamento_pending' ? (r.stato_precedente || 'in_lavorazione') : r.stato,
+      annullamento_richiesto_at: quando,
+      annullamento_da: rich.da || null,
+      annullamento_errore: null,
+    }).eq('id', r.id)
+  }
+  for (const r of (righe || [])) await rimborsaAnnulloSpedizione(admin, r, rich.da || null)
+  // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
+  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, ids) } catch {}
+  return { gambe: (righe || []).length }
 }

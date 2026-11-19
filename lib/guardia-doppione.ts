@@ -21,20 +21,32 @@ export const spedizioneAttiva = (s: { stato?: string | null; cancellata_il?: str
 export async function spedizioneDoppioneAttiva(
   admin: { from: (t: string) => any },
   params: { clienteId: string | null | undefined; rifOrdine: string | null | undefined; destCap: string | null | undefined },
-): Promise<{ id: string; numero: string } | null> {
+): Promise<{ id: string; numero: string; tracking: string | null } | null> {
   const { clienteId, rifOrdine, destCap } = params
   if (!clienteId || !rifOrdineAffidabile(rifOrdine)) return null
   const rif = String(rifOrdine).trim()
   const rifNudo = rif.replace(/^#/, '')
   const cap = String(destCap || '').trim()
   const { data } = await admin.from('spedizioni')
-    .select('id,numero,stato,cancellata_il')
+    .select('id,numero,tracking_number,stato,cancellata_il')
     .eq('cliente_id', clienteId)
     .eq('dest_cap', cap)
     .in('rif_ordine', Array.from(new Set([rif, rifNudo, '#' + rifNudo])))
     .limit(5)
   const attiva = (data || []).find(spedizioneAttiva)
-  return attiva ? { id: attiva.id, numero: attiva.numero } : null
+  return attiva ? { id: attiva.id, numero: attiva.numero, tracking: attiva.tracking_number || null } : null
+}
+
+// Il pacco non ha la spedizione del cliente sopra: tutte le sue righe sono gambe di conti d'ingrosso (ledger).
+// Succede quando la creazione attraverso il ponte di condivisione si interrompe a meta' strada: la LDV e' nata
+// dal venditore, ma chi l'aveva chiesta non ha fatto in tempo a scrivere la sua riga. Non e' un ordine spedito.
+// Letto per tracking_number (indicizzato), mai per numero con LIKE. Su un errore di lettura dice di no:
+// resta il messaggio di sempre.
+export async function doppioneSenzaTesta(admin: { from: (t: string) => any }, tracking: string | null | undefined): Promise<boolean> {
+  if (!tracking) return false
+  const { data, error } = await admin.from('spedizioni').select('id,clienti(ledger)').eq('tracking_number', tracking).limit(20)
+  if (error || !data?.length) return false
+  return data.every((r: any) => (Array.isArray(r.clienti) ? r.clienti[0]?.ledger : r.clienti?.ledger) === true)
 }
 
 // Il messaggio 409 e' identico fra le porte: chi integra deve ricevere sempre la stessa risposta.

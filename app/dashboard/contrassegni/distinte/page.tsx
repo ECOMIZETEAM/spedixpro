@@ -15,6 +15,7 @@ const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpac
 import { useDialog } from '@/app/components/DialogProvider'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import { etichettaModalitaCod, eAssegno } from '@/lib/contrassegno-modalita'
 // I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
 // iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
 function filtriDefault() {
@@ -36,7 +37,8 @@ export default function DistinteContrassegniPage() {
   // destinatari, carico rimesse). Modo indeterminato: e' una POST unica, non sappiamo la percentuale.
   const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string;sottotitolo?:string}|null>(null)
   const [caricando, setCaricando] = useState(false)
-  const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number}>({gruppi:[],totale:0,spedizioni:0})
+  const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number;perContratto:any[];resiFermi:any[];resiTotale:number}>({gruppi:[],totale:0,spedizioni:0,perContratto:[],resiFermi:[],resiTotale:0})
+  const [selResi, setSelResi] = useState<Set<string>>(new Set())          // resi fermati scelti per farli scendere (solo MULTIEXPRESS)
   const [selDest, setSelDest] = useState<Set<string>>(new Set())        // gruppi INTERI selezionati
   const [selSped, setSelSped] = useState<Record<string, Set<string>>>({}) // spedizioni singole per gruppo
   const [espansi, setEspansi] = useState<Set<string>>(new Set())          // tendine aperte
@@ -62,8 +64,8 @@ export default function DistinteContrassegniPage() {
 
   function caricaDaCaricare() {
     fetch('/api/contrassegni/da-caricare').then(r=>r.json()).then(d=>{
-      setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0) })
-      setSelDest(new Set()); setSelSped({}); setEspansi(new Set()); setDettGruppo({})
+      setDaCaricare({ gruppi: d?.gruppi || [], totale: Number(d?.totale||0), spedizioni: Number(d?.spedizioni||0), perContratto: d?.perContratto || [], resiFermi: d?.resiFermi || [], resiTotale: Number(d?.resiTotale||0) })
+      setSelDest(new Set()); setSelSped({}); setEspansi(new Set()); setDettGruppo({}); setSelResi(new Set())
     }).catch(()=>{})
   }
 
@@ -136,11 +138,32 @@ export default function DistinteContrassegniPage() {
           + `Spedizioni caricate: ${j.spedizioniCaricate} · € ${Number(j.totaleCaricato||0).toFixed(2)}\n`
           + (j.giaCaricate ? `Già in una tua distinta (saltate): ${j.giaCaricate}\n` : '')
           + (j.senzaImporto ? `Importo a zero, restano in attesa: ${j.senzaImporto}\n` : '')
-          + (j.nonRiuscite ? `Non caricate, tornate in attesa: ${j.nonRiuscite}\n` : '') })
+          + (j.nonRiuscite ? `Non caricate, tornate in attesa: ${j.nonRiuscite}\n` : '')
+          + (j.resiFermati ? `\nResi rimasti fermi: ${j.resiFermati} — sono tornati al mittente. Li trovi nel riquadro «Resi fermati»: scendono solo se li scegli lì.\n` : '') })
         caricaDaCaricare(); carica()
       } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
     } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
     setAvanz(null)
+    setCaricando(false)
+  }
+
+  // RESI FERMATI (solo MULTIEXPRESS): scendono solo quelli scelti qui, uno per uno.
+  async function faiScendereResi() {
+    const ids = Array.from(selResi)
+    if (!ids.length) { await dialog.alert({ title:'Nessuna selezione', message:'Seleziona almeno un reso da far scendere.' }); return }
+    const scelti = daCaricare.resiFermi.filter((r:any) => selResi.has(r.spedizione_id))
+    const tot = scelti.reduce((s:number, r:any) => s + Number(r.importo || 0), 0)
+    const ok = await dialog.confirm({ title:'Far scendere i resi?', message:`${ids.length} contrassegni di pacchi tornati al mittente, € ${tot.toFixed(2)}. Il destinatario non li ha pagati: se li fai scendere, li paghi tu al livello sotto. Confermi?` })
+    if (!ok) return
+    setCaricando(true)
+    try {
+      const r = await fetch('/api/contrassegni/da-caricare', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ resi: ids }) })
+      const j = await r.json()
+      if (j.success) {
+        await dialog.alert({ title:'Resi fatti scendere', message: `Distinte create: ${j.distinteCreate}\nSpedizioni caricate: ${j.spedizioniCaricate} · € ${Number(j.totaleCaricato||0).toFixed(2)}` })
+        caricaDaCaricare(); carica()
+      } else await dialog.alert({ title:'Errore', message: j.error || 'Errore durante il caricamento.' })
+    } catch { await dialog.alert({ title:'Errore', message:'Errore durante il caricamento.' }) }
     setCaricando(false)
   }
 
@@ -265,6 +288,8 @@ export default function DistinteContrassegniPage() {
       data: r.spedizioni?.created_at ? new Date(r.spedizioni.created_at).toLocaleDateString('it-IT') : '',
       iniziale: Number(r.importo_cod || 0),
       rimborsato: Number(r.importo_cod || 0),
+      // Contrassegno incassato con assegno: si segna col codice di Poste (ABM/ACM), come ha chiesto LOGIXIA.
+      incasso: etichettaModalitaCod(r.spedizioni?.contrassegno_modalita) || '',
     }))
   }
   // Nome file dell'export: "Distinta contrassegni <CLIENTE> <numero>" — il cliente e' il nome che
@@ -285,8 +310,8 @@ export default function DistinteContrassegniPage() {
     doc.text('Cliente ' + (d.clienti?.ragione_sociale || ''), 14, 32)
     autoTable(doc, {
       startY: 40,
-      head: [['Spedizioni','Rif. Mittente','Destinatario','Data Spedizione','Contr. iniziale','Contr. rimborsato']],
-      body: righe.map((r: any) => [r.numero, r.mittente, r.destinatario, r.data, r.iniziale.toFixed(2) + ' €', r.rimborsato.toFixed(2) + ' €']),
+      head: [['Spedizioni','Rif. Mittente','Destinatario','Data Spedizione','Incasso','Contr. iniziale','Contr. rimborsato']],
+      body: righe.map((r: any) => [r.numero, r.mittente, r.destinatario, r.data, r.incasso, r.iniziale.toFixed(2) + ' €', r.rimborsato.toFixed(2) + ' €']),
       styles: { fontSize: 9 }, headStyles: { fillColor: [255,255,255], textColor: [0,0,0], fontStyle: 'bold' },
     })
     const endY = (doc as any).lastAutoTable.finalY + 12
@@ -298,7 +323,7 @@ export default function DistinteContrassegniPage() {
   async function esportaExcel(d: any) {
     const { utils, writeFile } = await import('xlsx')
     const righe = estraiRighe(d)
-    const ws = utils.json_to_sheet(righe.map((r: any) => ({ Spedizioni: r.numero, 'Rif. Mittente': r.mittente, Destinatario: r.destinatario, 'Data Spedizione': r.data, 'Contr. iniziale': r.iniziale, 'Contr. rimborsato': r.rimborsato })))
+    const ws = utils.json_to_sheet(righe.map((r: any) => ({ Spedizioni: r.numero, 'Rif. Mittente': r.mittente, Destinatario: r.destinatario, 'Data Spedizione': r.data, Incasso: r.incasso, 'Contr. iniziale': r.iniziale, 'Contr. rimborsato': r.rimborsato })))
     const wb = utils.book_new(); utils.book_append_sheet(wb, ws, 'Distinta ' + d.numero)
     writeFile(wb, nomeFileDistinta(d) + '.xlsx')
   }
@@ -306,7 +331,19 @@ export default function DistinteContrassegniPage() {
     setModalPagamento(null); setMetodoPagamento(''); setImportoPag(''); setSuddividi(false)
     setRighePag([{metodo:'',importo:''},{metodo:'',importo:''}])
   }
+  // Distinta di contrassegni incassati con assegno (ABM/ACM): si chiude consegnando gli assegni, mai con
+  // soldi. Il server lo impone comunque (PUT /api/contrassegni/distinte/[id]); qui si evita di proporlo.
+  const soloAssegni = (d: any) => { const r = d?.distinte_contrassegni_righe || []; return r.length > 0 && r.every((x: any) => eAssegno(x.spedizioni?.contrassegno_modalita)) }
   async function confermaPagamento() {
+    if (soloAssegni(modalPagamento)) {
+      setConfermando(true)
+      const res = await fetch('/api/contrassegni/distinte/' + modalPagamento.id, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ metodoPagamento: 'assegno' }) })
+      const data = await res.json()
+      setConfermando(false)
+      if (data.success) { chiudiModalPagamento(); carica() }
+      else await dialog.alert({ title: 'Errore', message: data.error || 'Errore durante la conferma.' })
+      return
+    }
     const totale = Number(modalPagamento?.totale_iniziale || 0)
     const residuo = Math.round((totale - Number(modalPagamento?.totale_pagato || 0)) * 100) / 100
     let payload: any
@@ -402,6 +439,16 @@ export default function DistinteContrassegniPage() {
             <div>
               <div style={{fontSize:'13px',fontWeight:800,color:'#15803d'}}>💰 Contrassegni da caricare — {daCaricare.spedizioni} spedizioni · € {daCaricare.totale.toFixed(2)}</div>
               <div style={{fontSize:'11.5px',color:'#166534',marginTop:'2px'}}>Apri un cliente per scegliere le singole spedizioni (anche su più pagine), oppure spunta il cliente intero. Le non selezionate restano in attesa.</div>
+              {/* Totale per contratto: ogni cifra si confronta col file del corriere da cui viene (vedi la rotta). */}
+              {daCaricare.perContratto.length > 0 && (
+                <div style={{display:'flex',flexWrap:'wrap' as const,gap:'6px',marginTop:'7px'}}>
+                  {daCaricare.perContratto.map((c:any)=>(
+                    <span key={c.nome} style={{fontSize:'11.5px',color:'#14532d',background:'#dcfce7',border:'1px solid #bbf7d0',borderRadius:'999px',padding:'2px 9px'}}>
+                      <b>{c.nome}</b> · {c.spedizioni} sped. · <b>€ {Number(c.totale).toFixed(2)}</b>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
               <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#166534',cursor:'pointer',fontWeight:600}}>
@@ -442,7 +489,14 @@ export default function DistinteContrassegniPage() {
                       <span style={{fontSize:'10.5px',fontWeight:700,padding:'2px 7px',borderRadius:'999px',background:g.tipo==='cliente'?'#eff6ff':'#fff7ed',color:g.tipo==='cliente'?'#1d4ed8':'#c2410c'}}>{g.tipo}</span>
                     </td>
                     <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{g.spedizioni}</td>
-                    <td style={{padding:'7px 12px',fontWeight:700,color:'#15803d'}}>€ {Number(g.totale).toFixed(2)}</td>
+                    <td style={{padding:'7px 12px',fontWeight:700,color:'#15803d'}}>
+                      € {Number(g.totale).toFixed(2)}
+                      {(g.perContratto||[]).map((c:any)=>(
+                        <div key={c.nome} style={{fontSize:'11px',fontWeight:500,color:'#4b5563',marginTop:'2px',whiteSpace:'nowrap' as const}}>
+                          {c.nome}: <b style={{color:'#15803d'}}>€ {Number(c.totale).toFixed(2)}</b> <span style={{color:'#9ca3af'}}>({c.spedizioni})</span>
+                        </div>
+                      ))}
+                    </td>
                     <td style={{padding:'7px 12px',color:'#6b7280',fontSize:'11px'}}>{(g.origini||[]).map((o:string)=>o==='file'?'file corriere':'rimessa rete').join(' + ')}</td>
                   </tr>
                   {aperto && (
@@ -474,6 +528,7 @@ export default function DistinteContrassegniPage() {
                                     <span style={{fontFamily:'monospace',color:'#1a1a1a',minWidth:'130px'}}>{s.numero}</span>
                                     <span style={{color:'#374151',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{s.dest_nome}{s.dest_citta?` · ${s.dest_citta}`:''}</span>
                                     <span title="Data spedizione" style={{color:'#9ca3af',fontSize:'11px',whiteSpace:'nowrap' as const,minWidth:'66px',textAlign:'right' as const}}>{s.created_at?new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):''}</span>
+                                    {['ABM','ACM'].includes(s.contrassegno_modalita) && <span title={etichettaModalitaCod(s.contrassegno_modalita) || ''} style={{fontSize:'10px',fontWeight:700,color:'#1d4ed8',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',padding:'1px 5px',whiteSpace:'nowrap' as const}}>{s.contrassegno_modalita}</span>}
                                     {s.parziale && <span title={`COD parziale: il corriere ha incassato € ${Number(s.importo).toFixed(2)} sui € ${Number(s.dichiarato).toFixed(2)} dichiarati. Al cliente scende solo l'incassato.`} style={{fontSize:'10px',fontWeight:700,color:'#0369a1',background:'#e0f2fe',border:'1px solid #bae6fd',borderRadius:'4px',padding:'1px 5px',whiteSpace:'nowrap' as const}}>PARZIALE</span>}
                                     <span style={{fontWeight:700,color: s.parziale ? '#0369a1' : '#15803d',whiteSpace:'nowrap' as const,minWidth:'72px',textAlign:'right' as const}}>€ {Number(s.importo).toFixed(2)}</span>
                                   </label>
@@ -498,6 +553,55 @@ export default function DistinteContrassegniPage() {
                 </Fragment>
                 )
               })}
+            </tbody>
+          </table>
+        </div>
+        )
+      })()}
+
+      {/* RESI FERMATI (solo MULTIEXPRESS, lib/cod-resi-fermi.ts): contrassegni di pacchi tornati al mittente.
+          Fuori dai gruppi verdi: non scendono con "Seleziona tutti", solo se scelti qui. Lasciarli = tenerli. */}
+      {daCaricare.resiFermi.length > 0 && (() => {
+        const tutti = selResi.size === daCaricare.resiFermi.length
+        return (
+        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fca5a5',overflow:'hidden',marginBottom:'16px'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #fecaca',background:'#fef2f2',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
+            <div>
+              <div style={{fontSize:'13px',fontWeight:800,color:'#b91c1c'}}>Resi fermati — {daCaricare.resiFermi.length} spedizioni · € {daCaricare.resiTotale.toFixed(2)}</div>
+              <div style={{fontSize:'11.5px',color:'#991b1b',marginTop:'2px'}}>Questi pacchi sono tornati al mittente: il destinatario non ha pagato il contrassegno. Restano qui e non scendono con gli altri. Se vuoi farli scendere lo stesso, selezionali e premi «Fai scendere i selezionati».</div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#991b1b',cursor:'pointer',fontWeight:600}}>
+                <input type="checkbox" checked={tutti}
+                  onChange={e=>setSelResi(e.target.checked ? new Set(daCaricare.resiFermi.map((r:any)=>r.spedizione_id)) : new Set())}
+                  style={{width:'15px',height:'15px',cursor:'pointer'}}/>
+                Seleziona tutti
+              </label>
+              <button onClick={faiScendereResi} disabled={caricando || !selResi.size}
+                style={{padding:'7px 16px',background:selResi.size?'#b91c1c':'#d1d5db',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:700,cursor:selResi.size?'pointer':'default'}}>
+                {caricando ? 'Caricamento…' : `Fai scendere i selezionati (${selResi.size})`}
+              </button>
+            </div>
+          </div>
+          <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+            <thead><tr style={{background:'#f9fafb'}}>
+              {['','LDV','Mittente → destinatario','Scenderebbe a','Contrassegno','Reso il'].map((h,i)=><th key={i} style={{textAlign:'left' as const,padding:'7px 12px',fontWeight:700,textTransform:'uppercase' as const,fontSize:'10.5px',color:'#1a1a1a',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {daCaricare.resiFermi.map((r:any)=>(
+                <tr key={r.spedizione_id} style={{borderBottom:'1px solid #f3f4f6'}}>
+                  <td style={{padding:'7px 12px',width:'28px'}}>
+                    <input type="checkbox" checked={selResi.has(r.spedizione_id)}
+                      onChange={e=>setSelResi(prev=>{ const n = new Set(prev); if (e.target.checked) n.add(r.spedizione_id); else n.delete(r.spedizione_id); return n })}
+                      style={{width:'14px',height:'14px',cursor:'pointer'}}/>
+                  </td>
+                  <td style={{padding:'7px 12px',fontWeight:700,color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{r.numero}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{r.mitt_nome || '—'} → {r.dest_nome || '—'}{r.dest_citta ? ` (${r.dest_citta})` : ''}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a'}}>{r.verso}</td>
+                  <td style={{padding:'7px 12px',fontWeight:700,color:'#1a1a1a',whiteSpace:'nowrap' as const}}>€ {Number(r.importo||0).toFixed(2)}</td>
+                  <td style={{padding:'7px 12px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{r.reso_il ? new Date(r.reso_il).toLocaleDateString('it-IT') : '—'}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -645,6 +749,13 @@ export default function DistinteContrassegniPage() {
                   <div style={{color:'#a16207'}}><strong>Già pagato:</strong> € {Number(modalPagamento.totale_pagato).toFixed(2)} · <strong>Residuo:</strong> € {(Number(modalPagamento.totale_iniziale)-Number(modalPagamento.totale_pagato)).toFixed(2)}</div>
                 )}
               </div>
+              {soloAssegni(modalPagamento) ? (
+                <div style={{marginBottom:'16px',fontSize:'12.5px',color:'#1e3a8a',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',padding:'10px 12px',lineHeight:1.5}}>
+                  <strong>Contrassegni incassati con assegno (ABM/ACM)</strong>, intestato al mittente.
+                  La distinta si chiude <strong>consegnando gli assegni</strong>: nessun bonifico e nessuna compensazione sul credito.
+                  <div style={{marginTop:'6px'}}>Tipo pagamento: <strong>Assegno</strong></div>
+                </div>
+              ) : (<>
               <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'12.5px',color:'#1a1a1a',cursor:'pointer',marginBottom:'12px'}}>
                 <input type="checkbox" checked={suddividi} onChange={e=>setSuddividi(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316'}}/>
                 Suddividi il pagamento in più modalità
@@ -706,6 +817,7 @@ export default function DistinteContrassegniPage() {
                   })()}
                 </div>
               )}
+              </>)}
               <div style={{display:'flex',justifyContent:'space-between',gap:'10px'}}>
                 <button onClick={chiudiModalPagamento}
                   style={{padding:'8px 20px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>

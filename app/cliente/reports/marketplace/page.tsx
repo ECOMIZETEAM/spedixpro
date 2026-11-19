@@ -1,9 +1,10 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useDialog } from '@/app/components/DialogProvider'
 
 const ACCENT = '#f97316'
 
-type Gruppo = { piattaforma: string; data: string; n: number }
+type Gruppo = { piattaforma: string; data: string; n: number; righe?: number }
 
 const PIATT: Record<string, { label: string; emoji: string; nota: string }> = {
   amazon: { label: 'Amazon', emoji: '📦', nota: 'Scarica il file e caricalo su Amazon (Seller Central → Ordini → Carica file conferma spedizione) per marcare gli ordini come spediti con tracking.' },
@@ -16,19 +17,33 @@ const card: React.CSSProperties = { background: '#fff', borderRadius: '8px', bor
 const th: React.CSSProperties = { textAlign: 'left', fontSize: '11px', fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '.03em', padding: '10px 14px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap' }
 const td: React.CSSProperties = { fontSize: '13px', color: '#333', padding: '11px 14px', borderBottom: '1px solid #f2f2f2', whiteSpace: 'nowrap' }
 
+const MARKETPLACE = ['amazon', 'shopify', 'temu']
+
 export default function ReportMarketplacePage() {
+  const dialog = useDialog()
   const [gruppi, setGruppi] = useState<Gruppo[]>([])
   const [totali, setTotali] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
+  const [errore, setErrore] = useState('')
 
   useEffect(() => {
     (async () => {
+      // Un errore si dice: prima veniva taciuto e la pagina diceva "Nessun ordine", come se il
+      // cliente non avesse niente da confermare al marketplace.
       try {
         const res = await fetch('/api/cliente/reports/marketplace')
-        const data = await res.json()
+        const data = await res.json().catch(() => ({}))
         if (res.ok) { setGruppi(data.gruppi || []); setTotali(data.totali || {}) }
-      } catch { /* silente */ }
-      setLoading(false)
+        else {
+          const msg = data?.error || 'errore ' + res.status
+          setErrore(msg)
+          await dialog.alert({ title: 'Errore', message: 'Report non caricato: ' + msg })
+        }
+      } catch (e: any) {
+        setErrore(String(e?.message || e))
+      } finally {
+        setLoading(false)
+      }
     })()
   }, [])
 
@@ -38,8 +53,11 @@ export default function ReportMarketplacePage() {
     window.location.href = '/api/cliente/reports/marketplace/download?' + q.toString()
   }
 
-  const piattaforme = ['amazon', 'shopify', 'temu'].filter(p => (totali[p] || 0) > 0 || gruppi.some(g => g.piattaforma === p))
-  const hasDati = gruppi.length > 0
+  // Solo Amazon, Shopify e Temu hanno un file di conferma. Prima, se il cliente aveva solo ordini
+  // importati da file generici ("altro"), la pagina usciva BIANCA (29 clienti al 15/10/2026): c'erano gruppi, ma
+  // nessuno di una piattaforma da mostrare.
+  const piattaforme = MARKETPLACE.filter(p => gruppi.some(g => g.piattaforma === p))
+  const altri = totali.altro || 0
 
   return (
     <div>
@@ -52,12 +70,18 @@ export default function ReportMarketplacePage() {
 
       {loading ? (
         <div style={{ color: '#999', fontSize: '13px' }}>Caricamento…</div>
-      ) : !hasDati ? (
+      ) : errore ? (
+        <div style={{ ...card, padding: '28px', textAlign: 'center', color: '#b91c1c', fontSize: '13px' }}>
+          Report non caricato: {errore}
+        </div>
+      ) : !piattaforme.length ? (
         <div style={{ ...card, padding: '28px', textAlign: 'center', color: '#999', fontSize: '13px' }}>
-          Nessun ordine importato da file e spedito, per ora. Quando importi un file (Amazon/Shopify) e spedisci gli ordini, qui trovi i report con i tracking da scaricare.
+          {altri > 0
+            ? `Nessun ordine Amazon, Shopify o Temu spedito. Hai ${altri} ordini spediti importati da altri file: per quelli non c'è un file di conferma da ricaricare su un marketplace.`
+            : 'Nessun ordine importato da file e spedito, per ora. Quando importi un file (Amazon/Shopify) e spedisci gli ordini, qui trovi i report con i tracking da scaricare.'}
         </div>
       ) : (
-        (piattaforme.length ? piattaforme : ['amazon', 'shopify', 'temu']).map(piatt => {
+        piattaforme.map(piatt => {
           const gs = gruppi.filter(g => g.piattaforma === piatt)
           if (!gs.length) return null
           const meta = PIATT[piatt] || PIATT.altro

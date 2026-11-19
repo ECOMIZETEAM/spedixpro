@@ -2,11 +2,13 @@ import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import ClienteShell from './ClienteShell'
 import BannerPiano from '../components/BannerPiano'
+import BannerNovitaTiktok from '../components/BannerNovitaTiktok'
 import AvvisoApi from './AvvisoApi'
 import EsitoCollegamento from './EsitoCollegamento'
 import { DialogProvider } from '../components/DialogProvider'
+import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { pagaSoloEtichette } from '@/lib/conti-shopify'
+import { pagaSoloEtichette, masterDeiNegoziShopify } from '@/lib/conti-shopify'
 import { recapitoEmail } from '@/lib/indirizzi-interni'
 import { COLONNE_DATI_NEGOZIO, datiPerLaSchermata, servonoDatiNegozio, versioneDatiNegozio } from '@/lib/dati-negozio'
 
@@ -42,10 +44,14 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   // Stessa fonte del portale master (masters.logo_url/nome del master diretto); fallback a MoovExpress
   // se il master non ha caricato un logo/nome.
   let brandLogo: string | null = null, brandNome: string | null = null
+  // Il cliente di un master di prova non puo' collegare un negozio (verificaContoCliente in lib/shopifyCollega,
+  // usata anche da TikTok): a lui l'annuncio non si mostra.
+  let masterDemo = false
   if (utente.master_id) {
-    const { data: m } = await supabase.from('masters').select('logo_url,nome').eq('id', utente.master_id).maybeSingle()
+    const { data: m } = await supabase.from('masters').select('logo_url,nome,demo').eq('id', utente.master_id).maybeSingle()
     brandLogo = m?.logo_url || null
     brandNome = m?.nome || null
+    masterDemo = m?.demo === true
   }
 
   // Calcolati qui, sul server, e passati gia' pronti: la regola resta in un posto solo e il browser non
@@ -55,11 +61,15 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   //   all'utente con ruolo cliente: e' l'unico a cui la rotta che salva risponde.
   // - versioneDati: l'impronta dei dati che la schermata mostra. Torna indietro col salvataggio, e la
   //   rotta non scrive se nel frattempo qualcuno (il master dalla scheda) li ha cambiati.
-  // - soloEtichette: il cliente sta sotto il master dei negozi dell'App Store (lib/conti-shopify).
+  // - soloEtichette: il cliente e' un negozio dell'app sotto il master dell'App Store (lib/conti-shopify).
+  //   Se non si riesce a leggerlo vale "si'": la voce SMS non si mostra, la cassa resta chiusa.
   const completaDati = (utente.ruolo || '').toLowerCase() === 'cliente' && servonoDatiNegozio(cliente)
     ? datiPerLaSchermata(cliente) : null
   const versioneDati = completaDati ? versioneDatiNegozio(cliente) : null
-  const soloEtichette = pagaSoloEtichette(cliente?.master_id)
+  // La lettura in piu' si fa solo per i clienti del master dell'App Store: questo layout gira a ogni pagina
+  // del portale cliente, e per tutti gli altri la risposta e' gia' "no" dal master letto qui sopra.
+  const soloEtichette = !!cliente?.master_id && cliente.master_id === masterDeiNegoziShopify()
+    && (await pagaSoloEtichette(createAdminSupabase(), utente.cliente_id)) !== false
 
   // A CHI CHIEDERE AIUTO DALLA SCHERMATA. La schermata non si chiude, e il pulsante Supporto della
   // testata le sta sotto: chi ha un dato che i controlli non accettano (un CAP nuovo che l'archivio non
@@ -85,7 +95,7 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   return (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}
       completaDati={completaDati} versioneDati={versioneDati} contattoAiuto={contattoAiuto} soloEtichette={soloEtichette}>
-      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano /><EsitoCollegamento />{children}</DialogProvider>
+      <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano /><AvvisoVerifica />{!masterDemo && <BannerNovitaTiktok per="cliente" />}<EsitoCollegamento />{children}</DialogProvider>
     </ClienteShell>
   )
 }

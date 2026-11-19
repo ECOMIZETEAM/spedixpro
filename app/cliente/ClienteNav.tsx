@@ -126,7 +126,7 @@ export default function ClienteNav({ soloEtichette = false }: { soloEtichette?: 
     load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30000); return () => clearInterval(t)
   }, [pathname])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
-  const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce' }
+  const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce', ebay:'eBay', tiktok:'TikTok Shop', temu:'Temu' }
   const piattAttive = Array.from(new Set(integrazioni.map((i:any)=>i.piattaforma)))
   const NAV: NavItem[] = NAV_BASE.filter(sec => !(soloEtichette && VOCI_A_PAGAMENTO.includes(sec.id))).map(sec => {
     if (sec.id !== 'importa') return sec

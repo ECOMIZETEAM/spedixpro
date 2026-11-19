@@ -15,6 +15,11 @@ export type LivelloCatena = {
   // al cliente: sulla stessa spedizione devono essere la stessa, altrimenti qualcuno sta comprando
   // isola e vendendo pianura.
   zona?: string
+  // Il VOLUME con cui e' stato prezzato QUESTO livello, col suo divisore. Lo legge la rettifica per
+  // scrivere a ogni livello i chili su cui paga lui: un master puo' avere un fattore diverso dal
+  // contratto sopra. undefined = prezzato senza listino (costo reale del detentore).
+  pesoVolume?: number
+  fattoreVolume?: number
   // Questo livello e' il DETENTORE di un contratto SUO (proprio, non-vertice). Sui contratti propri
   // il master paga il corriere per conto suo: NON si addebita il nolo e NON si blocca sul credito
   // (al suo posto MoovExpress addebita la commissione fissa, via trigger). L'addebito spedizione e il
@@ -172,6 +177,8 @@ export async function costruisciCatena(
     // è il costo che vede nella sua lista movimenti.
     let calcolato = false
     let zonaLivello: string | undefined
+    let volumeLivello: number | undefined
+    let fattoreLivello: number | undefined
     let codOltreMax: boolean | undefined
     let assOltreMax: boolean | undefined
     let accNonPrezzati: string[] | undefined
@@ -209,6 +216,7 @@ export async function costruisciCatena(
         })
         if (pz != null) {
           prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true
+          volumeLivello = pz.peso_volume; fattoreLivello = pz.fattore_volume
           codOltreMax = pz.contrassegnoOltreMax; assOltreMax = pz.assicurazioneOltreMax
           // ACCESSORI SUL COSTO DI QUESTO LIVELLO. La base della percentuale e' nolo+fuel+sponda, la
           // stessa che usa il prezzo al cliente (crea/route.ts): senza contrassegno ne' assicurazione,
@@ -256,6 +264,8 @@ export async function costruisciCatena(
         if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
         prezzo = ris.prezzo
         zonaLivello = ris.zona
+        volumeLivello = ris.peso_volume
+        fattoreLivello = ris.fattore_volume
       }
     }
 
@@ -273,7 +283,7 @@ export async function costruisciCatena(
       masterId: m.id, nome: m.nome,
       tipoContratto: m.tipo_contratto || 'credito_scalare',
       credito: Number((pagaDalSuoConto ? m.credito_proprio : m.credito) || 0),
-      prezzo, isProprietario, zona: zonaLivello,
+      prezzo, isProprietario, zona: zonaLivello, pesoVolume: volumeLivello, fattoreVolume: fattoreLivello,
       pagaDalSuoConto,
       contrassegnoOltreMax: codOltreMax, assicurazioneOltreMax: assOltreMax,
       accessoriNonPrezzati: accNonPrezzati,

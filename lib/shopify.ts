@@ -1,5 +1,5 @@
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { ESITI_EVASIONE, MAX_TENTATIVI_NEGOZIO, STATI_SPEDIZIONE_IN_ANNULLO, righeDaEvadere, spedizioneDelPacco } from '@/lib/evasione-ordini'
+import { ESITI_EVASIONE, ESITO_IN_CORSO, MAX_TENTATIVI_NEGOZIO, STATI_SPEDIZIONE_IN_ANNULLO, righeDaEvadere, spedizioneDelPacco } from '@/lib/evasione-ordini'
 import { assorbitiDi } from '@/lib/ordini-uniti'
 
 const API_VERSION = '2026-04'
@@ -378,6 +378,20 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
         }
         annullateOra = true
       }
+      // UN ORDINE «IN CORSO» SI EVADE COME UNO APERTO. Mentre aspettava la distinta l'abbiamo segnato in
+      // corso (solo l'11/11/2026, vedi ORDINI SEGNATI «IN CORSO» qui sotto). Se un fulfillment order in corso non offre l'evasione ma
+      // offre la riapertura, lo si riapre prima (fulfillmentOrderOpen): altrimenti finiva in «nessun
+      // fulfillment order da evadere» proprio alla chiusura della distinta.
+      const inCorsoBloccati = ((ord?.fulfillmentOrders?.edges) || []).map((e: any) => e.node)
+        .filter((f: any) => String(f?.status || '') === 'IN_PROGRESS')
+        .filter((f: any) => {
+          const a = ((f?.supportedActions) || []).map((x: any) => String(x?.action || ''))
+          return !a.includes('CREATE_FULFILLMENT') && a.includes('MARK_AS_OPEN')
+        })
+      if (inCorsoBloccati.length) {
+        for (const f of inCorsoBloccati) await shopifyGraphQL(shop, token, MUTATION_RIAPRI_FO, { id: f.id })
+        ord = await leggiOrdine()
+      }
       const stato = String(ord?.displayFulfillmentStatus || '')
       const tutti = ((ord?.fulfillmentOrders?.edges) || []).map((e: any) => e.node)
       const azioni = (f: any) => ((f?.supportedActions) || []).map((x: any) => String(x?.action || ''))
@@ -503,6 +517,18 @@ export async function fulfillSpedizioniShopify(supabase: any, spedizioneIds: str
   }
   return esiti
 }
+
+// ── ORDINI SEGNATI «IN CORSO» L'11/11/2026 ──────────────────────────────────────────────────────
+//
+// L'11/11/2026, dalle 11:18 per circa un'ora, le spedizioni in attesa della distinta segnavano l'ordine
+// Shopify «In corso» (fulfillmentOrderReportProgress, riga 'in_corso'). Lorenzo l'ha tolto: l'ordine resta
+// «Non evaso» finche' non si chiude la distinta, e basta. Restano le due cose che servono a quegli ordini:
+// l'evasione alla distinta riapre il fulfillment order se Shopify non lo lascia evadere in corso
+// (fulfillSpedizioniShopify) e l'annullo prima della distinta lo riapre (esitoAnnulloOrdine, ramo i).
+// Passati i 10 giorni del recupero (dal 22/11/2026) non ce ne sono piu', e questo con il ramo i si toglie.
+const QUERY_FO_ORDINE = `query($id: ID!){ order(id:$id){ cancelledAt fulfillmentOrders(first:50){ edges{ node{ id status supportedActions{ action } } } } } }`
+const MUTATION_RIAPRI_FO = `mutation($id: ID!){ fulfillmentOrderOpen(id:$id){ fulfillmentOrder{ id status } userErrors{ field message } } }`
+const azioniFo = (f: any): string[] => ((f?.supportedActions) || []).map((x: any) => String(x?.action || ''))
 
 // ── LE EVASIONI DELLE SPEDIZIONI ANNULLATE ──────────────────────────────────────────────────────
 //
@@ -713,7 +739,10 @@ export async function integrazioneDellaRiga(db: any, riga: any): Promise<any | n
 const COLONNE_RIGA_ANNULLO = 'id,cliente_id,integrazione_id,shop,piattaforma,ordine_esterno_id,numero_ordine,stato,spedizione_id,unito_in,fulfillment_stato,fulfillment_errore,fulfillment_tentativi,created_at'
 
 // Una riga Shopify evasa e poi staccata dalla sua spedizione.
-const conLaTraccia = (r: any) => r?.piattaforma === 'shopify' && !r.spedizione_id && ESITI_EVASIONE.includes(String(r.fulfillment_stato || ''))
+// Anche una riga segnata «In corso» (ESITO_IN_CORSO): la spedizione si e' annullata prima della distinta, e
+// su Shopify l'ordine va riaperto.
+const ESITI_DA_RICONCILIARE = [...ESITI_EVASIONE, ESITO_IN_CORSO]
+const conLaTraccia = (r: any) => r?.piattaforma === 'shopify' && !r.spedizione_id && ESITI_DA_RICONCILIARE.includes(String(r.fulfillment_stato || ''))
 // Il tetto vale per i tentativi dell'ANNULLO. La prima volta che l'annullo prende una riga, i tentativi
 // che porta sono quelli dell'evasione (una riga puo' essere arrivata al tetto mentre il negozio non
 // rispondeva): non contano.
@@ -730,7 +759,7 @@ async function righeConLaTraccia(db: any, unite: boolean, clienti?: string[]): P
   const righe: any[] = []
   for (let da = 0; ; da += 1000) {
     let q = db.from('ordini_ecommerce').select(COLONNE_RIGA_ANNULLO)
-      .eq('piattaforma', 'shopify').is('spedizione_id', null).in('fulfillment_stato', ESITI_EVASIONE)
+      .eq('piattaforma', 'shopify').is('spedizione_id', null).in('fulfillment_stato', ESITI_DA_RICONCILIARE)
     q = unite ? q.not('unito_in', 'is', null) : q.is('unito_in', null)
     if (clienti?.length) q = q.in('cliente_id', clienti)
     const { data, error } = await q.order('created_at', { ascending: false }).order('id').range(da, da + 999)
@@ -811,7 +840,7 @@ export async function righeDelleSpedizioniAnnullate(db: any, spedizioneIds: stri
   for (const [clienteId, forme] of formePerCliente) {
     const { data, error } = await db.from('ordini_ecommerce').select(COLONNE_RIGA_ANNULLO)
       .eq('piattaforma', 'shopify').eq('cliente_id', clienteId).in('numero_ordine', Array.from(forme))
-      .is('spedizione_id', null).is('unito_in', null).in('fulfillment_stato', ESITI_EVASIONE)
+      .is('spedizione_id', null).is('unito_in', null).in('fulfillment_stato', ESITI_DA_RICONCILIARE)
     if (error) throw new Error('lettura ordini delle spedizioni annullate: ' + error.message)
     righe.push(...(data || []))
   }
@@ -868,7 +897,9 @@ type EsitoAnnullo = {
 //  g. rifiuto, token mancante, eccezione: 'errore', da ritentare. Prima un rifiuto lasciava 'ok'
 //     (nessun badge), e token o integrazione mancanti un `continue` muto;
 //  h. come a o b, ma la spedizione annullata e' un pacco Poste ancora sotto controllo: 'errore'
-//     definitivo con l'avviso del badge, stato come in a (pacchiPosteInSorveglianza).
+//     definitivo con l'avviso del badge, stato come in a (pacchiPosteInSorveglianza);
+//  i. come b, ma l'ordine l'avevamo segnato «In corso» in attesa della distinta: si riapre
+//     (fulfillmentOrderOpen), 'annullato'; un rifiuto si ritenta come in g.
 // `simula`: nessuna mutation e nessun rinnovo del token; dice cosa farebbe.
 async function esitoAnnulloOrdine(db: any, o: OrdineDaRiconciliare, simula: boolean): Promise<EsitoAnnullo> {
   const riga = o.righe[0]
@@ -929,9 +960,29 @@ async function esitoAnnulloOrdine(db: any, o: OrdineDaRiconciliare, simula: bool
       const quali = Array.from(new Set(cls.spedizioniVive.map(s => s.numero || s.tracking_number).filter(Boolean))).join(', ')
       return definitivo(`la spedizione ${quali || 'collegata'} è di nuovo attiva: evasione lasciata, l'ordine va ricollegato`, { stato: 'spedito' })
     }
+    // i: L'ORDINE «IN CORSO» SI RIAPRE. La spedizione si e' annullata prima della distinta: un'evasione da
+    // togliere non c'e', ma l'ordine l'avevamo segnato in corso noi (riga 'in_corso', solo l'11/11/2026).
+    // Lasciato cosi', sul negozio restava «In corso» un ordine che da noi e' tornato da spedire.
+    let riaperti = 0
+    if (o.righe.some((r: any) => r.fulfillment_stato === ESITO_IN_CORSO)) {
+      const fo = ((((await shopifyGraphQL(shop, token, QUERY_FO_ORDINE, { id: gid })) as any)?.order?.fulfillmentOrders?.edges) || []).map((e: any) => e.node)
+      const daRiaprire = fo.filter((f: any) => String(f?.status || '') === 'IN_PROGRESS' && azioniFo(f).includes('MARK_AS_OPEN'))
+      piano.inCorsoDaRiaprire = daRiaprire.length
+      if (daRiaprire.length && simula) return esito('annullato', `${PREFISSO_ANNULLO}: riaprirebbe l'ordine segnato «In corso» dalla spedizione annullata`)
+      const rifiuti: string[] = []
+      for (const f of daRiaprire) {
+        const r = await shopifyGraphQL(shop, token, MUTATION_RIAPRI_FO, { id: f.id })
+        const errs = ((r as any)?.fulfillmentOrderOpen?.userErrors) || []
+        if (errs.length) rifiuti.push(errs.map((x: any) => x?.message).filter(Boolean).join('; '))
+        else riaperti++
+      }
+      if (rifiuti.length) return daRitentare(`ordine «In corso» non riaperto: ${rifiuti.join(' | ')}`)
+      if (riaperti) ord = (await leggi()) || ord
+    }
     const st = statoDaShopify(fotoOrdine(ord, cls), { conStoria: true, assente: false })
     const stato = st === 'spedito' ? 'spedito' : 'da_spedire'
     if (sorveglianza) return definitivo(testoSorveglianza(sorveglianza), { stato })
+    if (riaperti) return esito('annullato', `${PREFISSO_ANNULLO}: riaperto l'ordine segnato «In corso» dalla spedizione annullata`, { stato })
     return esito('annullato', `${PREFISSO_ANNULLO}: nessuna evasione nostra attiva da annullare`, { stato })
   } catch (e: any) {
     return daRitentare(String(e?.message || e))

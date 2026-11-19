@@ -4,7 +4,9 @@
 // della spedizione), lo accetta e lo paga SUBITO, all'apertura — app/api/assistenza/apri. Prima si
 // pagava solo quando l'assistenza caricava il file col tasto "Carica POD", e una POD mandata come
 // allegato in chat arrivava gratis (TK-04637, GTS → MDS, 3,30 € mai addebitati).
-// Le altre due chiamate — "Carica POD" e un allegato mandato al cliente in chat — restano per le
+// Dal 04/11/2026 paga cosi' anche il MASTER che chiede la POD al suo master superiore (la funzione
+// del database sceglie da sola: movimento sul cliente o sul conto del master sotto).
+// Le altre due chiamate — "Carica POD" e un allegato mandato al richiedente in chat — restano per le
 // richieste aperte prima di quel giorno e come nuovo tentativo se l'addebito all'apertura non e'
 // riuscito; su una richiesta gia' pagata non fanno niente. Nei ticket di assistenza la chat resta
 // gratuita: il filtro sulla categoria e' nella funzione del database.

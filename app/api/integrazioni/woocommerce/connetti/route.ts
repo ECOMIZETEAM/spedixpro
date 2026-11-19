@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { wooGet } from '@/lib/woo'
-import { COME_SI_COLLEGA_SHOPIFY } from '@/lib/shopify-scheda-app'
+import { wooGet, motivoCollegamentoWoo } from '@/lib/woo'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -13,28 +12,26 @@ export async function POST(req: NextRequest) {
   }
   const body = await req.json()
   const nome = (body.nome_negozio || '').trim()
-  let url = (body.url || '').trim().replace(/\/+$/, '')
-  const ck = (body.consumer_key || '').trim()
-  const cs = (body.consumer_secret || '').trim()
-  if (!url || !ck || !cs) return NextResponse.json({ error: 'URL, Consumer Key e Consumer Secret obbligatori' }, { status: 400 })
+  // L'indirizzo come lo incollano: con /wp-admin/... in fondo (copiato dalla barra del pannello), senza
+  // https://, con la barra finale. Serve la radice del sito.
+  let url = (body.url || '').trim().replace(/\/wp-(admin|login\.php|json)\b.*$/i, '').replace(/\/+$/, '')
+  let ck = (body.consumer_key || '').trim()
+  let cs = (body.consumer_secret || '').trim()
+  if (!url || !ck || !cs) return NextResponse.json({ error: 'Servono l\'indirizzo del negozio e i due codici della chiave: «Chiave Utente» (ck_…) e «Utente nascosto» (cs_…).' }, { status: 400 })
   if (!/^https?:\/\//.test(url)) url = 'https://' + url
+  // I DUE CODICI. Nel pannello WooCommerce in italiano si chiamano «Chiave Utente» e «Utente nascosto»
+  // (Consumer key / Consumer secret): incollati al contrario si rimettono a posto, altrimenti si dice
+  // prima di chiamare il negozio che cosa manca.
+  if (ck.startsWith('cs_') && cs.startsWith('ck_')) [ck, cs] = [cs, ck]
+  if (!ck.startsWith('ck_') || !cs.startsWith('cs_')) {
+    return NextResponse.json({ error: 'I codici non sono quelli della chiave WooCommerce: la «Chiave Utente» (Consumer key) inizia con ck_ e l\'«Utente nascosto» (Consumer secret) con cs_. Copiali dalla pagina che compare dopo «Genera chiave API».' }, { status: 400 })
+  }
 
   // test connessione
   try {
     await wooGet(url, ck, cs, '/orders?per_page=1')
   } catch (e: any) {
-    const msg = String(e?.message || '')
-    if (msg.includes('401') || msg.includes('403')) return NextResponse.json({ error: 'Chiavi API non valide (accesso negato). Verifica Consumer Key/Secret e i permessi (lettura/scrittura).' }, { status: 400 })
-    // IL SITO NON È WOOCOMMERCE. L'API risponde con una PAGINA HTML (404/home) invece del JSON: succede
-    // quando il negozio è su un'altra piattaforma. Il 404 grezzo ("<!DOCTYPE html>...") non dice niente
-    // al cliente — qui riconosciamo la piattaforma vera e lo spieghiamo. (Caso reale: ilpapiroshop.com
-    // è Storeden, non WooCommerce — l'errore mostrava l'HTML di una pagina "storeden-404.html".)
-    if (/storeden/i.test(msg)) return NextResponse.json({ error: 'Questo sito è realizzato con Storeden, non con WooCommerce: non ha le API WooCommerce da collegare. Le integrazioni supportano WooCommerce, Shopify e PrestaShop.' }, { status: 400 })
-    // Shopify non si collega scrivendo il sito (requisito 2.3.1): la frase sta con la scheda dell'app.
-    if (/cdn\.shopify|myshopify|x-shopify/i.test(msg)) return NextResponse.json({ error: 'Questo sito sembra Shopify, non WooCommerce: ' + COME_SI_COLLEGA_SHOPIFY }, { status: 400 })
-    if (/prestashop/i.test(msg)) return NextResponse.json({ error: 'Questo sito sembra PrestaShop, non WooCommerce: collegalo dalla sezione PrestaShop.' }, { status: 400 })
-    if (/<!doctype|<html[\s>]/i.test(msg)) return NextResponse.json({ error: 'Questo indirizzo non espone l\'API WooCommerce (risponde con una pagina web, non con i dati). Controlla che sia davvero un sito WooCommerce e che l\'API REST sia attiva su /wp-json/wc/v3.' }, { status: 400 })
-    return NextResponse.json({ error: 'Impossibile raggiungere WooCommerce. Verifica URL e che le API REST siano attive. ' + msg.slice(0, 120) }, { status: 400 })
+    return NextResponse.json({ error: motivoCollegamentoWoo(e) }, { status: 400 })
   }
 
   const payload: any = {

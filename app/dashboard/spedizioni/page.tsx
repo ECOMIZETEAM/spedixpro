@@ -722,8 +722,10 @@ async function apriTracking(s: any) {
                     ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span title={s.cod_parziale?`COD parziale: il corriere ha incassato € ${fe(Number(s.cod_incassato))} sui € ${fe(Number(s.contrassegno))} dichiarati. Al cliente scende solo l'incassato.`:undefined} style={{...codBadgeStyle(s.stato_contrassegno,s.cod_parziale),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{fe(Number(s.contrassegno))}{s.cod_parziale&&<span style={{marginLeft:'3px',fontSize:'9px',fontWeight:'700'}}>PARZIALE</span>}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
                     { soldi: true, l: 'Cliente', v: <span><b style={{color:'#1a1a1a'}}>€ {fe(Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0))}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
-                    { soldi: true, l: 'Costo', v: s.prezzo_corriere!=null?`€ ${fe(Number(s.prezzo_corriere))}`:'—' },
-                    { soldi: true, l: 'Margine', v: <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${fe(Number(s.margine))}`:'—'}</b> },
+                    // In calcolo: spedizione di pochi secondi, l'addebito della catena non è ancora arrivato (la
+                    // rotta non inventa il costo: vedi APPENA_NATA in /api/spedizioni/lista).
+                    { soldi: true, l: 'Costo', v: s.costo_in_calcolo ? <span style={{color:'#9ca3af'}} title="L'addebito arriva fra pochi secondi: aggiorna la lista">in calcolo</span> : s.prezzo_corriere!=null?`€ ${fe(Number(s.prezzo_corriere))}`:'—' },
+                    { soldi: true, l: 'Margine', v: s.costo_in_calcolo ? <b style={{color:'#9ca3af',fontWeight:500}} title="L'addebito arriva fra pochi secondi: aggiorna la lista">in calcolo</b> : <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${fe(Number(s.margine))}`:'—'}</b> },
                     // Rettifica A PARTE: prezzo, costo e margine qui sopra sono solo della spedizione.
                     ...(s.rettifica ? [{ soldi: true, l: 'Rettifica', v: (
                       <span title={`Addebitata al cliente € ${fe(Number(s.rettifica.cliente))} · pagata € ${fe(Number(s.rettifica.costo))}`}>
@@ -746,8 +748,10 @@ async function apriTracking(s: any) {
                             </button>}
                         {s.ticket && <div><a href={`/dashboard/assistenza?ticket=${s.ticket.id}`} title="Ticket aperto su questa spedizione — clicca per aprirlo"
                           style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fef3c7',color:'#b45309',border:'1px solid #fde68a',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' as const}}>🎫 ticket aperto</a></div>}
-                        {s.dogana_bloccata_at && !s.tracking_number && <div><span title="Bloccata in dogana: il corriere richiede EORI, contenuto dettagliato ed email del destinatario. È stato aperto un ticket al cliente."
-                          style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fee2e2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,whiteSpace:'nowrap' as const}}>⚠️ Ferma in dogana</span></div>}
+                        {/* "Ferma in dogana" faceva pensare a un pacco fermo alla frontiera: il pacco invece non e'
+                            partito, e' la LDV che non viene emessa finche' non arrivano i documenti (TMP-26814143, 4/11). */}
+                        {s.dogana_bloccata_at && !s.tracking_number && <div><span title="Lettera di vettura non ancora emessa: fuori UE il corriere la rilascia solo con EORI del mittente, contenuto dettagliato con il valore ed email del destinatario. Il pacco non è partito. È stato aperto un ticket al cliente."
+                          style={{display:'inline-flex',alignItems:'center',gap:'3px',marginTop:'4px',background:'#fee2e2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'10px',padding:'1px 7px',fontSize:'10px',fontWeight:700,whiteSpace:'nowrap' as const}}>⚠️ Servono documenti doganali</span></div>}
                       </td>
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{s.mitt_nome}</div>
@@ -767,7 +771,11 @@ async function apriTracking(s: any) {
                         <span className="el-stato" style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
                         {nuova && <Percorso s={s} />}
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
-                        {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta {s.distinta_reso}</div>}
+                        {/* "Spedita" puo' voler dire solo "chiusa in distinta": il numero dice in quale, e porta alla
+                            distinta, da cui la spedizione si toglie (QUICK, 16/11). */}
+                        {s.distinta_numero && <div style={{marginTop:'3px'}}><a href={`/dashboard/distinte/${s.distinta_id}`} title="Apri la distinta"
+                          style={{fontSize:'10px',color:'#374151',fontWeight:'600',whiteSpace:'nowrap' as const,textDecoration:'underline'}}>Distinta {s.distinta_numero}</a></div>}
+                        {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta reso {s.distinta_reso}</div>}
                         {s.annullamento_errore && s.stato!=='annullamento_pending' && s.stato!=='annullamento_manuale' && <div title={s.annullamento_errore} style={{fontSize:'10px',color:'#b91c1c',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const,cursor:'help'}}>⚠ Non annullabile</div>}
                       </td>
                       <td style={{padding:'9px 12px 3px'}}>
@@ -943,9 +951,9 @@ async function apriTracking(s: any) {
                             <span style={{fontWeight:'700',color:'#1a1a1a',fontSize:'13px'}}>📦 Collo {c.numero} di {trackingData.colli_dettaglio.length}</span>
                             {c.lunghezza&&<span style={{fontSize:'12px',color:'#1a1a1a'}}>{c.lunghezza}×{c.larghezza}×{c.altezza} cm · {c.peso}kg</span>}
                           </div>
-                          {c.etichetta_url&&(
+                          {(c.etichetta_url||c.etichetta_path)&&(
                             <div style={{fontSize:'12px',color:'#1a1a1a'}}>
-                              <strong>Tracking collo:</strong> {c.etichetta_url.includes('base64')?'PDF disponibile':c.etichetta_url}
+                              <strong>Tracking collo:</strong> {(c.etichetta_path||String(c.etichetta_url).includes('base64'))?'PDF disponibile':c.etichetta_url}
                             </div>
                           )}
                         </div>

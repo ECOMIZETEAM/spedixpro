@@ -28,15 +28,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
   let et = await leggiEtichettaCompleta(admin, sped as any, { resaSda })
 
-  // Ripiego GLS on-demand: l'etichetta del contratto proprio può non essere pronta subito dopo la
-  // creazione (GLS la genera con un attimo di ritardo). Se manca, la si scarica ORA e la si salva —
-  // così il tasto non resta "non disponibile" per un problema di sola tempistica.
-  if (!et && (sped as any)?.raw_response?._gls) {
-    try {
-      const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
-      const buf = await recuperaEtichettaGlsSalvando(admin, { id, ...(sped as any) })
-      if (buf?.length) et = { buffer: buf, mime: 'application/pdf', ext: 'pdf' }
-    } catch (e) { console.error('[ETICHETTA][GLS] recupero on-demand:', e) }
+  // Ripiego on-demand: l'etichetta GLS può non essere pronta subito dopo la creazione (GLS la genera con
+  // un attimo di ritardo), anche solo per qualche collo, e quella di un PONTE fra reti si chiede al
+  // venditore. Se manca, o mancano dei colli, la si prende ORA e la si salva — così il tasto non resta
+  // "non disponibile", e il pacco non parte con un'etichetta in meno, per un problema di sola tempistica.
+  {
+    const { recuperaEtichettaMancante } = await import('@/lib/etichette')
+    et = await recuperaEtichettaMancante(admin, { id, ...(sped as any) }, et)
   }
 
   if (!et) {

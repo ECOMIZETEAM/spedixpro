@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
-import { spediamoproCreatePickup, spediamoproWaitPickupCode, EMAIL_PER_CORRIERE } from '@/lib/spediamopro'
+import { EMAIL_PER_CORRIERE } from '@/lib/spediamopro'
+import { avvisoDataSpostata } from '@/lib/ritiro-giorno'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
 import { codiceRitiroValido } from '@/lib/easyparcel'
@@ -61,7 +62,24 @@ function pulisciTelefono(v: any): string | undefined {
   return d || undefined
 }
 
+// OGNI RITIRO RESPINTO LASCIA UNA RIGA NEI LOG, col tipo di contratto e il motivo.
+// Prima la lasciavano solo i rami che parlavano col corriere, e non tutti: dal 3 al 17/11/2026 la rotta
+// ha risposto "no" 5.485 volte e 3.339 non avevano traccia (233 in un giorno solo erano SDA EXPRESS L in
+// giornata, respinti da KSync). Il controllo "i ritiri funzionano su ogni contratto?" e' una ricerca
+// di [RITIRO][KO] nei log, non un incrocio di orari fra Vercel e il database.
 export async function POST(req: NextRequest) {
+  const traccia: { tipo?: string; contratto?: string } = {}
+  const res = await creaRitiro(req, traccia)
+  if (res.status >= 400) {
+    try {
+      const j = await res.clone().json()
+      console.error('[RITIRO][KO]', res.status, traccia.tipo || '-', '|', traccia.contratto || '-', '|', String(j?.error || '').slice(0, 220))
+    } catch { /* il log non deve mai cambiare la risposta */ }
+  }
+  return res
+}
+
+async function creaRitiro(req: NextRequest, traccia: { tipo?: string; contratto?: string }): Promise<NextResponse> {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
@@ -82,7 +100,7 @@ export async function POST(req: NextRequest) {
 
   let spedQuery = admin
     .from('spedizioni')
-    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,master_id,cliente_id,richiedi_ritiro,data_ritiro,intervallo_ritiro')
+    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,mitt_nome,mitt_indirizzo,mitt_citta,mitt_provincia,mitt_cap,master_id,cliente_id,richiedi_ritiro,data_ritiro,intervallo_ritiro')
     .in('id', spedizioneIds).in('master_id', masterIdsAmmessi)
   if (isCliente) spedQuery = spedQuery.eq('cliente_id', utente.cliente_id)
   // Agente: può ritirare solo spedizioni dei suoi clienti.
@@ -91,15 +109,20 @@ export async function POST(req: NextRequest) {
   if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 400 })
 
   const primaSped = spedizioni[0]
-  const raw = primaSped.raw_response as any
+  // Le righe da cui si leggono i riferimenti del fornitore (id SpediamoPro, codici Spedisci). Di norma
+  // sono le spedizioni scelte; su un contratto condiviso sono le gambe vere dello stesso pacco (sotto).
+  let riferimenti: any[] = spedizioni
+  let raw = primaSped.raw_response as any
   // Il ritiro appartiene al master/cliente proprietario della spedizione (così risale nella rete)
   const masterId = primaSped.master_id
   const clienteId = primaSped.cliente_id || null
 
   // `let`/any: su condivisione il corriere viene RIASSEGNATO all'owner più sotto (il ponte non dispaccia).
-  const _corrRes = await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', primaSped.corriere_id).single()
+  const _corrRes = await admin.from('corrieri').select('id,tipo,nome_contratto,credenziali,settings').eq('id', primaSped.corriere_id).single()
   let corriere: any = _corrRes.data
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 400 })
+  traccia.tipo = corriere.tipo
+  traccia.contratto = corriere.nome_contratto
 
   // CONTRATTI DVA: il ritiro si prenota SOLO insieme alla spedizione, non dopo — il corriere non
   // ha una chiamata per aggiungerlo a posteriori. Senza questa uscita si finirebbe nel ramo in
@@ -167,18 +190,33 @@ export async function POST(req: NextRequest) {
   // (masterId/clienteId presi da primaSped sopra); colli/peso e tracking sono gli stessi (stesso pacco).
   // Senza, un moovexpress cadeva nel ripiego Spedisci (nessun _carrierCode) → "Impossibile recuperare il
   // corriere". Per l'owner Poste si entra nel ramo poste qui sotto, con credenziali vere.
-  if (corriere.tipo === 'moovexpress' && primaSped.tracking_number) {
-    const { risolviGambeSpedizione } = await import('@/lib/condivisione-catena')
-    const gambe = await risolviGambeSpedizione(admin, primaSped.tracking_number)
-    const owner = gambe.find((g: any) => g.tipo && g.tipo !== 'moovexpress')
-    if (!owner) return NextResponse.json({ error: 'Contratto condiviso: nessun owner reale per prenotare il ritiro.' }, { status: 400 })
-    const { data: spO } = await admin.from('spedizioni').select('corriere_id').eq('id', owner.spedizioneId).maybeSingle()
-    const { data: corrO } = (spO as any)?.corriere_id
-      ? await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', (spO as any).corriere_id).maybeSingle()
-      : { data: null as any }
-    if (!corrO) return NextResponse.json({ error: 'Contratto condiviso: corriere dell\'owner non trovato per il ritiro.' }, { status: 400 })
-    corriere = corrO as any
-    cred = ((corrO as any).credenziali || {}) as Record<string, string>
+  // La risoluzione sta in lib/ritiro-poste: la usa anche l'API pubblica.
+  if (corriere.tipo === 'moovexpress') {
+    const { contrattoCheRitira } = await import('@/lib/ritiro-poste')
+    const ris = await contrattoCheRitira(admin, corriere, primaSped.tracking_number)
+    if ('errore' in ris) return NextResponse.json({ error: ris.errore }, { status: 400 })
+    corriere = ris.corriere
+    cred = ((ris.corriere as any).credenziali || {}) as Record<string, string>
+    traccia.tipo = 'moovexpress>' + corriere.tipo
+    // ...MA I RIFERIMENTI DEL FORNITORE STANNO SULLA GAMBA VERA. Il commento qui sopra lo diceva gia', il
+    // codice cambiava solo il contratto: Spedisci.online e SpediamoPro leggevano il codice corriere e
+    // l'id della spedizione dalla gamba-ponte, che non li ha, e il ritiro falliva sempre ("Impossibile
+    // recuperare il corriere"): BRT VELOX, Poste STANDARD I e SDA EXPRESS condivisi, 17/11/2026.
+    // Poste (KSync) usa solo il numero del pacco, che e' lo stesso: li' non serve.
+    if (corriere.tipo !== 'poste') {
+      const { risolviGambeSpedizione } = await import('@/lib/condivisione-catena')
+      const idVeri: string[] = []
+      for (const s of spedizioni) {
+        const gambe = await risolviGambeSpedizione(admin, String(s.tracking_number || ''))
+        const vera = gambe.find((g: any) => g.tipo && g.tipo !== 'moovexpress')
+        if (!vera) return NextResponse.json({ error: `Contratto condiviso: per ${s.numero} non trovo la spedizione presso il corriere.` }, { status: 400 })
+        idVeri.push(vera.spedizioneId)
+      }
+      const { data: gambeVere } = await admin.from('spedizioni').select('id,numero,tracking_number,raw_response').in('id', idVeri)
+      if (!gambeVere?.length) return NextResponse.json({ error: 'Contratto condiviso: spedizione presso il corriere non trovata.' }, { status: 400 })
+      riferimenti = gambeVere
+      raw = (gambeVere.find((g: any) => g.id === idVeri[0]) || gambeVere[0]).raw_response as any
+    }
   }
 
   if (!body.mittNome || !body.mittIndirizzo || !body.mittCitta || !body.mittCap) {
@@ -232,7 +270,7 @@ export async function POST(req: NextRequest) {
     // Raccolgo gli shipmentId SpediamoPro (campo raw_response.id) delle spedizioni selezionate
     const shipmentIds: number[] = []
     let courierCode = 'sda'
-    for (const s of spedizioni) {
+    for (const s of riferimenti) {
       const r = s.raw_response as any
       const sid = r?.id || r?.raw?.data?.id
       if (sid) shipmentIds.push(Number(sid))
@@ -246,40 +284,37 @@ export async function POST(req: NextRequest) {
     const fascia = fasciaOraria(body.orarioRitiro)
     console.log('[RITIRO] spedizioni da ritirare:', shipmentIds.length, 'corriere:', courierCode, 'fascia:', JSON.stringify(fascia))
 
-    try {
-      const pk = await spediamoproCreatePickup(cred.authcode, {
-        contactInfo: {
-          name: body.mittNome,
-          address: body.mittIndirizzo,
-          postalCode: body.mittCap,
-          city: body.mittCitta,
-          country: body.mittPaese || 'IT',
-          phone: pulisciTelefono(body.mittTelefono),
-          email: body.mittEmail || undefined,
-          province: provincia2(body.mittProvincia),
-        },
-        date: body.dataRitiro,
-        from: fascia.from,
-        to: fascia.to,
-        shipments: shipmentIds,
-        courier: courierCode,
-      })
-      // Il POST non restituisce sempre il code (CP...): lo recupero con una GET
-      let codicePickup = pk.code
-      if (!codicePickup && pk.id) {
-        codicePickup = await spediamoproWaitPickupCode(cred.authcode, pk.id)
-      }
-      console.log('[RITIRO] ritiro creato:', codicePickup, 'id:', pk.id)
+    // Lunghezze, giorno e indirizzo del mittente li corregge lib/ritiro-spediamopro (la usa anche l'API).
+    const { prenotaRitiroSpediamopro } = await import('@/lib/ritiro-spediamopro')
+    const esito = await prenotaRitiroSpediamopro(cred.authcode, {
+      contactInfo: {
+        name: body.mittNome,
+        address: body.mittIndirizzo,
+        postalCode: body.mittCap,
+        city: body.mittCitta,
+        country: body.mittPaese || 'IT',
+        phone: pulisciTelefono(body.mittTelefono),
+        email: body.mittEmail || undefined,
+        province: provincia2(body.mittProvincia),
+      },
+      mittenteSpedizione: { nome: primaSped.mitt_nome, indirizzo: primaSped.mitt_indirizzo, cap: primaSped.mitt_cap, citta: primaSped.mitt_citta, provincia: primaSped.mitt_provincia },
+      date: body.dataRitiro,
+      from: fascia.from,
+      to: fascia.to,
+      shipments: shipmentIds,
+      courier: courierCode,
+    })
+    if (!esito.ok) return NextResponse.json({ error: erroreRitiroPulito(esito.errore) }, { status: 400 })
+    console.log('[RITIRO] ritiro creato:', esito.codice, 'id:', esito.id)
 
-      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(codicePickup || String(pk.id), pk.id || null)
-      if (insErr) {
-        return NextResponse.json({ error: `Ritiro creato (${pk.code}) ma errore DB: ${insErr.message}` }, { status: 500 })
-      }
-      return NextResponse.json({ id: nuovoRitiro.id, pickupId: pk.code || pk.id })
-    } catch (e: any) {
-      console.log('[RITIRO] errore dal corriere:', e?.message)
-      return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
+    const dataChiesta = String(body.dataRitiro)
+    body.dataRitiro = esito.data   // la riga del ritiro porta il giorno davvero prenotato
+    const { data: nuovoRitiro, error: insErr } = await salvaRitiro(esito.codice, esito.id || null)
+    if (insErr) {
+      return NextResponse.json({ error: `Ritiro creato (${esito.codice}) ma errore DB: ${insErr.message}` }, { status: 500 })
     }
+    const avviso = avvisoDataSpostata(dataChiesta, esito.data)
+    return NextResponse.json({ id: nuovoRitiro.id, pickupId: esito.codice, ...(avviso ? { avviso } : {}) })
   }
 
   // ══════════════════════════════════════════════════════
@@ -344,32 +379,25 @@ export async function POST(req: NextRequest) {
   // ══════════════════════════════════════════════════════
   // POSTE Delivery Business (KSync/ParcelPilot): ritiro ON-DEMAND via /pickup/booking (come FedEx).
   // bookingType RIT0001/2/3 dal contratto (settings, default RIT0003). Torna un bookingId.
+  // La prenotazione sta in lib/ritiro-poste: la stessa la usa l'API pubblica.
   // ══════════════════════════════════════════════════════
   if (corriere.tipo === 'poste') {
-    const { ritiroPrenotaKsync } = await import('@/lib/ksync')
-    const st: any = corriere.settings || {}
-    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope }
-    const ts = pickupTimeSpedisci(body.orarioRitiro)
-    try {
-      const ris = await ritiroPrenotaKsync(credPo, {
-        bookingType: st.booking_type || 'RIT0003',
-        indirizzo: {
-          ragioneSociale: body.mittNome, referente: body.mittNome, indirizzo: body.mittIndirizzo,
-          cap: body.mittCap, citta: body.mittCitta,
-          provincia: siglaProvincia(body.mittProvincia || '') || (body.mittProvincia || ''), paese: body.mittPaese || 'IT',
-          telefono: pulisciTelefono(body.mittTelefono) || '', email: body.mittEmail || '',
-        },
-        numColli: colliTotali, pesoKg: pesoTotale,
-        shipmentId: primaSped.tracking_number || primaSped.numero || '',
-        dataRitiro: body.dataRitiro, timeSlot: ts === 'PM' ? 'PM' : 'AM', note: body.istruzioni,
-      })
-      if (!ris.ok || !ris.bookingId) return NextResponse.json({ error: erroreRitiroPulito(ris.errore || 'Poste: ritiro non riuscito') }, { status: 400 })
-      const { data: nuovoRitiro, error: insErr } = await salvaRitiro(ris.bookingId)
-      if (insErr) return NextResponse.json({ error: `Ritiro creato (${ris.bookingId}) ma errore DB: ${insErr.message}` }, { status: 500 })
-      return NextResponse.json({ id: nuovoRitiro.id, pickupId: ris.bookingId })
-    } catch (e: any) {
-      return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
+    const { prenotaRitiroPoste } = await import('@/lib/ritiro-poste')
+    const ris = await prenotaRitiroPoste(admin, {
+      corriere, masterId, clienteId, spedizioni,
+      mittente: {
+        nome: body.mittNome, indirizzo: body.mittIndirizzo, citta: body.mittCitta, cap: body.mittCap,
+        provincia: body.mittProvincia, paese: body.mittPaese, telefono: body.mittTelefono, email: body.mittEmail,
+      },
+      data: body.dataRitiro, fascia: pickupTimeSpedisci(body.orarioRitiro) === 'PM' ? 'PM' : 'AM',
+      note: body.istruzioni, contenuto: body.contenuto,
+    })
+    if (ris.ok) {
+      const avviso = avvisoDataSpostata(String(body.dataRitiro), ris.data)
+      return NextResponse.json({ id: ris.ritiroId, pickupId: ris.codice, ...(avviso ? { avviso } : {}) })
     }
+    if (ris.motivo === 'registrazione') return NextResponse.json({ error: `Ritiro creato (${ris.codice}) ma errore DB: ${ris.errore}` }, { status: 500 })
+    return NextResponse.json({ error: ris.errore }, { status: 400 })
   }
 
   // ══════════════════════════════════════════════════════
@@ -441,86 +469,26 @@ export async function POST(req: NextRequest) {
   // personali di chi chiede il ritiro, e finirebbero nei log di produzione a ogni richiesta —
   // mentre il giro notturno di anonimizzazione lavora per toglierli dal database.
   console.log('[RITIRO] invio richiesta al corriere', { colli: payload?.packages?.length ?? '-', data: payload?.pickupDate ?? '-' })
-  // Timeout: l'API del corriere a volte si appende. Senza limite la funzione va in 504 (Vercel)
-  // dopo minuti; con AbortController torno un errore pulito e veloce, riprovabile.
-  const ctrl = new AbortController()
-  const to = setTimeout(() => ctrl.abort(), 25000)
-  let res: Response
-  try {
-    res = await fetch(`${baseUrl}/pickup/create`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    })
-  } catch (e: any) {
-    clearTimeout(to)
-    // Niente rimandi al portale del corriere: chi spedisce parla solo con noi.
-    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto; se persiste, contatta l\'assistenza.' }, { status: 504 })
-  }
-  clearTimeout(to)
-  let text = await res.text()
-  console.log('[RITIRO] risposta corriere status:', res.status)
-
-  // Spedisci NON accetta piu' il ritiro IN GIORNATA: riprovo in automatico col primo giorno
-  // LAVORATIVO utile, cosi' il ritiro parte comunque (il "richiedi ritiro" da nuova spedizione
-  // propone OGGI come data). Il rifiuto arriva con testi diversi a seconda del corriere e cambia
-  // nel tempo: prima "PICKUP_DATE = today is no longer possible", poi "Time slot not compatible
-  // with today's date" — quest'ultimo da solo ha fatto fallire 591 ritiri di 174 clienti, tutti
-  // persi perche' la vecchia regex prendeva solo il primo; e in italiano "...non e' possibile
-  // effettuare il ritiro nella mattina stessa". Basta che il messaggio dica che OGGI non va.
-  let dataSpostata: string | null = null
-  if (!res.ok && /PICKUP_DATE\s*=\s*today|time slot not compatible with today|nella mattina stessa/i.test(text)) {
-    const prossimo = new Date(String(body.dataRitiro) + 'T12:00:00')
-    do { prossimo.setDate(prossimo.getDate() + 1) } while ([0, 6].includes(prossimo.getDay()))
-    dataSpostata = prossimo.toISOString().slice(0, 10)
-    payload.pickupDate = dataSpostata
-    console.log('[RITIRO] ritiro in giornata rifiutato dal corriere: riprovo per', dataSpostata)
-    const ctrl2 = new AbortController()
-    const to2 = setTimeout(() => ctrl2.abort(), 25000)
-    try {
-      res = await fetch(`${baseUrl}/pickup/create`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ctrl2.signal,
-      })
-      text = await res.text()
-      console.log('[RITIRO] risposta corriere (secondo tentativo) status:', res.status)
-      if (res.ok) body.dataRitiro = dataSpostata   // il ritiro salvato porta la data REALE
-      else dataSpostata = null
-    } catch {
-      clearTimeout(to2)
-      return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto.' }, { status: 504 })
-    }
-    clearTimeout(to2)
-  }
-
-  let r: any
-  try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
-  if (!res.ok || r.error) {
-    // Diagnostica (solo il MESSAGGIO d'errore del corriere, non il payload coi dati personali): serve a
-    // capire perché stamattina i ritiri Spedisci tornano 400. Da rimuovere dopo aver risolto.
-    // La password si nasconde SOLO se c'e': con il pattern vuoto `replace` infilerebbe '***' davanti al
-    // messaggio. Qui c'era un carattere NUL messo al posto della stringa vuota, e un byte NUL rende il
-    // file "binario": ogni grep lo saltava, quindi questa rotta era invisibile alle ricerche (compresi i
-    // controlli sui permessi). Trovato il 3/10/2026 cercando chi scrive la riga del ritiro.
-    const pwd = String(cred?.password || '')
-    const msgKO = String(r?.error || '')
-    console.error('[RITIRO] pickup KO', res.status, (pwd ? msgKO.split(pwd).join('***') : msgKO).slice(0, 220))
-    return NextResponse.json({ error: erroreRitiroPulito(r?.error || `Errore ${res.status}`) }, { status: 400 })
-  }
+  // L'invio, i nomi oltre 35 caratteri e il "non oggi" (riprova col giorno che indica il corriere o
+  // col primo lavorativo) stanno in lib/ritiro-spedisci: la stessa chiamata la fa l'API pubblica.
+  // La scadenza tiene la funzione sotto il suo tetto di 30 secondi anche con due tentativi.
+  const { inviaRitiroSpedisci } = await import('@/lib/ritiro-spedisci')
+  const invio = await inviaRitiroSpedisci(baseUrl, cred.password, payload, Date.now() + 27000)
+  // Niente rimandi al portale del corriere: chi spedisce parla solo con noi.
+  if (invio.timeout) return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto; se persiste, contatta l\'assistenza.' }, { status: 504 })
+  const r = invio.risposta || {}
+  if (!invio.ok) return NextResponse.json({ error: erroreRitiroPulito(r?.error || `Errore ${invio.status}`) }, { status: 400 })
 
   // Codice ritiro del corriere: spedisci lo restituisce come pickupId (CP…) o, in alcune versioni,
   // come id/uuid/code/reference. Prendo il primo disponibile.
   const codiceCorriere = r.pickupId ?? r.pickup_id ?? r.id ?? r.uuid ?? r.code ?? r.reference ?? null
+  const dataChiesta = String(body.dataRitiro)
+  body.dataRitiro = invio.data   // il ritiro salvato porta la data REALE
   const { data: nuovoRitiro, error: insertError } = await salvaRitiro(codiceCorriere)
   if (insertError) {
     return NextResponse.json({ error: `Ritiro creato (${codiceCorriere}) ma errore DB: ${insertError.message}` }, { status: 500 })
   }
   // `id` = riferimento interno MoovExpress; `pickupId` = codice del corriere (es. CP…).
-  return NextResponse.json({
-    id: nuovoRitiro.id, pickupId: codiceCorriere,
-    ...(dataSpostata ? { avviso: `Il corriere non accetta più il ritiro in giornata: ritiro programmato per il ${dataSpostata.split('-').reverse().join('/')}.` } : {}),
-  })
+  const avviso = avvisoDataSpostata(dataChiesta, invio.data)
+  return NextResponse.json({ id: nuovoRitiro.id, pickupId: codiceCorriere, ...(avviso ? { avviso } : {}) })
 }

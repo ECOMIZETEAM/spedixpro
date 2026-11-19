@@ -92,6 +92,9 @@ export async function POST(req: NextRequest) {
     } else if (r.tipo === 'supplemento' && r.supplemento_id) {
       const { data: s } = await admin.from('listini_clienti_supplementi').select('id,tipo,valore,descrizione,nome').eq('id', r.supplemento_id).maybeSingle()
       if (!s) { saltate++; continue }
+      // I supplementi multicollo stanno tutti nella descrizione: riscriverla qui li cancellerebbe. Non si
+      // adeguano mai da qui (lib/sotto-costo li segnala senza supplemento_id: questa e' la seconda serratura).
+      if ((s as any).tipo === 'multicollo_supplementi') { saltate++; continue }
       let d: any = {}; try { d = JSON.parse((s as any).descrizione || '{}') || {} } catch { /* non JSON */ }
       let agg: any, prima: number, dopo: number, primaP = 0, dopoP = 0
       if (s.tipo === 'contrassegno' || s.tipo === 'assicurazione') {
@@ -101,8 +104,9 @@ export async function POST(req: NextRequest) {
         prima = sc.prezzo_fisso; dopo = alza(prima); primaP = sc.perc; dopoP = alzaPerc(primaP)
         d.prezzo_fisso = String(dopo); if (dopoP > 0) d.perc = String(dopoP)
         agg = { valore: dopo, descrizione: JSON.stringify(d) }
-      } else if (['giacenza_apertura', 'sponda', 'ritiro'].includes(s.tipo)) {
-        // un importo solo, nella colonna `valore`: la descrizione (soglia della sponda, % del ritiro) resta
+      } else if (['giacenza_apertura', 'sponda', 'ritiro', 'minimo_collo'].includes(s.tipo)) {
+        // un importo solo, nella colonna `valore`: la descrizione (soglia della sponda, % del ritiro) resta.
+        // Il minimo a collo e' euro per collo, letto solo da `valore` (lib/pricing → minimoACollo).
         prima = Number(s.valore) || 0; dopo = alza(prima)
         agg = { valore: dopo }
       } else {

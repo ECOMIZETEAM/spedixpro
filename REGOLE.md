@@ -27,10 +27,14 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | ...nemmeno su due gambe dello stesso pacco: lo stesso pagatore, sullo stesso conto, paga il reso di un tracking una volta sola | trigger `trg_reso_una_volta_per_pacco` (rifiuta col codice del vincolo unico: per `fn_addebita_resi` è "già addebitato"). Dall'8 al 14/10/2026 sono passati 54 doppi così, stornati. Script: `scripts/reso-una-volta-per-pacco.sql` |
 | Un pacco "reso al mittente" non torna "consegnata" né in viaggio: la consegna dopo il reso è quella del ritorno al mittente, e il reso resta da pagare | trigger `trg_aa_reso_non_torna_consegnata` (lo stato resta reso, le altre colonne si scrivono; dal 26/10 anche spedita/in transito/in consegna/giacenza/non consegnato, dopo che `/api/v1/tracking` riportava i resi "in consegna"; correzione a mano via `in_lavorazione`). Al 24/10/2026 22 resi veri risultavano consegnati e fuori dalla percentuale resi. Le quattro porte del tracking lo fanno anche nel codice; il riconoscimento del ritorno alla filiale di partenza sta in `ritornoAllaPartenza` (lib/tracking-poste). Script: `scripts/reso-non-torna-consegnata.sql` |
 | Il prezzo del reso: percentuale, ripiego, transazione unica | `fn_addebita_resi` |
+| Il titolare che ha già il costo del reso dal corriere (`RESOFORN-…`, su una qualsiasi gamba del pacco) non paga anche la sua riga di reso | `fn_addebita_resi`, esito `costo_fornitore_gia_registrato` (per chi chiama vale come pagato: `resoPagato` in lib/reso-prezzi). Senza questa regola, se il corriere fattura il reso prima che il portale lo veda, il titolare lo pagava due volte. Nello storico al 10/11/2026 è successo una volta sola: 050190292829031, 13,57 € a MULTIEXPRESS. Script: `scripts/reso-titolare-costo-fornitore.sql` |
+| Un reso fatturato dal corriere è un reso, anche se il tracking non l'ha visto | `lib/conto-fornitore.ts` → `decidiResoFatturato` / `segnaResiFatturati`, nel giro mattutino `/api/cron/costi-fornitore`: dopo il costo, il pacco (tutte le gambe) passa a reso e lo addebita la coda dei resi. Prima si rilegge il tracking vivo: mai partito, o consegnato al destinatario senza reso negli eventi, resta com'è e torna nel log come «da controllare» (fattura da contestare). Nato il 10/11/2026: 114 resi fatturati in due giorni e mai addebitati sotto (1.793,92 €), corretti a mano |
+| Lo status 12 del fornitore (pacco al punto di ritiro) non è una consegna | `mapStatoSpediamopro` (lib/spediamopro): 12 → `in_consegna`, 10 → `consegnata`. La consegna è il ritiro: con 12 = consegnata i pacchi non ritirati al fermopoint, all'Access Point o al locker sparivano dal tracking |
 | Una giacenza la apre solo il fornitore, mai una lettura di Poste | trigger `trg_giacenza_solo_dal_fornitore`: `in_giacenza` senza `giacenza_data` non passa (fuori il circuito interno) |
 | Una giacenza aperta va addebitata, sempre | trigger `trg_giacenza_da_addebitare` → coda `giacenze_da_addebitare` |
 | Pacco consegnato o reso: la giacenza si chiude e le richieste in sospeso si annullano | trigger `trg_chiudi_giacenza_terminale` (non tocca `svincolata` né le richieste confermate) |
 | Un reso va addebitato, anche se arriva dal corriere | trigger `trg_reso_da_addebitare` → coda `resi_da_addebitare` |
+| Una spedizione annullata va rimborsata, da qualunque strada diventi 'annullata' | trigger `trg_annullo_da_rimborsare` → coda `annulli_da_rimborsare`, svuotata da `addebiti-code` con `rimborsaAnnulloSpedizione` mezz'ora dopo, e solo se non c'è nessun rimborso (la porta che ha annullato l'ha già fatto). Rimborsata solo in parte da chi l'ha annullata, oppure risulta partita (evento di viaggio, ripesatura del fornitore): non si decide da soli, resta in coda a vista col motivo e la mostra il controllo dei log. Nato il 4/11/2026: il dettaglio del tracking e `/api/v1/tracking` scrivevano 'annullata' dal fornitore senza rimborsare (5 spedizioni, 143,85 €). Script: `scripts/annullo-da-rimborsare.sql` |
 | A quale conto appartiene un movimento | trigger `trg_conto_movimento` → `fn_conto_di` |
 | I soldi finiscono sul conto giusto | `registra_movimento_master` chiama `fn_conto_di` |
 | Cancellare un contratto porta via la sua configurazione | vincoli `on delete cascade` (zone, fasce, supplementi, listini) |
@@ -50,8 +54,8 @@ Qui non serve ricordarsene: il database le applica da solo, da qualunque strada 
 | Un cliente nasce **senza** pagare le API | default `clienti.api_esente = true` |
 | Se le API sono ferme, e perché | `fn_stato_api_cliente` — unica fonte, usata sia dal blocco sia dai pannelli |
 
-**Le due code funzionano così**: il database registra il *fatto* (c'è da addebitare), il lavoro
-pianificato calcola il *prezzo* e addebita. La regola sta nel database, la tariffa nell'applicazione
+**Le code funzionano così**: il database registra il *fatto* (c'è da addebitare, o da rimborsare), il
+lavoro pianificato calcola il *prezzo* e addebita. La regola sta nel database, la tariffa nell'applicazione
 — che è dove vive il motore dei listini. Se un addebito fallisce la riga resta in coda e si riprova,
 contando i tentativi: dopo cinque smette e resta a vista, invece di sparire.
 
@@ -77,14 +81,16 @@ Vivono nel codice, ma in **un punto solo** che tutti chiamano. Modificarle lì v
 | Se un contratto si può condividere con un master collegato. Su un master c'è una riga sola per nome; se il suo master gliel'ha tolto, il collegato lo sostituisce (su conferma coi numeri, solo senza storico, togliendo anche le copie sotto di lui) | `lib/condivisione-engine.ts` → `valutaContrattoPerCompratore`, usata da Assegna, scheda del collegato e riallineamento |
 | Eliminare un contratto: le SUE spedizioni, ritiri e distinte lo bloccano nel database, la configurazione cade in cascata con un DELETE solo. Le copie dei sotto-master non le guarda: vedi sotto | `lib/elimina-contratto.ts` → `eliminaContrattiSenzaStorico` |
 | Il prezzo del reso è solo nolo | `lib/reso-prezzi.ts` |
+| Creazione su un contratto CONDIVISO: chi chiama dice al venditore quanto tempo gli resta, e il venditore non chiama il corriere se non fa in tempo. Se la risposta non arriva (timeout, 5xx) si chiede al venditore com'è andata: nata → la si tiene, altrimenti il credito torna. Vale per il portale e per l'API pubblica | `lib/moovexpress.ts` → `creaSpedizioneMoovexpress`, `scadenzaRichiesta`; registro del venditore in `lib/ponte-richieste.ts` (tabella `ponte_richieste`), chiuso dall'`/api/v1/shipments` a risposta pronta |
+| Le gambe d'ingrosso rimaste senza la spedizione del cliente (creazione interrotta) si annullano da sole dopo 20 minuti, su tutte le gambe e con lo storno a ogni livello: SDA EXPRESS L con la sorveglianza di 30 giorni, GLS diretto con l'annullo su GLS; gli altri contratti si segnalano soltanto (Lorenzo, 9/11/2026). Se è la riga del cliente a non scriversi dopo che la LDV è nata, si riprova subito (una o due volte, adottando la riga se il primo insert era andato); se non va, le gambe si annullano subito e, solo se l'annullo riesce, il credito torna con «Spedizione non creata… il credito è stato restituito. Riprova.»; con le gambe ancora vive resta il messaggio col numero, perché un nuovo tentativo comprerebbe una seconda LDV (Lorenzo, 12/11/2026) | `lib/ponte-orfane.ts` → `sentinellaOrfanePonte`, ogni 15 minuti da `/api/spedizioni/ponte-orfane-cron`, e `annullaPaccoOrfano`, la stessa strada usata subito da portale e API; ripetizione in `lib/ponte-testa.ts` → `scriviTestaPonte`; la guardia doppione dell'API pubblica le riconosce con `lib/guardia-doppione.ts` → `doppioneSenzaTesta` |
 | Quali tariffe si possono offrire a un cliente: contratto in catena, contratti "a un punto", locker a taglia | `lib/tariffe-offerte.ts` → `soloCorrieriInCatena`, `annotaPuntoPoste` + `eTariffaAUnPunto`, `contrattiConFasceATaglia` |
 | "Prezzo minore" o "contratto scelto" nelle porte di massa del cliente (import da file, ordini dei negozi) | `app/cliente/anteprima-prezzi.ts` → `scegliTariffa` (la stessa per mostrare e per spedire) |
 | Il prezzo mostrato PRIMA di spedire nelle porte di massa | `lib/anteprima-prezzi.ts` → `prezziPerRighe`: elenco dei contratti dal motore del preventivo, cifra dalla funzione dell'addebito |
+| Con quale città si prezza (città storta su un CAP dove il contratto nomina comuni: si ferma, dall'import si corregge se il CAP è di un solo comune) | `lib/citta-spedizione.ts` → `cittaPerLaSpedizione`, chiamata dalla creazione del portale, dall'API pubblica e dall'anteprima, sul contratto con cui si spedisce e su quelli a monte |
 | Cosa puo' fare un contratto GLS diretto: il nazionale solo l'Italia; il Parcel (`settings.tipo_spedizione = 'P'`, "GLS Europa") solo i paesi UE, fuori dai territori extra-doganali (Canarie, oltremare…) e senza contrassegno | `lib/gls.ts` → `motivoGlsNonServe`, chiamata dai due preventivi (cliente e spedizione propria del master) e dalla creazione, prima del credito. Servizi accessori e telefono del Parcel si controllano solo in creazione (si scelgono dopo il prezzo). L'API pubblica non crea GLS diretto per niente |
 
-Due funzioni nate il 13 ottobre **non** stanno in questa tabella, perché hanno ancora un doppione
-(vedi sotto, «Ancora scritte in più posti»): `lib/citta-spedizione.ts` → `cittaPerLaSpedizione` e
-`lib/prezzo-cliente.ts` → `prezzoClienteDaListino`.
+Una funzione nata il 13 ottobre **non** sta in questa tabella, perché ha ancora un doppione
+(vedi sotto, «Ancora scritte in più posti»): `lib/prezzo-cliente.ts` → `prezzoClienteDaListino`.
 
 ---
 
@@ -183,8 +189,8 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   **La cura vera esiste e ce l'abbiamo in casa**: `lib/data/comuni.json` (7.904 comuni con CAP e
   provincia) e `lib/data/frazioni.json` (9.878). Con quelli si distingue una frazione da un comune
   omonimo di CAP, invece di indovinare. Fatto per la creazione: `lib/valida-citta.ts` li usa, e
-  `lib/citta-spedizione.ts` decide — se la città non è un nome noto per un CAP con zona speciale, la
-  spedizione si ferma; per import e negozi, quando il CAP è di un solo comune, la città viene
+  `lib/citta-spedizione.ts` decide — se la città non è un nome noto per quel CAP e il contratto con
+  cui si spedisce (o uno a monte) ha su quel CAP righe che nominano comuni, la spedizione si ferma; per import e negozi, quando il CAP è di un solo comune, la città viene
   corretta da sola. Resta aperto il CAP condiviso fra più comuni con una città che non combacia con
   nessuno: lì ci si ferma, non si decide.
 - **Preventivo e addebito sono due calcoli diversi.** Il prezzo che il cliente PAGA lo decide la
@@ -208,13 +214,12 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   (città + listino) non prezza; gli altri rifiuti della creazione — credito lungo la catena,
   telefono richiesto dal corriere, risposta del corriere — la prova non li copre.
   **Restano sul totale del motore**: i due moduli "Nuova spedizione" e il sito pubblico.
-- **La città della spedizione e la somma del prezzo: l'API pubblica ha le sue copie.**
-  `cittaPerLaSpedizione` e `prezzoClienteDaListino` le chiamano la creazione del portale e
-  l'anteprima. `app/api/v1/shipments` ha ancora in linea sia il blocco città↔CAP (blocca sempre,
-  non normalizza mai; il suo messaggio nomina `shipTo.city`) sia la somma trasporto + contrassegno
-  + assicurazione; `app/api/v1/rates` la stessa somma. Oggi danno lo stesso numero (stesse due
-  funzioni di `lib/pricing.ts`, l'API non ha servizi accessori): chi cambia la formula o la regola
-  della città in un posto deve allineare l'altro.
+- **La somma del prezzo: l'API pubblica ha la sua copia.** `prezzoClienteDaListino` la chiamano
+  la creazione del portale e l'anteprima. `app/api/v1/shipments` ha ancora in linea la somma
+  trasporto + contrassegno + assicurazione; `app/api/v1/rates` la stessa somma. Oggi danno lo
+  stesso numero (stesse due funzioni di `lib/pricing.ts`, l'API non ha servizi accessori): chi
+  cambia la formula in un posto deve allineare l'altro. (La regola della città non è più doppia:
+  dal 4 novembre anche l'API chiama `cittaPerLaSpedizione`, e scrive solo il suo messaggio.)
 - **«È un locker» ha due definizioni.** Quella dichiarata (`corrieri.settings.consegna = 'locker'`)
   c'è solo sul contratto del detentore: sulle copie dei sotto-master è vuota (13 ottobre: vuota su
   17 dei 19 contratti di tipo InPost, tutte le copie; una, "InPost Locker", è nel listino di 264
@@ -224,15 +229,6 @@ Da sistemare, e da guardare con sospetto quando si tocca qualcosa lì vicino.
   `app/api/cliente/corrieri`); il modulo della spedizione singola, la creazione
   (`contrattoLocker = settings.consegna === 'locker'`) e l'API pubblica leggono **solo** la prima:
   per loro una copia è una consegna a domicilio, senza scelta del locker.
-- **L'elenco dei CAP con zona speciale è caricato a metà.** `lib/cap-speciali.ts` decide se una
-  città scritta male va fermata o corretta. Legge zone e righe senza paginazione, e il database ne
-  restituisce al massimo mille per lettura: misurato il 13 ottobre, 1.000 zone lette su 2.701 e
-  **1.223 CAP caricati su 1.868** (645 fuori). Quali restano fuori dipende dall'ordine in cui
-  arrivano le righe, e l'elenco è tenuto in memoria per istanza: lo stesso CAP può essere
-  riconosciuto da un server e non da un altro. Su un CAP rimasto fuori, una città scritta male non
-  viene né corretta né fermata e la zona speciale può perdersi (è il guasto del primo punto di
-  questo elenco). Non toccato: allargare l'elenco ferma spedizioni che oggi passano, quindi va fatto
-  rieseguendo prima e dopo sulle spedizioni vere, comprese quelle che passano.
 - **Il messaggio dell'autista** dice "non è fra le tue consegne" senza sapere il perché: la ricerca
   è solo sulle consegne già caricate.
 - **`master_id` non è un permesso, ma viene usato come tale.** È l'appartenenza al tenant, e ce

@@ -17,8 +17,10 @@ import { useDialog } from '@/app/components/DialogProvider'
 import { riferimentoFornitore } from '@/lib/numero-spedizione'
 // Default: ultimi 60 giorni di annullate (le code pending/manuali restano complete: sono attive e
 // poche). Prima si scaricavano e arricchivano TUTTE le annullate di sempre -> pagina sempre piu' lenta.
-const _oggiC = new Date().toISOString().slice(0, 10)
-const _da60C = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+// Calcolate all'APERTURA della pagina, non al caricamento del modulo: nell'app il modulo resta in
+// memoria per giorni se la scheda non si ricarica, e "oggi" restava il giorno in cui la si era aperta.
+const oggiC = () => new Date().toISOString().slice(0, 10)
+const da60C = () => new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 // Etichettina della SECONDA riga (valori sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 export default function SpedizioniCancellatePage() {
@@ -28,12 +30,19 @@ export default function SpedizioniCancellatePage() {
   const [storni, setStorni] = useState<any[]>([])     // annullo gia' chiesto al corriere, in attesa della sua conferma
   const [manuali, setManuali] = useState<any[]>([])   // annullo manuale in sola lettura (nel mio ambito)
   const [codaOwner, setCodaOwner] = useState<any[]>([]) // annulli Spedisci che DEVO richiedere io (detentore)
+  const [disGls, setDisGls] = useState<any[]>([])      // spedizioni che il portale e GLS raccontano diverse (solo il detentore)
+  const [verificando, setVerificando] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // Filtri persistiti: restano finché l'utente non preme "Azzera" (chiave unica per questa pagina).
   const [cerca, setCerca, azzeraCerca] = useFiltriPersistenti('spedizioni-cancellate-master:cerca', '')
   const [filtroCliente, setFiltroCliente, azzeraCliente] = useFiltriPersistenti('spedizioni-cancellate-master:cliente', '')
-  const [dal, setDal, azzeraDal] = useFiltriPersistenti('spedizioni-cancellate-master:dal', _da60C)
-  const [al, setAl, azzeraAl] = useFiltriPersistenti('spedizioni-cancellate-master:al', _oggiC)
+  // Il PERIODO invece non si ricorda: riparte ogni volta dagli ultimi 60 giorni fino a oggi.
+  // Era persistito, e useFiltriPersistenti salva anche il valore iniziale alla prima apertura: il
+  // giorno "al" restava quello della prima visita, e tutto quello che si cancellava dopo non
+  // compariva piu', ne' nelle annullate ne' nelle attese. Wave il 17/11: "le GLS cancellate non
+  // vanno su Spedizioni Cancellate" — erano annullate e stornate, solo fuori dal periodo rimasto fermo.
+  const [dal, setDal] = useState(da60C)
+  const [al, setAl] = useState(oggiC)
   const [perPage, setPerPage] = useFiltriPersistenti('spedizioni-cancellate-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
   const [paginaPending, setPaginaPending] = useState(1)   // paginazione sezione "in attesa di annullo"
@@ -54,12 +63,15 @@ export default function SpedizioniCancellatePage() {
       // 'storno_richiesto' finche' il corriere non conferma: senza questa riga spariva sia dall'elenco
       // delle attese sia dalle annullate (96 il 16/10), e chi l'aveva cancellata non la ritrovava.
       fetch('/api/spedizioni/lista?light=1&stato=storno_richiesto').then(r => r.json()),
-    ]).then(([ann, pen, man, coda, sto]) => {
+      // Le trova il controllo notturno col registro GLS; se la lettura fallisce la pagina resta com'era.
+      fetch('/api/spedizioni/gls-disallineamenti').then(r => r.json()).catch(() => []),
+    ]).then(([ann, pen, man, coda, sto, dis]) => {
       setSpedizioni(Array.isArray(ann) ? ann : [])
       setPending(Array.isArray(pen) ? pen : [])
       setStorni(Array.isArray(sto) ? sto : [])
       setManuali(Array.isArray(man) ? man : [])
       setCodaOwner(Array.isArray(coda) ? coda : [])
+      setDisGls(Array.isArray(dis) ? dis : [])
       setLoading(false)
     }).catch(() => setLoading(false))
   }
@@ -72,6 +84,15 @@ export default function SpedizioniCancellatePage() {
     setRipristinando(null)
     if (res.ok) carica()
     else { const d = await res.json().catch(() => ({})); await dialog.alert({ title: 'Errore', message: d.error || 'Errore durante il ripristino.' }) }
+  }
+
+  async function segnaVerificata(id: string, numero: string) {
+    if (!await dialog.confirm({ title: 'Segnare come verificata?', message: `Spedizione ${numero}: sparisce da questo elenco e il controllo con GLS non la riproporrà. Rimborsi o riaddebiti restano da fare a parte.`, confirmText: 'Segna verificata' })) return
+    setVerificando(id)
+    const res = await fetch(`/api/spedizioni/gls-disallineamenti?id=${id}`, { method: 'POST' })
+    setVerificando(null)
+    if (res.ok) setDisGls(prev => prev.filter(d => d.spedizione_id !== id))
+    else { const d = await res.json().catch(() => ({})); await dialog.alert({ title: 'Errore', message: d.error || 'Operazione non riuscita.' }) }
   }
 
   async function confermaAnnullo(id: string) {
@@ -202,11 +223,58 @@ export default function SpedizioniCancellatePage() {
               style={{padding:'8px 10px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',width:'100%',color:'#1a1a1a',background:'#fff',boxSizing:'border-box'}}/>
           </div>
           {filtriAttivi && (
-            <button onClick={()=>{azzeraCliente();azzeraDal();azzeraAl();azzeraCerca();setPagina(1)}}
+            <button onClick={()=>{azzeraCliente();setDal(da60C());setAl(oggiC());azzeraCerca();setPagina(1)}}
               style={{padding:'8px 14px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>Azzera</button>
           )}
         </div>
       </div>
+
+      {/* DA VERIFICARE CON GLS: il portale e GLS non raccontano la stessa cosa (controllo notturno, solo il
+          detentore del contratto). Niente filtri qui: sono poche, e ognuna va guardata. */}
+      {disGls.length > 0 && (
+        <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #fcd34d',overflow:'hidden',marginBottom:'16px'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #fde68a',background:'#fffbeb'}}>
+            <span style={{fontSize:'13px',fontWeight:'700',color:'#92400e'}}>Da verificare con GLS <span style={{color:'#a16207',fontWeight:'400',fontSize:'12px'}}>({disGls.length})</span></span>
+            <span style={{display:'block',marginTop:'2px',fontSize:'12px',color:'#92400e'}}>Ogni notte confrontiamo le spedizioni del portale con il registro del tuo conto GLS. Queste non tornano: decidi tu se rimborsare, riaddebitare o lasciare così, poi premi &quot;Segna verificata&quot;.</span>
+          </div>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
+              <tbody>
+                {disGls.map(d => {
+                  const s = d.spedizione || {}
+                  const cancellataSuGls = d.tipo === 'cancellata_su_gls'
+                  const colliDiversi = d.tipo === 'colli_diversi'
+                  return (
+                    <tr key={d.spedizione_id} style={{borderBottom:'1px solid #fef3c7'}}>
+                      <td style={{padding:'9px 16px',verticalAlign:'top'}}>
+                        <div style={{fontWeight:700,color:'#1a1a1a'}}>{s.tracking_number || s.numero || '—'}</div>
+                        <div style={{fontSize:'12px',color:'#6b7280'}}>{s.corrieri?.nome_contratto || ''}{s.created_at ? ` · ${new Date(s.created_at).toLocaleDateString('it-IT')}` : ''}</div>
+                      </td>
+                      <td style={{padding:'9px 16px',verticalAlign:'top'}}>
+                        <div style={{color:'#1a1a1a'}}>{s.clienti?.ragione_sociale || '—'}</div>
+                        <div style={{fontSize:'12px',color:'#6b7280'}}>{s.dest_nome || ''}{s.dest_citta ? ` · ${s.dest_citta}` : ''}{Number(s.contrassegno) > 0 ? ` · contrassegno ${Number(s.contrassegno).toFixed(2).replace('.', ',')} €` : ''}</div>
+                      </td>
+                      <td style={{padding:'9px 16px',verticalAlign:'top',color:'#92400e',maxWidth:'420px'}}>
+                        {colliDiversi
+                          ? <><b>Colli diversi: {d.colli_portale} sul portale, {d.colli_gls} su GLS.</b> {Number(d.colli_gls) > Number(d.colli_portale) ? 'GLS aspetta colli che non arriveranno e la spedizione può fermarsi: chiedi a GLS di correggerla.' : 'GLS ne ha meno di quelli partiti: chiedi a GLS di correggerla.'}</>
+                          : cancellataSuGls
+                          ? <><b>Cancellata su GLS, valida sul portale.</b> Sul portale risulta {s.stato ? `"${String(s.stato).replace(/_/g, ' ')}"` : 'valida'} e pagata; nel registro GLS non c&apos;è più.</>
+                          : <><b>Annullata sul portale, ancora attiva su GLS.</b> Il cliente è stato rimborsato, ma GLS la ha {/CHIUSA/i.test(d.stato_gls || '') ? 'già trasmessa (chiusa): il pacco può partire e GLS addebitarla' : 'ancora in attesa di chiusura'}.</>}
+                      </td>
+                      <td style={{padding:'9px 16px',verticalAlign:'top',textAlign:'right',whiteSpace:'nowrap'}}>
+                        <button onClick={()=>segnaVerificata(d.spedizione_id, s.tracking_number || s.numero || '')} disabled={verificando === d.spedizione_id}
+                          style={{padding:'5px 12px',background:'#fff',color:'#92400e',border:'1px solid #fcd34d',borderRadius:'6px',fontSize:'12px',fontWeight:600,cursor:'pointer'}}>
+                          {verificando === d.spedizione_id ? '…' : 'Segna verificata'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* CODA DETENTORE: annulli Spedisci da richiedere via assistenza (solo il detentore del contratto) */}
       {codaOwner.length > 0 && (

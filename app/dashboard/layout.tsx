@@ -4,10 +4,14 @@ import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
 import AbbonamentoGate from './AbbonamentoGate'
 import BannerPiano from '../components/BannerPiano'
+import BannerNovitaTiktok from '../components/BannerNovitaTiktok'
 import AvvisoImportante from './AvvisoImportante'
 import CongelatoGate from './CongelatoGate'
 import BannerDemo from '../components/BannerDemo'
 import { DialogProvider } from '../components/DialogProvider'
+import { contabilitaAttiva } from '@/lib/contabilita-banca'
+import { eTitolareOAdmin } from '@/lib/ruoli'
+import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 import { cookies } from 'next/headers'
 import { Outfit } from 'next/font/google'
 
@@ -100,6 +104,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
       graficaEntrata: graficaNuova && !biscotti.get('mx_entrata'),
       graficaLuce: graficaNuova ? luceIniziale(graficaScelta) : undefined,
       graficaProposta: graficaNuova && ['a', 'b', 'c', 'd'].includes(biscotti.get('mx_plancia')?.value || '') ? biscotti.get('mx_plancia')!.value : '',
+      // Estratto conto: in prova solo su alcuni master, e solo per titolare e admin.
+      contabilita: contabilitaAttiva(utente?.master_id) && eTitolareOAdmin(utente),
     }}>
       <DialogProvider>
         {demo && demoScadenza && <BannerDemo scadenza={demoScadenza} />}
@@ -107,6 +113,10 @@ export default async function Layout({ children }: { children: React.ReactNode }
         {!demo && <CongelatoGate />}
         {!demo && <AvvisoImportante />}
         {!demo && <BannerPiano linkUpgrade="/dashboard/abbonamento" />}
+        {/* L'annuncio TikTok Shop (prima quello Shopify) e' per chi gestisce il portale e i clienti: non per agenti
+            e autisti, ne' per le prove demo, i cui clienti un negozio non lo possono collegare. */}
+        {!demo && ['master', 'admin', 'operatore'].includes(String(utente?.ruolo || '').toLowerCase()) && <BannerNovitaTiktok per="master" />}
+        <AvvisoVerifica />
         {children}
       </DialogProvider>
     </DashboardLayout>

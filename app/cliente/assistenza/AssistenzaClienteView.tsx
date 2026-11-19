@@ -9,6 +9,9 @@ import PodCosto, { type StatoPodCosto } from '@/app/components/PodCosto'
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
   in_lavorazione: { label: 'In lavorazione', bg: '#eff6ff', color: '#2563eb' },
+  // Il cliente lo vede com'e' (decisione del committente, 28/10/2026): senza questa voce il Badge
+  // ripiegherebbe su "Aperto" e il cliente penserebbe che nessuno ci stia lavorando.
+  rimborso: { label: 'In attesa di rimborso', bg: '#f5f3ff', color: '#7c3aed' },
   risolto: { label: 'Risolto', bg: '#f0fdf4', color: '#16a34a' },
   chiuso: { label: 'Chiuso', bg: '#f3f4f6', color: '#6b7280' },
 }
@@ -206,7 +209,7 @@ export default function AssistenzaClienteView({ categoria }: { categoria: 'ticke
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV o pratica…" style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '190px' }} />
             <select value={filtroStato} onChange={e => { setFiltroStato(e.target.value); setPagina(1) }} style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
-              <option value="tutti">Tutti gli stati</option><option value="aperto">Aperti</option><option value="in_lavorazione">In lavorazione</option><option value="risolto">Risolti</option><option value="chiuso">Chiusi (archivio)</option>
+              <option value="tutti">Tutti gli stati</option><option value="aperto">Aperti</option><option value="in_lavorazione">In lavorazione</option>{!isPod && <option value="rimborso">In attesa di rimborso</option>}<option value="risolto">Risolti</option><option value="chiuso">Chiusi (archivio)</option>
             </select>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
               Mostra

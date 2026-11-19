@@ -27,3 +27,21 @@ export const CAP_PROVINCIA: Map<string, string> = (() => {
   for (const f of (frazioniIT as any[])) aggiungi(f.cap, f.sigla)
   return m
 })()
+
+// CONSEGNA A UN PUNTO: LA PROVINCIA NON SI CHIEDE, MA DECIDE IL PREZZO.
+// Il modulo "Nuova spedizione", quando il pacco va a un punto, chiede solo il CAP (serve a cercare i
+// punti): niente citta', niente provincia. Ma le zone dei listini rivendicano intere province con un
+// jolly ("Venezia/Laguna" = IT (VE) * *), e senza provincia quel jolly non aggancia: la spedizione
+// scivolava sul prezzo "Italia". Caso vero 050152293138491 (BRT Fermopoint S, 30030 Martellago):
+// venduta a 8,42 "ITALIA", mentre con VE il listino del cliente quella zona non la prezza, quindi
+// non e' vendibile (REGOLE.md, regola 1). L'API pubblica la provincia la pretende.
+// Qui la si ricava dal CAP, come per gli ordini Amazon. La chiamano il preventivo e la creazione
+// con lo stesso CAP, cosi' il prezzo mostrato e quello addebitato restano lo stesso.
+// Solo Italia e solo se manca: una provincia scritta non si tocca. CAP ambiguo o sconosciuto ->
+// resta vuota, come prima.
+export function completaProvinciaDaCap(shipTo: any): void {
+  if (!shipTo || String(shipTo.state || '').trim()) return
+  if (String(shipTo.country || 'IT').toUpperCase().trim() !== 'IT') return
+  const sigla = CAP_PROVINCIA.get(String(shipTo.postalCode || '').trim())
+  if (sigla) shipTo.state = sigla
+}

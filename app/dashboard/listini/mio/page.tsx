@@ -1,5 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
+import SupplementiMulticollo from '@/app/components/SupplementiMulticollo'
+import { normalizzaSupplementiMulticollo } from '@/lib/multicollo-zone'
 
 const eur = (x: number) => Number(x) > 0 ? '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const pct = (x: number) => Number(x) > 0 ? Number(x).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%' : '—'
@@ -32,6 +34,8 @@ const TABS: [string, string][] = [
   ['accessorio', 'Servizi accessori'],
   // La sponda la addebita il motore e qui non c'era: stessa mancanza della vista cliente.
   ['sponda', 'Sponda idraulica'],
+  // Il minimo a collo cambia la cifra del multicollo: come nella vista del cliente.
+  ['minimo_collo', 'Multicollo'],
   ['giacenza', 'Giacenze'],
   ['ritiro', 'Ritiro'],
 ]
@@ -101,26 +105,12 @@ export default function MioListinoPage() {
                       </div>
                       <div style={{ padding: tab === 'pesi' ? 0 : '14px 16px', overflowX: 'auto' }}>
                         {tab === 'pesi' ? (
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: `${160 + (c.zone?.length || 1) * 90}px` }}>
-                            <thead>
-                              <tr>
-                                <th style={thL}>Peso (kg)</th>
-                                {(c.zone || []).map((z: string, k: number) => <th key={k} style={th}>{z}</th>)}
-                                <th style={th}>Fuel</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(c.fasce || []).map((f: any, j: number) => (
-                                <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
-                                  <td style={tdL}>{f.tipo === 'oltre' ? `oltre, ogni ${f.peso_max}` : `fino a ${f.peso_max}`}</td>
-                                  {(c.zone || []).map((z: string, k: number) => <td key={k} style={td}>{eur(Number(f.prezzi?.[z] || 0))}</td>)}
-                                  <td style={td}>{f.fuel ? `${f.fuel}%` : '—'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                          <GrigliaPesi zone={c.zone || []} fasce={c.fasce || []} zoneMittente={c.zoneMittente || []} />
                         ) : (
+                          <>
+                          {tab === 'minimo_collo' && c.multicollo && <div style={{ margin: '-14px -16px 14px' }}><GrigliaPesi zone={c.multicollo.zone || []} fasce={c.multicollo.fasce || []} zoneMittente={[]} /></div>}
                           <SupplTable tipo={tab} righe={(c.supplementi || {})[tab] || []} />
+                        </>
                         )}
                       </div>
                     </div>
@@ -140,6 +130,7 @@ export default function MioListinoPage() {
 // giusto sarebbe un componente solo: non l'ho estratto per non allargare un intervento che riguarda
 // i soldi, ma e' debito, e la prima volta che le due si contraddiranno sara' per questo.
 function SupplTable({ tipo, righe }: { tipo: string; righe: any[] }) {
+  if (tipo === 'minimo_collo') return <MinimoCollo righe={righe} />
   if (!righe.length) return <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessuna voce impostata per questo corriere.</div>
 
   // Sponda: la soglia e' solo il grilletto, poi il prezzo/kg vale su TUTTO il peso fatturato.
@@ -217,3 +208,46 @@ const th = { fontSize: '11px', fontWeight: 700 as const, color: '#8a8a8a', textT
 const thL = { ...th, textAlign: 'left' as const }
 const td = { fontSize: '12.5px', color: '#1a1a1a', padding: '8px 10px', borderBottom: '1px solid #f6f6f6', textAlign: 'center' as const, whiteSpace: 'nowrap' as const }
 const tdL = { ...td, textAlign: 'left' as const, fontWeight: 600 as const, color: '#444' }
+
+// MINIMO A COLLO (multicollo): la stessa regola del motore (lib/pricing → noloMulticollo), a parole.
+function MinimoCollo({ righe }: { righe: any[] }) {
+  const v = Math.max(0, ...righe.filter((r: any) => r.tipo !== 'multicollo_supplementi').map((r: any) => Number(r.prezzo) || 0))
+  const riga = righe.find((r: any) => r.tipo === 'multicollo_supplementi' && r.dati)
+  const suppl = riga ? normalizzaSupplementiMulticollo(riga.dati) : null
+  return (
+    <div style={{ fontSize: '12.5px', color: '#1a1a1a' }}>
+      {v > 0
+        ? <div style={{ marginBottom: '8px' }}>Con due o più colli: almeno <b>{eur(v)} per collo</b>.</div>
+        : <div style={{ fontSize: '12.5px', color: '#9ca3af', padding: '4px 0' }}>Nessun minimo a collo su questo corriere.</div>}
+      <div style={{ fontSize: '12px', color: '#666' }}>
+        Con due o più colli si paga il maggiore fra la fascia del <b>peso totale</b>{v > 0 ? <> e il numero di colli × {eur(v)}</> : null}. Esempio: 3 colli da 2 kg{v > 0 ? <> pagano almeno 3 × {eur(v)} = <b>{eur(3 * v)}</b></> : ' pagano la fascia dei 6 kg'}.
+      </div>
+      {suppl && <SupplementiMulticollo chi="vista" valore={suppl} sola zoneRemote={[]} zonePartenza={[]} />}
+    </div>
+  )
+}
+
+// LA GRIGLIA PESI / ZONE: la stessa per il collo singolo e per il multicollo (zone multicollo, prezzi sul
+// peso totale della spedizione). Una sola, cosi' le due schede si leggono allo stesso modo.
+function GrigliaPesi({ zone, fasce, zoneMittente }: { zone: string[]; fasce: any[]; zoneMittente: string[] }) {
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', minWidth: `${160 + (zone.length || 1) * 90}px` }}>
+                            <thead>
+                              <tr>
+                                <th style={thL}>Peso (kg)</th>
+                                {zone.map((z: string, k: number) => <th key={k} style={th}>{z}</th>)}
+                                <th style={th}>Fuel</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {fasce.map((f: any, j: number) => (
+                                <tr key={j} style={{ background: j % 2 ? '#fcfcfc' : '#fff' }}>
+                                  <td style={tdL}>{f.tipo === 'oltre' ? `oltre, ogni ${f.peso_max}` : `fino a ${f.peso_max}`}</td>
+                                  {zone.map((z: string, k: number) => <td key={k} style={td}>{eur(Number(f.prezzi?.[z] || 0))}</td>)}
+                                  <td style={td}>{f.fuel ? `${f.fuel}%` : '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+  )
+}

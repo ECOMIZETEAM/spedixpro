@@ -3,6 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { vedeLaRete } from '@/lib/ruoli'
 import { isAgente } from '@/lib/agente'
 import { siglaContratto } from '@/lib/corriere-logo'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { codiciContratti } from '@/lib/codice-contratto'
 
 export async function GET() {
   const _t0 = Date.now()
@@ -26,11 +28,14 @@ export async function GET() {
   // gerarchia). contrattiSospesiSopra guarda solo gli ANTENATI, non il proprio livello (quello e' `attivo`).
   const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
   const sospesi = await contrattiSospesiSopra(utente?.master_id)
+  // Il codice del contratto (CT-…) allo staff del master, non all'agente: lib/codice-contratto.
+  const codici = sigla ? new Map<string, string>() : await codiciContratti(createAdminSupabase(), utente?.master_id)
   const _ms = Date.now() - _t0
   if (_ms > 300) console.log('[CORRIERI][TEMPI]', _ms + 'ms', 'istanza=' + Math.round(process.uptime()) + 's', 'contratti=' + (data || []).length)
   return NextResponse.json((data || []).map((c: any) => ({
     ...c,
     ...(sigla ? { tipo: siglaContratto(c.tipo) } : {}),
+    ...(codici.has(c.id) ? { codice: codici.get(c.id) } : {}),
     sospeso_sopra: sospesoDallaCatena(c.nome_contratto, sospesi),
   })))
 }

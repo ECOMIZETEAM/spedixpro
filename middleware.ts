@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { PARAM_ERRORE, PARAM_COLLEGATO } from '@/lib/esiti-collegamento'
+import { API_SENZA_VERIFICA, CODICE_CAMBIO_PASSWORD, CODICE_VERIFICA, PAGINA_CAMBIO_PASSWORD, PAGINA_VERIFICA, bloccataDallaVerifica, statoSessione } from '@/lib/verifica-due-passaggi'
 
 // SCRITTURE CONSENTITE ALL'AGENTE.
 // L'agente e' di sola lettura, ma alcune rotte usano POST per LEGGERE (preventivi, esportazioni,
@@ -60,7 +61,9 @@ export async function middleware(req: NextRequest) {
     // L'elenco qui sopra esenta dal divieto dell'AGENTE, non dal blocco per canone non pagato:
     // sono due cose diverse e uscire qui le confondeva. Chi e' esente dal primo prosegue lo
     // stesso, e sara' il controllo del canone piu' sotto a dire l'ultima parola.
-    if (!scrittura || !conSessione) return NextResponse.next()
+    if (!conSessione) return NextResponse.next()
+    const senzaVerifica = API_SENZA_VERIFICA.some(p => pathname.startsWith(p))
+    if (!scrittura && senzaVerifica) return NextResponse.next()
 
     const risposta = NextResponse.next({ request: { headers: req.headers } })
     const sb = createServerClient(
@@ -73,6 +76,42 @@ export async function middleware(req: NextRequest) {
         },
       }
     )
+
+    // VERIFICA IN DUE PASSAGGI, su TUTTE le API con una sessione, letture comprese.
+    // Nel database un controllo prima di ogni richiesta ferma gia' la sessione che non ha messo il
+    // codice, ma molte rotte, dopo aver letto chi e' l'utente, lavorano con la chiave di servizio, che
+    // quel controllo non lo attraversa. Qui la domanda la si fa al database stesso: e' lui che
+    // conosce la data di obbligo e le sessioni di "entra come", e che verifica la firma del token.
+    // Se la domanda non arriva (database giu', token scaduto) si lascia decidere alla rotta, che
+    // l'utente lo controlla comunque: fermare tutti per un guasto sarebbe peggio.
+    if (!senzaVerifica) {
+      const { stato, errore: vErr } = await statoSessione(sb)
+      // Un link aperto nel browser (entra come, l'arrivo da Seller Central) va alla pagina del codice
+      // e poi torna qui; una chiamata della pagina riceve la risposta da leggere.
+      const navigazione = req.method === 'GET' && (req.headers.get('accept') || '').includes('text/html')
+      if (bloccataDallaVerifica(vErr) || stato === 'codice') {
+        const no = navigazione
+          ? NextResponse.redirect(new URL(`${PAGINA_VERIFICA}?dopo=${encodeURIComponent(pathname + req.nextUrl.search)}`, req.url))
+          : NextResponse.json({ error: 'Per continuare serve il codice della verifica in due passaggi.', codice: CODICE_VERIFICA }, { status: 403 })
+        risposta.cookies.getAll().forEach((c) => no.cookies.set(c))
+        return no
+      }
+      // Password scaduta o fuori regola: prima si cambia, poi si lavora. Solo per le sessioni aperte con
+      // la password (lo decide il database): "entra come" e l'app Shopify non passano di qui.
+      if (stato === 'password_scaduta' || stato === 'password_regole') {
+        const motivo = stato.slice('password_'.length)
+        const no = navigazione
+          ? NextResponse.redirect(new URL(`${PAGINA_CAMBIO_PASSWORD}?motivo=${motivo}&dopo=${encodeURIComponent(pathname + req.nextUrl.search)}`, req.url))
+          : NextResponse.json({ error: 'Per continuare scegli una nuova password.', codice: CODICE_CAMBIO_PASSWORD }, { status: 403 })
+        risposta.cookies.getAll().forEach((c) => no.cookies.set(c))
+        return no
+      }
+      // In silenzio i casi normali: token scaduto o anonimo (ci pensa la rotta) e funzione non ancora
+      // creata nel database (PGRST202, prima che lo script sia applicato).
+      if (vErr && vErr.code !== 'PGRST202' && !/JWT|permission denied/i.test(vErr.message || '')) console.error('[MIDDLEWARE] verifica in due passaggi non letta:', vErr.message)
+    }
+    if (!scrittura) return risposta
+
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return risposta
     const { data: u, error: uErr } = await sb.from('utenti').select('ruolo, masters(pagamento_scaduto_dal, demo, demo_scadenza, abbonamento_piano, abbonamento_esente, parent_master_id)').eq('id', user.id).single()
@@ -237,6 +276,19 @@ export async function middleware(req: NextRequest) {
     if (isPaginaAccesso) return response
     // Non autenticato: rimanda al login appropriato
     return vaiA(isCliente ? conEsito('/cliente') : '/')
+  }
+
+  // Password giusta ma codice non ancora messo (o verifica da attivare perche' e' diventata
+  // obbligatoria): alla pagina del codice, che poi riporta qui. La lettura di `utenti` qui sotto,
+  // con questa sessione, il database la rifiuterebbe comunque.
+  const { stato, errore: vErr } = await statoSessione(supabase)
+  if (bloccataDallaVerifica(vErr) || stato === 'codice') {
+    return vaiA(`${PAGINA_VERIFICA}?dopo=${encodeURIComponent(pathname)}`)
+  }
+  // Password scaduta (12 mesi) o vecchia e fuori regola: si sceglie quella nuova, poi si torna qui.
+  // Dopo il codice, non prima: il cambio lo fa solo chi ha passato tutti e due i controlli.
+  if (stato === 'password_scaduta' || stato === 'password_regole') {
+    return vaiA(`${PAGINA_CAMBIO_PASSWORD}?motivo=${stato.slice('password_'.length)}&dopo=${encodeURIComponent(pathname)}`)
   }
 
   const { data: utente } = await supabase

@@ -38,7 +38,7 @@ export default function TrackingPubblico() {
   }, [token, riprova])
 
   return (
-    <GuscioTracking brand={dati?.brand || null} lingua={lingua}>
+    <GuscioTracking lingua={lingua}>
       {stato === 'carico' && <CartaCaricamento />}
       {stato === 'nontrovato' && <CartaMessaggio icona="cerca" titolo={t.nonTrovataTitolo} testo={t.nonTrovataTesto} />}
       {stato === 'errore' && (

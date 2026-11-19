@@ -4,6 +4,7 @@ import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
 import { inviaReport } from '@/lib/report-client'
+import { giornoRoma } from '@/lib/date-roma'
 
 const sel = { padding: '7px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12px', background: '#fff', color: '#1a1a1a', width: '100%' } as const
 const lbl = { fontSize: '11px', fontWeight: 600 as const, color: '#1a1a1a', display: 'block' as const, marginBottom: '4px' }
@@ -13,8 +14,11 @@ const lbl = { fontSize: '11px', fontWeight: 600 as const, color: '#1a1a1a', disp
 // master (ragione sociale, indirizzo, PIVA, logo) come Spedisci.online — stesso builder condiviso.
 export default function ReportAgentiPage() {
   const dialog = useDialog()
-  const oggi = new Date().toISOString().split('T')[0]
-  const primo = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
+  // Giorni di Roma. new Date(y, m, 1).toISOString() dava l'ultimo giorno del mese PRIMA (la mezzanotte
+  // italiana e' alle 22:00 UTC del giorno prima): le 894 spedizioni di spedizioni 2000 del 30/09
+  // finivano nel report agenti di ottobre.
+  const oggi = giornoRoma()
+  const primo = oggi.slice(0, 8) + '01'
   const [agentiLista, setAgentiLista] = useState<any[]>([])
   const [filtri, setFiltri] = useState({ agenteId: '', dal: primo, al: oggi, formato: 'PDF' })
   const [d, setD] = useState<any>(null)
@@ -22,6 +26,7 @@ export default function ReportAgentiPage() {
   const [generating, setGenerating] = useState(false)
   const [intest, setIntest] = useState<any>({ nome: '', indirizzo: '', email: '', piva: '', logo_url: null })
   const [reports, setReports] = useState<any[]>([])
+  const [erroreElenco, setErroreElenco] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
 
@@ -29,14 +34,28 @@ export default function ReportAgentiPage() {
     setLoading(true)
     const p = new URLSearchParams({ dal: filtri.dal, al: filtri.al })
     if (filtri.agenteId) p.set('agenteId', filtri.agenteId)
-    const r = await fetch('/api/agenti/report?' + p.toString()).then(x => x.json()).catch(() => null)
-    setD(r && !r.error ? r : { agenti: [], totale: 0, error: r?.error })
-    if (r?.agenti && !agentiLista.length) setAgentiLista(r.agenti)
-    setLoading(false)
+    // Se la rotta fallisce si dice perche': prima un errore diventava "Nessun agente nel periodo".
+    try {
+      const res = await fetch('/api/agenti/report?' + p.toString())
+      const r = await res.json().catch(() => null)
+      if (!res.ok || !r || r.error || !Array.isArray(r.agenti)) {
+        setD({ agenti: [], totale: 0, error: 'Report agenti non calcolato: ' + (r?.error || ('risposta ' + res.status)) })
+      } else {
+        setD(r)
+        if (!agentiLista.length) setAgentiLista(r.agenti)
+      }
+    } catch (e: any) {
+      setD({ agenti: [], totale: 0, error: 'Report agenti non calcolato: ' + (e?.message || 'rete non raggiungibile') })
+    } finally {
+      setLoading(false)
+    }
   }
+  // L'elenco dei report, quando non si legge, risponde { error }: si dice, invece di mostrare
+  // "Nessun report generato" come se non ce ne fossero.
   async function caricaReports() {
-    const data = await fetch('/api/reports/lista?tipo=agenti').then(x => x.json()).catch(() => [])
+    const data = await fetch('/api/reports/lista?tipo=agenti').then(x => x.json()).catch(() => null)
     setReports(Array.isArray(data) ? data : [])
+    setErroreElenco(Array.isArray(data) ? '' : 'Elenco dei report non letto: ' + (data?.error || 'errore di rete'))
   }
   useEffect(() => { carica() }, [filtri.agenteId, filtri.dal, filtri.al])
   useEffect(() => {
@@ -63,6 +82,7 @@ export default function ReportAgentiPage() {
   }
 
   async function generaReport() {
+    if (d?.error) { await dialog.alert({ title: 'Errore', message: d.error }); return }
     const righe = (d?.agenti || [])
     if (!righe.length) { await dialog.alert({ title: 'Nessun dato', message: 'Nessun agente da scaricare nel periodo.' }); return }
     setGenerating(true)
@@ -133,7 +153,7 @@ export default function ReportAgentiPage() {
 
       {/* Anteprima a schermo: totale + tabella per agente */}
       {(loading && !d) ? <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>Caricamento…</div> : d?.error ? (
-        <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>{d.error}</div>
+        <div style={{ padding: 24, textAlign: 'center', color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>{d.error}</div>
       ) : !d?.agenti?.length ? (
         <div style={{ padding: 40, textAlign: 'center', color: '#999', background: '#fff', borderRadius: 8, border: '1px solid #d1d5db', marginBottom: 16 }}>Nessun agente nel periodo. Assegna il compenso dalla scheda dell&apos;agente (Impostazioni → Staff).</div>
       ) : (
@@ -182,6 +202,7 @@ export default function ReportAgentiPage() {
 
       {/* Elenco report generati — come Report Spedizioni */}
       <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #d1d5db', overflow: 'hidden' }}>
+        {erroreElenco && <div style={{padding:'10px 16px',borderBottom:'1px solid #fecaca',background:'#fef2f2',color:'#b91c1c',fontSize:'12px'}}>{erroreElenco}</div>}
         <div style={{ padding: '10px 16px', borderBottom: '1px solid #f0f0f0', fontSize: 12, fontWeight: 400, color: '#666' }}>
           Report generati — Mostra{' '}
           <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPagina(1) }}

@@ -5,6 +5,9 @@ import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { fetchAll } from '@/lib/fetch-all'
+import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
+import { pacchiConCostoGia, stimeDaSostituire } from '@/lib/ripesature-crea'
+import { controlloAttivo, controllaRighe, FERMA } from '@/lib/ripesature-controllo'
 
 // Confermare cento rettifiche vuol dire cento chiamate di credito in fila. Col limite di durata
 // breve la funzione veniva uccisa a meta' — ed e' proprio meta' lavoro fatto il caso peggiore.
@@ -21,13 +24,18 @@ export async function GET(req: NextRequest) {
   if (!vedeLaRete(utente)) return NextResponse.json([])
   const fileId = req.nextUrl.searchParams.get('fileId')
   const filtroAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // L'agente legge con la chiave di servizio, filtrato qui sotto sul suo master e sui SUOI clienti: il
+  // database non gli lascia piu' leggere la tabella, perche' con la sua sessione aveva ogni colonna,
+  // costo_fornitore compreso (31/10/2026: un agente ne vedeva 598 righe, 57 col costo del fornitore).
+  const db = filtroAgente ? (await import('@/lib/supabase-admin')).createAdminSupabase() : supabase
   // fetchAll: senza, oltre 1000 rettifiche da confermare non comparivano (e non erano confermabili).
   const build = () => {
-    let q = supabase.from('rettifiche')
+    let q = db.from('rettifiche')
       .select('*, clienti(ragione_sociale), masters:target_master_id(nome)')
       .eq('master_id', utente?.master_id)
       .eq('confermata', false)
-      .order('created_at', { ascending: false })
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
     if (filtroAgente) q = q.in('cliente_id', filtroAgente)
     if (fileId) q = q.eq('file_id', fileId)
     return q
@@ -110,7 +118,30 @@ export async function GET(req: NextRequest) {
     }
     return { prima, dopo, nota }
   }
+  // IL PESO SU CUI SI PAGA, SULLE MULTICOLLO (lib/rettifiche-peso-pagato, lo stesso che la Conferma scrive nel
+  // movimento). Le colonne dicono i totali, somma dei pesi e somma dei volumi, ma si paga collo per collo:
+  // 3UW1WLJ093303 mostrava volume 27,17 → 27,91 kg con 7,92 € di rettifica e sembrava sbagliata, mentre si paga
+  // 28,88 → 30,60 kg, oltre la fascia dei 30. Sulle monocollo le colonne bastano (base_prima/base_dopo qui sotto).
+  // Parte subito e si aspetta solo alla fine: sono sole letture, e in fila alle altre allungavano l'apertura (MULTI,
+  // 17/11/2026: 71 multicollo su 2.703 in attesa, ~1,3 s).
+  const pesiMultiP: Promise<Map<string, any>> = (async () => {
+    const multi = righeGrezze.filter((r: any) => (Array.isArray(r.colli_ripesati) && r.colli_ripesati.length > 1)
+      || (Number(spedDati.get(r.spedizione_id)?.colli) || 1) > 1)
+    if (!multi.length) return new Map()
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { pesiPagati } = await import('@/lib/rettifiche-peso-pagato')
+      return (await pesiPagati(createAdminSupabase(), multi)).pesiDi
+    } catch (e: any) { console.error('[RETTIFICHE] peso su cui si paga:', e?.message); return new Map() }
+  })()
   const bloccoDi = (r: any) => {
+    // IN CONTESTAZIONE: il fornitore ha fatto pagare un peso impossibile e la riga aspetta la sua risposta.
+    // 04/11/2026, sei Poste Delivery Business S di agosto a 84-156 kg senza misure, gia' misurati a ~20 kg
+    // (1UW07WF325226: 49,5x39x29 cm e 20,3 kg, per il fornitore 156,32 kg e 48,79 €). Non si seleziona e la
+    // Conferma la rifiuta (vedi sotto): qui si dice perche', altrimenti sembra una riga rotta.
+    // Fermata al caricamento dal confronto con OneTracking (lib/ripesature-controllo): si dice cosa ha misurato Poste.
+    if (r.stato === 'in_contestazione' && r.controllo?.motivo) return `Fermata dal controllo Poste: ${r.controllo.motivo} Da contestare al fornitore, non si conferma.`
+    if (r.stato === 'in_contestazione') return 'In contestazione col fornitore: non si conferma finché non risponde'
     const st = r.spedizione_id ? statoSped.get(r.spedizione_id) : null
     if (st === 'annullata') return 'Spedizione annullata: non si addebita'
     if (st === 'annullamento_pending' || st === 'annullamento_manuale') return 'Spedizione in annullo: si conferma solo se l\'annullo non va a buon fine'
@@ -149,6 +180,9 @@ export async function GET(req: NextRequest) {
     let motivo: string
     if (nomi.includes('penale')) {
       motivo = `Penale corriere ${costoForn.toFixed(2)}€ (servizio a peso reale sforato): il riprezzo normale non la recupera. Il Ricalcola NON la sistema — decidi se girare l'intera penale al cliente o assorbirla.`
+    } else if (eSupplementoTardivo(r)) {
+      // Il resto del costo non e' un listino da alzare: i chili di questo pacco sono gia' stati chiesti prima.
+      motivo = `Supplemento arrivato dopo i chili: sotto si gira solo il supplemento (${daGirare.toFixed(2)}€), i chili di questo pacco sono già stati rettificati prima.`
     } else {
       const dims = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
       const senzaMisure = dims.length > 0 && dims.every((c: any) => !((Number(c?.length) || 0) || (Number(c?.width) || 0) || (Number(c?.height) || 0)))
@@ -178,12 +212,53 @@ export async function GET(req: NextRequest) {
       for (const e of esiti) for (const x of e) giaPagate.add(x)
     }
   }
+  // PERCHE' E' SOLO A TUO CARICO (lib/rettifiche-perche): il pacco l'avevi gia' fatto pagare sotto (a chi, quando,
+  // quanto), e' un reso, il fornitore ha addebitato un importo senza voce, o sotto il peso nuovo costa uguale. Le righe
+  // sono tutte di chi guarda (master_id = lui) e anche quello che si legge per spiegarle: le sue rettifiche verso sotto.
+  const { stimaCedeAllaFattura } = await import('@/lib/rettifiche-perche')
+  let percheMio = new Map<string, any>()
+  const soloMie = righeGrezze.filter((r: any) => r.target_master_id && r.target_master_id === r.master_id)
+  if (!agente && soloMie.length) {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { perchePropri } = await import('@/lib/rettifiche-perche')
+    try { percheMio = await perchePropri(createAdminSupabase(), utente!.master_id, soloMie) }
+    catch (e: any) { console.error('[RETTIFICHE] perche\' solo a tuo carico:', e?.message) }
+  }
+  const pesiMulti = await pesiMultiP
+  // DA CONTROLLARE SOLO SE SUL PACCO CI PERDI (lib/rettifiche-margine-pacco). Recuperare meno del fornitore e' normale
+  // quando lo scalino del listino di sotto e' piu' basso del suo: se a conti fatti sul pacco intero resti sopra zero,
+  // la rettifica e' giusta e va tra le buone (Lorenzo, 17/11/2026). Se il conto non riesce, la riga resta com'era.
+  let margini = new Map<string, number>()
+  const sottoRecupero = agente ? [] : righeGrezze.filter((r: any) => classeDi(r).classe === 'da_controllare')
+  if (sottoRecupero.length) {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { marginePacco } = await import('@/lib/rettifiche-margine-pacco')
+      margini = await marginePacco(createAdminSupabase(), utente!.master_id, sottoRecupero)
+    } catch (e: any) { console.error('[RETTIFICHE] margine sul pacco:', e?.message) }
+  }
+  const classeFinale = (r: any) => {
+    // IN CONTESTAZIONE COL FORNITORE (non fermata dal controllo Poste, che ha la sua sezione): il fornitore ha addebitato
+    // sopra il suo listino e gli si e' chiesto il rimborso. Non si conferma finche' non risponde, e non e' un listino da
+    // sistemare: stava tra le «da controllare» e la pagina sembrava sbagliata (Lorenzo 18/11/2026, PDB S di SpediamoPro
+    // del 28-29/10).
+    if (r.stato === 'in_contestazione' && !FERMA.has(r.controllo?.esito))
+      return { classe: 'contestata', motivo: r.controllo?.motivo || 'In contestazione col fornitore: non si conferma finché non risponde.', manca: 0 }
+    const c = classeDi(r)
+    const m = margini.get(r.id)
+    if (c.classe !== 'da_controllare' || m == null) return c
+    if (m >= -0.005) return { classe: 'buona', motivo: null, manca: 0, margine_pacco: m }
+    return { ...c, margine_pacco: m, motivo: `${c.motivo} Sul pacco intero ci perdi ${Math.abs(m).toFixed(2)}€.` }
+  }
   const righe = righeGrezze.map((r0: any) => {
     const r = agente ? { ...r0, costo_fornitore: null } : r0
     const b = baseDi(r)
     return {
       ...r,
-      costo_gia_pagato: !!(r.rif_fornitore && giaPagate.has(r.rif_fornitore)),
+      ...(percheMio.has(r.id) ? { perche_mio: percheMio.get(r.id) } : {}),
+      // Gia' pagato, o non si paghera': la stima del portale su un pacco con la fattura del fornitore alla Conferma cede.
+      costo_gia_pagato: !!(r.rif_fornitore && giaPagate.has(r.rif_fornitore)) || stimaCedeAllaFattura(r, percheMio.get(r.id)),
+      stima_cede: stimaCedeAllaFattura(r, percheMio.get(r.id)),
       destinatario_nome: (r.target_master_id && r.target_master_id === r.master_id) ? 'Solo a tuo carico (niente da rettificare sotto)'
         : (nomi.get(r.target_master_id) || nomi.get(r.cliente_id) || null),
       destinatario_tipo: (r.target_master_id && r.target_master_id === r.master_id) ? 'proprio' : (r.target_master_id ? 'master' : (r.cliente_id ? 'cliente' : null)),
@@ -191,7 +266,8 @@ export async function GET(req: NextRequest) {
       base_prima: b.prima,     // 'reale' | 'volume': su cosa si pagava DAVVERO
       base_dopo: b.dopo,       // e su cosa si paga ora
       nota_peso: b.nota,       // perche' e' cambiato, quando cambia la base
-      ...classeDi(r),          // classe: 'buona'|'da_controllare', motivo, manca (sotto-recupero)
+      peso_pagato: pesiMulti.get(r.id) || null,   // multicollo: kg su cui si pagava e si paga, collo per collo
+      ...classeFinale(r),      // classe: 'buona'|'da_controllare', motivo, manca (sotto-recupero), margine_pacco
     }
   })
   return NextResponse.json(righe)
@@ -224,9 +300,13 @@ export async function POST(req: NextRequest) {
       .in('id', rettificaIds.slice(i, i + 200))
       .eq('master_id', utente?.master_id)
       .eq('confermata', false)
+      // SOLO LE "DA RETTIFICARE". La pagina lascia selezionare solo quelle, ma una scheda aperta prima che
+      // una riga andasse in contestazione col fornitore la rimanderebbe ancora, e qui passava tutto cio'
+      // che non era confermato.
+      .eq('stato', 'da_rettificare')
     if (data?.length) rettifiche.push(...data)
   }
-  if (!rettifiche.length) return NextResponse.json({ error: 'Nessuna rettifica trovata (o gia\' confermata da un altro invio).' }, { status: 404 })
+  if (!rettifiche.length) return NextResponse.json({ error: 'Nessuna rettifica trovata (gia\' confermata da un altro invio, o in contestazione col fornitore).' }, { status: 404 })
 
   // Se qualcosa va storto su una riga, quella riga TORNA APERTA: non deve restare archiviata come
   // fatta senza che i soldi si siano mossi. Prima i due `catch` si limitavano a scrivere nel log e
@@ -284,69 +364,9 @@ export async function POST(req: NextRequest) {
   // di fuori dimensione si spiega da solo, invece di chiamarsi "fuori sagoma" come tutti gli altri.
   // Se la riga è SOLO supplemento (nessuna ripesatura) si scrive solo quella, senza il fuorviante
   // "peso inserito X - peso ripesato X". Sulle righe vecchie il nome non c'è: si scrive "Supplemento".
-  // Il peso fatturato di un gruppo di colli: per ognuno il maggiore fra peso e volume, poi si somma.
-  const fattDi = (colli: any[], fattore: number) => (colli || []).reduce((tot: number, c: any) => {
-    const p = Number(c?.weight ?? c?.peso) || 0
-    const L = Number(c?.length ?? c?.lunghezza) || 0, W = Number(c?.width ?? c?.larghezza) || 0, H = Number(c?.height ?? c?.altezza) || 0
-    const v = (L && W && H && fattore > 0) ? (L * W * H) / fattore : 0
-    return tot + Math.max(p, v)
-  }, 0)
-
-  // I PESI FATTURATI, riga per riga: quello dichiarato alla partenza e quello dopo la ripesatura,
-  // calcolati come li calcola il motore (per collo, col fattore volumetrico DEL CONTRATTO).
-  const pesiDi = new Map<string, { prima: number; dopo: number; colli: number[]; nota: string }>()
-  {
-    const { fattoreVolumeCorriere } = await import('@/lib/pricing')
-    const { pesoSuReale, descriviAgevolazione } = await import('@/lib/agevolazione-misure')
-    const idS = [...new Set(rettifiche.map((r: any) => r.spedizione_id).filter(Boolean))]
-    const spedInfo = new Map<string, any>()
-    // Senza le etichette dentro colli_dettaglio: servono solo peso e lati (vedi colli-senza-etichette).
-    const { spedizioniConColliLeggeri } = await import('@/lib/colli-senza-etichette')
-    for (const [k, x] of await spedizioniConColliLeggeri(adminDb, idS, 'peso_reale,lunghezza,larghezza,altezza,corriere_id,master_id,corrieri(settings)')) spedInfo.set(k, x)
-    const fattori = new Map<string, number>()
-    const fattoreDi = async (sp: any) => {
-      const k = `${sp.master_id}|${sp.corriere_id}`
-      if (fattori.has(k)) return fattori.get(k)!
-      let f = 4000
-      try { f = Number(await fattoreVolumeCorriere(adminDb, sp.master_id, sp.corriere_id)) || 4000 } catch { /* resta il predefinito */ }
-      fattori.set(k, f); return f
-    }
-    for (const r of rettifiche as any[]) {
-      const sp = r.spedizione_id ? spedInfo.get(r.spedizione_id) : null
-      const dopoColli = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
-      if (!sp || !dopoColli.length) continue
-      const f = await fattoreDi(sp)
-      const dett = Array.isArray(sp.colli_dettaglio) ? sp.colli_dettaglio : []
-      const n = Math.max(1, Number(sp.colli) || 1)
-      const primaColli = dett.length ? dett : Array.from({ length: n }, () => ({
-        peso: (Number(sp.peso_reale) || 0) / n, lunghezza: sp.lunghezza, larghezza: sp.larghezza, altezza: sp.altezza,
-      }))
-      // QUANDO VALE L'AGEVOLAZIONE SI PAGA SUL PESO REALE, non sul maggiore fra peso e volume:
-      // scrivere il fatturato senza tenerne conto fa sembrare che il peso scenda mentre il prezzo
-      // sale (1UW07WF292297: «da 6,89 a 6,30» con 2,50 EUR di addebito). La verita' e' che il collo
-      // misurato esce dalla scatola del contratto e da li' in poi si paga a volume.
-      const sett = ((sp as any).corrieri || {}).settings || {}
-      const perAgev = (colli: any[]) => colli.map((c: any) => ({
-        length: Number(c?.length ?? c?.lunghezza) || 0, width: Number(c?.width ?? c?.larghezza) || 0, height: Number(c?.height ?? c?.altezza) || 0,
-      }))
-      const pesoReale = (colli: any[]) => colli.reduce((t: number, c: any) => t + (Number(c?.weight ?? c?.peso) || 0), 0)
-      const agevPrima = pesoSuReale(sett, perAgev(primaColli), pesoReale(primaColli))
-      const agevDopo = pesoSuReale(sett, perAgev(dopoColli), pesoReale(dopoColli))
-      const nota = (agevPrima && !agevDopo)
-        ? ` — il collo misurato esce dalla scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul volume`
-        : (!agevPrima && agevDopo) ? ` — il collo misurato rientra nella scatola agevolata ${descriviAgevolazione(sett)}, quindi ora si paga sul peso reale` : ''
-      pesiDi.set(r.id, {
-        prima: agevPrima ? pesoReale(primaColli) : fattDi(primaColli, f),
-        dopo: agevDopo ? pesoReale(dopoColli) : fattDi(dopoColli, f),
-        nota,
-        colli: agevDopo ? dopoColli.map((c: any) => Number(c?.weight) || 0) : dopoColli.map((c: any) => {
-          const p = Number(c?.weight) || 0
-          const L = Number(c?.length) || 0, W = Number(c?.width) || 0, H = Number(c?.height) || 0
-          return Math.max(p, (L && W && H) ? (L * W * H) / f : 0)
-        }),
-      })
-    }
-  }
+  // I pesi su cui si pagava e si paga, riga per riga (lib/rettifiche-peso-pagato: gli stessi che mostrano le schermate).
+  const { pesiPagati } = await import('@/lib/rettifiche-peso-pagato')
+  const { pesiDi, sogliaDi } = await pesiPagati(adminDb, rettifiche)
 
   // IL PESO CHE SI PAGA NON E' LA SOMMA DEI CHILI.
   //
@@ -377,7 +397,15 @@ export async function POST(req: NextRequest) {
     }
     if (extraFS > 0) {
       const nomi = String(r.supplementi_nomi || '').trim()
-      parti.push(`Supplemento${nomi ? ' ' + nomi : ''} ${r.numero_spedizione} €${extraFS.toFixed(2)}${dimDi(r)}`)
+      if (/penale/i.test(nomi)) {
+        // LA PENALE DICE I CHILI. «Supplemento penale BRT peso reale sforato 050187292960523 €18.60» diceva
+        // quanto, non perche': BL SISTEMI leggeva 18,60 € e doveva aprire il report per scoprire che aveva
+        // dichiarato 5 kg su un servizio fino a 5 kg e il corriere ne aveva pesati 18,6. Lorenzo, 31/10/2026.
+        const soglia = r.spedizione_id ? sogliaDi.get(r.spedizione_id) : undefined
+        parti.push(`Penale BRT ${r.numero_spedizione}: dichiarato ${kg(Number(r.peso_iniziale) || 0)}, pesato ${kg(Number(r.peso_reale) || 0)}${soglia ? ` (servizio fino a ${kg(soglia)})` : ''} €${extraFS.toFixed(2)}`)
+      } else {
+        parti.push(`Supplemento${nomi ? ' ' + nomi : ''} ${r.numero_spedizione} €${extraFS.toFixed(2)}${dimDi(r)}`)
+      }
     }
     return parti.length ? parti.join(' + ') : `Rettifica ${r.numero_spedizione}`
   }
@@ -385,6 +413,8 @@ export async function POST(req: NextRequest) {
   const { registraMovimentoMaster } = await import('@/lib/movimenti')
   let mosse = 0
   let costiMiei = 0   // costo di chi conferma (detentore / chi ha caricato il file del fornitore)
+  let costiGiaPresenti = 0   // costi calcolati non registrati perche' su quel pacco il costo del fornitore c'era gia'
+  let stimeStornate = 0      // stime del portale stornate perche' e' arrivata la fattura del fornitore sullo stesso pacco
   // LA CHIAVE ANTI-DOPPIONE, TENENDO CONTO DEGLI STORNI. Se la chiave non c'e' si usa; se c'e' ed e'
   // stata STORNATA (movimento STORNO-<chiave>, es. il file LOGIXIA 12-16/10 annullato il 22/10) si passa
   // alla successiva (-2, -3…), perche' quell'addebito non esiste piu'; se c'e' e NON e' stornata torna
@@ -401,7 +431,40 @@ export async function POST(req: NextRequest) {
   }
   const spedizioniDaAggiornare: any[] = []
 
-  for (const r of rettifiche as any[]) {
+  // ── UN PO' PIU' VELOCE, CON GLI STESSI CONTROLLI (28/10/2026) ──
+  // Wave confermava le 6.141 rettifiche OneTracking di SDA EXPRESS L a ~175 al minuto: ogni riga rileggeva la
+  // sua spedizione e ricostruiva da capo la catena del contratto condiviso (sempre la stessa) per sapere su quale
+  // conto "(ingrosso)" addebitare. Ora: (1) le spedizioni del blocco si leggono in una volta sola; (2) la
+  // catena si ricostruisce UNA volta per ogni domanda identica (stessa gamba d'origine, cliente, contratto) e
+  // le letture di configurazione passano dal client con memoria — stessi ingressi, stessa risposta; (3) TRE
+  // righe alla volta invece di una. Ogni riga resta presa da sola (UPDATE condizionato), il doppio addebito
+  // lo fermano come prima la chiave RIP-/RIPFORN- (indice unico) e trg_rettifica_no_doppia_ripesatura, e il
+  // credito si muove con le stesse funzioni atomiche (una riga di saldo per volta, nel database).
+  const spedPerId = new Map<string, any>()
+  {
+    const idsSped = [...new Set((rettifiche as any[]).map((r: any) => r.spedizione_id).filter(Boolean))]
+    for (let i = 0; i < idsSped.length; i += 200) {
+      const { data: ss } = await adminDb.from('spedizioni').select('id,master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').in('id', idsSped.slice(i, i + 200))
+      for (const s of (ss || [])) spedPerId.set((s as any).id, s)
+    }
+  }
+  const { createAdminSupabaseConMemoria } = await import('@/lib/supabase-admin')
+  const adminMem = createAdminSupabaseConMemoria()
+  const catenaRisolta = new Map<string, Promise<any>>()
+  const destinoCondivisione = (sp: any): Promise<any> => {
+    const c: any = Array.isArray(sp?.corrieri) ? sp.corrieri[0] : sp?.corrieri
+    const arg = { master_id: sp.master_id, cliente_id: sp.cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: sp.corriere_id }
+    const k = [arg.master_id, arg.cliente_id, arg.corriereTipo, arg.nomeContratto, arg.corriereId].join('|')
+    let p = catenaRisolta.get(k)
+    if (!p) {
+      p = scendiCodDaSpedizione(adminMem, arg, utente!.master_id!)
+      catenaRisolta.set(k, p)
+      p.catch(() => catenaRisolta.delete(k))   // un errore non si ricorda: la riga dopo riprova
+    }
+    return p
+  }
+
+  const confermaUna = async (r: any): Promise<void> => {
     // PRESA ATOMICA, UNA RIGA ALLA VOLTA.
     // Serve contro il doppio addebito: due schede, o un secondo invio dopo che il primo e' andato
     // in timeout mentre ancora girava, rileggevano le stesse righe ancora aperte e addebitavano una
@@ -415,18 +478,29 @@ export async function POST(req: NextRequest) {
       .update({ confermata: true, stato: 'confermata' })
       .eq('id', r.id).eq('master_id', utente!.master_id).eq('confermata', false)
       .select('id')
-    if (!presa?.length) { saltate.push({ id: r.id, perche: 'gia\' confermata da un altro invio' }); continue }
+    if (!presa?.length) { saltate.push({ id: r.id, perche: 'gia\' confermata da un altro invio' }); return }
 
     // ── PRIMA PAGA CHI CONFERMA (regola di Lorenzo, 22/10/2026) ──
     // Chi ha caricato il file del suo fornitore ha gia' pagato il fornitore: il suo costo (costo_fornitore
     // della riga, vedi il caricamento) gli si registra QUI, prima di addebitare il livello sotto. Stesso
     // riferimento che il caricamento usava per la fattura del fornitore (RIPFORN-<riga del file>): un file
     // caricato prima di questa regola l'ha gia' pagato al caricamento, e qui non si ripaga.
-    const costoMio = Math.round(Number(r.costo_fornitore || 0) * 100) / 100
+    let costoMio = Math.round(Number(r.costo_fornitore || 0) * 100) / 100
     const soloMio = !!r.target_master_id && r.target_master_id === utente!.master_id
+    // UN COSTO CALCOLATO DAL PORTALE NON SI SCRIVE DUE VOLTE SULLO STESSO PACCO. Le righe dei file di soli pesi hanno
+    // la LDV come riferimento (quelle con l'importo del fornitore il suo codice): il loro costo e' un conto del portale,
+    // non una riga di fattura, e la chiave RIPFORN-<LDV> non riconosce lo stesso addebito entrato col codice 6A...
+    // Se sul pacco il costo del fornitore c'e' gia' (registrato, o portato da una riga di fattura viva) questa non ne
+    // aggiunge un secondo: la riga si chiude e, se va sotto, addebita sotto come sempre (vedi pacchiConCostoGia).
+    if (costoMio > 0.005 && r.spedizione_id && r.rif_fornitore && r.rif_fornitore === r.numero_spedizione
+      && (await pacchiConCostoGia(adminDb, utente!.master_id, [r.spedizione_id], { escludiRiga: r.id, soloRigheFattura: true })).has(r.spedizione_id)) {
+      costoMio = 0; costiGiaPresenti++
+    }
+    let costoRegistrato = false   // il costo di questa riga ora c'e' sul conto: scritto qui, o la sua chiave c'era gia'
     if (costoMio > 0.005 && r.rif_fornitore && r.spedizione_id) {
-      if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
+      if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); return }
       const rifCosto = await chiaveLibera(`RIPFORN-${r.rif_fornitore}`)
+      costoRegistrato = !rifCosto
       if (rifCosto) {
         try {
           await registraMovimentoMaster(adminDb, {
@@ -435,17 +509,38 @@ export async function POST(req: NextRequest) {
             importo: -costoMio, riferimento: rifCosto, spedizioneId: r.spedizione_id, createdBy: user.id,
           })
           costiMiei += costoMio
+          costoRegistrato = true
         } catch (e: any) {
           // gia' registrato da un invio parallelo: il costo c'e', si prosegue col livello sotto
           if (!/23505|duplicate key|unique/i.test(String(e?.message || ''))) {
             console.error('[RETTIFICHE] costo di chi conferma non registrato', r.numero_spedizione, e?.message)
-            await riapriRiga(r, 'il tuo costo non e\' stato registrato'); continue
+            await riapriRiga(r, 'il tuo costo non e\' stato registrato'); return
           }
+          costoRegistrato = true
         }
       }
     }
+    // LA STIMA CEDE ALLA FATTURA (l'ordine inverso della guardia qui sopra, vedi stimeDaSostituire). Confermata la riga col
+    // codice del fornitore, la stima che il portale aveva registrato sullo stesso pacco da un file di soli pesi si storna:
+    // sul pacco resta un costo solo, quello della fattura. Il supplemento arrivato dopo e' un addebito in piu', non lo
+    // stesso, e non tocca la stima dei chili.
+    if (costoRegistrato && r.rif_fornitore !== r.numero_spedizione && !eSupplementoTardivo(r)) {
+      try {
+        for (const s of await stimeDaSostituire(adminDb, utente!.master_id, r.spedizione_id, r.rif_fornitore)) {
+          await registraMovimentoMaster(adminDb, {
+            masterOwnerId: utente!.master_id, masterTargetId: utente!.master_id, tipo: 'rettifica',
+            descrizione: `Ripesatura ${r.numero_spedizione} - stima del portale sostituita dalla fattura del fornitore`,
+            importo: -s.importo, riferimento: `STORNO-${s.riferimento}`, spedizioneId: r.spedizione_id, createdBy: user.id,
+          })
+          stimeStornate++
+        }
+      } catch (e: any) {
+        // la riga resta confermata col costo vero: la stima in piu' si vede nei movimenti, si storna a mano
+        console.error('[RETTIFICHE] stima del portale non stornata', r.numero_spedizione, e?.message)
+      }
+    }
     // SOLO A TUO CARICO: niente da addebitare a nessuno sotto, la riga e' chiusa col suo costo.
-    if (soloMio) { mosse++; continue }
+    if (soloMio) { mosse++; return }
 
     // SEGNO: differenza = costo_iniziale - costo_finale, quindi negativa = addebito e positiva =
     // accredito. Il ramo dei master lo rispettava, quello dei clienti prendeva il valore assoluto e
@@ -464,8 +559,8 @@ export async function POST(req: NextRequest) {
     // passa. Il gate guarda l'importo TOTALE (differenza + fuori sagoma): una riga di solo fuori
     // sagoma ha differenza 0 ma importo -16,39, e NON deve essere scartata. Importo zero O positivo:
     // niente da muovere, ma la riga resta CHIUSA (riaprirla la rimetterebbe in elenco per sempre).
-    if (importoAddebito >= -0.005) continue
-    if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); continue }
+    if (importoAddebito >= -0.005) return
+    if (annullata(r)) { await riapriRiga(r, 'spedizione annullata dopo il caricamento'); return }
 
     // UN PACCO NON SI RETTIFICA DUE VOLTE ALLO STESSO DESTINATARIO. Questa e' la PORTA UNICA dove il
     // credito si muove: qui converge OGNI pipeline (file ripesature, file pesi, cascata di rete,
@@ -476,8 +571,12 @@ export async function POST(req: NextRequest) {
     // per il caso diff>=0: NON si riapre, altrimenti tornerebbe in elenco per sempre. La garanzia vera
     // e' l'indice unico su movimenti(riferimento) per 'RIP-%'; questo pre-controllo evita solo il throw.
     // Con gli STORNI: se l'addebito di prima e' stato stornato, la chiave successiva (vedi chiaveLibera).
-    const rifRett = r.spedizione_id ? await chiaveLibera(`RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}`) : null
-    if (r.spedizione_id && !rifRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); continue }
+    // IL SUPPLEMENTO ARRIVATO DOPO I CHILI ha una chiave sua, RIP-<spedizione>-<destinatario>-SUP: la prima e'
+    // gia' presa dai chili, e senza questa il supplemento si fermava qui (lib/supplemento-tardivo). Sta sotto
+    // 'RIP-%', quindi l'indice unico ne lascia passare uno solo per pacco e destinatario.
+    const baseRett = `RIP-${r.spedizione_id}-${r.target_master_id || r.cliente_id}`
+    const rifRett = r.spedizione_id ? await chiaveLibera(eSupplementoTardivo(r) ? `${baseRett}-SUP` : baseRett) : null
+    if (r.spedizione_id && !rifRett) { saltate.push({ id: r.id, perche: 'gia\' rettificata per questa spedizione (evitato doppio addebito)' }); return }
 
     try {
       if (r.target_master_id) {
@@ -487,9 +586,8 @@ export async function POST(req: NextRequest) {
         let ledgerClienteId: string | null = null
         if (r.spedizione_id) {
           try {
-            const { data: sp } = await adminDb.from('spedizioni').select('master_id,cliente_id,corriere_id,corrieri(tipo,nome_contratto)').eq('id', r.spedizione_id).maybeSingle()
-            const c: any = Array.isArray((sp as any)?.corrieri) ? (sp as any).corrieri[0] : (sp as any)?.corrieri
-            const dCon = sp ? await scendiCodDaSpedizione(adminDb, { master_id: (sp as any).master_id, cliente_id: (sp as any).cliente_id, corriereTipo: c?.tipo, nomeContratto: c?.nome_contratto, corriereId: (sp as any).corriere_id }, utente!.master_id!) : null
+            const sp = spedPerId.get(r.spedizione_id)
+            const dCon = sp ? await destinoCondivisione(sp) : null
             if (dCon && !dCon.fuori && dCon.ledger && dCon.target_master_id === r.target_master_id && dCon.cliente_id) ledgerClienteId = dCon.cliente_id
           } catch (e) { console.error('[RETTIFICHE] ledger condivisione:', e) }
         }
@@ -499,7 +597,7 @@ export async function POST(req: NextRequest) {
         // salto a codice — Wave non sta sotto LOGIXIA, MULTI è il padre di Wave, spedizioni 2000 e GTS sono
         // fratelli — quindi la rettifica tornava aperta con "non è un master della tua rete" e il venditore
         // restava col costo del fornitore. Senza ledger risolto un compratore fuori dall'albero non passa.
-        if (!discendenti.has(r.target_master_id) && !ledgerClienteId) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); continue }
+        if (!discendenti.has(r.target_master_id) && !ledgerClienteId) { await riapriRiga(r, 'destinatario non e\' un master della tua rete'); return }
         if (ledgerClienteId) {
           await registraMovimento(adminDb, {
             masterId: utente!.master_id, clienteId: ledgerClienteId,
@@ -514,7 +612,7 @@ export async function POST(req: NextRequest) {
           })
         }
       } else if (r.cliente_id) {
-        if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); continue }
+        if (!mieiClienti.has(r.cliente_id)) { await riapriRiga(r, 'il cliente non e\' tuo'); return }
         await registraMovimento(adminDb, {
           masterId: utente!.master_id, clienteId: r.cliente_id,
           tipo: 'rettifica', descrizione: descrizione(r), importo: importoAddebito,
@@ -524,7 +622,7 @@ export async function POST(req: NextRequest) {
         // ripesatura (diff<0): un fuori sagoma puro (diff=0) non cambia il nolo, e riscrivere
         // peso_fatturato col peso ripesato lo abbasserebbe sotto il fatturato reale.
         if (r.spedizione_id && diff < -0.005) spedizioniDaAggiornare.push(r)
-      } else { await riapriRiga(r, 'nessun destinatario'); continue }
+      } else { await riapriRiga(r, 'nessun destinatario'); return }
       mosse++
     } catch (e: any) {
       const m = String(e?.message || '')
@@ -538,7 +636,47 @@ export async function POST(req: NextRequest) {
         await riapriRiga(r, 'addebito non riuscito')
       }
     }
+    }
+
+  // IL CONTROLLO POSTE ANCHE ALLA CONFERMA (lib/ripesature-controllo). Una riga caricata prima che il controllo fosse
+  // acceso non e' mai stata confrontata con la misura di Poste: si confronta qui, l'ultima porta prima che l'addebito
+  // scenda. Se Poste la smentisce si ferma col suo motivo come al caricamento (si puo' sempre caricarla lo stesso).
+  // Una riga che ha gia' l'esito scritto non si riconfronta: passa se Poste la conferma o se e' stata sbloccata a mano
+  // («Carica lo stesso»), si ferma se Poste la smentisce e nessuno l'ha sbloccata. Il supplemento arrivato dopo non e'
+  // una questione di chili e non si guarda.
+  let fermateAllaConferma = 0
+  if (await controlloAttivo(adminDb, utente!.master_id)) {
+    const daGuardare = (rettifiche as any[]).filter(r => r.spedizione_id && !eSupplementoTardivo(r))
+    const daControllare = daGuardare.filter(r => !r.controllo)
+    if (daGuardare.length) {
+      const verdetti = daControllare.length ? await controllaRighe(adminDb, utente!.master_id, daControllare) : new Map()
+      const ferme = new Set<string>()
+      for (const r of daGuardare) {
+        const v = r.controllo || verdetti.get(r.id)
+        if (!v || !FERMA.has(v.esito) || v.sbloccata_il) continue
+        const { data: fatta } = await adminDb.from('rettifiche').update({ stato: 'in_contestazione', controllo: v })
+          .eq('id', r.id).eq('master_id', utente!.master_id).eq('confermata', false).eq('stato', 'da_rettificare').select('id')
+        if (fatta?.length) { ferme.add(r.id); fermateAllaConferma++; saltate.push({ id: r.id, perche: v.esito === 'senza_agevolazione'
+          ? 'fermata dal controllo Poste: agevolazione peso reale non applicata (il motivo è sulla riga, fra le ferme)'
+          : 'fermata dal controllo Poste: peso diverso dalla misura di Poste (il motivo è sulla riga, fra le ferme)' }) }
+      }
+      for (let i = rettifiche.length - 1; i >= 0; i--) if (ferme.has((rettifiche as any[])[i].id)) rettifiche.splice(i, 1)
+    }
   }
+
+  // TRE ALLA VOLTA. Un errore inatteso su una riga non ferma le altre: quella riga torna aperta e si
+  // riprova (se il suo addebito fosse gia' passato, al nuovo invio la chiave RIP- lo riconosce e non lo ripete).
+  let prossima = 0
+  await Promise.all(Array.from({ length: Math.min(3, rettifiche.length) }, async () => {
+    while (prossima < rettifiche.length) {
+      const r = (rettifiche as any[])[prossima++]
+      try { await confermaUna(r) }
+      catch (e: any) {
+        console.error('[RETTIFICHE] conferma interrotta', r?.numero_spedizione, e?.message)
+        try { await riapriRiga(r, 'errore inatteso: riprova') } catch { /* resta in saltate */ }
+      }
+    }
+  }))
 
   // Il costo della spedizione si aggiorna SOLO se l'addebito e' andato a buon fine: prima si
   // riscriveva comunque, e restava a sistema una spedizione riprezzata che nessuno aveva pagato.
@@ -546,12 +684,47 @@ export async function POST(req: NextRequest) {
     // peso_fatturato = il MAGGIORE fra reale e volumetrico ripesato (non il solo peso reale): è quello
     // che è stato davvero fatturato col ricalcolo. Prima ci scriveva peso_reale e, quando vinceva il
     // volume, la spedizione restava con un peso fatturato più basso del costo che le era stato messo.
+    // E' il peso del CLIENTE, col divisore del suo listino, lo stesso della descrizione: il volume della
+    // riga poteva essere quello del contratto, e 282343J028496 e' rimasta a 25,2 kg (a 6000) con i 16,20
+    // della fascia 50, pagata su 30,23 kg (a 5000). Senza le misure si resta al peso della riga.
+    const fatturatoCliente = pesiDi.get(r.id)?.dopo || 0
     await supabase.from('spedizioni').update({
-      costo_totale: r.costo_finale, peso_fatturato: pesoFatt(r),
+      costo_totale: r.costo_finale,
+      peso_fatturato: fatturatoCliente > 0 ? Math.round(fatturatoCliente * 100) / 100 : pesoFatt(r),
     }).eq('id', r.spedizione_id)
   }
 
-  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, nonEseguite: saltate.length, dettaglio: saltate })
+  return NextResponse.json({ success: true, rettificate: mosse, costiMiei: Math.round(costiMiei * 100) / 100, costiGiaPresenti, stimeStornate, fermateAllaConferma, nonEseguite: saltate.length, dettaglio: saltate })
+}
+
+// CARICA LO STESSO UNA RIGA FERMATA DAL CONTROLLO ONETRACKING (Lorenzo, 05/11/2026: «tutte anche le sbagliate devono
+// potersi caricare.. ma lo fa manualmente multi in caso.. pero lo deve sapere»). La riga torna 'da_rettificare' e si
+// conferma come le altre; il motivo del controllo resta scritto sulla riga, con chi l'ha sbloccata e quando. Solo le
+// righe fermate DAL CONTROLLO (controllo presente): una contestazione aperta a mano col fornitore non si sblocca da qui.
+export async function PATCH(req: NextRequest) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  const _bloccoAg = bloccaAgente(utente); if (_bloccoAg) return _bloccoAg
+  if (!gestisceLaRete(utente) || !utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  const body = await req.json()
+  const ids: string[] = Array.isArray(body?.rettificaIds) ? body.rettificaIds.filter(Boolean) : []
+  if (body?.azione !== 'sblocca' || !ids.length) return NextResponse.json({ error: 'Nessuna rettifica da sbloccare' }, { status: 400 })
+  let sbloccate = 0
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: righe, error } = await supabase.from('rettifiche').select('id,controllo')
+      .in('id', ids.slice(i, i + 200)).eq('master_id', utente.master_id).eq('stato', 'in_contestazione').eq('confermata', false)
+      .not('controllo', 'is', null)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    for (const r of (righe || []) as any[]) {
+      const { data: fatta } = await supabase.from('rettifiche')
+        .update({ stato: 'da_rettificare', controllo: { ...r.controllo, sbloccata_da: user.id, sbloccata_il: new Date().toISOString() } })
+        .eq('id', r.id).eq('stato', 'in_contestazione').select('id')
+      if (fatta?.length) sbloccate++
+    }
+  }
+  return NextResponse.json({ success: true, sbloccate })
 }
 
 export async function DELETE(req: NextRequest) {
@@ -570,8 +743,13 @@ export async function DELETE(req: NextRequest) {
   if (!rettificaIds?.length) return NextResponse.json({ error: 'Nessuna rettifica selezionata' }, { status: 400 })
   // A LOTTI come la conferma: con centinaia di id un solo `.in()` sfora la URL verso PostgREST.
   let eliminate = 0
+  const girateCancellate: any[] = []
   for (let i = 0; i < rettificaIds.length; i += 200) {
     const fetta = rettificaIds.slice(i, i + 200)
+    // Prima di cancellare si leggono le girate da sopra (origine_rettifica_id), per segnarle sulla madre: dopo non ci sono piu'.
+    const { data: figlie } = await supabase.from('rettifiche')
+      .select('id,origine_rettifica_id,cliente_id,target_master_id,differenza,fuori_sagoma,costo_iniziale,costo_finale,peso_reale,peso_volume_reale')
+      .in('id', fetta).eq('master_id', utente?.master_id).eq('confermata', false).not('origine_rettifica_id', 'is', null)
     const { error } = await supabase.from('rettifiche')
       .delete()
       .in('id', fetta)
@@ -579,6 +757,49 @@ export async function DELETE(req: NextRequest) {
       .eq('confermata', false)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     eliminate += fetta.length
+    if (figlie?.length) {
+      // Solo quelle andate davvero: una confermata nel frattempo da un'altra scheda resta, e la madre non si tocca.
+      const { data: rimaste } = await supabase.from('rettifiche').select('id').in('id', figlie.map((f: any) => f.id))
+      const ancora = new Set(((rimaste || []) as any[]).map(r => r.id))
+      girateCancellate.push(...(figlie as any[]).filter(f => !ancora.has(f.id)))
+    }
   }
+  if (girateCancellate.length) await segnaGirateCancellate(girateCancellate, utente!.master_id)
   return NextResponse.json({ success: true, eliminate })
+}
+
+// GIRATA E POI CANCELLATA: la madre ricevuta da sopra resta 'propagata' senza figlia, e il costo resta al master. Si
+// scrive sulla madre (rettifiche.perche) a chi era girata e quanto le si chiedeva, col suo listino: lo legge Rettifica
+// Costi → «non girate sotto» (lib/rettifiche-perche, descriviNonGirata). Il 15/11/2026 su Ecomize Solution erano 4 su
+// POSTA CENTRALE (3UW1UHA266010, Poste Express M): collo di 5,32 kg, listino che passa da 5,94 € fino a 5 kg a 24,51 €
+// fino a 100 kg — le si chiedevano 19,11 € e Ecomize le ha cancellate; ricostruirlo dopo voleva dire rifare il conto a
+// mano. Non muove soldi: se la scrittura non riesce si perde solo la frase.
+async function segnaGirateCancellate(figlie: any[], mio: string) {
+  try {
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const cl = [...new Set(figlie.map(f => f.cliente_id).filter(Boolean))]
+    const ms = [...new Set(figlie.map(f => f.target_master_id).filter(Boolean))]
+    const nomi = new Map<string, string>()
+    if (cl.length) { const { data } = await admin.from('clienti').select('id,ragione_sociale').in('id', cl); for (const c of (data || []) as any[]) nomi.set(c.id, String(c.ragione_sociale || '').trim()) }
+    if (ms.length) { const { data } = await admin.from('masters').select('id,nome').in('id', ms); for (const m of (data || []) as any[]) nomi.set(m.id, m.nome) }
+    const il = new Date().toISOString()
+    const a2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100
+    let k = 0
+    await Promise.all(Array.from({ length: Math.min(8, figlie.length) }, async () => {
+      while (k < figlie.length) {
+        const f = figlie[k++]
+        const peso = Math.max(Number(f.peso_reale) || 0, Number(f.peso_volume_reale) || 0)
+        const perche = {
+          tipo: 'cancellata_sotto', il, chi: nomi.get(f.cliente_id || f.target_master_id) || null,
+          chiedeva: a2(-Number(f.differenza || 0) + Number(f.fuori_sagoma || 0)),
+          pagato: f.costo_iniziale != null ? a2(f.costo_iniziale) : null, dovuto: f.costo_finale != null ? a2(f.costo_finale) : null,
+          peso_dopo: peso > 0 ? a2(peso) : null,
+        }
+        // Solo una madre ricevuta da me: il filtro sul destinatario e' la garanzia, l'id viene dalla mia figlia.
+        const { error } = await admin.from('rettifiche').update({ perche }).eq('id', f.origine_rettifica_id).eq('target_master_id', mio)
+        if (error) console.error('[RETTIFICHE] girata cancellata:', error.message)
+      }
+    }))
+  } catch (e: any) { console.error('[RETTIFICHE] girata cancellata:', e?.message || e) }
 }

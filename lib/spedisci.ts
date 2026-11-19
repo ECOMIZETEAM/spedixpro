@@ -98,6 +98,12 @@ export function trovaRateContratto(rates: any[], cred: any): any | null {
 // reso compiuto perde il riconoscimento.
 const ANNUNCIO_DI_RESO = /(verr[àa]|verranno|sar[àa]|saranno|potrebbe|potrebbero|potr[àa]|potranno|stiamo per|restituiremo|rispediremo|rinvieremo|in corso di restituzione)[^.;]{0,45}(res[oa]|ritorn\w*|rientr\w*|restitu\w*|respint\w*|rispedit\w*|rinvi\w*)\w*[^.;]{0,25} al mittente/
 
+// L'annuncio da solo non e' un reso (vedi sopra). Serve a chi ha ANCHE un'altra prova che il ritorno c'e'
+// stato: oggi il giro del conto, che ha in mano la fattura del reso (lib/conto-fornitore).
+export function testoAnnunciaReso(testo: string): boolean {
+  return ANNUNCIO_DI_RESO.test((testo || '').toLowerCase())
+}
+
 export function testoIndicaReso(testo: string): boolean {
   const s = (testo || '').toLowerCase()
   if (ANNUNCIO_DI_RESO.test(s)) return false
@@ -153,8 +159,11 @@ export async function spedisciTrackingStati(
 ): Promise<{ stati: string[]; raw: any; ok: boolean }> {
   // Endpoint CORRETTO: /api/v2/tracking/{tracking} (NON /shipping/tracking, che dà 404).
   // Struttura risposta: { return: { shipment: [ { shipment: {...stato...}, tracking: [ {data, StatusDescription, phase, officeDescription}, ... ] } ] } }
+  // Tempo massimo: chi chiama (il giro del tracking) tratta l'errore come "fornitore giu'" e smette di
+  // chiedere per il resto del giro, invece di restare appeso a ogni spedizione.
   const res = await fetch(`https://${cred.master_domain}/api/v2/tracking/${tracking}`, {
     headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15_000),
   })
   const text = await res.text()
   let data: any

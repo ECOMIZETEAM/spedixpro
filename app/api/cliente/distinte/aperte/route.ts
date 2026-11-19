@@ -15,7 +15,8 @@ export async function GET() {
     .eq('cliente_id', clienteId)
     .is('distinta_id', null)
     .neq('stato', 'annullata')
-    .order('created_at', { ascending: false }))
+    // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+    .order('created_at', { ascending: false }).order('id', { ascending: false }))
   // ID Ordine reale (order_id CSV / numero ordine integrazioni)
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const idOrd = await mappaIdOrdine(createAdminSupabase(), (spedizioni || []).map((s: any) => s.id))

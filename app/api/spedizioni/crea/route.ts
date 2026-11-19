@@ -19,7 +19,7 @@ import { EMAIL_PER_CORRIERE,
 } from '@/lib/spediamopro'
 // Il sanificatore dei messaggi del corriere ora sta in lib/errore-corriere.ts: lo usano anche
 // l'API pubblica e la conferma distinte, che prima rimandavano il testo grezzo del provider.
-import { erroreCorrierePulito } from '@/lib/errore-corriere'
+import { erroreCorrierePulito, MSG_PONTE_NON_REGISTRATA } from '@/lib/errore-corriere'
 import { stampaMittenteSpedizione } from '@/lib/etichetta-mittente'
 // Con quale citta' si prezza e quanto paga il cliente: due decisioni che stavano scritte qui dentro
 // e che ora condivide l'anteprima dei prezzi (import e ordini dei negozi). Una regola, due porte.
@@ -33,14 +33,20 @@ const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (is
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
+import { modalitaCodPoste, modalitaCodDaRichiesta } from '@/lib/contrassegno-modalita'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
+import { completaProvinciaDaCap } from '@/lib/provincia-da-cap'
 
 
 // La creazione parla con i corrieri: alcuni rispondono subito, altri si prendono qualche secondo
 // per emettere la lettera di vettura. Senza un tetto esplicito vale quello brevissimo di default,
 // e una richiesta che scade dopo che l'ordine e' gia' stato PAGATO e' il peggio che possa capitare:
 // il pacco esiste dal corriere e da noi no. Un minuto e' molto piu' di quanto serva davvero.
-export const maxDuration = 60
+// Due minuti per il PONTE DI CONDIVISIONE: da qui si chiama l'/api/v1 del venditore, che a sua volta puo'
+// chiamarne un altro (SDA EXPRESS L: portale → Wave → LOGIXIA), e ogni salto deve lasciare tempo a quello
+// sotto (lib/moovexpress). Con 60 secondi, il 9/11/2026 il database lento bastava a far morire questa rotta
+// mentre la LDV nasceva sotto, e la LDV restava addebitata ai master senza la spedizione del cliente.
+export const maxDuration = 120
 
 // IL COSTO DEL MASTER NON ESCE DALLA CREAZIONE. Ogni ramo corriere chiude con `costo`: quanto paga il
 // master al corriere o al fornitore (shipmentCost, totalPrice, importo, il suo listino corrieri). Questa
@@ -49,7 +55,7 @@ export const maxDuration = 60
 // d'errore restano intatte: quella del credito insufficiente (402) porta in `costo` il prezzo DEL
 // CLIENTE, ed e' quello che la finestra di pagamento mostra.
 export async function POST(req: NextRequest) {
-  const res = await creaSpedizioneInterna(req)
+  const res = await creaSpedizioneInterna(req, Date.now())
   if (!res.ok) return res
   const corpo = await res.clone().json().catch(() => null)
   if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo) || !('costo' in corpo)) return res
@@ -59,7 +65,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(resto, { status: res.status, headers })
 }
 
-async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
+// `t0` = il primo istante della richiesta: da li' si conta il tempo che resta al ponte (lib/moovexpress).
+async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Response> {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
@@ -276,8 +283,11 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
 
   const cred = corriereRecord.credenziali as Record<string, string>
 
-  // Consegna a un PUNTO (PuntoPoste/Ufficio Postale): il destinatario non ha una provincia (il pacco va
-  // al punto, la zona la dà il CAP). Si riconosce da body.puntoArrivo. La consegna a casa la richiede.
+  // Consegna a un PUNTO (PuntoPoste/Ufficio Postale): il modulo non chiede la provincia del destinatario
+  // (il pacco va al punto). Si riconosce da body.puntoArrivo. La consegna a casa la richiede.
+  // La zona pero' la decide anche la provincia: la si ricava dal CAP, come fa il preventivo
+  // (lib/provincia-da-cap → completaProvinciaDaCap, con il caso vero che l'ha resa necessaria).
+  if (String(body.puntoArrivo || '').trim()) completaProvinciaDaCap(body.shipTo)
   if (!body.shipTo?.state?.trim() && !String(body.puntoArrivo || '').trim()) return NextResponse.json({ error: 'Provincia destinatario obbligatoria' }, { status: 400 })
   if (!body.shipFrom?.state?.trim()) return NextResponse.json({ error: 'Provincia mittente obbligatoria' }, { status: 400 })
 
@@ -287,9 +297,10 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
   // città-condiviso scarta la riga speciale e la destinazione cade sul jolly "Italia": venduta a
   // prezzo pianura, pagata a prezzo disagiata (caso vero 3UW1UHA272704, −7,61 a MULTIEXPRESS).
   // Blocco MIRATO: solo se la città NON è un nome noto per quel CAP (archivio comuni+frazioni) E
-  // quel CAP ha davvero una zona speciale — così una frazione valida o una città su CAP normale
-  // (che comunque prezza Italia, senza perdita) NON viene fermata. Chi spedisce corregge o seleziona
-  // dall'elenco (l'autocomplete /api/comuni è già nel form). Solo Italia; l'estero non si valida.
+  // sulle zone del CONTRATTO SCELTO (e di quelli a monte) quel nome storto cambierebbe il prezzo —
+  // così una frazione valida o una città su CAP normale (che comunque prezza Italia, senza perdita)
+  // NON viene fermata. Chi spedisce corregge o seleziona dall'elenco (l'autocomplete /api/comuni è
+  // già nel form). Solo Italia; l'estero non si valida.
   //
   // LA DECISIONE STA IN lib/citta-spedizione.ts, non piu' qui: la prende anche l'anteprima dei
   // prezzi di import e ordini dei negozi. Finche' stava solo qui, il prezzo calcolato PRIMA di
@@ -301,6 +312,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
   //   singolo ordine, mostrato nella pagina ordini). Manuale: si blocca sempre (deve correggere/selezionare).
   {
     const cd = await cittaPerLaSpedizione({
+      admin: adminCrea, corriereId: corriereRecord.id,
       cap: body.shipTo?.postalCode, citta: body.shipTo?.city, paese: body.shipTo?.country,
       daImport: !!body._daImport,
     })
@@ -844,8 +856,9 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         label_format: 'PDF', packages: packagesSpedisci,
         // EMAIL SCHERMO: al provider va l'email di servizio, mai quelle vere di mittente e destinatario
         // (le sue notifiche non devono arrivare al cliente finale). ECCEZIONE per contratto, decisa
-        // dall'owner e scritta in lib/email-corriere: su Crono BS gli avvisi del corriere DEVONO arrivare
-        // a mittente e destinatario, quindi li' passano le email vere (se mancano, resta quella di servizio).
+        // dall'owner e scritta in lib/email-corriere: su Crono gli avvisi del corriere DEVONO arrivare
+        // a mittente e destinatario, quindi li' passano le email vere. Se mancano il campo non parte:
+        // mai la nostra al posto della loro (sul pannello del fornitore risultava l'email di MULTI).
         shipFrom: { ...body.shipFrom, email: emailAlCorriere(corriereRecord.nome_contratto, body.shipFrom?.email) },
         shipTo: { ...body.shipTo, email: emailAlCorriere(corriereRecord.nome_contratto, body.shipTo?.email) },
         notes: String(body.notes || '').trim() || undefined,
@@ -2010,7 +2023,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       return NextResponse.json({ error: 'Contratto GLS non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
     }
     try {
-      const { creaSpedizioneGls, etichetteGls, annullaSpedizioneGls, codiceServizioGls } = await import('@/lib/gls')
+      const { creaSpedizioneGls, etichetteGls, annullaSpedizioneGls, codiceServizioGls, bdaSpedizioneGls, numeroGlsGiaNostro } = await import('@/lib/gls')
 
       // Prezzo dal listino PRIMA della creazione (come il circuito interno).
       let costoCorrente = costoMaster
@@ -2024,40 +2037,39 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       }
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
-      // GLS EUROPA (Parcel, settings.tipo_spedizione = 'P'): per GLS il riferimento (Bda) e'
-      // obbligatorio, quindi se l'ordine non ne ha uno se ne genera uno univoco; paese, telefono e
-      // persona di riferimento li mette lib/gls. Contrassegno e servizi accessori sono gia' stati
-      // fermati prima del credito (sul Parcel GLS non li accetta).
-      // Sul Parcel GLS tiene 11 caratteri: si taglia QUI, cosi' AddParcel e GetPdfBySped ricevono lo
-      // stesso valore (l'etichetta si cerca anche per Bda).
+      // RIFERIMENTO (Bda): quello dell'ordine o, se manca, uno univoco nostro, anche sul nazionale. Senza,
+      // GLS univa due spedizioni allo stesso destinatario nella stessa giornata e la seconda faceva
+      // annullare la prima (lib/gls, bdaSpedizioneGls). Sul Parcel la Bda e' anche obbligatoria e tiene
+      // 11 caratteri: si taglia li', cosi' AddParcel e GetPdfBySped ricevono lo stesso valore.
+      // GLS EUROPA (Parcel, settings.tipo_spedizione = 'P'): paese, telefono e persona di riferimento li
+      // mette lib/gls. Contrassegno e servizi accessori sono gia' stati fermati prima del credito (sul
+      // Parcel GLS non li accetta).
       const parcelGls = servizioGls(corriereRecord.settings) === 'P'
-      const _rif = (body.rifOrdine ? String(body.rifOrdine) : '').trim()
-      const bda = parcelGls
-        ? (_rif.substring(0, 11) || 'MX' + Date.now().toString(36).toUpperCase().slice(-9))
-        : (_rif.substring(0, 20) || undefined)
+      const bda = bdaSpedizioneGls(body.rifOrdine, parcelGls)
       // MULTICOLLO: un peso per collo (GLS crea un <Parcel> per collo). Contrassegno/assicurazione
       // vanno solo sul primo collo (li mette lib/gls).
       const pesiColli = packages.map((p: any) => parseFloat(p?.weight) || 1)
-      // SERVIZI ACCESSORI GLS trasmessi via <ServiziAccessori> (tabella codici GLS, verificata 2/9).
-      // (1) modalità CONTRASSEGNO: 01 contanti, 02 assegno bancario (il form ha C/A → 01/02).
-      // (2) servizi scelti (Sabato 23, Exchange 24, Preavviso 14, …) mappati per nome.
+      // SERVIZI ACCESSORI GLS trasmessi via <ServiziAccessori>: solo i servizi scelti (Exchange 24, …),
+      // mappati per nome.
+      // La modalità del CONTRASSEGNO non va lì: viaggia soltanto in <ModalitaIncasso>, ed è quella che GLS
+      // stampa ("contante", "ass bancario"). Fino al 30/10/2026 mettevamo nei servizi anche 01/02/03,
+      // dalla tabella che GLS ci aveva dato il 2/9 ("01 contanti, 02 assegno bancario"); per GLS invece
+      // sono servizi di consegna: 01 stampava "ENTRO ORE 12" su ogni contrassegno in contanti (Wave, 77
+      // spedizioni dal 17/10; Quick 19) e 02 "ORA FISSA". Provato sul conto di Wave, prove annullate.
       const codiciGls: string[] = []
-      // Modalità contrassegno GLS: 'C' contanti (01/CONT), 'AB' assegno bancario (02/AB), 'AC' assegno
-      // circolare (03/AC). 'A' (vecchio valore generico del form) = bancario, per retro-compatibilità.
+      // Modalità contrassegno GLS: 'C' contanti (CONT), 'AB' assegno bancario, 'AC' assegno circolare.
+      // 'A' (vecchio valore generico del form) = bancario, per retro-compatibilità.
       const _im = String(body.incassoModalita || 'C')
-      const _codModalita = (_im === 'AB' || _im === 'A') ? '02' : _im === 'AC' ? '03' : '01'
       const _modalitaIncassoGls = (_im === 'AB' || _im === 'A') ? 'AB' : _im === 'AC' ? 'AC' : 'CONT'
-      if (body.codValue && Number(body.codValue) > 0) codiciGls.push(_codModalita)
       for (const sv of (serviziAccessori || [])) { const cod = codiceServizioGls(String((sv as any)?.nome || '')); if (cod) codiciGls.push(cod) }
 
-      // FLEX DELIVERY SERVICE (FDS): GLS manda al DESTINATARIO email/SMS con il link per gestirsi la
-      // consegna (riprogramma, dirotta a punto GLS, deposito sicuro, vicino, rifiuta). GLS lo attiva da
-      // solo quando riceve Email/Cellulare1 e il servizio è abilitato sul contratto (lato GLS). Siccome
-      // è l'OPPOSTO della regola "email schermo corriere" (di norma al corriere diamo l'email di
-      // servizio così i suoi link non arrivano al cliente), lo accendiamo di proposito PER CONTRATTO:
-      // settings.flex_delivery = true (oggi i GLS diretti di Quick). Spento = non mandiamo i contatti e
-      // GLS consegna standard. Verificato sull'API GLS vera di Quick (AddParcel di prova + annullo).
-      const fdsAttivo = (corriereRecord as any)?.settings?.flex_delivery === true
+      // CONTATTI DEL DESTINATARIO: su GLS DIRETTO vanno sempre quelli veri (email, cellulare, telefono).
+      // La schermatura con l'email di servizio vale per i provider, non per i contratti diretti
+      // (Lorenzo, 30/10/2026): prima partivano solo dove era acceso settings.flex_delivery (i GLS di
+      // Quick), e su tutti gli altri GLS l'autista e GLS non avevano un numero. Con email e cellulare
+      // GLS avvisa il destinatario e, dove il contratto ha il FlexDeliveryService, gli manda il link per
+      // gestirsi la consegna. Email e cellulare GLS li accetta sui contratti di Quick dall'11/9; il telefono
+      // (TelefonoDestinatario) provato sul conto di Wave il 30/10: 1 e 2 colli accettati, multicollo intero.
       const ris = await creaSpedizioneGls(credGls, {
         ragioneSociale: body.shipTo.name,
         indirizzo: body.shipTo.street1,
@@ -2066,19 +2078,18 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         provincia: body.shipTo.state,
         pesiColli,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
-        // ModalitaIncasso coerente col codice ServiziAccessori: contante→CONT, assegno→AB (bancario=02).
+        // Modalità del contrassegno: contante→CONT, assegno bancario→AB, circolare→AC.
         modalitaIncasso: body.codValue ? _modalitaIncassoGls : undefined,
         serviziAccessori: codiciGls.length ? codiciGls : undefined,
         assicurazione: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         bda,
-        // Contatti VERI del destinatario solo se FDS è acceso su questo contratto (qui shipTo NON è
-        // mascherato: il mascheramento con l'email di servizio è solo nel ramo SpediamoPro).
-        email: fdsAttivo ? (body.shipTo.email || undefined) : undefined,
-        cellulare: fdsAttivo ? (body.shipTo.phone || undefined) : undefined,
+        email: body.shipTo.email || undefined,
+        cellulare: body.shipTo.phone || undefined,
+        telefono: body.shipTo.phone || undefined,
         ...(parcelGls ? {
           tipoSpedizione: 'P' as const, paese: body.shipTo.country,
-          personaRiferimento: body.shipTo.name, telefono: body.shipTo.phone,
+          personaRiferimento: body.shipTo.name,
         } : {}),
       })
 
@@ -2108,18 +2119,22 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       const mittenteGls = (await stampaMittenteSpedizione(adminCrea, corriereRecord).catch(() => false))
         ? { nome: body.shipFrom?.name, destinatario: body.shipTo?.name } : null
 
-      // Etichette: una PER COLLO (GetPdfBySped NumeroCollo 1..N; col vuoto non torna nulla).
-      // L'etichetta "della spedizione" è l'unione (una pagina per collo, come easyparcel).
-      let etichettePerCollo: string[] = []
+      // Etichette: una PER COLLO (GetPdfBySped NumeroCollo 1..N; col vuoto non torna nulla), allineate ai
+      // colli (null = GLS non l'aveva ancora pronta). L'etichetta "della spedizione" è l'unione (una
+      // pagina per collo, come easyparcel).
+      let etichettePerCollo: (string | null)[] = []
       let etichettaUrl: string | null = null
+      let colliSenzaEtichetta = ris.numeroColli
       try {
         const et = await etichetteGls(credGls, numeroBare, ris.numeroColli, { bda, mittente: mittenteGls })
-        etichettePerCollo = et.etichette.map(b => `data:application/pdf;base64,${b}`)
+        etichettePerCollo = et.perCollo.map(b => (b ? `data:application/pdf;base64,${b}` : null))
+        colliSenzaEtichetta = et.mancanti.length
         if (et.etichette.length) {
           const { unisciEtichette } = await import('@/lib/easyparcel')
           const merged = await unisciEtichette(et.etichette)
-          etichettaUrl = merged ? `data:application/pdf;base64,${merged}` : (etichettePerCollo[0] || null)
+          etichettaUrl = `data:application/pdf;base64,${merged || et.etichette[0]}`
         }
+        if (et.mancanti.length) console.error('[CREA][GLS] colli senza etichetta alla creazione:', numeroFinale, et.mancanti.join(','), 'di', ris.numeroColli)
       } catch (e) { console.error('[CREA][GLS] etichette:', e) }
 
       const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
@@ -2150,7 +2165,8 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         colli_dettaglio: colliDettaglio,
         // Si conserva il numero NUDO (serve a GetPdfBySped/DeleteSped/CloseWorkDay) accanto al
         // tracking mostrato, più le sigle sede e il flag GLS Check.
-        raw_response: { _gls: true, numero: numeroBare, tracking: numeroFinale, siglaMittente: ris.siglaMittente, siglaSedeDestino: ris.siglaSedeDestino, glsCheck: ris.glsCheck, ...(parcelGls ? { parcel: true, bda } : {}) },
+        // La Bda si salva sempre: anche quella generata da noi e' il riferimento della spedizione su GLS.
+        raw_response: { _gls: true, numero: numeroBare, tracking: numeroFinale, siglaMittente: ris.siglaMittente, siglaSedeDestino: ris.siglaSedeDestino, glsCheck: ris.glsCheck, bda, ...(parcelGls ? { parcel: true } : {}) },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
@@ -2162,6 +2178,18 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       }).select('id').single()
 
       if (insertError) {
+        // NUMERO GIA' NOSTRO: GLS ha messo il pacco dentro una spedizione che esiste gia' (stesso
+        // destinatario e stesso riferimento). Quella spedizione e' viva, pagata e magari gia' etichettata:
+        // annullarla qui la cancellava tutta (NI665655922, 10/11/2026). Non nasce una spedizione nuova,
+        // quindi il credito prenotato torna.
+        if (numeroGlsGiaNostro(insertError)) {
+          console.error('[CREA][GLS][INSERT] numero gia\' di una nostra spedizione, NON annullato su GLS', numeroFinale, insertError.message)
+          await stornaPrenotazione()
+          return NextResponse.json({
+            error: `GLS ha unito questo pacco alla spedizione ${numeroFinale}, già creata per lo stesso destinatario con lo stesso riferimento ordine${body.rifOrdine ? ` (${body.rifOrdine})` : ''}. Non è stata creata una spedizione nuova e non ti è stato addebitato niente: contatta l'assistenza indicando ${numeroFinale}.`,
+            numero: numeroFinale, annullataSuCorriere: false,
+          }, { status: 409 })
+        }
         // COMPENSAZIONE: la spedizione esiste su GLS ma non da noi -> la si annulla, cosi' nessuno
         // paga una spedizione che non risulta a sistema.
         const annullata = await annullaSpedizioneGls(credGls, numeroBare)
@@ -2194,23 +2222,19 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         })
       } catch (e) { console.error('[CREA][GLS] cascata catena:', e) }
 
-      // Etichette non pronte al volo? Le si riprende in background (rete di sicurezza), per collo.
-      if (inserted?.id && !etichettaUrl) {
-        const spedIdBg = inserted.id
-        const numColliBg = ris.numeroColli
-        const colliBase = colliDettaglio
+      // Etichette non pronte al volo, o pronte solo per alcuni colli? Le si riprende in background (rete
+      // di sicurezza), solo per i colli che mancano. Prima si riprovava solo se non ce n'era NESSUNA: un
+      // multicollo con un collo non pronto restava con un'etichetta in meno, e cosi' partiva il pacco.
+      // Stessa funzione della stampa (lib/gls, recuperaEtichettaGlsSalvando), con attese piu' lunghe.
+      if (inserted?.id && (!etichettaUrl || colliSenzaEtichetta > 0)) {
+        const spedBg = {
+          id: inserted.id, corriere_id: corriereRecord.id, colli: ris.numeroColli, colli_dettaglio: colliDettaglio, etichetta_url: etichettaUrl,
+          raw_response: { _gls: true, numero: numeroBare, ...(parcelGls ? { parcel: true, bda } : {}) },
+        }
         after(async () => {
           try {
-            const { etichetteGls } = await import('@/lib/gls')
-            const { unisciEtichette } = await import('@/lib/easyparcel')
-            const et = await etichetteGls(credGls, numeroBare, numColliBg, { bda, mittente: mittenteGls })
-            if (et.etichette.length) {
-              const merged = await unisciEtichette(et.etichette)
-              const upd: any = {}
-              if (merged) upd.etichetta_url = `data:application/pdf;base64,${merged}`
-              upd.colli_dettaglio = colliBase.map((c: any, i: number) => ({ ...c, etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : (c.etichetta_url || null) }))
-              await adminCrea.from('spedizioni').update(upd).eq('id', spedIdBg)
-            }
+            const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+            await recuperaEtichettaGlsSalvando(adminCrea, spedBg, { riprove: [5000, 20000] })
           } catch (e) { console.error('[CREA][GLS] recupero etichette background:', e) }
         })
       }
@@ -2293,6 +2317,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         localita: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state,
         paese: body.shipTo.country || 'IT',
         contatto: body.shipTo.name, telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined,
+        cellulare: body.shipTo.phone || undefined,
         pesoTotKg: pesoTot, numeroColli: packages.length, volumeM3: volTot > 0 ? volTot : undefined,
         importoContrassegno: body.codValue ? Number(body.codValue) : undefined,
         codPaymentType: _codPaymentTypeBrt,
@@ -2687,6 +2712,10 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         note: body.notes ? String(body.notes) : undefined,
         numeroOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        // Dogana fuori UE e locker InPost: i controlli stanno in lib/dielle (preparaInsSpedDielle).
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
+        codiceLocker: String(body.inpostPointId || body.pointId || '').trim() || undefined,
       })
       const numeroFinale = ris.ldv
 
@@ -2781,7 +2810,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
     } catch (err: any) {
       console.error('[CREA][DIELLE]', err?.message)
       await stornaPrenotazione()
-      return NextResponse.json({ error: erroreCorrierePulito(err?.message) }, { status: 400 })
+      return NextResponse.json({ error: err?.dielle ? err.message : erroreCorrierePulito(err?.message) }, { status: 400 })
     }
   }
 
@@ -2794,6 +2823,8 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
       clientId: cred.clientId, secretId: cred.secretId,
       costCenterCode: cred.costCenterCode || settingsPo.cost_center_code,
       ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope,
+      // Utente e password del web service KSync: con questi la lettera si crea direttamente su KSync (lib/ksync).
+      wsUtente: cred.wsUtente, wsPassword: cred.wsPassword, wsHost: cred.wsHost,
     }
     const productPo = String(settingsPo.product || '').trim()
     if (!productPo) {
@@ -2819,6 +2850,9 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1,   // kg: creaKsync converte in grammi
       }))
 
+      // Come si incassa il contrassegno: contanti, assegno bancario o circolare (lib/contrassegno-modalita).
+      const codPo = Number(body.codValue || 0) > 0 ? modalitaCodPoste(body.incassoModalita, settingsPo.modalita_pagamento_cod) : null
+
       const ris = await creaKsync(credPo, {
         product: productPo,
         clientReferenceId: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
@@ -2837,16 +2871,17 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         colli: colliPo,
         contrassegno: body.codValue ? Number(body.codValue) : undefined,
         codiceContrassegno: settingsPo.codice_contrassegno ? String(settingsPo.codice_contrassegno) : undefined,
-        modalitaPagamentoCod: settingsPo.modalita_pagamento_cod ? String(settingsPo.modalita_pagamento_cod) : undefined,
+        modalitaPagamentoCod: codPo || undefined,
         assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
         codiceAssicurazione: settingsPo.codice_assicurazione ? String(settingsPo.codice_assicurazione) : undefined,
       })
       const numeroFinale = ris.ldv
 
-      // Etichetta: scaricata dal downloadURL della create e salvata (il token può scadere).
+      // Etichetta: KSync diretto la manda nella risposta; col ponte si scarica dal downloadURL della create.
+      // In entrambi i casi si salva subito (il token del ponte può scadere).
       let etichettaUrl: string | null = null
       try {
-        const lab = await etichettaKsync(credPo, ris.downloadUrl, 'pdf')
+        const lab = ris.pdf?.length ? { bytes: ris.pdf } : await etichettaKsync(credPo, ris.downloadUrl, 'pdf')
         if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}`
       } catch (e) { console.error('[CREA][POSTE] etichetta:', (e as any)?.message) }
 
@@ -2872,11 +2907,11 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         colli: packages.length, peso_reale: pesoReale,
         peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
         lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
-        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        contrassegno: body.codValue || 0, contrassegno_modalita: codPo, assicurazione: body.insuranceValue || 0,
         tracking_number: numeroFinale,
         etichetta_url: etichettaUrl,
         colli_dettaglio: colliDettaglio,
-        raw_response: { _ksync: true, ldv: numeroFinale, downloadUrl: ris.downloadUrl, ambiente: credPo.ambiente },
+        raw_response: { _ksync: true, ldv: numeroFinale, downloadUrl: ris.downloadUrl, ambiente: credPo.ambiente, ...(ris.raw?.diretto ? { diretto: true, uuid: ris.raw.uuid } : {}) },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
         servizi_accessori: serviziAccessori,
@@ -3109,53 +3144,64 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
     }
   }
 
-  if (corriereRecord.tipo === 'moovexpress') {
-    // CONDIVISIONE CONTRATTI (CONDIVISIONE-CONTRATTI.md): questo master RIVENDE il contratto di un altro
-    // master. Il corriere punta all'`/api/v1` del VENDITORE con la api_key ricevuta all'Accetta: il venditore
-    // crea la spedizione VERA sul suo contratto (smistando al corriere reale) e torna numero + etichetta +
-    // prezzo W. È un provider a COSTO ESTERNO come Spedisci.online: costoCorrente = W (NON 0 come i diretti),
-    // così la cascata lo usa come base e ci marca sopra il ricarico del compratore. A più salti funziona da
-    // sé: il venditore può essere a sua volta un compratore, e ogni livello addebita col W del livello sotto.
-    // ATTENZIONE: niente annullo via API al volo (lo gestisce il ciclo di vita a webhook) → su insertError si
-    // risponde col numero, come gli altri provider senza annullo.
-    // CONDIVISIONE: la chiave di dispatch NON è quella del ponte dell'ORIGINANTE (può essere una COPIA colata
-    // giù per l'albero = fuga credenziale), ma quella del PRIMO detentore-CODICE risalendo la catena
-    // (risolviChiaveDispatch, via corrieri_condivisi). Verificato sui dati: per i ponti attivi è la STESSA
-    // chiave di oggi, ma non dipende più dalla copia → le copie dei sub si possono bonificare.
-    const credMv = await risolviChiaveDispatch(adminCrea, masterId, corriereRecord.nome_contratto)
-    if (!credMv?.api_key) {
+  if (corriereRecord.tipo === 'ecosmos') {
+    // ECOSMOS (corriere elettrico di Roma): diretto, contratto PROPRIO del master (lib/ecosmos.ts). Una
+    // spedizione = una lettera di vettura e un PDF anche con più colli, e Ecosmos prezza il peso TOTALE.
+    // Il ritiro lo fa Ecosmos dal mittente senza prenotazione (entro il loro orario limite parte in
+    // giornata): qui non si prenota nessun ritiro. Si annulla via API, quindi una spedizione creata da loro
+    // e non registrata da noi si annulla subito, come FedEx: un pacco fantasma verrebbe ritirato e fatturato.
+    const credEc = { api_key: String(cred.api_key || '') }
+    const servizioEc = String(((corriereRecord as any)?.settings || {}).servizio || 'express_24h')
+    if (!credEc.api_key) {
       await stornaPrenotazione()
-      return NextResponse.json({ error: 'Contratto non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
+      return NextResponse.json({ error: 'Contratto Ecosmos senza chiave API: va inserita dal master nel contratto.' }, { status: 400 })
     }
     try {
-      const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')
+      const { creaSpedizioneEcosmos, annullaEcosmos } = await import('@/lib/ecosmos')
 
-      const ris = await creaSpedizioneMoovexpress(credMv, {
-        packages: packages.map((p: any) => ({
-          weight: parseFloat(p?.weight) || 1,
-          length: parseFloat(p?.length) || undefined, width: parseFloat(p?.width) || undefined, height: parseFloat(p?.height) || undefined,
-        })),
-        shipFrom: body.shipFrom, shipTo: body.shipTo,
-        codValue: body.codValue ? Number(body.codValue) : undefined,
-        insuranceValue: body.insuranceValue ? Number(body.insuranceValue) : undefined,
-        valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
-        notes: body.notes ? String(body.notes) : undefined,
-        contenuto: body.contenuto ? String(body.contenuto) : undefined,
-        rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
-        pickup: _vuoleRitiro ? { requested: true, date: String(body.dataRitiro), time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
-      })
-      const numeroFinale = ris.tracking
-      // W = quanto il venditore addebita al compratore = il COSTO per questo master.
-      const costoCorrente = ris.prezzo
+      let costoCorrente = costoMaster
+      if (!isProprio) {
+        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          pesoReale, packages,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })) ?? 0
+      }
       const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
-      // Etichetta del venditore (quella del corriere reale, propagata su per ogni salto): scaricata subito e
-      // salvata come data URL, così non dipende da una chiamata live dopo. Col suo tipo: UPS è una GIF.
-      let etichettaUrl: string | null = null
+      let ris: Awaited<ReturnType<typeof creaSpedizioneEcosmos>>
       try {
-        const lab = await etichettaMoovexpress(credMv, ris.label_url)
-        if (lab.buffer.length) etichettaUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}`
-      } catch (e) { console.error('[CREA][MOOVEXPRESS] etichetta:', (e as any)?.message) }
+        ris = await creaSpedizioneEcosmos(credEc, {
+          servizio: servizioEc, colli: packages.length, pesoKg: pesoReale,
+          mittente: {
+            nome: body.shipFrom.name, indirizzo: body.shipFrom.street1, citta: body.shipFrom.city,
+            cap: body.shipFrom.postalCode, provincia: body.shipFrom.state,
+            telefono: body.shipFrom.phone || null, email: body.shipFrom.email || null,
+          },
+          destinatario: {
+            nome: body.shipTo.name, indirizzo: body.shipTo.street1, citta: body.shipTo.city,
+            cap: body.shipTo.postalCode, provincia: body.shipTo.state,
+            telefono: body.shipTo.phone || null, email: body.shipTo.email || null,
+          },
+          noteConsegna: body.notes ? String(body.notes) : null,
+          contenuto: body.contenuto ? String(body.contenuto) : null,
+          contrassegno: Number(body.codValue || 0) || null,
+          riferimento: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || null,
+          idempotenza: crypto.randomUUID(),
+        })
+      } catch (e: any) {
+        // Ecosmos ha risposto 200 ma senza un numero leggibile: forse la spedizione c'e'. Non si storna
+        // alla cieca (il giro delle prenotazioni scadute la libera se davvero non c'e'): si dice di
+        // controllare, col dettaglio nei log per ritrovarla.
+        if (e?.forseCreata) {
+          console.error('[CREA][ECOSMOS] risposta senza numero', JSON.stringify(e.raw || {}).slice(0, 800))
+          return NextResponse.json({ error: e.message }, { status: 502 })
+        }
+        throw e
+      }
+      const numeroFinale = ris.numero
+      const etichettaUrl = ris.etichettaBase64 ? `data:application/pdf;base64,${ris.etichettaBase64}` : null
 
       const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
         .map((c: any, i: number) => ({
@@ -3164,7 +3210,7 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
           larghezza: c.larghezza || packages[i]?.width || null,
           altezza: c.altezza || packages[i]?.height || null,
           peso: packages[i]?.weight || null,
-          etichetta_url: etichettaUrl,   // una LDV, un PDF per l'intera spedizione
+          etichetta_url: etichettaUrl,   // Ecosmos: una LDV, un PDF per l'intera spedizione
         }))
 
       const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
@@ -3183,6 +3229,157 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         tracking_number: numeroFinale,
         etichetta_url: etichettaUrl,
         colli_dettaglio: colliDettaglio,
+        // Niente prezzo Ecosmos qui: e' il costo del master, e raw_response non deve portare a nessuno
+        // dei suoi clienti quanto paga lui.
+        raw_response: { _ecosmos: true, numero: numeroFinale, stato: ris.stato, servizio: servizioEc, tracking_url: ris.trackingUrl },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: false, data_ritiro: null, intervallo_ritiro: null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        console.error('[CREA][ECOSMOS][INSERT]', numeroFinale, insertError.message)
+        after(async () => {
+          try {
+            const a = await annullaEcosmos(credEc, numeroFinale)
+            if (a.annullata) console.log('[CREA][ECOSMOS] pacco fantasma annullato', numeroFinale)
+            else console.error('[CREA][ECOSMOS] pacco fantasma NON annullato, annullare dal portale Ecosmos', numeroFinale, a.messaggio)
+          } catch (e) { console.error('[CREA][ECOSMOS] annullo fantasma:', e) }
+        })
+        return NextResponse.json({
+          error: `Spedizione non registrata a sistema (rif. ${numeroFinale}): riprova. Se ricompare, contatta l'assistenza.`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          // Diretto: nessuna quotazione esterna, il listino È il costo → costoSpedizione:0 (come FedEx/GLS).
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][ECOSMOS] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][ECOSMOS]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: err?.ecosmos ? err.message : erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
+  if (corriereRecord.tipo === 'moovexpress') {
+    // CONDIVISIONE CONTRATTI (CONDIVISIONE-CONTRATTI.md): questo master RIVENDE il contratto di un altro
+    // master. Il corriere punta all'`/api/v1` del VENDITORE con la api_key ricevuta all'Accetta: il venditore
+    // crea la spedizione VERA sul suo contratto (smistando al corriere reale) e torna numero + etichetta +
+    // prezzo W. È un provider a COSTO ESTERNO come Spedisci.online: costoCorrente = W (NON 0 come i diretti),
+    // così la cascata lo usa come base e ci marca sopra il ricarico del compratore. A più salti funziona da
+    // sé: il venditore può essere a sua volta un compratore, e ogni livello addebita col W del livello sotto.
+    // Se la riga non si scrive dopo che la LDV e' nata, si riprova e poi si annullano le gambe con lo storno
+    // e il credito torna (lib/ponte-testa, lib/ponte-orfane): vedi sotto, al momento dell'insert.
+    // CONDIVISIONE: la chiave di dispatch NON è quella del ponte dell'ORIGINANTE (può essere una COPIA colata
+    // giù per l'albero = fuga credenziale), ma quella del PRIMO detentore-CODICE risalendo la catena
+    // (risolviChiaveDispatch, via corrieri_condivisi). Verificato sui dati: per i ponti attivi è la STESSA
+    // chiave di oggi, ma non dipende più dalla copia → le copie dei sub si possono bonificare.
+    const credMv = await risolviChiaveDispatch(adminCrea, masterId, corriereRecord.nome_contratto)
+    if (!credMv?.api_key) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })
+    }
+    try {
+      const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')
+      // Il tetto di questa rotta meno tre secondi: e' il tempo che il ponte divide fra il venditore e il
+      // lavoro da fare qui dopo la sua risposta (lib/moovexpress).
+      const scadenzaPonte = t0 + maxDuration * 1000 - 3_000
+
+      const ris = await creaSpedizioneMoovexpress(credMv, {
+        packages: packages.map((p: any) => ({
+          weight: parseFloat(p?.weight) || 1,
+          length: parseFloat(p?.length) || undefined, width: parseFloat(p?.width) || undefined, height: parseFloat(p?.height) || undefined,
+        })),
+        shipFrom: body.shipFrom, shipTo: body.shipTo,
+        codValue: body.codValue ? Number(body.codValue) : undefined,
+        // Contanti o assegno: lo usa il contratto vero, che sta dal venditore (per SDA EXPRESS L, Poste).
+        ...(Number(body.codValue || 0) > 0 && body.incassoModalita ? { incassoModalita: String(body.incassoModalita) } : {}),
+        insuranceValue: body.insuranceValue ? Number(body.insuranceValue) : undefined,
+        valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
+        notes: body.notes ? String(body.notes) : undefined,
+        contenuto: body.contenuto ? String(body.contenuto) : undefined,
+        rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
+        pickup: _vuoleRitiro ? { requested: true, date: String(body.dataRitiro), time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
+      }, { scadenza: scadenzaPonte })
+      const numeroFinale = ris.tracking
+      // W = quanto il venditore addebita al compratore = il COSTO per questo master.
+      const costoCorrente = ris.prezzo
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      // Etichetta del venditore (quella del corriere reale, propagata su per ogni salto): scaricata subito e
+      // salvata come data URL, così non dipende da una chiamata live dopo. Col suo tipo: UPS è una GIF.
+      let etichettaUrl: string | null = null
+      // Si aspetta solo finche' resta il tempo di scrivere la riga e addebitare: senza la riga la LDV
+      // resterebbe orfana.
+      try {
+        const lab = await etichettaMoovexpress(credMv, ris.label_url, { timeoutMs: scadenzaPonte - Date.now() - 12_000 })
+        if (lab.buffer.length) etichettaUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}`
+      } catch (e) { console.error('[CREA][MOOVEXPRESS] etichetta:', (e as any)?.message) }
+
+      const colliDettaglio = (body.colliDettaglio || packages.map((p: any) => ({ lunghezza: p.length, larghezza: p.width, altezza: p.height })))
+        .map((c: any, i: number) => ({
+          numero: i + 1,
+          lunghezza: c.lunghezza || packages[i]?.length || null,
+          larghezza: c.larghezza || packages[i]?.width || null,
+          altezza: c.altezza || packages[i]?.height || null,
+          peso: packages[i]?.weight || null,
+          etichetta_url: etichettaUrl,   // una LDV, un PDF per l'intera spedizione
+        }))
+
+      const rigaTesta = {
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        // La modalita' che il venditore ha davvero mandato al corriere (null se non e' un contratto Poste).
+        contrassegno: body.codValue || 0, contrassegno_modalita: modalitaCodDaRichiesta(ris.codMode), assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
         raw_response: { _moovexpress: true, tracking: numeroFinale, venditore_spedizione_id: ris.id || null, label_url: ris.label_url || null },
         stato: 'in_lavorazione',
         costo_spedizione: costoCorrente, costo_totale: costoCliente,
@@ -3192,15 +3389,33 @@ async function creaSpedizioneInterna(req: NextRequest): Promise<Response> {
         intervallo_ritiro: _vuoleRitiro ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
         note: body.notes || null, contenuto: body.contenuto || null,
         rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
-      }).select('id').single()
-
-      if (insertError) {
-        console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, insertError.message)
+      }
+      // La LDV dal venditore c'e' gia': se la riga non si scrive si riprova, e se proprio non va si chiude
+      // subito (lib/ponte-testa, regola di Lorenzo del 12/11/2026).
+      const { scriviTestaPonte } = await import('@/lib/ponte-testa')
+      const testa = await scriviTestaPonte(adminCrea, () => supabase.from('spedizioni').insert(rigaTesta).select('id').single(), numeroFinale, scadenzaPonte)
+      if (testa.adottata) console.warn('[CREA][MOOVEXPRESS][INSERT] riga gia\' scritta dal primo tentativo, adottata', numeroFinale)
+      if (!testa.id) {
+        console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, testa.errore)
+        // Le gambe del pacco si annullano adesso, con lo storno a ogni livello, e il credito del cliente torna.
+        // Il credito torna e il cliente legge «riprova» SOLO se l'annullo e' riuscito. Se le gambe restano vive
+        // (contratto senza annullo automatico, GLS che rifiuta, errore a meta', pacco gia' partito), un nuovo
+        // tentativo comprerebbe una seconda LDV e la prima resterebbe pagata dai master per sempre: in quel caso
+        // resta il messaggio col numero, cosi' il caso arriva a una persona, e il credito lo libera il giro delle
+        // prenotazioni scadute. Se il pacco non si riesce a leggere non si tocca niente.
+        const { annullaPaccoOrfano } = await import('@/lib/ponte-orfane')
+        const chiuso = await annullaPaccoOrfano(adminCrea, numeroFinale).catch(() => null)
+        console.error('[CREA][MOOVEXPRESS][INSERT]', numeroFinale, chiuso ? `gambe: ${chiuso.esito}${chiuso.motivo ? ' (' + chiuso.motivo + ')' : ''}` : 'pacco non verificato: nessun annullo')
+        if (chiuso?.esito === 'annullata') {
+          await stornaPrenotazione()
+          return NextResponse.json({ error: MSG_PONTE_NON_REGISTRATA }, { status: 400 })
+        }
         return NextResponse.json({
           error: `Spedizione creata sul corriere (${numeroFinale}) ma non registrata a sistema: contatta l'assistenza indicando il numero ${numeroFinale}.`,
           numero: numeroFinale,
         }, { status: 500 })
       }
+      const inserted = { id: testa.id }
 
       await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
       try {

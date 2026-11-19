@@ -431,6 +431,7 @@ export async function GET(req: NextRequest) {
     if (!(mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).length)) return
     const adminMov = admin
     const spedIds = (spedizioni || []).map((s: any) => s.id)
+    const clienteDellaSped = new Map<string, string>((spedizioni || []).map((s: any) => [s.id, s.cliente_id]))
     // Importi SIGNED: charge = negativo, credito = positivo; il totale addebitato è -(somma).
     // Prezzo, costo e margine sono SOLO quelli del movimento 'spedizione'; le 'rettifica' (ripesature,
     // allineamenti) si sommano a parte. Prima entravano nel margine della riga: una ripesatura
@@ -453,7 +454,11 @@ export async function GET(req: NextRequest) {
           const imp = Number(mv.importo || 0)   // SIGNED
           const rett = (mv as any).tipo === 'rettifica'
           if (mv.cliente_id) {
-            if (rett) rettCli.set(mv.spedizione_id, (rettCli.get(mv.spedizione_id) || 0) - imp)
+            // Solo la rettifica del CLIENTE DELLA SPEDIZIONE. Sulla riga di un sotto-master c'e' anche quella che il
+            // fornitore di condivisione ha fatto al suo cliente «(ingrosso)» di sopra, ed entrava come incassata dal
+            // cliente. 282343J060918 (SDA EXPRESS L, 18/11/2026): Ecomize Solution vedeva «rettifica € 3,85 (margine
+            // € 0,00)», cioe' i 3,85 che Wave ha preso a MULTIEXPRESS contro i 3,85 che MULTIEXPRESS ha preso a lei.
+            if (rett) { if (mv.cliente_id === clienteDellaSped.get(mv.spedizione_id)) rettCli.set(mv.spedizione_id, (rettCli.get(mv.spedizione_id) || 0) - imp) }
             else sumCli.set(mv.spedizione_id, (sumCli.get(mv.spedizione_id) || 0) + imp)
           } else if (mv.master_target_id) {
             const k = mv.spedizione_id + '|' + mv.master_target_id
@@ -518,6 +523,23 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // NUMERO DELLA DISTINTA in cui sta la riga, sotto lo stato. "Spedita" lo diventa anche solo chiudendo la
+  // distinta, e un pacco fermo in magazzino non si distingueva da uno partito (QUICK, NI860104843, 16/11:
+  // «risultano spedite ma non sono partite, non so in che distinta stanno»). E' la distinta di QUESTA riga,
+  // cioe' del livello che la vede: le righe di chi vende il contratto qui non arrivano (nascondi-fornitori),
+  // e con loro le loro distinte. Client di servizio perche' le distinte della rete non passano dalla RLS
+  // del master, ma gli id sono solo quelli delle righe che l'utente sta gia' guardando.
+  const distintaNumero = new Map<string, string>()
+  const caricaDistinte = async () => {
+    const ids = Array.from(new Set((spedizioni || []).map((s: any) => s.distinta_id).filter(Boolean))) as string[]
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data, error } = await admin.from('distinte').select('id,numero').in('id', ids.slice(i, i + 300))
+      // Se la lettura non riesce manca solo il numero: l'elenco esce lo stesso.
+      if (error) { console.error('[LISTA] numeri distinta:', error.message); return }
+      for (const d of (data || [])) if (d.numero) distintaNumero.set(String(d.id), String(d.numero))
+    }
+  }
+
   // Ticket APERTI collegati a queste spedizioni (badge "ticket aperto" sulla LDV). Mostrato solo a
   // chi può davvero aprire il ticket (cliente proprietario / master della rete), coerente con la RLS
   // del dettaglio: chi non è parte del ticket non vede il badge.
@@ -549,7 +571,7 @@ export async function GET(req: NextRequest) {
 
   // I blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
   // In LIGHT si saltano del tutto: chi la chiede mostra solo i campi base.
-  if (!light) { await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket()]); segna('arricchimento') }
+  if (!light) { await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket(), caricaDistinte()]); segna('arricchimento') }
 
   // CAP DELLA PAGINA: i calcolatori qui sotto devono prezzare SOLO queste righe, quindi si portano
   // dietro i loro CAP e leggono le zone mirate invece di tutte quelle del listino (per un master vero
@@ -672,6 +694,13 @@ export async function GET(req: NextRequest) {
   }
   segna('tipo-corriere')
   const OLTRE_15GG = Date.now() - 15 * 24 * 60 * 60 * 1000
+  // APPENA NATA: la riga della spedizione si salva PRIMA che la catena addebiti i master (27/10, spedizioni
+  // 2000, 050063293084645: riga salvata alle 09:30:41.7, lista letta alle 42.197, movimento del master alle
+  // 42.676). In quel mezzo secondo costoMine manca e la riga cadeva sul ripiego calcMioCorr, che prezza col
+  // listino del master sul peso fatturato (3,13 kg → 5,56) mentre la cascata applica la regola del fornitore
+  // (peso reale 2 kg → 4,79): il master ha visto margine −0,21 rosso su una spedizione che gli rende +0,56.
+  // Nei primi 2 minuti, se il mio movimento non c'è ancora, costo e margine restano «in calcolo».
+  const APPENA_NATA = Date.now() - 2 * 60 * 1000
 
   // master_rete = nome della MIA prima linea per le spedizioni dei sotto-master (null per le mie)
   const rows = (spedizioni || []).map((s: any) => {
@@ -734,7 +763,12 @@ export async function GET(req: NextRequest) {
     if (prezzo_corriere == null && (costoIngrossoAcq.get(s.id) || 0) > 0) {
       prezzo_corriere = costoIngrossoAcq.get(s.id)!
     }
-    if (prezzo_corriere == null && calcMioCorr) {
+    // Solo dopo i rami esatti qui sopra (contratto proprio, ponte, ingrosso): quelli hanno già il costo vero
+    // alla nascita. Restano fuori il ripiego sul listino e il pareggio col prezzo cliente, che su una
+    // spedizione di pochi secondi danno un numero inventato. Vale anche per il padre che guarda la sua rete.
+    const costoInCalcolo = vedeCostoMaster && prezzo_corriere == null && !costoMine.has(s.id)
+      && !!s.created_at && new Date(s.created_at).getTime() > APPENA_NATA
+    if (prezzo_corriere == null && calcMioCorr && !costoInCalcolo) {
       const nome = (s.corrieri as any)?.nome_contratto
       const mioCorr = (s.master_id === mineId) ? s.corriere_id : (nome ? nomeToMioCorr.get(nome) : null)
       if (mioCorr) { const r = calcMioCorr({ ...s, corriere_id: mioCorr }); if (r && r.totale != null) prezzo_corriere = r.totale }
@@ -750,8 +784,8 @@ export async function GET(req: NextRequest) {
     // comparire "0,00 €" su ogni riga, indistinguibile da un margine realmente nullo: da qui
     // la segnalazione che i margini del portale agente erano sbagliati. Meglio un trattino.
     const agenteSenzaCosto = ruolo === 'agente' && prezzo_corriere == null
-    if (prezzo_corriere == null && !agenteSenzaCosto) prezzo_corriere = prezzo_cliente
-    const margine = agenteSenzaCosto ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
+    if (prezzo_corriere == null && !agenteSenzaCosto && !costoInCalcolo) prezzo_corriere = prezzo_cliente
+    const margine = (agenteSenzaCosto || costoInCalcolo) ? null : Math.round((prezzo_cliente - (prezzo_corriere as number)) * 100) / 100
     // Rettifica della riga, dal punto di vista di chi guarda: quanto l'ha addebitata al SUO diretto
     // (cliente, o figlio di prima linea per le spedizioni di rete) e quanto l'ha pagata lui. Solo
     // movimenti, come il riquadro Rettifiche: se non ha pagato niente, il costo e' 0.
@@ -768,8 +802,9 @@ export async function GET(req: NextRequest) {
       : null
     const id_ordine = idOrdine.get(s.id) || (s as any).id_ordine_esterno || (s as any).rif_ordine || null
     const distinta_reso = distintaReso.get(s.id) || null
+    const distinta_numero = (s as any).distinta_id ? distintaNumero.get(String((s as any).distinta_id)) || null : null
     const no_annullo_15gg = corrTipo.get(s.corriere_id) === 'spediamopro' && !!s.created_at && new Date(s.created_at).getTime() < OLTRE_15GG
-    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, rettifica, id_ordine, distinta_reso, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
+    return { ...s, master_rete, master_rete_id, costo_mostrato, prezzo_cliente, prezzo_corriere, margine, costo_in_calcolo: costoInCalcolo, rettifica, id_ordine, distinta_reso, distinta_numero, no_annullo_15gg, ticket: ticketPerSped.get(s.id) || null }
   })
   // ── CONTRASSEGNO PER-LIVELLO: il badge è verde solo se IO ho incassato. ──
   // Per un MASTER: verde se la rimessa indirizzata a ME (target_master_id) è pagata; arancio se
@@ -814,7 +849,10 @@ export async function GET(req: NextRequest) {
       // quello del cliente. (Il totale paginato resta quello del filtro DB: approssimazione nota.)
       if (fStatoContr === 'pagato') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'pagato')
       else if (fStatoContr === 'in_attesa') rowsOut = rows.filter((r: any) => r.stato_contrassegno === 'in_distinta')
-      else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato'].includes(String(r.stato_contrassegno || '')))
+      // 'annullato' (reso: non si incassera' mai) fuori dai "da pagare", come nel filtro a DB qui sopra.
+      // Mancava solo qui: MULTIEXPRESS 1-14/10 in Elenco 1.775 "da pagare" contro i 1.711 del Report
+      // (misurati il 15/10): la differenza erano i 64 annullati.
+      else if (fStatoContr === 'da_pagare') rowsOut = rows.filter((r: any) => Number(r.contrassegno) > 0 && !['in_distinta', 'pagato', 'annullato'].includes(String(r.stato_contrassegno || '')))
     }
   }
 

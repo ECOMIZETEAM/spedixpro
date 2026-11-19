@@ -6,7 +6,9 @@ import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
 import { controllaColliXL } from '@/lib/ripesature-xl'
 import { colliDalPesoTotale } from '@/lib/ripesature-pesi'
-import { inserisciRettifica, fattureGiaPagate } from '@/lib/ripesature-crea'
+import { inserisciRettifica, fattureGiaPagate, pacchiConCostoGia } from '@/lib/ripesature-crea'
+import { controlloAttivo, controllaConOneTracking, riepilogoControllo, FERMA } from '@/lib/ripesature-controllo'
+import { nomeTardivo } from '@/lib/supplemento-tardivo'
 
 
 // Risale la catena dei master: [masterId, padre, nonno, ...]
@@ -51,7 +53,7 @@ export async function POST(req: NextRequest) {
   {
     const { sembraRipesature, sembraRipesatureSP, leggiRipesature } = await import('@/lib/ripesature')
     if (sembraRipesature(righe || [])) {
-      const { calcolaRipesature, qualcunoSottoDeve } = await import('@/lib/ripesature-calcolo')
+      const { calcolaRipesature, qualcunoSottoDeve, volumiDelLivello } = await import('@/lib/ripesature-calcolo')
       const lette = leggiRipesature(righe || [])
       if (!lette.righe.length) return NextResponse.json({ error: 'Il file non contiene ripesature leggibili' }, { status: 400 })
 
@@ -95,17 +97,18 @@ export async function POST(req: NextRequest) {
       // agganciata". E' il guasto vero del "non riesco a caricarlo": il vecchio batch da 100 andava
       // SEMPRE in timeout (verificato: 5/5 batch a 500, 0 codici agganciati su 500).
       const attesaMisureLdv = new Set<string>()
-      const spPerCode = new Map<string, { id: string; colli: number }>()
+      const spPerCode = new Map<string, { id: string; colli: number; contratto?: string }>()
       if (isSP) {
         const codiciFetta = Array.from(new Set(fetta.map(r => r.codiceProvider || r.ldv)))
         const codeToTrack = new Map<string, string>()
         const { data: sp } = await adminRip.from('spedizioni')
-          .select('id,colli,tracking_number,code:raw_response->>code')
+          .select('id,colli,tracking_number,code:raw_response->>code,corrieri(nome_contratto)')
           .in('raw_response->>code', codiciFetta)
         for (const s of (sp || [])) {
           const code = (s as any).code, tn = (s as any).tracking_number
+          const corr: any = Array.isArray((s as any).corrieri) ? (s as any).corrieri[0] : (s as any).corrieri
           if (code && tn) codeToTrack.set(code, tn)
-          if (code) spPerCode.set(code, { id: (s as any).id, colli: Number((s as any).colli || 1) })
+          if (code) spPerCode.set(code, { id: (s as any).id, colli: Number((s as any).colli || 1), contratto: String(corr?.nome_contratto || '') })
         }
         for (const r of fetta) { const t = codeToTrack.get(r.codiceProvider || r.ldv); if (t) r.ldv = t }
       }
@@ -140,8 +143,16 @@ export async function POST(req: NextRequest) {
       // domani la riga ritorna e verra' caricata giusta. Dopo tre tentativi a vuoto (spedizioni
       // che il portale filiali non copre) si rinuncia e si torna a fare come prima, col totale in
       // un collo solo: meglio recuperare meno che non recuperare niente.
+      // SOLO I CONTRATTI POSTE/SDA ASPETTANO LE MISURE: il Mac le legge dal portale filiali di Poste, e un pacco BRT o
+      // UPS li' non c'e'. Dal 29/09 al 17/11/2026 i multicollo BRT Express messi in coda sono stati 228 e nessuno ha mai
+      // avuto una misura: restavano fermi tre giri e poi si caricavano lo stesso col totale (97 il 17/11, 591 € di
+      // sovrapprezzi). Per BRT il totale e' anche il conto giusto: il multicollo si paga sul peso complessivo.
       const { colliDaMisure } = await import('@/lib/misure-colli')
-      const multi = nuove.filter(r => (spPerCode.get(r.codiceProvider || '')?.colli || 1) > 1)
+      const { DI_POSTE } = await import('@/lib/ripesature-controllo')
+      const multi = nuove.filter(r => {
+        const sp = spPerCode.get(r.codiceProvider || '')
+        return (sp?.colli || 1) > 1 && DI_POSTE.test(sp?.contratto || '')
+      })
       if (multi.length) {
         const idsMulti = multi.map(r => spPerCode.get(r.codiceProvider || '')!.id)
         const misurePerSped = new Map<string, any[]>()
@@ -196,6 +207,9 @@ export async function POST(req: NextRequest) {
       // Client CON MEMORIA, nuovo a ogni richiesta: zone, listini e contratti si leggono una volta
       // per pacchetto invece che una per spedizione (lib/supabase-admin). Spedizioni e movimenti freschi.
       const esiti = await calcolaRipesature(createAdminSupabaseConMemoria(), daCalcolare)
+      // IL CONTROLLO CON ONETRACKING (lib/ripesature-controllo): ogni riga dei contratti Poste/SDA si confronta con la
+      // misura ufficiale di Poste prima di diventare una rettifica. Acceso solo per chi lo ha nelle impostazioni.
+      const controlli = (await controlloAttivo(adminRip, myMaster)) ? await controllaConOneTracking(adminRip, myMaster, esiti) : null
 
       // ── ANTI-DOPPIO PER SPEDIZIONE ── salta le spedizioni che hanno GIÀ una rettifica viva
       // (confermata o da_rettificare), da OneTracking o da un import precedente. Il dedup su
@@ -205,8 +219,10 @@ export async function POST(req: NextRequest) {
       // una volta sola: la spesa del fornitore c'è anche se non creo una seconda rettifica.)
       const spedEsiti = Array.from(new Set(esiti.filter(e => e.spedizioneId).map(e => e.spedizioneId as string)))
       const giaRettificateSet = new Set<string>()
+      // Di queste, quelle che un supplemento l'avevano gia': il supplemento arrivato dopo (piu' sotto) non si chiede due volte.
+      const giaConSupplemento = new Set<string>()
       for (let i = 0; i < spedEsiti.length; i += 200) {
-        const { data: gr } = await adminRip.from('rettifiche').select('spedizione_id,master_id,target_master_id,propagazione')
+        const { data: gr } = await adminRip.from('rettifiche').select('spedizione_id,master_id,target_master_id,propagazione,fuori_sagoma')
           .in('spedizione_id', spedEsiti.slice(i, i + 200)).or('confermata.eq.true,stato.eq.da_rettificare')
         for (const x of (gr || []) as any[]) {
           // Non contano: il COSTO DEL DETENTORE (riga intestata a se' stesso: non e' un addebito a
@@ -219,9 +235,13 @@ export async function POST(req: NextRequest) {
           // MULTI ha gia' pagato) lo ferma il database, trg_rettifica_no_doppia_ripesatura (stesso pagante).
           if (x.master_id !== myMaster && x.target_master_id !== myMaster) continue
           if (x.spedizione_id) giaRettificateSet.add(x.spedizione_id)
+          if (x.spedizione_id && Number(x.fuori_sagoma) > 0) giaConSupplemento.add(x.spedizione_id)
         }
       }
       let giaRettificateCount = 0
+      // Pacchi su cui il costo del fornitore c'e' gia' (registrato a chi carica, o portato da una sua riga viva): un file
+      // di soli pesi non ne scrive un secondo (vedi pacchiConCostoGia e costoProprio qui sotto).
+      const costoGia = await pacchiConCostoGia(adminRip, myMaster, spedEsiti)
 
       // PENALE BRT EXPRESS: mappa spedizione → soglia peso-reale, SOLO per i contratti 'BRT Express' con
       // soglia attiva. Serve alla regola penale piu' sotto (un collo del servizio ≤5kg che sfora). Per
@@ -274,12 +294,23 @@ export async function POST(req: NextRequest) {
         //    fila). Chi non e' detentore non ha un costo suo da registrare: per lui nulla cambia.
         // Sta in costo_fornitore, la colonna che la pagina usa gia' per dividere buone e da controllare.
         let aTuoCarico = 0, soloATuoCarico = 0
+        // DOVE FINISCONO LE RIGHE CHE NON DIVENTANO RETTIFICHE (rettifiche_files.esito, Lorenzo 05/11/2026: «da 1000 so
+        // rimaste 300 da addebitare e le 700 che fine hanno fatto? questo si domandava il master»). Prima queste uscivano
+        // dal conto senza lasciare traccia: ora ognuna e' contata col suo motivo, e la pagina fa tornare il totale del file.
+        const senzaRiga = { giaPagate: 0, giaRettificateSenzaCosto: 0, resoSenzaCosto: 0, nienteDaChiedere: 0, nonCalcolabili: 0 }
+        // Una riga che OneTracking smentisce nasce IN CONTESTAZIONE, col motivo scritto sopra: resta nello storico,
+        // la Conferma non la prende (prende solo 'da_rettificare') e quindi a nessuno sotto arriva niente.
+        const statoDopoControllo = (idOrdine: string) => (controlli && FERMA.has(controlli.get(idOrdine)?.esito as any) ? 'in_contestazione' : 'da_rettificare')
+        const colonnaControllo = (idOrdine: string) => (controlli?.has(idOrdine) ? { controllo: controlli.get(idOrdine) } : {})
         // Fatture gia' pagate da un caricamento precedente (export cumulativi): niente riga "solo tua" da
         // confermare, e fuori dal "tuo costo" annunciato. Sulle righe verso sotto il costo resta scritto
         // (serve a dividere buone e da controllare), ma alla conferma non si ripaga.
         const giaPagate = await fattureGiaPagate(adminRip, esiti.filter((e: any) => e.trovata && e.spedizioneId).map((e: any) => e.idOrdine))
         const costoProprio = (e: any): number => {
           if (Number(e.addebitoFornitore) > 0) return Math.round(Number(e.addebitoFornitore) * 100) / 100
+          // File di soli pesi: il costo e' un conto del portale. Se sul pacco quello del fornitore c'e' gia', niente
+          // secondo costo, e quindi niente riga "solo a carico" (la riga verso sotto, se c'e' da chiedere, nasce lo stesso).
+          if (costoGia.has(e.spedizioneId)) return 0
           const cat = e.catenaDalBasso || []
           const detentore = cat.length > 0 && cat[cat.length - 1] === myMaster
           const cd = e.costoDetentore
@@ -291,39 +322,83 @@ export async function POST(req: NextRequest) {
         // SOLO A TUO CARICO: sotto non c'e' niente da chiedere (gia' rettificata da un'altra fonte, reso,
         // stesso scaglione per tutti), ma il fornitore ha fatto pagare chi carica. La riga e' intestata a
         // lui stesso: confermandola paga lui, e a nessuno sotto arriva niente.
-        const soloMio = (e: any, rip: any, costo: number) => {
-          if (giaPagate.has(e.idOrdine)) return     // gia' pagata: come prima, nessuna riga
+        // PERCHE' (colonna perche, 05/11/2026): il motivo e, quando sotto «non c'e' niente da chiedere», i numeri del conto —
+        // chi sta sotto, quanto ha pagato, quanto pagherebbe col peso del fornitore e in che zona del suo listino. Prima la
+        // pagina scriveva «per chi sta sotto costa uguale» e il master non capiva: su 1ZF4328R6814924086 nascondeva un conto
+        // fatto su «Italia» per un pacco in Calabria (10,50 € contro 14,18).
+        const soloMio = (e: any, rip: any, costo: number, perche: any = null) => {
+          if (giaPagate.has(e.idOrdine)) { senzaRiga.giaPagate++; return }     // gia' pagata: come prima, nessuna riga
           soloATuoCarico++
           // Quanto aveva gia' pagato chi carica: dal suo listino (costoDetentore) o, nei file con
           // l'importo, dal suo livello nella catena.
-          const pagatoMio = e.costoDetentore?.pagato ?? (e.livelli || []).find((l: any) => l.masterId === myMaster)?.pagato ?? 0
+          const livMio = (e.livelli || []).find((l: any) => l.masterId === myMaster)
+          const pagatoMio = e.costoDetentore?.pagato ?? livMio?.pagato ?? 0
           daScrivere.push({
             master_id: myMaster, file_id: creaturaFile,
             spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
             cliente_id: null, target_master_id: myMaster,
-            peso_iniziale: e.pesoRealePrima, peso_volume_iniziale: e.pesoVolumePrima,
-            peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
+            peso_iniziale: e.pesoRealePrima, peso_reale: e.pesoDopo, ...volumiDelLivello(e, livMio),
             costo_iniziale: pagatoMio, costo_finale: Math.round((pagatoMio + costo) * 100) / 100,
             differenza: 0, fuori_sagoma: 0,
             supplementi_nomi: ((rip as any)?.supplementiNomi || []).join(' + ') || null,
+            costo_fornitore: costo,
+            stato: statoDopoControllo(e.idOrdine),
+            rif_fornitore: e.idOrdine,
+            colli_ripesati: e.colli_ripesati || null,
+            ...colonnaControllo(e.idOrdine),
+            perche,
+          })
+        }
+        // SUPPLEMENTO ARRIVATO DOPO I CHILI (lib/supplemento-tardivo): il pacco e' gia' rettificato, ma il fornitore
+        // addebita ora un supplemento fisso che la rettifica di allora non aveva. I chili non si richiedono, il
+        // supplemento si': al figlio diretto, come le righe normali, col costo del fornitore che resta a chi carica.
+        // Se la catena non si ricostruisce, o il supplemento c'era gia', resta "solo a tuo carico" come prima.
+        let supplementiArrivatiDopo = 0
+        const supplementoTardivo = (e: any, rip: any, costo: number): boolean => {
+          const fs = Number(rip?.supplementi || 0)
+          if (!(fs > 0) || rip?.reso || giaConSupplemento.has(e.spedizioneId) || giaPagate.has(e.idOrdine)) return false
+          const cat = e.catenaDalBasso || []
+          const mio = cat.indexOf(myMaster)
+          if (mio < 0 || e.catenaCompleta === false) return false
+          const figlio = mio > 0 ? cat[mio - 1] : null
+          const liv = figlio ? e.livelli.find((l: any) => l.masterId === figlio) : e.livelli.find((l: any) => l.clienteId)
+          if (!liv) return false
+          const vol = volumiDelLivello(e, liv)
+          daScrivere.push({
+            master_id: myMaster, file_id: creaturaFile,
+            spedizione_id: e.spedizioneId, numero_spedizione: e.ldv,
+            cliente_id: figlio ? null : liv.clienteId, target_master_id: figlio,
+            // Stesso peso prima e dopo: non e' una ripesatura, e trg_rettifica_no_doppia_ripesatura la lascia passare.
+            peso_iniziale: e.pesoDopo, peso_reale: e.pesoDopo, ...vol, peso_volume_iniziale: vol.peso_volume_reale,
+            costo_iniziale: liv.pagato, costo_finale: liv.pagato,
+            differenza: 0, fuori_sagoma: fs,
+            supplementi_nomi: nomeTardivo(rip?.supplementiNomi || []),
             costo_fornitore: costo,
             stato: 'da_rettificare',
             rif_fornitore: e.idOrdine,
             colli_ripesati: e.colli_ripesati || null,
           })
+          supplementiArrivatiDopo++
+          return true
         }
         for (const e of esiti) {
           if (!e.trovata || !e.spedizioneId) continue
           const rip = ripPerOrdine.get(e.idOrdine) as any
           const costo = costoProprio(e)
           // Già rettificata (OneTracking o import precedente) → non se ne crea una seconda. Il costo del
-          // fornitore pero' c'e' lo stesso: resta "solo a tuo carico".
-          if (giaRettificateSet.has(e.spedizioneId)) { giaRettificateCount++; if (costo > 0) soloMio(e, rip, costo); continue }
+          // fornitore pero' c'e' lo stesso: resta "solo a tuo carico", salvo un supplemento arrivato dopo.
+          if (giaRettificateSet.has(e.spedizioneId)) {
+            giaRettificateCount++
+            if (supplementoTardivo(e, rip, costo)) continue
+            if (costo > 0) soloMio(e, rip, costo, { tipo: 'gia_rettificata' })
+            else senzaRiga.giaRettificateSenzaCosto++
+            continue
+          }
           // RESO: il "peso reale" del file è il peso del RITORNO, non una ripesatura dell'andata:
           // darlo al motore riprezzerebbe l'andata su un peso che non è suo. Il reso ha il suo flusso
           // (prezzo = nolo di fascia), quindi qui NON si crea un addebito cliente. Il costo fornitore
           // (quello che E&A ha davvero pagato per il ritorno) resta scalato sotto, come per tutte.
-          if (rip?.reso) { resoSaltate++; if (costo > 0) soloMio(e, rip, costo); continue }
+          if (rip?.reso) { resoSaltate++; if (costo > 0) soloMio(e, rip, costo, { tipo: 'reso' }); else senzaRiga.resoSenzaCosto++; continue }
           // In attesa delle misure collo per collo: non si addebita adesso (sarebbe meno del
           // dovuto, e l'anti-doppione impedirebbe di correggerla dopo). Il costo del fornitore si
           // scala lo stesso, piu' sotto: quello e' uscito davvero.
@@ -352,7 +427,7 @@ export async function POST(req: NextRequest) {
           const liv = figlio
             ? e.livelli.find(l => l.masterId === figlio)
             : e.livelli.find(l => l.clienteId)
-          if (!liv || liv.differenza == null) continue
+          if (!liv || liv.differenza == null) { senzaRiga.nonCalcolabili++; continue }
           // SOLO RECUPERI, MAI RIMBORSI. La ripesatura del fornitore serve a incassare quello che
           // abbiamo fatturato in MENO; se riprezzata sul listino del livello esce piu' bassa (o
           // uguale) di quanto pagato — liv.differenza = dovuto - pagato <= 0 — non si crea una nota
@@ -364,13 +439,27 @@ export async function POST(req: NextRequest) {
           // banda normale NON la recupera. Si gira l'INTERO costo fornitore come supplemento fisso, che
           // cascata invariato fino al cliente che ha sforato — differenza a 0 (non e' un cambio-peso: il
           // peso_fatturato non si tocca). Verificato su 050187292960523 (5→18,6kg, costo 18,60 = 18,6×1€).
+          // LA PENALE E' DI CHI HA USATO IL SERVIZIO A PESO REALE: un collo DICHIARATO entro la soglia,
+          // e per questo tassato sul peso reale (stessa condizione di lib/agevolazione-misure pesoSuReale),
+          // che il corriere trova piu' pesante. Un collo dichiarato gia' sopra la soglia e' stato prezzato
+          // sul volumetrico come tutti: il sovrapprezzo e' una ripesatura normale e si riprezza col listino.
+          // Senza questa condizione il 30/10/2026 sono finiti "in penale" 121 pacchi dichiarati da 6,3 a
+          // 300 kg (es. 050026152906222, dichiarato 30,4 kg): sotto si pagavano i chili in piu' due volte,
+          // una col listino del livello e una con la "penale", che era il costo degli stessi chili.
           const pen = penalePerSped.get(e.spedizioneId)
-          const isPenaleBrt = !!pen && Number(e.pesoDopo || 0) > pen.sogliaKg && Number(e.addebitoFornitore || 0) > 0
+          const dichiaratoReale = Number(e.pesoRealePrima || 0)
+          const isPenaleBrt = !!pen && dichiaratoReale > 0 && dichiaratoReale <= pen.sogliaKg
+            && Number(e.pesoDopo || 0) > pen.sogliaKg && Number(e.addebitoFornitore || 0) > 0
           const fsEff = isPenaleBrt ? Math.round(Number(e.addebitoFornitore) * 100) / 100 : fs
           // A ZERO MA NON FERMA: il figlio non deve niente, ma qualcuno sotto di lui si' (vedi
           // qualcunoSottoDeve). La riga nasce a zero cosi' la catena prosegue e chi sta sotto la gira ai suoi.
           const aZero = liv.differenza < 0.01 && fsEff === 0
-          if (aZero && !qualcunoSottoDeve(e, figlio)) { if (costo > 0) soloMio(e, rip, costo); continue }
+          if (aZero && !qualcunoSottoDeve(e, figlio)) {
+            if (costo > 0) soloMio(e, rip, costo, { tipo: 'stesso_prezzo', chi: liv.chi, pagato: liv.pagato, dovuto: liv.dovuto,
+              zona: (liv as any).zona ?? null, peso_prima: e.pesoRealePrima ?? null, peso_dopo: e.pesoDopo ?? null })
+            else senzaRiga.nienteDaChiedere++
+            continue
+          }
           if (aZero) passateAZero++
           const diffRett = (!isPenaleBrt && liv.differenza >= 0.01) ? liv.differenza : 0
           if (!isPenaleBrt && e.addebitoFornitore > 0 && diffRett > e.addebitoFornitore * 3) {
@@ -387,10 +476,10 @@ export async function POST(req: NextRequest) {
             // "iniziale" = collo DICHIARATO: reale nella colonna Peso, volumetrico in Peso/Volume
             // (prima: peso_iniziale=fatturato e peso_volume_iniziale=0, cioè peso che mostrava il
             //  volume e peso/volume vuoto). Il costo resta calcolato sul fatturato, qui è solo display.
-            peso_iniziale: e.pesoRealePrima, peso_volume_iniziale: e.pesoVolumePrima,
             // Il volume vero (quello che fa salire il costo): prima era 0 anche sul primo livello,
             // così la sua Rettifica Costi mostrava "0,00" mentre il livello sotto vedeva il volume.
-            peso_reale: e.pesoDopo, peso_volume_reale: e.pesoVolumeDopo || 0,
+            // Col divisore del figlio, che e' chi paga questa riga (vedi volumiDelLivello).
+            peso_iniziale: e.pesoRealePrima, peso_reale: e.pesoDopo, ...volumiDelLivello(e, liv),
             // A zero il costo resta quello pagato: col listino del figlio potrebbe uscire anche piu' basso,
             // e mostrarlo sembrerebbe un rimborso che non c'e'.
             costo_iniziale: liv.pagato, costo_finale: (isPenaleBrt || aZero) ? liv.pagato : liv.dovuto,
@@ -404,7 +493,8 @@ export async function POST(req: NextRequest) {
             // (es. Velox) non hanno costo fornitore → resta null.
             // e, dal 22/10/2026, quello che si registra a CHI CARICA alla conferma (vedi costoProprio).
             costo_fornitore: costo,
-            stato: 'da_rettificare',
+            stato: statoDopoControllo(e.idOrdine),
+            ...colonnaControllo(e.idOrdine),
             rif_fornitore: e.idOrdine,     // l'anti-doppione: indice unico sul database
             // Le misure viaggiano con la riga: servono a chi la ricevera' per riprezzare col
             // PROPRIO listino quando la gira al livello sotto. La cifra in euro non scende lungo
@@ -518,12 +608,25 @@ export async function POST(req: NextRequest) {
         // I conteggi si SOMMANO a quelli gia' scritti dalle fette precedenti.
         if (creaturaFile) {
           const { data: pre } = await supabase.from('rettifiche_files')
-            .select('n_processate,n_trovate,n_scartati,n_da_rettificare').eq('id', creaturaFile).maybeSingle()
+            .select('n_processate,n_trovate,n_scartati,n_da_rettificare,esito').eq('id', creaturaFile).maybeSingle()
+          const prima: any = (pre as any)?.esito || {}
+          const piu = (k: string, n: number) => (Number(prima[k]) || 0) + n
           await supabase.from('rettifiche_files').update({
             n_processate: (pre?.n_processate || 0) + fetta.length,
             n_trovate: (pre?.n_trovate || 0) + esiti.filter(e => e.trovata).length,
             n_scartati: (pre?.n_scartati || 0) + esiti.filter(e => !e.trovata).length,
             n_da_rettificare: (pre?.n_da_rettificare || 0) + scritte,
+            // Per motivo, solo le righe che NON sono diventate rettifiche: quelle diventate rettifiche si contano dalle righe.
+            esito: {
+              spedizioni: totaleFile, righeNonSpedizione: Number((lette as any).scartate) || 0,
+              nonTrovate: piu('nonTrovate', esiti.filter(e => !e.trovata).length),
+              giaCaricate: piu('giaCaricate', fetta.length - nuove.length),
+              xlInAttesa: piu('xlInAttesa', nuove.length - daCalcolare.length),
+              fuoriCatena: piu('fuoriCatena', fuoriCatena), attesaMisure: piu('attesaMisure', attesaMisure), doppioni: piu('doppioni', doppioni),
+              giaPagate: piu('giaPagate', senzaRiga.giaPagate), giaRettificateSenzaCosto: piu('giaRettificateSenzaCosto', senzaRiga.giaRettificateSenzaCosto),
+              resoSenzaCosto: piu('resoSenzaCosto', senzaRiga.resoSenzaCosto), nienteDaChiedere: piu('nienteDaChiedere', senzaRiga.nienteDaChiedere),
+              nonCalcolabili: piu('nonCalcolabili', senzaRiga.nonCalcolabili),
+            },
           }).eq('id', creaturaFile)
         }
 
@@ -541,6 +644,9 @@ export async function POST(req: NextRequest) {
           aTuoCarico: Math.round(aTuoCarico * 100) / 100,   // costo di chi carica, da pagare alla conferma
           soloATuoCarico,                    // righe col solo costo di chi carica (sotto non c'e' niente da chiedere)
           passateAZero,                      // create a zero: al figlio non costano, servono a chi sta sotto
+          supplementiArrivatiDopo,           // gia' rettificate per i chili: sotto si gira solo il supplemento
+          // Il confronto con OneTracking di questa fetta (null se per chi carica non e' acceso).
+          controlloOneTracking: controlli ? riepilogoControllo(controlli, esiti, daScrivere) : null,
           // Formato XL di Poste: spedizioni con colli non misurati (in attesa del prossimo file), con
           // piu' righe che colli (da guardare a mano), e — per tutto il file — LDV senza nessuna misura.
           misureIncomplete, colliInPiu, senzaMisure: lette.senzaMisure || 0,
@@ -590,6 +696,8 @@ export async function POST(req: NextRequest) {
   }
 
   let nProcessate = 0, nTrovate = 0, nScartati = 0, nDaRettificare = 0
+  // Dove finiscono le righe che non diventano rettifiche (rettifiche_files.esito), come nel ramo delle ripesature.
+  const motivi = { nonTrovate: 0, annullate: 0, fuoriCatena: 0, giaRettificateSenzaCosto: 0, nonCalcolabili: 0, nienteDaChiedere: 0 }
   const { data: fileRec } = await supabase.from('rettifiche_files').insert({
     master_id: myMaster, nome_file: nomeFile, n_tot_spedizioni: (righe || []).length,
   }).select().single()
@@ -602,20 +710,20 @@ export async function POST(req: NextRequest) {
       .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,stato,contrassegno,assicurazione,valore_merce,servizi_accessori')
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
-    if (!spedizione) { nScartati++; continue }
+    if (!spedizione) { nScartati++; motivi.nonTrovate++; continue }
     // Niente rettifiche su spedizioni ANNULLATE: sono già stornate, aggiungere una rettifica
     // lascerebbe un residuo non rimborsato a ogni livello della catena.
-    if ((spedizione as any).stato === 'annullata') { nScartati++; continue }
+    if ((spedizione as any).stato === 'annullata') { nScartati++; motivi.annullate++; continue }
 
     // Chi carica deve essere il master della spedizione o un suo ANTENATO
     const catena = await risaliCatena(adminDb, spedizione.master_id)
     const idx = catena.indexOf(myMaster)
-    if (idx === -1) { nScartati++; continue }
+    if (idx === -1) { nScartati++; motivi.fuoriCatena++; continue }
 
     // Anti-duplicato: salta se esiste già una rettifica CONFERMATA o IN ATTESA per la spedizione
     // (prima bloccava solo le confermate → si potevano creare doppioni "da_rettificare")
     const { data: giaEsiste } = await supabase.from('rettifiche').select('id').eq('spedizione_id', spedizione.id).or('confermata.eq.true,stato.eq.da_rettificare').limit(1)
-    if (giaEsiste && giaEsiste.length > 0) { nScartati++; continue }
+    if (giaEsiste && giaEsiste.length > 0) { nScartati++; motivi.giaRettificateSenzaCosto++; continue }
     nTrovate++
 
     const pesoIniziale = Number(spedizione.peso_fatturato || spedizione.peso_reale || 0)
@@ -675,7 +783,7 @@ export async function POST(req: NextRequest) {
       }
       const differenza = costoIniziale - costoFinale
       // SOLO RECUPERI (differenza negativa = addebito), mai rimborsi: vedi il ramo ripesature sopra.
-      if (differenza > -0.01) { continue }
+      if (differenza > -0.01) { motivi.nienteDaChiedere++; continue }
       nDaRettificare++
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,
@@ -690,7 +798,7 @@ export async function POST(req: NextRequest) {
       // ── CATENA: la rettifica si ferma al primo master sotto di me ──
       const targetMasterId = catena[idx - 1]
       const { data: tm } = await adminDb.from('masters').select('parent_listino_id').eq('id', targetMasterId).maybeSingle()
-      if (!tm?.parent_listino_id) { nScartati++; continue }
+      if (!tm?.parent_listino_id) { nScartati++; motivi.nonCalcolabili++; continue }
       const pesoRicalcolo = pesoReale || pesoIniziale
       const prezzoIni = await calcolaPrezzoListino(adminDb, {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
@@ -702,12 +810,12 @@ export async function POST(req: NextRequest) {
         cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
         packages: [{ weight: pesoRicalcolo }], corriereId: spedizione.corriere_id,
       })
-      if (!prezzoIni || !prezzoFin) { nScartati++; continue }
+      if (!prezzoIni || !prezzoFin) { nScartati++; motivi.nonCalcolabili++; continue }
       const costoIniziale = prezzoIni.prezzo
       const costoFinale = prezzoFin.prezzo
       const differenza = costoIniziale - costoFinale
       // SOLO RECUPERI (differenza negativa = addebito), mai rimborsi: vedi il ramo ripesature sopra.
-      if (differenza > -0.01) { continue }
+      if (differenza > -0.01) { motivi.nienteDaChiedere++; continue }
       nDaRettificare++
       rettificheToInsert.push({
         master_id: myMaster, file_id: fileRec?.id, spedizione_id: spedizione.id,
@@ -724,6 +832,7 @@ export async function POST(req: NextRequest) {
   if (rettificheToInsert.length > 0) await supabase.from('rettifiche').insert(rettificheToInsert)
   await supabase.from('rettifiche_files').update({
     n_processate: nProcessate, n_trovate: nTrovate, n_scartati: nScartati, n_da_rettificare: nDaRettificare,
+    esito: { spedizioni: daProcessare.length, anomalie: anomalie.length, ...motivi, nonTrovate: motivi.nonTrovate + motivi.annullate },
   }).eq('id', fileRec?.id)
   return NextResponse.json({ success: true, fileId: fileRec?.id, nProcessate, nTrovate, nScartati, nDaRettificare, anomalie })
 }

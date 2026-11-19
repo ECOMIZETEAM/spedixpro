@@ -1,5 +1,7 @@
 import { Resend } from 'resend'
 import { eIndirizzoInterno } from '@/lib/indirizzi-interni'
+import { eSpedizioneDaAmazon } from '@/lib/compratore-amazon'
+import { COSA_FARE_ALLARME } from '@/lib/allarmi-sicurezza'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 // Mittente con NOME VISIBILE: se la env contiene solo l'indirizzo (noreply@...), Gmail mostrava
@@ -75,6 +77,27 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
 }
 
+// Il codice della verifica in due passaggi via mail (lib/verifica-mail). Il codice sta anche
+// nell'oggetto: lo si legge gia' dalla notifica del telefono, senza aprire la mail.
+export async function inviaCodiceAccesso({ to, codice, minuti }: { to: string; codice: string; minuti: number }): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const r: any = await invia({
+      from: FROM,
+      to,
+      subject: `Codice di accesso MoovExpress: ${codice}`,
+      html: wrap(`
+        <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">Il tuo codice di accesso</h2>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 6px">Per entrare in MoovExpress scrivi questo codice:</p>
+        <p style="font-size:32px;letter-spacing:8px;font-weight:800;color:#1a1a1a;text-align:center;margin:20px 0">${esc(codice)}</p>
+        <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 18px">Vale ${minuti} minuti e si può usare una volta sola.</p>
+        <p style="color:#999;font-size:12px;line-height:1.5;margin:0">Se non stai provando ad accedere tu, qualcuno conosce la tua password: cambiala subito con «Password dimenticata» nella pagina di accesso.</p>
+      `),
+    })
+    if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
+    return { ok: true }
+  } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
+}
+
 // Email di prova (verifica dominio/mittente Resend). Ritorna esito + id Resend o errore.
 export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: string; id?: string | null; error?: string }> {
   try {
@@ -115,8 +138,8 @@ export async function inviaEmailDoganaFerma({ to, destNome, numero, paese, maste
       }
     }
     const inner = `
-      <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">La tua spedizione è ferma in dogana</h2>
-      <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 14px">${destNome ? 'Ciao ' + esc(destNome) + ', ' : ''}la spedizione <strong>${esc(numero)}</strong>${paese ? ' verso ' + esc(paese) : ''} è bloccata in dogana e non può partire finché non riceviamo alcuni dati obbligatori per l'esportazione:</p>
+      <h2 style="font-size:19px;color:#1a1a1a;margin:0 0 10px">Servono documenti doganali per la tua spedizione</h2>
+      <p style="color:#555;font-size:14px;line-height:1.6;margin:0 0 14px">${destNome ? 'Ciao ' + esc(destNome) + ', ' : ''}la spedizione <strong>${esc(numero)}</strong>${paese ? ' verso ' + esc(paese) : ''} non è ancora partita: il corriere emette la lettera di vettura solo dopo aver ricevuto alcuni dati obbligatori per l'esportazione:</p>
       <ul style="color:#555;font-size:14px;line-height:1.7;margin:0 0 16px;padding-left:20px">
         <li><strong>Codice EORI</strong> del mittente (l'identificativo doganale dell'esportatore)</li>
         <li><strong>Contenuto dettagliato</strong> della spedizione, articolo per articolo, con il valore di ciascuno</li>
@@ -126,7 +149,7 @@ export async function inviaEmailDoganaFerma({ to, destNome, numero, paese, maste
       ${link ? `<p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#f97316;color:#fff;text-decoration:none;border-radius:8px;padding:12px 26px;font-size:14px;font-weight:700;display:inline-block">Apri il ticket e invia i documenti</a></p>` : ''}
     `
     const html = brand ? wrapBrand(inner, { logo: brand.logo, nome: brand.nome }) : wrap(inner)
-    const r: any = await invia({ from, to, subject: `Spedizione ${numero} ferma in dogana — servono alcuni dati`, html })
+    const r: any = await invia({ from, to, subject: `Spedizione ${numero}: servono documenti doganali`, html })
     if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
     return { ok: true }
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
@@ -228,6 +251,43 @@ export async function inviaControlloGiornaliero(to: string, righe: { area: strin
     return { ok: true }
   } catch (err: any) {
     console.error('[SENTINELLA] email non inviata:', err?.message || err)
+    return { ok: false }
+  }
+}
+
+// ALLARMI DI SICUREZZA (/api/controllo/allarmi, ogni 15 minuti, solo quando c'e' qualcosa di nuovo).
+// Per ogni allarme: cosa e' successo, chi, quando e cosa fare (lib/allarmi-sicurezza: lo stesso testo
+// della pagina Allarmi di sicurezza). Risponde ok solo se Resend ha preso l'email: se no gli allarmi
+// restano "da spedire" e riparte al giro dopo.
+export async function inviaAllarmiSicurezza(to: string, allarmi: { tipo: string; descrizione: string; chi: string; quando: string }[]): Promise<{ ok: boolean }> {
+  if (!to || !allarmi.length) return { ok: false }
+  const esc = (t: string) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[c])
+  const blocco = (a: typeof allarmi[number]) => `
+    <div style="border:1px solid #fecaca;background:#fff7f7;border-radius:8px;padding:12px 14px;margin:0 0 10px">
+      <div style="font-size:14px;color:#b91c1c;font-weight:700;margin:0 0 4px">${esc(a.descrizione)}</div>
+      <div style="font-size:12px;color:#6b7280;margin:0 0 6px">${esc(a.quando)}${a.chi ? ` · ${esc(a.chi)}` : ''}</div>
+      <div style="font-size:13px;color:#374151;line-height:1.5">${esc(COSA_FARE_ALLARME[a.tipo] || 'Va guardato.')}</div>
+    </div>`
+  try {
+    const r: any = await invia({
+      from: FROM, to,
+      subject: `🚨 MoovExpress — ${allarmi.length === 1 ? 'allarme di sicurezza' : `${allarmi.length} allarmi di sicurezza`}`,
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 4px">Allarme di sicurezza</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 16px">
+          I registri hanno visto qualcosa fuori dal normale. Non vuol dire per forza un attacco, ma va guardato.
+        </p>
+        ${allarmi.map(blocco).join('')}
+        <p style="color:#9ca3af;font-size:12px;line-height:1.6;margin:14px 0 0">
+          Ogni allarme va esaminato e l'esito scritto: lo chiede Amazon (politica sui dati, punto 2.6.2).
+          Lo stesso fatto non si ripete prima di un'ora.
+        </p>
+      `),
+    })
+    if (r?.error) { console.error('[ALLARMI] email non inviata:', r.error?.message || r.error); return { ok: false } }
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[ALLARMI] email non inviata:', err?.message || err)
     return { ok: false }
   }
 }
@@ -354,6 +414,13 @@ export async function inviaEmailSpedizioneCreata(p: {
   if (p.masterId) {
     try { const { masterEDemo } = await import('@/lib/demo'); if (await masterEDemo(p.masterId)) return } catch { /* best-effort */ }
   }
+  // Ordine del collegamento diretto Amazon: ne' email ne' SMS (lib/compratore-amazon).
+  if (p.spedizioneId) {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      if (await eSpedizioneDaAmazon(createAdminSupabase(), p.spedizioneId)) return
+    } catch { return }
+  }
   // NOTIFICA SMS al destinatario (best-effort, indipendente dall'email): stesso evento "spedizione
   // creata". Gatea da sola sulla preferenza notifica_sms e sul credito SMS; non parte se non c'è il
   // gateway configurato. Sta qui perché ogni porta che manda l'email passa già da questa funzione.
@@ -448,6 +515,7 @@ export async function inviaEmailGiacenza(p: {
   trackingToken?: string | null
   masterId?: string | null
   notificaDest?: boolean
+  spedizioneId?: string | null
 }): Promise<{ ok: boolean; error?: string }> {
   const dest = String(p.destEmail || '').trim().toLowerCase()
   if (!(p.notificaDest ?? true)) return { ok: false, error: 'notifiche disattivate dal cliente' }
@@ -455,6 +523,13 @@ export async function inviaEmailGiacenza(p: {
   // Master in prova: non si scrive a nessuno di vero.
   if (p.masterId) {
     try { const { masterEDemo } = await import('@/lib/demo'); if (await masterEDemo(p.masterId)) return { ok: false, error: 'master demo' } } catch { /* best-effort */ }
+  }
+  // Ordine del collegamento diretto Amazon: al compratore scrive solo Amazon (lib/compratore-amazon).
+  if (p.spedizioneId) {
+    try {
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      if (await eSpedizioneDaAmazon(createAdminSupabase(), p.spedizioneId)) return { ok: false, error: 'ordine Amazon dal collegamento' }
+    } catch { return { ok: false, error: 'controllo ordine Amazon non riuscito' } }
   }
 
   // Marchio del master, come per la spedizione creata: il destinatario non ha mai sentito nominare
@@ -498,6 +573,44 @@ export async function inviaEmailGiacenza(p: {
       subject: `Il tuo pacco \u00e8 in attesa \u2014 spedizione ${p.numero}`,
       html: (brandLogo || brandNome) ? wrapBrand(corpo, { logo: brandLogo, nome: brandNome }) : wrap(corpo),
     })
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'invio non riuscito' }
+  }
+}
+
+// LA PROFORMA AL CLIENTE, col PDF allegato. Parte a nome del master e col suo marchio: il cliente
+// compra da lui. Le risposte vanno al master (replyTo), non a noi.
+export async function inviaEmailProforma(p: {
+  to: string; replyTo?: string | null
+  master: { nome: string; logo?: string | null }
+  cliente: string; numero: string; dal: string; al: string; totale: number
+  pdf: Buffer; nomeFile: string
+}): Promise<{ ok: boolean; error?: string }> {
+  const dest = String(p.to || '').trim().toLowerCase()
+  if (!EMAIL_RE.test(dest)) return { ok: false, error: 'email del cliente non valida' }
+  const giorno = (g: string) => `${g.slice(8, 10)}/${g.slice(5, 7)}/${g.slice(0, 4)}`
+  const euro = p.totale.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const corpo = `
+          <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Fattura proforma ${esc(p.numero)}</h2>
+          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px">Gentile <strong>${esc(p.cliente)}</strong>,
+          in allegato la fattura proforma dei servizi dal <strong>${giorno(p.dal)}</strong> al <strong>${giorno(p.al)}</strong>,
+          per un totale di <strong>€ ${euro}</strong> IVA compresa.</p>
+          <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 10px">Nel PDF trovi il riepilogo per voce e, dalla seconda pagina, il dettaglio di ogni movimento.</p>
+          <p style="color:#999;font-size:12px;line-height:1.6;margin:14px 0 0">Documento non valido ai fini fiscali. Per qualsiasi domanda rispondi a questa email.</p>
+        `
+  const fromAddr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+  const nome = String(p.master.nome || '').replace(/["<>]/g, '').slice(0, 60)
+  const fromBrand = nome ? `${nome} <${fromAddr}>` : FROM
+  const replyTo = EMAIL_RE.test(String(p.replyTo || '').trim().toLowerCase()) ? String(p.replyTo).trim().toLowerCase() : undefined
+  try {
+    const r: any = await invia({
+      from: fromBrand, to: dest, replyTo,
+      subject: `Fattura proforma ${p.numero} - ${nome || 'MoovExpress'}`,
+      html: wrapBrand(corpo, { logo: p.master.logo || null, nome: nome || null }),
+      attachments: [{ filename: p.nomeFile, content: p.pdf }],
+    })
+    if (r?.error) return { ok: false, error: r.error?.message || 'invio non riuscito' }
     return { ok: true }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'invio non riuscito' }

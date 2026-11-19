@@ -4,6 +4,7 @@ import PuliziaSessione from './components/PuliziaSessione'
 const MESSAGGI: Record<string, string> = {
   credenziali_errate: 'Email o password non corretti.',
   account_non_attivo: 'Account non attivo. Contatta il tuo referente.',
+  troppi_tentativi: 'Troppi tentativi sbagliati: per sicurezza l\'accesso è sospeso per 15 minuti.',
 }
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ error?: string }> }) {

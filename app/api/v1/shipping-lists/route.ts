@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
@@ -52,11 +52,6 @@ export async function POST(req: NextRequest) {
   // lavorazione" per sempre, nel portale del cliente e in quello del master.
   await admin.from('spedizioni').update({ stato: 'spedita' }).in('id', idsRighe).eq('stato', 'in_lavorazione')
 
-  // Tracking ai marketplace collegati: senza, gli ordini restavano non evasi e i tempi di spedizione
-  // del marketplace continuavano a correre. UNICA porta: fulfillMarketplace applica la guardia
-  // "mai evadere col numero provvisorio" per tutte le piattaforme. Best-effort.
-  try { const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace'); await fulfillMarketplace(admin, idsRighe) } catch { }
-
   // Chiusura al corriere (best-effort). `confermata_vettore` NON si scrive prima: veniva messo a
   // true insieme all'insert, quindi una chiusura fallita restava marcata come trasmessa e nessuno
   // se ne accorgeva piu'. Lo scrivono le funzioni di chiusura quando riesce davvero.
@@ -92,6 +87,19 @@ export async function POST(req: NextRequest) {
     await chiudiDistintaMoovexpress(admin, distinta.id)
     await chiudiDistintaSenzaManifest(admin, distinta.id)
   } catch (e) { console.error('API close-day senza manifest:', e) }
+
+  // Tracking ai marketplace collegati: senza, gli ordini restavano non evasi e i tempi di spedizione
+  // del marketplace continuavano a correre. UNICA porta: fulfillMarketplace applica la guardia
+  // "mai evadere col numero provvisorio" per tutte le piattaforme. Best-effort.
+  // DOPO la chiusura al corriere e a risposta data. Dal 10/11/2026 e' qui che parte l'evasione vera (prima
+  // gli ordini erano gia' evasi all'etichetta e questa chiamata li saltava), e una distinta con 164 ordini
+  // dei negozi (4/11/2026) chiede minuti di chiamate ai negozi. Messa prima, come era, se la funzione
+  // finiva il tempo la distinta non arrivava al corriere: niente ritiro. Quello che non finisce qui lo
+  // riprende il recupero ogni 20 minuti (app/api/integrazioni/fulfill-retry).
+  after(async () => {
+    try { const { fulfillMarketplace } = await import('@/lib/fulfillMarketplace'); await fulfillMarketplace(admin, idsRighe) }
+    catch (e: any) { console.error('[V1][DISTINTE][EVASIONE NEGOZI]', distinta.id, e?.message) }
+  })
 
   // Rileggo il borderò eventualmente prodotto (spedisci): lo restituisco come PDF base64.
   // NB: non esiste un endpoint /pdf per le distinte via API — restituisco direttamente il documento del corriere.

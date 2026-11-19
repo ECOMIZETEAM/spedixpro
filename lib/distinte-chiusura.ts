@@ -48,7 +48,9 @@ export async function chiudiDistintaMoovexpress(supabase: any, distintaId: strin
 // ALLOWLIST ESPLICITA, non "tutti gli altri": un corriere DIRETTO futuro che richiede trasmissione reale
 // non dev'essere mai auto-attestato per sbaglio (merce ignota al corriere mascherata da verde = il
 // contrario del bug, e più pericoloso). Un tipo nuovo resta fuori e lo si gestisce apposta.
-export const TIPI_SENZA_MANIFEST = ['easyparcel', 'interno', 'inpost', 'poste', 'dielle']
+// ecosmos: la spedizione e' registrata da loro alla create e il ritiro e' automatico (lib/ecosmos.ts),
+// la loro API non ha una chiusura di giornata.
+export const TIPI_SENZA_MANIFEST = ['easyparcel', 'interno', 'inpost', 'poste', 'dielle', 'ecosmos']
 
 export async function chiudiDistintaSenzaManifest(supabase: any, distintaId: string) {
   try {

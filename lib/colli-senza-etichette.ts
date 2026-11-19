@@ -15,35 +15,43 @@ const CAMPI_COLLO = ['peso', 'lunghezza', 'larghezza', 'altezza']
 export async function spedizioniConColliLeggeri(admin: any, ids: string[], colonne: string): Promise<Map<string, any>> {
   const out = new Map<string, any>()
   const unici = Array.from(new Set(ids.filter(Boolean)))
-  for (let i = 0; i < unici.length; i += 150) {
-    const blocco = unici.slice(i, i + 150)
-    const { data: righe } = await admin.from('spedizioni').select(colonne ? `id,colli,${colonne}` : 'id,colli').in('id', blocco)
-    for (const r of (righe || []) as any[]) out.set(r.id, { ...r, colli_dettaglio: [] })
-    // QUANTI COLLI LEGGERE: ogni campo estratto costringe il database ad aprire l'intero dettaglio (etichette
-    // comprese), quindi se ne chiedono il meno possibile. Il dettaglio non ha mai piu' elementi dei colli
-    // della spedizione (verificato il 19/10 sulle 4.648 in attesa): le monocollo — quasi tutte — si leggono
-    // al solo collo 0, le multicollo fino al loro numero di colli.
-    const gruppi = new Map<number, string[]>()
-    for (const r of (righe || []) as any[]) {
-      const n = Math.min(50, Math.max(1, Number(r.colli) || 1))
-      gruppi.set(n, [...(gruppi.get(n) || []), r.id])
-    }
-    for (const [n, idsGruppo] of gruppi) {
-      const campi = ['id']
-      for (let k = 0; k < n; k++) for (const c of CAMPI_COLLO) campi.push(`c${k}_${c}:colli_dettaglio->${k}->${c}`)
-      const { data: colli } = await admin.from('spedizioni').select(campi.join(',')).in('id', idsGruppo)
-      for (const r of (colli || []) as any[]) {
-        const dett: any[] = []
-        for (let k = 0; k < n; k++) {
-          const el: any = {}
-          for (const c of CAMPI_COLLO) { const v = r[`c${k}_${c}`]; if (v !== null && v !== undefined) el[c] = v }
-          if (!Object.keys(el).length) break           // fine dell'array
-          dett.push(el)
+  // QUATTRO BLOCCHI ALLA VOLTA (28/10/2026). Sono sole letture e ogni blocco scrive solo le sue spedizioni:
+  // in fila, con le 6.141 rettifiche OneTracking di Wave in attesa, Rettifica Costi restava ~30 s su
+  // "Caricamento…" (82 letture da ~300 ms una dopo l'altra). Stessi dati, stesso risultato.
+  const blocchi: string[][] = []
+  for (let i = 0; i < unici.length; i += 150) blocchi.push(unici.slice(i, i + 150))
+  let prossimo = 0
+  await Promise.all(Array.from({ length: Math.min(4, blocchi.length) }, async () => {
+    while (prossimo < blocchi.length) {
+      const blocco = blocchi[prossimo++]
+      const { data: righe } = await admin.from('spedizioni').select(colonne ? `id,colli,${colonne}` : 'id,colli').in('id', blocco)
+      for (const r of (righe || []) as any[]) out.set(r.id, { ...r, colli_dettaglio: [] })
+      // QUANTI COLLI LEGGERE: ogni campo estratto costringe il database ad aprire l'intero dettaglio (etichette
+      // comprese), quindi se ne chiedono il meno possibile. Il dettaglio non ha mai piu' elementi dei colli
+      // della spedizione (verificato il 19/10 sulle 4.648 in attesa): le monocollo — quasi tutte — si leggono
+      // al solo collo 0, le multicollo fino al loro numero di colli.
+      const gruppi = new Map<number, string[]>()
+      for (const r of (righe || []) as any[]) {
+        const n = Math.min(50, Math.max(1, Number(r.colli) || 1))
+        gruppi.set(n, [...(gruppi.get(n) || []), r.id])
+      }
+      for (const [n, idsGruppo] of gruppi) {
+        const campi = ['id']
+        for (let k = 0; k < n; k++) for (const c of CAMPI_COLLO) campi.push(`c${k}_${c}:colli_dettaglio->${k}->${c}`)
+        const { data: colli } = await admin.from('spedizioni').select(campi.join(',')).in('id', idsGruppo)
+        for (const r of (colli || []) as any[]) {
+          const dett: any[] = []
+          for (let k = 0; k < n; k++) {
+            const el: any = {}
+            for (const c of CAMPI_COLLO) { const v = r[`c${k}_${c}`]; if (v !== null && v !== undefined) el[c] = v }
+            if (!Object.keys(el).length) break           // fine dell'array
+            dett.push(el)
+          }
+          const riga = out.get(r.id)
+          if (riga) riga.colli_dettaglio = dett
         }
-        const riga = out.get(r.id)
-        if (riga) riga.colli_dettaglio = dett
       }
     }
-  }
+  }))
   return out
 }

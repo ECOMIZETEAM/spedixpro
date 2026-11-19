@@ -6,6 +6,18 @@
 // "Operazione non supportata dal provider KSync" tale e quale.
 const NOMI_FORNITORI = /spediamo\s*pro|spedisci\.?online|core\.spediamopro\.com|easy\s*parcel|api\.easyparcel\.it|\bdva\b|k\s*sync(wrapper)?|parcel\s*pilot|parcelpilot\.it/gi
 
+// GLI ESITI DEL PONTE DI CONDIVISIONE CHE NON VENGONO DA UN CORRIERE, MA DA NOI. Attraversano uno o due
+// salti (cliente → Wave → LOGIXIA) e a ogni salto passano da erroreCorrierePulito: senza la regola qui sotto
+// diventavano "Il corriere non può gestire questa spedizione (…" tagliati a 120 caratteri, come il 9/11/2026
+// il messaggio della guardia doppione arrivava al cliente con il numero della gamba di LOGIXIA.
+// Testi decisi da Lorenzo (9/11 e 12/11/2026).
+export const MSG_PONTE_NON_CONCLUSO = 'Il corriere non ha risposto in tempo: la spedizione non è stata creata e il credito non è stato scalato. Riprova fra qualche minuto.'
+export const MSG_TENTATIVO_IN_ANNULLO = 'Il tentativo precedente di questo ordine non si è concluso: lo stiamo annullando, riprova fra 15 minuti.'
+// La LDV era nata ma la riga della spedizione non si e' scritta: le gambe si annullano e il credito torna.
+// Prima: «creata sul corriere ma non registrata, contatta l'assistenza», senza storno (12/11/2026).
+export const MSG_PONTE_NON_REGISTRATA = 'Spedizione non creata per un errore temporaneo: il credito è stato restituito. Riprova.'
+const MSG_PONTE = [MSG_PONTE_NON_CONCLUSO, MSG_TENTATIVO_IN_ANNULLO, MSG_PONTE_NON_REGISTRATA]
+
 // SVINCOLO GIACENZA: l'errore del corriere arrivava all'utente come JSON grezzo
 // ('release : {"processId":"<jmkc…>","error":{"id":"err_…","status":500,…}}') — illeggibile e
 // inutile. Qui si estrae la causa e la si traduce in un'indicazione operativa.
@@ -101,8 +113,23 @@ export function erroreRitiroPulito(raw: any): string {
   if (!msg) msg = s.replace(/^.*?failed[^:]*:\s*/i, '').replace(/\{[\s\S]*\}/, '').trim()
   msg = msg.replace(NOMI_FORNITORI, '').replace(/pickup failed[^:]*:?/ig, '').replace(/\s{2,}/g, ' ').trim()
   // Messaggi tipici del corriere → testo chiaro in italiano per l'utente.
-  if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg) || /time slot not compatible with today/i.test(msg) || /nella mattina stessa/i.test(msg)) {
+  if (/pickup_date\s*=\s*today.*no longer possible/i.test(msg) || /today.*no longer possible/i.test(msg) || /time slot not compatible with today/i.test(msg) || /nella mattina stessa|per la stessa giornata|same-day pickup/i.test(msg)) {
     return 'Il ritiro in giornata non è più disponibile per questo corriere: scegli una data futura (di norma il giorno lavorativo successivo).'
+  }
+  // Rifiuti di SpediamoPro che arrivavano in inglese (3-17/11/2026: 133 "not eligible", 57 "already
+  // assigned", 99 "pickup address"): quasi sempre spedizioni gia' in un ritiro, gia' partite o
+  // annullate. Non e' un guasto, ma chi legge deve capire che non c'e' niente da riprovare.
+  if (/already assigned to a pickup/i.test(msg)) {
+    return 'Questa spedizione è già in un ritiro prenotato: non serve richiederlo di nuovo.'
+  }
+  if (/not eligible for pickup/i.test(msg)) {
+    return 'Questa spedizione non si può più mettere in un ritiro: è già in un ritiro, è già partita oppure è stata annullata.'
+  }
+  if (/does not allow pickup/i.test(msg)) {
+    return 'Il servizio di questa spedizione non prevede il ritiro a domicilio: il pacco va consegnato a un punto del corriere.'
+  }
+  if (/pickup address is not valid for the shipment sender/i.test(msg)) {
+    return 'Il ritiro va fatto all\'indirizzo del mittente della spedizione: per spedizioni di mittenti diversi serve un ritiro per ciascuno.'
   }
   // "Nessun prezzo impostato nel listino per il contratto X per il peso inserito" e la variante
   // "Contratto X non ha un prezzo impostato per fascia di peso o per questa zona di consegna": il
@@ -172,7 +199,24 @@ export function erroreTrackingPulito(raw: any): string {
 // Messaggio pulito quando il corriere rifiuta la spedizione: MAI il nome del provider
 // (SpediamoPro/Spedisci.online) né il testo grezzo dell'API. Deduce la causa dai keyword.
 export function erroreCorrierePulito(raw: any): string {
+  // Gli esiti del ponte passano identici a ogni salto (vedi MSG_PONTE): vanno PRIMA di tutto, o l'ultima
+  // regola qui sotto li incapsulerebbe in "Il corriere non può gestire…" e li taglierebbe a ogni salto.
+  const nostro = MSG_PONTE.find(m => String(raw || '').includes(m))
+  if (nostro) return nostro
   const t = String(raw || '').toLowerCase()
+  // CAMPO TROPPO LUNGO. GLS Europa: "Indirizzo maggiore di 40 caratteri" (e il nostro controllo prima di
+  // chiamarlo, lib/gls erroreParcelGls). Senza questa regola diventava "Indirizzo non valido: controlla
+  // nome, indirizzo, citta', provincia e CAP", che manda a cercare l'errore dove non c'e': il 18/11/2026
+  // BOTTEGA PAESANO ha riprovato quattro volte cambiando la provincia. Il testo contiene di proposito
+  // "massimo N caratteri" e il nome del campo: al salto di condivisione dopo esce identico.
+  const troppoLungo = String(raw || '').match(/(?:maggiore di|oltre i?|massimo|max\.?)\s*(\d+)\s*caratteri/i)
+  if (troppoLungo && /indiriz|localit|citt|ragione sociale|\bnome\b/.test(t)) {
+    const campo = /indiriz/.test(t) ? 'Indirizzo' : /localit|citt/.test(t) ? 'Località' : 'Nome'
+    const lungo = campo === 'Località' ? 'troppo lunga' : 'troppo lungo'
+    const chi = /mittent/.test(t) && !/destinat/.test(t) ? 'del mittente' : 'del destinatario'
+    const ora = String(raw || '').match(/\(ora (\d+)\)/i)
+    return `${campo} ${chi} ${lungo} per il corriere: massimo ${troppoLungo[1]} caratteri${ora ? ` (ora ${ora[1]})` : ''}. Accorcialo e riprova; il resto puoi scriverlo nelle note.`
+  }
   // CARATTERE NON AMMESSO (POSTE: "Mittente : Campo obbligatorio! Non sono ammessi i caratteri escape e
   // simboli speciali"). Va PRIMA della regola "Campo obbligatorio": il 15/10/2026 un trattino lungo nel
   // nome mittente arrivava al cliente come "Indirizzo non valido" e lo mandava a ricontrollare CAP e
@@ -186,6 +230,19 @@ export function erroreCorrierePulito(raw: any): string {
   }
   if (/timed\s*out|timeout|0 bytes received/.test(t))
     return 'Il corriere non ha risposto in tempo (rallentamento momentaneo dei suoi sistemi). Riprova tra qualche istante.'
+  // CONTRASSEGNO OLTRE IL MASSIMO DELLA MODALITA' DI INCASSO. Poste: "Importo non compatibile con metodo di
+  // rimessa contanti | Il valore di contrassegno 2.415 e' superiore al massimo consentito:1.999,99". Il
+  // 29/10/2026 la regola generica piu' sotto lo rendeva "non gestibile… o importo oltre il massimo", senza il
+  // numero e senza dire che con l'assegno si arriva a 12.499,99 €: il cliente ha pensato all'assicurazione.
+  // Il massimo si legge dalla risposta, non si scrive qui: se Poste lo cambia, il messaggio lo segue.
+  // Il testo contiene di proposito "massimo consentito: <importo>" e "contanti": al salto di condivisione
+  // dopo esce identico invece di diventare il messaggio generico.
+  const maxCod = String(raw || '').match(/massimo consentito\s*:?\s*([\d.]+,\d{2})/i)
+  if (maxCod && /contrassegn|rimessa/.test(t)) {
+    return /contant/.test(t)
+      ? `Contrassegno in contanti oltre il massimo consentito: ${maxCod[1]} €. Scegli l'incasso con assegno bancario o circolare, oppure riduci l'importo.`
+      : `Contrassegno oltre il massimo consentito: ${maxCod[1]} € per l'incasso con assegno. Riduci l'importo.`
+  }
   // CREDITO di un conto A MONTE esaurito — tipico della CONDIVISIONE ("Credito insufficiente:
   // disponibili € X, spedizione € Y", che arriva dal venditore) o del conto-corriere del master
   // ("120 CREDIT - ... (credito: 0.53, costo: ...)"). Quel saldo è del MASTER/detentore, NON del

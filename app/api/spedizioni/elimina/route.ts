@@ -103,6 +103,19 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: la spedizione è in cancellazione. Verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
+  // ── DIELLE: nessun annullo via API e il portale del fornitore non lascia eliminare (lib/annullaSpedizione).
+  //    Coda manuale del DETENTORE SUBITO, non fra 48 ore: intanto il detentore conferma sul portale del
+  //    fornitore le spedizioni del giorno e il pacco partirebbe. Il rimborso parte quando lui conferma.
+  if (corr?.tipo === 'dielle') {
+    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const { error: manErr } = await admin.from('spedizioni').update({
+      stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
+      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
+    }).eq('id', spedizioneId)
+    if (manErr) return NextResponse.json({ error: manErr.message }, { status: 400 })
+    return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: la spedizione è in cancellazione. Verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
+  }
+
   // ── CONTRATTI DVA: ora il corriere HA una richiesta di storno (richiesta-storno), asincrona. La
   //    chiediamo SUBITO. Se DVA la ammette, la spedizione va in 'storno_richiesto' e il credito NON si
   //    storna ancora: si rimborsa solo quando DVA conferma la cancellazione (cron storno-dva-cron, che
@@ -131,6 +144,22 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica in questo caso, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
+  // ── PACCO GLS CONDIVISO FRA RETI: come il GLS diretto qui sotto, SUBITO, ma sul pacco intero. ──
+  // Da qualunque gamba si chieda (il cliente sulla sua gamba-ponte, o il detentore sulla gamba GLS): si
+  // toglie da GLS e si annullano e stornano tutte le gambe (lib/annullo-gls). Annullando una gamba sola
+  // restava addebitato chi stava sopra, oppure partiva verso GLS un pacco gia' rimborsato.
+  if (corr?.tipo === 'moovexpress' || corr?.tipo === 'gls') {
+    const { gambePaccoGls, annullaPaccoGls } = await import('@/lib/annullo-gls')
+    const gambe = await gambePaccoGls(admin, (sped as any).tracking_number)
+    if (gambe) {
+      const r = await annullaPaccoGls(admin, gambe, { da: user.id })
+      if (r.ok) return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
+      const msg = `Annullo non riuscito: ${r.motivo} La spedizione resta valida.`
+      await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+  }
+
   // ── GLS / BRT DIRETTI: annullo IMMEDIATO, mai la coda 48h. ──
   // GLS è "attesa-chiusura": PRIMA della chiusura distinta (confermata_vettore) la spedizione NON è ancora
   // trasmessa a GLS, quindi si annulla in sicurezza (DeleteSped) e si rimborsa; DOPO la chiusura GLS
@@ -143,7 +172,11 @@ export async function DELETE(req: NextRequest) {
   // SpediamoPro). Quindi NON è qui: cade nel ramo 48h (pending, ripristinabile) e il cron manda l'annullo
   // vero dopo. Se FedEx lo rifiuta (già ritirato) la spedizione torna valida SENZA rimborso e le consegnate
   // sono escluse dal cron: nessun rimborso a vuoto. (Scelta 21/09/2026, coerente col comportamento reale.)
-  if (corr?.tipo === 'gls' || corr?.tipo === 'brt') {
+  //
+  // ECOSMOS sta QUI e non nel ramo 48h: annulla solo finche' la spedizione non e' validata per il giro di
+  // ritiro, che parte in giornata (orario limite 13:00). Fra 48 ore il pacco sarebbe gia' consegnato e
+  // l'annullo fallirebbe sempre; tentato subito, o riesce e si rimborsa, o resta valida col motivo.
+  if (corr?.tipo === 'gls' || corr?.tipo === 'brt' || corr?.tipo === 'ecosmos') {
     // "Trasmessa a GLS" = la sua DISTINTA e' confermata_vettore (il flag vive sulla distinta, NON sulla
     // spedizione). Lo leggo qui e lo attacco a `sped`, cosi' vale anche la guardia in annullaSpedizione.
     if (corr.tipo === 'gls' && (sped as any).distinta_id) {

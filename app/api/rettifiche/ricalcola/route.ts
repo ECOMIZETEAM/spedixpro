@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
+import { eSupplementoTardivo } from '@/lib/supplemento-tardivo'
 
 // RICALCOLA UNA RETTIFICA col listino AGGIORNATO (passo A, pagina Rettifiche "da controllare").
 //
@@ -32,21 +33,22 @@ export async function POST(req: NextRequest) {
   if (String(r.supplementi_nomi || '').toLowerCase().includes('penale')) {
     return NextResponse.json({ error: 'E\' una penale del corriere: non si recupera col listino. Decidi se girarla al cliente o assorbirla.' }, { status: 400 })
   }
+  // Riprezzarla rimetterebbe dentro i chili, che su questo pacco sono gia' stati chiesti: si gira com'e'.
+  if (eSupplementoTardivo(r)) {
+    return NextResponse.json({ error: 'E\' un supplemento arrivato dopo i chili: si gira com\'e\', i chili di questo pacco sono già stati rettificati.' }, { status: 400 })
+  }
 
   const { data: sp } = await admin.from('spedizioni').select('numero,tracking_number,stato')
     .eq('id', r.spedizione_id).maybeSingle()
   if (!sp) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
   if (sp.stato === 'annullata') return NextResponse.json({ error: 'Spedizione annullata: non si rettifica' }, { status: 400 })
 
-  const { calcolaRipesature } = await import('@/lib/ripesature-calcolo')
-  // I colli ripesati salvati sulla riga; se mancano, un collo unico col peso reale (niente volume).
+  const { calcolaRipesature, volumiDelLivello } = await import('@/lib/ripesature-calcolo')
+  const { colloDaSalvato } = await import('@/lib/ripesature')
+  // I colli ripesati salvati sulla riga (col peso reale del fornitore, se c'era); se mancano, un collo unico
+  // col peso reale (niente volume).
   const colli = Array.isArray(r.colli_ripesati) && r.colli_ripesati.length
-    ? r.colli_ripesati.map((c: any) => ({
-        peso: Number(c?.weight ?? c?.peso) || 0,
-        lunghezza: Number(c?.length ?? c?.lunghezza) || 0,
-        larghezza: Number(c?.width ?? c?.larghezza) || 0,
-        altezza: Number(c?.height ?? c?.altezza) || 0,
-      }))
+    ? r.colli_ripesati.map(colloDaSalvato)
     : [{ peso: Number(r.peso_reale) || 0, lunghezza: 0, larghezza: 0, altezza: 0 }]
   const rip: any = {
     idOrdine: r.rif_fornitore || r.id,
@@ -74,6 +76,9 @@ export async function POST(req: NextRequest) {
     costo_iniziale: costoIniziale,
     costo_finale: costoFinale,
     differenza: -diffRett,
+    // I chili con cui si e' appena riprezzato, col divisore di chi paga questa riga: un listino puo'
+    // essere cambiato anche nel fattore.
+    ...volumiDelLivello(e, liv),
     // costo_fornitore e fuori_sagoma restano com'erano: la fattura del corriere non cambia col listino.
   }).eq('id', r.id).eq('confermata', false)
   if (errUpd) return NextResponse.json({ error: 'Salvataggio non riuscito: ' + errUpd.message }, { status: 500 })

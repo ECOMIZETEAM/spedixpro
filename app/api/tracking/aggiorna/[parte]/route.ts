@@ -1,0 +1,810 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { spediamoproGetTracking, spediamoproSearchStocks, mapStatoSpediamopro, spediamoproEventiIndicanoReso, spediamoproGetLabel, normalizzaEtichetta } from '@/lib/spediamopro'
+import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
+import { spedisciTrackingStati, mapStatoSpedisci, prioritaStato } from '@/lib/spedisci'
+import { notificaCambioStato } from '@/lib/tracking-notifica'
+import { risolviChiaveDispatch, type ChiaveDispatch } from '@/lib/condivisione-catena'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300
+
+// IL GIRO E' DIVISO IN PARTI, e ogni parte e' un cron a se' (vercel.json: /api/tracking/aggiorna/1-di-4 …).
+// Il 04/11/2026 le spedizioni attive erano 55.421 (17.049 il 02/10) e il giro unico ne controllava circa
+// 5.200 l'ora: ogni spedizione veniva riletta ogni 10 ore, alle 17:30 la piu' vecchia era ferma dalle 08:01.
+// Il collo di bottiglia non erano le 12.000 righe caricate ma il TEMPO: un giro solo, gruppi da 16 che
+// aspettavano il piu' lento, 270 secondi e poi stop. Le parti girano in parallelo, ognuna sulla sua fetta
+// di spedizioni (per id: la fetta si legge dall'indice, senza scorrere la tabella), quindi per tenerle
+// tutte fresche basta aggiungere parti in vercel.json — il codice non cambia.
+const FRESCHEZZA_MS = 30 * 60_000       // una spedizione controllata da meno di cosi' non si rilegge
+const CARICO_MAX = 8000                 // piu' di quanto una parte riesca a lavorare in un giro
+const CONCORRENZA = 16                  // chiamate in volo per parte, come i vecchi gruppi da 16
+const LIMITE_SPEDIZIONE_MS = 25_000     // oltre, la spedizione si lascia al giro dopo
+const STOP_NUOVE_MS = 240_000           // da qui non se ne prendono altre: chi e' in volo ha 25 s per finire
+
+// Fetta di id della parte k su n. Gli id sono UUID casuali: dividere lo spazio delle prime 8 cifre in n
+// intervalli uguali da' n fette di pari peso, stabili nel tempo (una spedizione resta sempre nella sua).
+function fettaDiId(k: number, n: number): { da: string; a: string | null } {
+  const passo = 0x100000000 / n
+  const uuid = (v: number) => Math.floor(v).toString(16).padStart(8, '0') + '-0000-0000-0000-000000000000'
+  return { da: uuid((k - 1) * passo), a: k === n ? null : uuid(k * passo) }
+}
+
+// CRON: aggiorna lo stato delle spedizioni ancora "attive" leggendo il tracking
+// dai corrieri. SpediamoPro: mappa lo status 0-13; lo status 11 (eccezione) → controlla gli
+// stock: se c'è uno stock attivo → in_giacenza, altrimenti non_consegnato.
+export async function GET(req: NextRequest, { params }: { params: Promise<{ parte: string }> }) {
+  const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
+  // Il tempo si conta da QUI, dall'avvio della funzione: prima partiva dopo il caricamento delle
+  // spedizioni attive, che non veniva contato, e il giro poteva arrivare ai 300 secondi senza accorgersene.
+  const avvioMs = Date.now()
+  const { parte } = await params
+  const mParte = /^(\d+)-di-(\d+)$/.exec(parte || '')
+  const k = mParte ? Number(mParte[1]) : 0, n = mParte ? Number(mParte[2]) : 0
+  if (!mParte || n < 1 || k < 1 || k > n) return NextResponse.json({ error: 'Parte non valida: si scrive come 1-di-4' }, { status: 400 })
+  const fetta = fettaDiId(k, n)
+  const admin = createAdminSupabase()
+
+  // MAI 'raw_response' né 'etichetta_url' interi: l'etichetta è il PDF in base64 (156 KB in
+  // media) e la risposta del corriere ~43 KB. Su 8.000 righe superavano il gigabyte e la
+  // funzione veniva UCCISA per memoria esaurita (4 volte nelle ultime 24h): il giro moriva
+  // a metà e il tracking restava indietro per tutti. Qui servono solo tre valori, presi
+  // direttamente dal JSON, e l'etichetta si guarda a parte (solo gli id di chi non ce l'ha).
+  // ep_offerta/ep_ordine: i due riferimenti del terzo provider. Il tracking si interroga col
+  // CODICE OFFERTA (per LDV risponde "Spedizione non trovata"), l'etichetta con l'id ordine.
+  const COLONNE = 'id,numero,stato,stato_precedente,tracking_number,tracking_check_at,giacenza_data,giacenza_motivo,giacenza_apertura_addebitata,giacenza_addebito_effettuato,cliente_id,master_id,corriere_id,corrieri(tipo,credenziali,nome_contratto),sp_id:raw_response->id,sp_id_annidato:raw_response->raw->data->id,sp_code:raw_response->code,ep_offerta:raw_response->_codiceOfferta,ep_ordine:raw_response->_idOrdine,gls_numero:raw_response->numero,brt_parcel:raw_response->parcelID'
+  const soglia = new Date(avvioMs - FRESCHEZZA_MS).toISOString()
+  const daControllare = (q: any) => {
+    q = q.or(`tracking_check_at.is.null,tracking_check_at.lt.${soglia}`).gte('id', fetta.da)
+    if (fetta.a) q = q.lt('id', fetta.a)
+    return q.order('tracking_check_at', { ascending: true, nullsFirst: true }).order('id', { ascending: true })
+  }
+
+  // A PAGINE: PostgREST tronca ogni risposta a 1000 righe. Carico tutte le pagine PRIMA di processare,
+  // con dedup per id (le pagine possono slittare se qualche riga cambia stato nel frattempo).
+  // Gli stati esclusi sono esattamente quelli dell'indice idx_sped_tracking_attivo: con questo filtro la
+  // lettura scorre l'indice; con il vecchio `not in (consegnata,annullata)` il database leggeva l'INTERA
+  // tabella spedizioni e la riordinava, una volta per pagina, 24 volte l'ora.
+  const vistiIds = new Set<string>()
+  const spedizioni: any[] = []
+  let oltreIlCarico = false
+  for (let pag = 0; pag * 1000 < CARICO_MAX; pag++) {
+    const { data: pagina } = await daControllare(admin.from('spedizioni').select(COLONNE)
+      .not('stato', 'in', '(consegnata,annullata,annullamento_pending,annullamento_manuale)'))
+      .range(pag * 1000, pag * 1000 + 999)
+    for (const r of pagina || []) { if (!vistiIds.has(r.id)) { vistiIds.add(r.id); spedizioni.push(r) } }
+    if (!pagina || pagina.length < 1000) break
+    if ((pag + 1) * 1000 >= CARICO_MAX) oltreIlCarico = true
+  }
+  // La coda d'annullo (annullamento_pending/manuale) VIENE tracciata, per accorgersi se un pacco e'
+  // PARTITO e riportarlo buono (vedi la guardia piu' sotto). Sta fuori dall'indice, quindi si legge a
+  // parte (sono poche) e si rimette in fila con le altre. Restano fuori solo consegnata e annullata.
+  {
+    const { data: coda } = await daControllare(admin.from('spedizioni').select(COLONNE)
+      .in('stato', ['annullamento_pending', 'annullamento_manuale']))
+      .range(0, 999)
+    for (const r of coda || []) { if (!vistiIds.has(r.id)) { vistiIds.add(r.id); spedizioni.push(r) } }
+    const t = (r: any) => (r.tracking_check_at ? Date.parse(r.tracking_check_at) : -Infinity)
+    spedizioni.sort((a, b) => t(a) - t(b) || String(a.id).localeCompare(String(b.id)))
+  }
+
+  // Chi non ha l'etichetta: SOLO gli id, così sappiamo per quali tentare il recupero senza
+  // portarci in memoria i PDF di tutte le altre. Il recupero esiste solo per due provider, e si chiede
+  // solo per le spedizioni caricate qui: prima si scorrevano tutte le attive a ogni giro.
+  // "Senza etichetta" vuol dire senza NESSUNA delle due forme: un'etichetta archiviata su Storage ha
+  // `etichetta_url` vuoto apposta. Guardando solo quello, questo giro la riscaricava dal fornitore (su
+  // DVA il solo primo collo) e la rimetteva nella riga: il base64 non usciva mai dal database, e la
+  // riga riscritta non combaciava piu' col file, per cui nessuno la liberava (vedi lib/etichette).
+  const senzaEtichetta = new Set<string>()
+  const conRecuperoEtichetta = spedizioni
+    .filter((s: any) => s.stato !== 'annullamento_pending' && s.stato !== 'annullamento_manuale')
+    .filter((s: any) => s.corrieri?.tipo === 'spediamopro' || s.corrieri?.tipo === 'easyparcel')
+    .map((s: any) => s.id)
+  for (let i = 0; i < conRecuperoEtichetta.length; i += 150) {
+    const { data } = await admin.from('spedizioni').select('id')
+      .in('id', conRecuperoEtichetta.slice(i, i + 150)).is('etichetta_url', null).is('etichetta_path', null)
+    for (const r of data || []) senzaEtichetta.add((r as any).id)
+  }
+
+  // CONTRATTI CONDIVISI: la chiave del venditore dipende solo da master e contratto, e prima si risaliva la
+  // catena a ogni spedizione (19.506 attive di questo tipo il 04/11). Una volta per giro basta.
+  const chiaviDispatch = new Map<string, Promise<ChiaveDispatch | null>>()
+  const chiaveDispatch = (masterId: string, nomeContratto: string) => {
+    const kk = masterId + '|' + nomeContratto
+    if (!chiaviDispatch.has(kk)) chiaviDispatch.set(kk, risolviChiaveDispatch(admin, masterId, nomeContratto))
+    return chiaviDispatch.get(kk)!
+  }
+  const memoVenditore = { accessi: new Map<string, Promise<any>>(), chiaveDi: chiaveDispatch }
+
+  let aggiornate = 0, errori = 0
+  let spedisciBloccato = false   // breaker: al primo 403 di policy niente altre chiamate Spedisci nel giro
+  // CRONOLOGIE: niente piu' quota. Fino al 16/11/2026 gli eventi che NON cambiano lo stato si salvavano solo
+  // dentro 300 scritture per giro, divise fra tutti i corrieri e consumate dai primi pacchi della coda (la
+  // quota era nata per recuperare lo storico vecchio senza far scadere il giro). Gli altri restavano
+  // indietro per giorni: NI665698814 (GLS di Wave) con "La spedizione non e' arrivata presso la sede GLS
+  // destinataria" del 16/11 08:56 ancora assente alle 17:45; 18 GLS su 39 in viaggio indietro di 1-2 eventi.
+  // Ora si scrive quando lo stato cambia o quando il corriere ha un evento che da noi manca
+  // (lib/tracking-eventi, mancanoEventi): una lettura sull'indice per spedizione, e si scrive solo il nuovo.
+  let chiaviEventoIgnote: string[] = []
+  const lavora = async (s: any) => {
+    const corr: any = (s as any).corrieri
+    const tipo = corr?.tipo
+    const cred: any = corr?.credenziali || {}
+
+    try {
+      let nuovo: string | null = null
+      let nuovoTracking: string | null = null
+      let motivoGiacenza: string | null = null   // causale del corriere (rifiuto, assente, indirizzo errato…)
+      // LA GIACENZA E' UN FATTO, NON IL MASSIMO DI UNA CLASSIFICA. `nuovo` qui sotto e' lo stato PIU'
+      // AVANZATO fra quelli letti dal corriere, e nella scala in_giacenza vale 4 mentre
+      // non_consegnato vale 5: siccome la mancata consegna accompagna SEMPRE la giacenza, `nuovo`
+      // diventa 'non_consegnato' e la giacenza non veniva registrata mai (misurato il 18/09: 256
+      // spedizioni con l'evento di giacenza scritto e `giacenza_data` nulla, 101 delle quali su
+      // corrieri che passano SOLO di qui, senza webhook). Questo flag dice "la giacenza l'abbiamo
+      // vista", a prescindere da chi vince la classifica degli stati.
+      let vistaGiacenza = false
+      // ...e questo dice "la giacenza e' ancora in corso", quando lo afferma il corriere stesso con i
+      // suoi eventi (oggi solo KSync, vedi il ramo poste): allora non si chiede all'ultimo evento salvato.
+      let giacenzaInCorso = false
+      // Contesto SpediamoPro per il recupero di numero/etichetta rimasti indietro (vedi sotto).
+      let spAuth: string | null = null
+      let spId: number | null = null
+      let spCode: string | null = null
+
+      if (tipo === 'spediamopro') {
+        // Valori presi dalle sole chiavi che servono (vedi select sopra), non dall'intero JSON.
+        const spid = (s as any).sp_id ?? (s as any).sp_id_annidato
+        const authcode = cred?.authcode
+        if (!spid || !authcode) return
+        spAuth = authcode; spId = Number(spid); spCode = (s as any).sp_code || null
+
+        const tr = await spediamoproGetTracking(authcode, Number(spid))
+        nuovo = mapStatoSpediamopro(tr.status)
+        if (nuovo === 'eccezione') {
+          // distinguo giacenza (stock attivo) da altre eccezioni
+          try {
+            const stocks = await spediamoproSearchStocks(authcode, tr.shipmentCode || (s as any).sp_code || String(spid))
+            const attivo = (stocks || []).find((st: any) => Number(st.status) === 1 && Number(st.shipmentId) === Number(spid))
+            nuovo = attivo ? 'in_giacenza' : 'non_consegnato'
+            // Solo lo stock ATTIVO, di proposito: qui la data sarebbe "adesso", e una giacenza gia'
+            // chiusa verrebbe aperta con una data falsa (e addebitata). Il recupero delle giacenze
+            // passate e' un'altra cosa, e si fa col webhook che porta `opened_at`.
+            if (attivo) vistaGiacenza = true
+            // MOTIVO dichiarato dal corriere (es. "Rifiuto del destinatario"): serve all'operatore
+            // per scegliere lo svincolo GIUSTO — su un pacco rifiutato la riconsegna viene respinta
+            // dal corriere, l'unica strada e' il reso al mittente.
+            if (attivo?.reason) motivoGiacenza = String(attivo.reason).slice(0, 200)
+          } catch { nuovo = 'non_consegnato' }
+        }
+        // RESO AL MITTENTE: lo status numerico non lo distingue (una riconsegna al mittente registra
+        // come "consegnata"); lo dicono gli EVENTI. Se il pacco e' stato reso, lo stato e'
+        // reso_mittente — e il trigger DB (trg_reso_da_addebitare) mette in coda l'addebito del reso.
+        // Vince su tutto il resto (anche su una eventuale eccezione/giacenza dello stesso giro).
+        if (spediamoproEventiIndicanoReso(tr.events)) nuovo = 'reso_mittente'
+        // IL RITORNO ALLA PARTENZA (lib/tracking-poste): non consegnato in una filiale, poi consegnato in
+        // quella da cui era partito = tornato al mittente, anche se nessun evento dice "reso" (4 casi nello
+        // storico al 24/10/2026, es. IUZZOLINI 1UW07WF351807: mancata consegna ad Albignasego, consegnato a
+        // Cosenza col nome del mittente). Si guarda solo quando SpediamoPro dichiara la consegna: gli
+        // eventi di questo giro e quelli gia' salvati, perche' le filiali le porta la cronologia Poste
+        // letta da OneTracking, non sempre questa. Se la lettura non riesce resta la consegna.
+        if (nuovo === 'consegnata' && s.stato !== 'consegnata') {
+          try {
+            const { normalizzaEventi } = await import('@/lib/tracking-eventi')
+            const { ritornoAllaPartenza } = await import('@/lib/tracking-poste')
+            const { eventi: diQuestoGiro } = normalizzaEventi(tr.events, {
+              data: ['at', 'date', 'datetime', 'data'], descrizione: ['description', 'title'], luogo: ['location', 'place', 'luogo'],
+            })
+            const { data: salvati } = await admin.from('tracking_events')
+              .select('stato,descrizione,luogo,data_evento').eq('spedizione_id', s.id).limit(500)
+            if (ritornoAllaPartenza([...(salvati || []), ...diQuestoGiro])) nuovo = 'reso_mittente'
+          } catch { /* resta la consegna */ }
+        }
+        if (tr.trackingCode) nuovoTracking = tr.trackingCode
+
+        // CRONOLOGIA. Gli eventi erano gia' qui — `tr.events`, usati sopra per riconoscere il reso —
+        // e finivano nel nulla: 9.190 spedizioni in cinque giorni con lo stato che avanzava e la
+        // pagina di tracking vuota. La forma e' documentata in lib/spediamopro: { at, title,
+        // description }. Regole e scrittura in lib/tracking-eventi, uguali per tutti i provider.
+        try {
+          const cambiatoSp = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(tr.events, {
+              data: ['at', 'date', 'datetime', 'data'],
+              descrizione: ['description', 'title'],
+              luogo: ['location', 'place', 'luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoSp || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][SP][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'spedisci') {
+        // Il provider ha CHIUSO il polling (403 "use the Webhooks events"): il WEBHOOK resta la
+        // fonte primaria. Qui TENTIAMO comunque a ogni giro: se il blocco viene rimosso, il polling
+        // riparte DA SOLO (ogni 30 min); al primo 403 di policy fermiamo il resto del giro
+        // (zero chiamate sprecate). Lo stato avanza SOLO in avanti come per SpediamoPro.
+        if (spedisciBloccato) return
+        if (!s.tracking_number || !cred?.master_domain || !cred?.password) return
+        // Anche un fornitore che NON RISPONDE ferma il resto del giro: il 04/11/2026 infinity.spedisci.online
+        // lasciava le connessioni appese, e senza questo ogni spedizione Spedisci del giro avrebbe aspettato
+        // la sua volta il tempo massimo.
+        let letto: Awaited<ReturnType<typeof spedisciTrackingStati>>
+        try { letto = await spedisciTrackingStati(cred, s.tracking_number) } catch { spedisciBloccato = true; return }
+        const { stati, raw, ok } = letto
+        if (!ok) { if (JSON.stringify(raw || {}).includes('Webhooks events')) spedisciBloccato = true; return }
+        for (const str of stati) {
+          const m = mapStatoSpedisci(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (stati.some((str) => mapStatoSpedisci(str) === 'in_giacenza')) vistaGiacenza = true
+        // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
+        if (stati.some((str) => mapStatoSpedisci(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+      } else if (tipo === 'easyparcel') {
+        // Si interroga col CODICE OFFERTA, non con la LDV (verificato sul campo: la ricerca per
+        // LDV risponde "Spedizione non trovata"). Senza quel riferimento non c'e' nulla da chiedere.
+        const offerta = (s as any).ep_offerta
+        if (!offerta || !cred?.apikey) return
+        const { easyparcelTracking, mapStatoEasyparcel } = await import('@/lib/easyparcel')
+        const { stati, raw } = await easyparcelTracking(cred.apikey, { codiceOfferta: String(offerta) })
+        for (const str of stati) {
+          const m = mapStatoEasyparcel(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (stati.some((str) => mapStatoEasyparcel(str) === 'in_giacenza')) vistaGiacenza = true
+        // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
+        if (stati.some((str) => mapStatoEasyparcel(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+        // La LDV compare nel tracking anche quando alla creazione non era ancora pronta: e' la
+        // seconda occasione per rimpiazzare il numero provvisorio "DVA-<ordine>".
+        const ldv = (raw as any)?.tracking?.lettera_vettura
+        if (ldv) nuovoTracking = String(ldv)
+
+        // CRONOLOGIA DEGLI EVENTI — l'unico provider che non la salvava.
+        //
+        // Di questa stessa risposta si teneva solo il testo per calcolare lo stato, e `raw` — che
+        // contiene la cronologia completa — veniva buttato via. Cosi' per OGNI spedizione di questo
+        // provider (8.013 in dieci giorni, contate) il cliente e il destinatario vedevano lo stato
+        // avanzare ma la pagina di tracking con la cronologia vuota. Gli altri due provider gli
+        // eventi li scrivono da sempre (webhook Spedisci, poller GLS): qui non era rotto niente,
+        // semplicemente non era mai stato fatto.
+        //
+        // CANCELLA E RISCRIVI, come nel poller Poste: la risposta arriva COMPLETA a ogni giro, e
+        // aggiungere in coda riempirebbe il popup di doppioni.
+        //
+        // Quando: se lo stato e' cambiato, o se fra gli eventi del provider ce n'e' uno che da noi
+        // manca (vedi CRONOLOGIE in testa al giro).
+        try {
+          const cambiato = nuovo !== s.stato
+          {
+            const { eventiEasyparcel } = await import('@/lib/easyparcel')
+            const { scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = eventiEasyparcel(raw)
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiato || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) {
+          // La cronologia e' un di piu': se non si scrive, lo STATO deve aggiornarsi lo stesso.
+          console.error('[TRACKING][EP][EVENTI]', s.numero, e?.message)
+        }
+
+      } else if (tipo === 'gls') {
+        // GLS DIRETTO (contratto proprio): il webservice di creazione non dà lo stato di consegna,
+        // lo legge il T&T Infoweb (manuale MU40). Serve il numero NUDO salvato in raw_response.numero
+        // alla creazione — il tracking_number è prefissato (NL…), che il T&T non accetta. Le
+        // credenziali (sigla_sede/codice_contratto) arrivano dalla join corrieri.credenziali via admin.
+        const numeroNudo = (s as any).gls_numero
+        if (!numeroNudo || !cred?.sigla_sede) return
+        const { trackingGls, mapStatoGls } = await import('@/lib/gls')
+        const { stati, eventi: glsEventi, motivoGiacenza: motivoGls } = await trackingGls(cred, String(numeroNudo))
+        for (const str of stati) {
+          const m = mapStatoGls(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (stati.some((str) => mapStatoGls(str) === 'in_giacenza')) vistaGiacenza = true
+        // Il motivo (es. "Destinatario sconosciuto — Tel errato") lo ricava lib/gls.motivoGiacenzaGls
+        // dall'evento che ha causato la giacenza: prima non si leggeva e le giacenze GLS erano tutte senza.
+        if (vistaGiacenza && motivoGls) motivoGiacenza = motivoGls
+        // Il reso vince sulla consegna del ritorno (vedi sotto, dove si applica lo stato).
+        if (stati.some((str) => mapStatoGls(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        // CRONOLOGIA. Qui non si salvava NIENTE: lo stato avanzava e la pagina del tracking restava
+        // vuota. GLS diretto era l'unico corriere con ZERO eventi in assoluto (02/10/2026: 127
+        // attive e tutte le consegnate), e dall'XML del T&T gli eventi c'erano gia' — si leggeva
+        // solo <Stato> e si buttava via data e luogo. Stesse regole degli altri rami.
+        try {
+          const cambiatoGls = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(glsEventi, {
+              data: ['data'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoGls || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][GLS][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'brt') {
+        // BRT DIRETTO: lo stato di consegna si legge da GET /tracking/parcelID/{parcelID} (barcode 18
+        // char) salvato in raw_response alla creazione. Best-effort: se la risposta non torna, nessun
+        // aggiornamento (mai declassa).
+        const brtParcel = (s as any).brt_parcel
+        if (!brtParcel || !cred?.user || !cred?.password) return
+        const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
+        const { stati, consegnata: brtConseg, eventi: brtEventi, giacenzaInCorso: brtGiacenza, motivoGiacenza: brtMotivo } = await trackingBrt(cred, String(brtParcel))
+        for (const str of stati) {
+          const m = mapStatoBrt(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        // Consegna dal campo dedicato di BRT (non serve l'evento testuale "CONSEGNATA").
+        if (brtConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        if (stati.some((str) => mapStatoBrt(str) === 'in_giacenza')) vistaGiacenza = true
+        // La giacenza BRT sta nello stato della bolla, non negli eventi (lib/brt trackingBrt): è lo stato
+        // ATTUALE del pacco, quindi vale come "in corso" e non si chiede all'ultimo evento salvato, che
+        // per BRT è la mancata consegna ("RIFIUTA…", "LASCIATO AVVISO") e non la parola giacenza.
+        if (brtGiacenza) {
+          vistaGiacenza = true
+          giacenzaInCorso = true
+          if (brtMotivo) motivoGiacenza = brtMotivo.slice(0, 200)
+        }
+        // ...ma se il pacco e' tornato al mittente, quella consegna e' il RITORNO: vince il reso.
+        if (stati.some((str) => mapStatoBrt(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        // CRONOLOGIA. trackingBrt torna gia' `eventi` nella forma giusta ({ data, descrizione,
+        // luogo }) e nessuno li salvava: stato che avanza, pagina di tracking vuota. Come per gli
+        // altri, la data si legge e si scrive con le regole di lib/tracking-eventi.
+        try {
+          const cambiatoBrt = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(brtEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoBrt || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][BRT][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'dielle') {
+        // DIELLE (aggregatore TWS, dentro BRT/GLS/UPS…): lo stato si legge da /extracking/trackingStatus
+        // con la LDV (= tracking_number salvato alla creazione). username/password/ambiente arrivano dalla
+        // join corrieri.credenziali. Lo stato si mappa sulla DESCRIZIONE (non sui 816 codici). Best-effort:
+        // nessuna risposta = nessun aggiornamento (mai declassa), come per gli altri diretti.
+        if (!s.tracking_number || !cred?.username || !cred?.password) return
+        const { trackingDielle, mapStatoDielle } = await import('@/lib/dielle')
+        const { stati, consegnata: dlConseg, eventi: dlEventi } = await trackingDielle(cred, String(s.tracking_number))
+        for (const str of stati) {
+          const m = mapStatoDielle(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (dlConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        if (stati.some((str) => mapStatoDielle(str) === 'in_giacenza')) vistaGiacenza = true
+        // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
+        if (stati.some((str) => mapStatoDielle(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        // CRONOLOGIA: trackingDielle torna gia' `eventi` {data:"DD-MM-YYYY HH:mm:ss", descrizione, luogo}.
+        // La data italiana la gestisce istanteDaTesto (mai new Date(), che leggerebbe mese-giorno).
+        try {
+          const cambiatoDl = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(dlEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoDl || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][DIELLE][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'ecosmos') {
+        // ECOSMOS (corriere elettrico di Roma): stato ed eventi da /shipments/{numero}/tracking, con la chiave
+        // del contratto dalla join. Gli stati sono codici fissi (lib/ecosmos.ts li mappa uno per uno), non
+        // testo da interpretare. Le loro notifiche di cambio stato sono un'aggiunta da attivare con
+        // Ecosmos; questo giro resta comunque la rete di sicurezza che la loro guida raccomanda.
+        if (!s.tracking_number || !cred?.api_key) return
+        const { trackingEcosmos, mapStatoEcosmos } = await import('@/lib/ecosmos')
+        const ec = await trackingEcosmos({ api_key: String(cred.api_key) }, String(s.tracking_number))
+        for (const str of ec.stati) {
+          const m = mapStatoEcosmos(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (ec.consegnata && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        // Il pacco tornato al mittente chiude con una consegna che NON e' quella al destinatario: vince il reso.
+        if (ec.stati.some((str) => mapStatoEcosmos(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+        try {
+          const cambiatoEc = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(ec.eventi, {
+              data: ['data'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoEc || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][ECOSMOS][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'poste') {
+        // POSTE Delivery Business diretto via KSync/ParcelPilot: lo stato si legge da /tracking (formato
+        // Poste PDB) con la LDV. Credenziali (clientId/secretId/costCenterCode/ambiente) dalla join. Sul
+        // demo l'auth è disabilitata (nessuna credenziale) → si interroga lo stesso. Mappa sulla DESCRIZIONE.
+        //
+        // ATTENZIONE: in PRODUZIONE questo ramo oggi non porta niente. Il fornitore risponde
+        // `outcome: OK`, riconosce la LDV, ma `tracking` e' SEMPRE una lista vuota — provato il
+        // 6/10/2026 su "SDA EXPRESS L" con tutte le varianti dei parametri (lastTracingState S/N/assente,
+        // statusDescription, customerType, costCenterCode) su un pacco che poste.it dava "in transito".
+        // Finche' ParcelPilot non alimenta i tracciamenti, lo stato di questi contratti arriva dal
+        // tracking PUBBLICO di poste.it: lo legge /api/tracking/bonifica-poste (stessa libreria
+        // lib/tracking-poste). Questo ramo resta perche' il giorno in cui il fornitore comincia a
+        // rispondere e' la fonte migliore (eventi del corriere, non pagina pubblica).
+        if (!s.tracking_number) return
+        if (!cred?.clientId && cred?.ambiente !== 'demo') return
+        const { trackingKsync, mapStatoKsync } = await import('@/lib/ksync')
+        const { stati, consegnata: poConseg, eventi: poEventi } = await trackingKsync(cred, String(s.tracking_number))
+        for (const str of stati) {
+          const m = mapStatoKsync(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (poConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        if (stati.some((str) => mapStatoKsync(str) === 'in_giacenza')) vistaGiacenza = true
+        // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
+        if (stati.some((str) => mapStatoKsync(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+        // GIACENZA CHE CONTINUA. Dopo "INIZIO GIACENZA" Poste ripete ogni notte "DESTIN. ASSENTE-SVINCOLA
+        // ONLINE PER NUOVA CONSEGNA", che da sola si legge 'non_consegnato' (e' la stessa frase del
+        // tentativo fallito). Cosi' l'ultimo evento non era mai una giacenza e la giacenza non si apriva:
+        // 282343J002458 e' rimasta invisibile dal 14 al 22/10/2026, con altri 21 pacchi SDA EXPRESS L.
+        // Se dopo l'ultima giacenza il corriere ha scritto SOLO quella frase, il pacco e' ancora fermo;
+        // qualunque altro evento (rimessa in consegna, in consegna, reso…) dice che si e' mosso.
+        if (nuovo !== 'reso_mittente' && nuovo !== 'consegnata') {
+          const ordinati = [...poEventi].sort((a, b) => a.data.localeCompare(b.data))   // "YYYY-MM-DD HH:mm:ss"
+          let iGiac = -1
+          ordinati.forEach((ev, i) => { if (mapStatoKsync(ev.descrizione) === 'in_giacenza') iGiac = i })
+          if (iGiac >= 0 && ordinati.slice(iGiac + 1).every((ev) => /svincola online/i.test(ev.descrizione))) giacenzaInCorso = true
+        }
+
+        try {
+          const cambiatoPo = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(poEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoPo || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][POSTE][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'inpost') {
+        // INPOST diretto (Global API): lo stato si legge da /tracking/v1/parcels con il trackingNumber.
+        // credenziali (clientId/secretId/organizationId/ambiente) dalla join. `trackingInpost` torna GIA' i
+        // nostri stati (mappa sull'eventCode). InPost NON ha giacenza tradizionale (il locker che attende il
+        // ritiro è consegna normale): nessun vistaGiacenza.
+        if (!s.tracking_number || !cred?.clientId || !cred?.organizationId) return
+        const { trackingInpost } = await import('@/lib/inpost')
+        const { stati, consegnata: ipConseg, eventi: ipEventi } = await trackingInpost(cred, String(s.tracking_number))
+        for (const st of stati) {
+          if (st && prioritaStato(st) > prioritaStato(nuovo)) nuovo = st
+        }
+        if (ipConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        // ...ma se il pacco è tornato al mittente, quella "consegnata" è il RITORNO: vince il reso.
+        if (stati.some((st) => st === 'reso_mittente')) nuovo = 'reso_mittente'
+
+        try {
+          const cambiatoIp = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(ipEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoIp || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][INPOST][EVENTI]', s.numero, e?.message) }
+
+      } else if (tipo === 'moovexpress') {
+        // CONDIVISIONE CONTRATTI: lo stato si chiede al VENDITORE (GET /api/v1/tracking/<numero>) con la
+        // api_key del contratto. Il venditore risponde con lo stato della SUA spedizione — GIA' nel nostro
+        // vocabolario (lui l'ha già mappato dal corriere reale) — più la cronologia. A più salti la catena
+        // resta fresca da sé, perché ogni livello interroga quello sotto e il cron gira su tutte le spedizioni.
+        // CONDIVISIONE (fuga credenziale): la chiave NON si legge dal ponte locale (può essere una copia
+        // colata o azzerata), ma si risale al PRIMO detentore-codice — lo stesso risolutore del dispatch in
+        // creazione. Così il tracking di un sub propagato dopo la copy-guard non resta cieco.
+        const credMv = await chiaveDispatch(s.master_id, corr.nome_contratto)
+        if (!s.tracking_number || !credMv?.api_key) return
+        const { trackingMoovexpress, venditoreSuQuestoPortale, trackingMoovexpressLocale } = await import('@/lib/moovexpress')
+        // Il venditore sta su questo stesso portale (nessun base_url: tutti i contratti condivisi al 04/11):
+        // la sua spedizione si legge dal database invece di richiamare la nostra API. La chiamata HTTP costava
+        // un'altra funzione Vercel e una dozzina di letture per pacco, consumava il limite di 600 richieste al
+        // minuto della chiave del cliente, e il 04/11 alle 15:03 due chiamate rimaste appese 300 s su Spedisci
+        // hanno fatto morire il giro intero.
+        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi } = venditoreSuQuestoPortale(credMv as any)
+          ? await trackingMoovexpressLocale(admin, credMv as any, String(s.tracking_number), memoVenditore)
+          : await trackingMoovexpress(credMv as any, String(s.tracking_number))
+        if (mvStato && prioritaStato(mvStato) > prioritaStato(nuovo)) nuovo = mvStato
+        if (mvStato === 'in_giacenza') vistaGiacenza = true
+        // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
+        if (mvStato === 'reso_mittente') nuovo = 'reso_mittente'
+        if (mvConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+
+        try {
+          const cambiatoMv = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(mvEventi, {
+              data: ['data', 'dataOra', 'datetime'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoMv || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][MOOVEXPRESS][EVENTI]', s.numero, e?.message) }
+
+      } else {
+        // Qui finiscono anche le FedEx: tolte dal giro il 04/11/2026 (Lorenzo: "levalo che tanto non serve").
+        // La chiave Track non ha mai funzionato (401 a ogni chiamata), e le 488 attive erano tutte vecchie.
+        return
+      }
+
+      const upd: any = {}
+      // Lo stato avanza SOLO IN AVANTI ('annullata' sempre applicata): il corriere può essere
+      // "indietro" rispetto a noi (es. 'spedita' dopo la distinta mentre lui dice ancora
+      // "in lavorazione") e NON deve declassare. Era la causa dei badge che regredivano.
+      // RESO APPICCICOSO: se e' 'reso_mittente', la 'consegnata' del corriere e' la consegna del
+      // RITORNO al mittente -> NON e' una consegna al destinatario, lo stato resta reso.
+      // UNICA ECCEZIONE AL "SOLO IN AVANTI": il RESO. Il pacco rifiutato torna indietro e il ritorno
+      // si chiude con una "consegnata" — che e' la consegna AL MITTENTE. Chi era gia' segnato
+      // consegnato va quindi CORRETTO all'indietro, se no il reso non si addebita mai alla rete
+      // (231 spedizioni cosi' al 17/09/2026, di cui 2 sole addebitate).
+      if (nuovo && nuovo !== s.stato
+          && (nuovo === 'annullata' || nuovo === 'reso_mittente' || prioritaStato(nuovo) > prioritaStato(s.stato))
+          && !(s.stato === 'reso_mittente' && nuovo === 'consegnata')) upd.stato = nuovo
+      // GIACENZA: si registra se l'abbiamo VISTA (vedi `vistaGiacenza` sopra), non solo quando vince
+      // la classifica degli stati. SOLO SE IL PACCO E' ANCORA FERMO, pero': qui la data sarebbe
+      // "adesso" e non quella vera (la porta solo il webhook, col campo `opened_at`), quindi su un
+      // pacco gia' consegnato o reso si scriverebbe una giacenza con data falsa — e si farebbe
+      // partire un addebito per una giacenza finita chissa' quando. Il recupero di quelle passate e'
+      // una decisione a parte, non un effetto collaterale del cron.
+      const fermo = s.stato !== 'consegnata' && s.stato !== 'reso_mittente' && s.stato !== 'annullata'
+      if ((vistaGiacenza || nuovo === 'in_giacenza') && !s.giacenza_data && fermo) {
+        // ...E SOLO SE E' APERTA ADESSO. `vistaGiacenza` dice che una giacenza c'e' stata, non che ci
+        // sia ancora. Misurato il 18/09 PRIMA che il cron la usasse: su 438 pacchi fermi con una
+        // giacenza nella cronologia, solo 115 avevano la giacenza come ULTIMO evento; 122 si erano gia'
+        // mossi dopo (ripartiti, in consegna, consegnati) e 173 erano fermi da settimane su eventi non
+        // riconosciuti. Aprirli tutti avrebbe addebitato giacenze gia' finite.
+        // Se lo stato del corriere e' gia' 'in_giacenza' basta quello; altrimenti decide l'ultimo
+        // evento della cronologia. Una "mancata consegna" arrivata DOPO la giacenza non basta: non e'
+        // certo che il pacco sia tornato in giacenza, e qui si apre solo cio' che e' sicuro.
+        // Fa eccezione la frase che il corriere ripete ogni giorno DURANTE la giacenza (`giacenzaInCorso`).
+        let apertaAdesso = nuovo === 'in_giacenza' || giacenzaInCorso
+        if (!apertaAdesso) {
+          const { data: ult } = await admin.from('tracking_events').select('stato,descrizione')
+            .eq('spedizione_id', s.id).order('data_evento', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+          apertaAdesso = (ult as any)?.stato === 'in_giacenza' || /giacenz/i.test(String((ult as any)?.descrizione || ''))
+        }
+        if (apertaAdesso) upd.giacenza_data = new Date().toISOString()
+      }
+      if (motivoGiacenza && motivoGiacenza !== (s as any).giacenza_motivo) upd.giacenza_motivo = motivoGiacenza
+      if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
+
+      // RECUPERO NUMERO: alla creazione, se SpediamoPro/BRT non aveva ancora assegnato il tracking, il
+      // numero è rimasto il codice interno (es. "6A5E..." o "SP-<id>"). Ora che il tracking reale c'è,
+      // correggo il numero mostrato (così in elenco appare la LDV vera, non il codice interno).
+      // 'DVA-<ordine>' e' il numero provvisorio del terzo provider, assegnato quando la lettera di
+      // vettura non era ancora pronta: va sostituito appena arriva quella vera, come per 'SP-'.
+      if (nuovoTracking && nuovoTracking !== s.numero && (s.numero === spCode || /^(SP|DVA|TMP)-/.test(String(s.numero || '')))) {
+        upd.numero = nuovoTracking
+      }
+
+      // RECUPERO ETICHETTA: se l'etichetta non è mai stata salvata (il completamento in background prova
+      // solo ~20s, ma BRT Express a volte genera dopo minuti/ore) e ora c'è un tracking → la scarico UNA
+      // volta e la salvo. Così il download è immediato e non dipende più dal fallback on-demand.
+      if (tipo === 'spediamopro' && senzaEtichetta.has(s.id) && spAuth && spId && (nuovoTracking || s.tracking_number)) {
+        try {
+          const lb = await spediamoproGetLabel(spAuth, spId, 1, 0)
+          const norm = await normalizzaEtichetta(lb)
+          upd.etichetta_url = `data:${norm.mime};base64,${norm.buffer.toString('base64')}`
+        } catch { /* non ancora pronta: riprovo al giro dopo */ }
+      }
+      // Stessa rete di sicurezza per il terzo provider: li' l'etichetta nasce da una chiamata a
+      // parte (getwaybill) e alla creazione puo' non essere ancora disponibile.
+      // Il CODICE DEL RITIRO non si riprende piu' da qui: questo giro passa su ogni spedizione circa
+      // ogni 7 ore, e un codice arrivato dopo la creazione restava fuori dall'elenco Ritiri per mezza
+      // giornata (41 ritiri il 26/10/2026). Lo rincorre /api/ritiri/codici-lampo ogni 2 minuti.
+      if (tipo === 'easyparcel' && senzaEtichetta.has(s.id) && (s as any).ep_ordine && cred?.apikey) {
+        try {
+          const { easyparcelWaybill } = await import('@/lib/easyparcel')
+          const w = await easyparcelWaybill(cred.apikey, String((s as any).ep_ordine), 1, 0, false, 0, Number((s as any).colli) || 1)
+          const b64 = w.singole[0]?.pdfBase64 || w.pdfBase64
+          if (b64) upd.etichetta_url = `data:application/pdf;base64,${b64}`
+          if (w.numero && w.numero !== s.tracking_number) {
+            upd.tracking_number = w.numero
+            if (/^(TMP|DVA)-/.test(String(s.numero || ''))) upd.numero = w.numero
+          }
+        } catch { /* non ancora pronta: riprovo al giro dopo */ }
+      }
+
+      // AUTO-PULIZIA DEL TRACKING "COMPOSITO" (quirk SpediamoPro Poste). Alla creazione il provider a
+      // volte restituisce il tracking SPORCO = <code interno>+<LDV vera> (es. "07WFM2EEW1UW07WF403279");
+      // poco dopo lo pulisce, ma uno dei due campi resta sulla forma sporca → numero e tracking_number
+      // divergono, con la LDV vera come SUFFISSO comune. Qui, SOLO quando un campo è suffisso dell'altro
+      // (identica LDV, cambia solo il prefisso spurio), si allineano entrambi alla forma PULITA. La
+      // guardia del suffisso è ciò che rende sicura questa pulizia: i casi a codici DAVVERO DISTINTI (es.
+      // UPS che ri-emette l'etichetta all'Access Point: due 1Z diversi, nessuno suffisso dell'altro) NON
+      // vengono toccati — lì non si può sapere a tavolino quale sia il buono. (16/09)
+      {
+        const a = String(upd.numero ?? s.numero ?? '')
+        const b = String(upd.tracking_number ?? s.tracking_number ?? '')
+        if (a && b && a !== b) {
+          let pulito: string | null = null
+          if (a.length > b.length && a.endsWith(b) && b.length >= 6) pulito = b
+          else if (b.length > a.length && b.endsWith(a) && a.length >= 6) pulito = a
+          if (pulito) { upd.numero = pulito; upd.tracking_number = pulito }
+        }
+      }
+
+      // ── SPEDIZIONE IN CODA D'ANNULLO ─────────────────────────────────────────────────────────
+      // E' inclusa nel tracking apposta, per accorgersi se e' PARTITA. Non va pero' trattata come le
+      // altre: se il corriere la da' in transito/consegna/giacenza/reso, ha viaggiato → la RIPRISTINO
+      // (tolgo la richiesta d'annullo) e la lascio 'in_lavorazione'; cosi' non e' piu' esclusa e il
+      // giro dopo il tracking normale le da' lo stato reale coi suoi effetti (giacenza, notifiche),
+      // senza doverli innescare da qui (nessun addebito/storno inatteso nel ripristino). Se NON risulta
+      // mossa, la lascio ESATTAMENTE com'e': lo stato d'annullo resta, cosi' rimane in coda e il cron
+      // annulli la trova ancora (si basa su annullamento_richiesto_at). In entrambi i casi NON applico
+      // l'update normale, che declasserebbe lo stato d'annullo o toccherebbe la coda.
+      if (s.stato === 'annullamento_manuale' || s.stato === 'annullamento_pending') {
+        const PARTITA = ['in_transito', 'in_consegna', 'consegnata', 'in_giacenza', 'non_consegnato', 'reso_mittente']
+        if (nuovo && PARTITA.includes(nuovo)) {
+          await admin.from('spedizioni').update({
+            stato: (s as any).stato_precedente || 'in_lavorazione',
+            stato_precedente: null,
+            annullamento_richiesto_at: null,
+            annullamento_da: null,
+            annullamento_errore: null,
+            annullamento_owner_id: null,
+          }).eq('id', s.id)
+          aggiornate++
+          console.warn('[TRACKING][ANNULLO] partita (' + nuovo + ') → ripristinata:', (s as any).numero)
+        }
+        return
+      }
+
+      if (Object.keys(upd).length) {
+        await admin.from('spedizioni').update(upd).eq('id', s.id)
+        aggiornate++
+        // Se il NUMERO è cambiato, la descrizione dei movimenti cita ancora la forma vecchia: la
+        // riallineo (solo il testo, mai importi/date). Scatta di rado, non appesantisce il giro.
+        if (upd.numero && s.numero && upd.numero !== s.numero) {
+          const { data: mv } = await admin.from('movimenti').select('id,descrizione').eq('spedizione_id', s.id)
+          for (const m of (mv || [])) {
+            const t = String((m as any).descrizione || '')
+            if (t.includes(s.numero)) await admin.from('movimenti').update({ descrizione: t.split(s.numero).join(upd.numero) }).eq('id', (m as any).id)
+          }
+        }
+      }
+
+      // AUTO-ANNULLO DEL CORRIERE = ANCHE STORNO DEL CREDITO.
+      // Se il corriere cancella la spedizione (es. SpediamoPro status 0: LDV async mai assegnata,
+      // tipico sulle internazionali BRT Europa) qui si aggiornava SOLO lo stato ad 'annullata' e il
+      // cliente restava ADDEBITATO per un pacco mai partito — segnalato da un cliente ("cancellate da
+      // sole, riaccreditatemi"). Ora, sulla transizione verso annullata, si restituisce il credito a
+      // cascata (cliente + master), come l'annullo manuale. rimborsaAnnulloSpedizione e' idempotente
+      // (salta se esiste gia' un 'rimborso'): niente doppio storno con annullamenti-cron/annullo manuale.
+      if (upd.stato === 'annullata' && s.stato !== 'annullata') {
+        try { await rimborsaAnnulloSpedizione(admin, s as any, null) }
+        catch (e: any) { console.error('[TRACKING][AUTO-ANNULLO] storno non riuscito', (s as any).numero, e?.message) }
+      }
+
+      // WEBHOOK AL CLIENTE quando lo stato CAMBIA DAVVERO.
+      // Chi si integra puo' registrare tracking.updated / tracking.delivered /
+      // tracking.exception, ma finora quelle notifiche partivano da un solo punto: la GET del
+      // tracking, cioe' solo se era il cliente stesso a interrogarci. Il giro che aggiorna
+      // davvero gli stati — questo — non ne mandava nessuna. Risultato: per sapere di una
+      // consegna il cliente doveva fare polling su ogni spedizione, esattamente cio' che il
+      // webhook serve a evitare. Best-effort: non blocca ne' fa fallire il giro.
+      if (upd.stato) await notificaCambioStato(admin, s.id, upd.stato, s.stato)
+
+      // L'apertura giacenza non si addebita piu' da qui: la registra il database da solo (trigger
+      // trg_giacenza_da_addebitare) appena una spedizione entra in giacenza, da qualunque strada.
+      // Qui sotto, fuori dal ciclo, si svuota quella coda. Prima l'addebito stava dietro a QUESTA
+      // porta soltanto, e le giacenze scoperte dal webhook del corriere non le pagava nessuno.
+    } catch (e: any) {
+      // Prima si contava e basta: il numero nei log non diceva quale pacco, ne' quale fornitore.
+      errori++
+      console.error('[TRACKING][ERRORE]', tipo, s.numero, String(e?.message || e).slice(0, 200))
+    }
+  }
+
+  // LAVORO IN PARALLELO + ROTAZIONE: CONCORRENZA spedizioni in volo, e appena una finisce parte la
+  // successiva — prima si lavorava a gruppi da 16 e ogni gruppo aspettava il piu' lento (mediana 1,4 s a
+  // gruppo, il 04/11). Ogni spedizione finita si marca in tracking_check_at, cosi' va in fondo alla coda e
+  // il giro dopo parte da chi aspetta da piu' tempo. Anche se il run viene ucciso a meta', la rotazione
+  // resta EQUA: nessuna spedizione puo' restare indietro per sempre (era il bug "si aggiorna solo al click").
+  // TEMPO MASSIMO PER SPEDIZIONE: un fornitore che non risponde non deve fermare la fila. Chi lo supera
+  // si marca lo stesso (si riprova al giro dopo) e la chiamata appesa resta a finire per conto suo.
+  const lista = spedizioni
+  const inizioMs = Date.now()
+  let prossima = 0, lavorate = 0, scadute = 0
+  let daMarcare: string[] = []
+  const marca = async (forza: boolean) => {
+    if (!daMarcare.length || (!forza && daMarcare.length < 50)) return
+    const ids = daMarcare; daMarcare = []
+    try { await admin.from('spedizioni').update({ tracking_check_at: new Date().toISOString() }).in('id', ids) } catch {}
+  }
+  const lavoratore = async () => {
+    // margine di sicurezza sotto il maxDuration (300s): meglio fermarsi puliti che essere uccisi
+    while (prossima < lista.length && Date.now() - avvioMs < STOP_NUOVE_MS) {
+      const s = lista[prossima++]
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const scaduta = await Promise.race([
+        lavora(s).then(() => false),
+        new Promise<boolean>((ok) => { timer = setTimeout(() => ok(true), LIMITE_SPEDIZIONE_MS) }),
+      ])
+      clearTimeout(timer)
+      if (scaduta) scadute++
+      lavorate++
+      daMarcare.push(s.id)
+      await marca(false)
+    }
+  }
+  await Promise.all(Array.from({ length: CONCORRENZA }, lavoratore))
+  await marca(true)
+
+  // GLI ADDEBITI (aperture giacenza e resi) NON SI FANNO PIU' QUI: li fa /api/cron/addebiti-code, un giro
+  // a parte ogni 10 minuti. Stavano in fondo a questo giro e vivevano dei suoi avanzi di tempo — il
+  // 18/09 due giri di fila si sono fermati a meta' coda e i resi non sono stati toccati. Le code le
+  // riempie il database coi trigger; qui si aprono le giacenze, la' si addebitano. Un solo consumatore:
+  // rimettere qui un blocco che le svuota vorrebbe dire rischiare di addebitare due volte.
+
+  console.log(`[TRACKING] parte=${k}/${n} da_controllare=${lista.length} lavorate=${lavorate} aggiornate=${aggiornate} errori=${errori} scadute=${scadute} durata=${Math.round((Date.now() - avvioMs) / 1000)}s`)
+  // IL RITARDO DEVE GRIDARE. Se una parte non arriva in fondo alla sua fila, le spedizioni rimaste
+  // aspettano il giro dopo e il ritardo cresce in silenzio: e' cosi' che si era arrivati a 10 ore.
+  // La cura e' una parte in piu' in vercel.json.
+  if (lavorate < lista.length || oltreIlCarico) {
+    const ferma = lista[lavorate]?.tracking_check_at
+    console.error(`[TRACKING][RITARDO] parte ${k}/${n}: ${lista.length - lavorate} spedizioni non controllate in questo giro`
+      + (oltreIlCarico ? `, e altre oltre le ${CARICO_MAX} caricate` : '')
+      + (lavorate < lista.length ? (ferma ? `, la piu' vecchia controllata l'ultima volta il ${ferma}` : ', alcune mai controllate') : '')
+      + '. Se si ripete, aggiungere una parte al giro in vercel.json.')
+  }
+  // IL NOME DEL CAMPO DATA DEGLI EVENTI non e' documentato nella sezione tracking del provider: si
+  // provano `data` (la forma usata da getorder e listorder nella stessa API) e le varianti note. Se
+  // NESSUNA risponde, gli eventi vengono scartati invece di ricevere una data inventata — e qui si
+  // stampano le chiavi VERE, cosi' la cosa si chiude al primo giro invece di restare un mistero.
+  if (chiaviEventoIgnote.length) {
+    console.error('[TRACKING][EP][EVENTI] nessun campo data riconosciuto. Chiavi presenti nell\'evento:',
+      chiaviEventoIgnote.join(', '))
+  }
+  return NextResponse.json({ ok: true, parte: `${k}/${n}`, daControllare: lista.length, lavorate, aggiornate, errori, scadute, durataSec: Math.round((Date.now() - inizioMs) / 1000) })
+}

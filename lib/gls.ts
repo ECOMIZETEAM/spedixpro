@@ -45,6 +45,31 @@ export function servizioGls(settings: unknown): ServizioGls {
   return (settings as any)?.tipo_spedizione === 'P' ? 'P' : 'N'
 }
 
+// IL RIFERIMENTO (Bda) DI UNA SPEDIZIONE NUOVA: quello dell'ordine, oppure uno nostro diverso ogni volta.
+// GLS mette nella STESSA spedizione i colli con lo stesso destinatario e la stessa Bda, anche fra due
+// AddParcel diversi, finche' la prima non e' chiusa. Senza riferimento la Bda e' vuota per tutte, quindi
+// uguale: il secondo pacco allo stesso destinatario nello stesso giorno finiva dentro la spedizione ancora
+// aperta, e AddParcel restituiva il numero della PRIMA. Il salvataggio falliva sul numero doppio e la
+// compensazione annullava su GLS quel numero, cioe' la prima spedizione intera, col suo pacco gia' etichettato.
+// Caso vero: DOLCE LUNA → RITA AUGENTI, 10/11/2026, NI665655922 (contrassegno 29,90 €) cancellata alle 10:44
+// dal secondo pacco; 8 spedizioni cosi' dal 20/10 (7 su GLS NI W di Wave, 1 su GLS LIGHT NN di M.C).
+// Quello generato sta in 11 caratteri, il limite del Parcel. Il riferimento dell'ordine resta com'era (sul
+// nazionale fino a 20 caratteri, sul Parcel 11): e' quello che il cliente cerca su GLS.
+export function bdaSpedizioneGls(rifOrdine: unknown, parcel: boolean): string {
+  const rif = String(rifOrdine ?? '').trim()
+  if (rif) return rif.substring(0, parcel ? 11 : 20)
+  // Tutto casuale (9 cifre esadecimali, 68 miliardi di valori): con ora + 2 caratteri casuali, 1.000
+  // creazioni nello stesso millisecondo davano solo 854 riferimenti diversi.
+  return 'MX' + globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 9).toUpperCase()
+}
+
+// Il salvataggio di una spedizione GLS appena creata e' fallito perche' quel NUMERO e' gia' di una nostra
+// spedizione? Allora GLS ha messo il pacco dentro una spedizione che esiste gia' (stesso destinatario e
+// stesso riferimento, vedi bdaSpedizioneGls). Quella spedizione e' viva e pagata: NON va annullata.
+export function numeroGlsGiaNostro(err: { message?: string } | null | undefined): boolean {
+  return /spedizioni_numero_key/.test(String(err?.message || ''))
+}
+
 // IL PAESE DEL PARCEL VA NEL TAG <Provincia>, con la sigla GLS del paese: non c'e' un tag "nazione".
 // Fonte: manuale GLS MU162 rev.22 (05/07/2022), par. 6.1 "Tag <Provincia> (sigla sede paesi
 // internazionali)" e tabella AddParcel ("Provincia / Codice Stato"). Le sigle coincidono con l'ISO
@@ -117,6 +142,10 @@ export type CredenzialiGls = {
   user_webservice?: string   // CodiceClienteGls / CodiceCliente
   password_webservice?: string // PasswordClienteGls / Password
   codice_contratto?: string  // CodiceContrattoGls / CodiceContratto
+  // Password dell'AREA PERSONALE del sito GLS: la vuole il servizio di svincolo giacenze, che NON
+  // accetta quella del webservice etichette (svincolaGiacenzaGls) né quella del Weblabeling. Il nome
+  // del campo è rimasto quello vecchio per non perdere le password già salvate.
+  password_weblabeling?: string
 }
 
 export type ParcelGls = {
@@ -134,12 +163,9 @@ export type ParcelGls = {
   modalitaIncasso?: string       // codice metodo incasso (dipende dal contratto)
   assicurazione?: number         // EUR (solo sul primo collo)
   note?: string                  // Notespedizione
-  serviziAccessori?: string[]    // codici GLS 2-cifre (max 6): Sabato 23, Exchange 24, Preavviso 14, ...
-  // Contatti del DESTINATARIO per il FlexDeliveryService (FDS): GLS manda al destinatario il link
-  // via email/SMS per gestirsi la consegna (riprogramma, dirotta, deposito sicuro, vicino, rifiuta).
-  // Attivo se FDS è abilitato sul contratto GLS: senza questi campi GLS non ha come avvisare nessuno
-  // e il servizio non parte. Vanno passati SOLO quando si vuole davvero far scrivere GLS al cliente
-  // (è l'opposto della regola "email schermo corriere"): lo decide il ramo crea, non questa libreria.
+  serviziAccessori?: string[]    // codici GLS 2-cifre (max 6): oggi solo Exchange 24, vedi codiceServizioGls
+  // Contatti VERI del DESTINATARIO: GLS li usa per gli avvisi (email/SMS) e, dove il contratto ha il
+  // FlexDeliveryService, per il link con cui il destinatario si gestisce la consegna.
   email?: string                 // <Email> destinatario (max 70)
   cellulare?: string             // <Cellulare1> destinatario (GLS vuole le ultime 10 cifre)
   // PARCEL (estero, contratto con settings.tipo_spedizione = 'P'). Manuale MU162 rev.22: per il
@@ -150,25 +176,25 @@ export type ParcelGls = {
   tipoSpedizione?: ServizioGls
   paese?: string                 // ISO 3166 del paese di destinazione (solo Parcel)
   personaRiferimento?: string    // <PersonaRiferimento> (max 50)
-  telefono?: string              // <TelefonoDestinatario> (solo cifre, max 16)
+  telefono?: string              // <TelefonoDestinatario> (solo cifre, max 16): obbligatorio sul Parcel, facoltativo sul nazionale
 }
 
-// NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori (tabella GLS,
-// verificata sul contratto Quick 2/9). I codici sono 2 cifre; il tag ne accetta max 6 separati da virgola.
-// 01/02/03 sono le modalità del CONTRASSEGNO (contanti/assegno banc./assegno circ.), qui NON mappate:
-// la modalità COD la mette il ramo crea a parte. Torna null se il nome non è un servizio GLS trasmissibile.
+// NOME servizio accessorio (come sta a listino/nel form) → CODICE GLS ServiziAccessori. I codici sono 2
+// cifre; il tag ne accetta max 6 separati da virgola. Torna null se il nome non è un servizio GLS
+// trasmissibile.
+// La tabella che GLS ci aveva dato il 2/9 era SBAGLIATA quasi ovunque: dal 2/9 al 30/10/2026 il codice
+// mandato attivava un altro servizio. Codici veri (guida GLS Italy di ShippyPro, combaciata su tutti i 12
+// punti verificabili: 18 prove sul conto di Wave il 30/10 con etichetta letta e annullo, il pannello
+// fornitore, il manuale MU162): 01 entro le 12, 02 ora fissa, 03 anticipato, 05 consegna al piano,
+// 06 mezzo idoneo, 07 sabato, 08 verifica contenuto, 14/15/16/21 servizi della laguna di Venezia,
+// 22 Express12, 23 document return, 24 Exchange, 25 preavviso telefonico, 27 timbro, 28 Erod,
+// 29 sabato pomeriggio, 30 GDO, 31 Flex, 32 Ident PIN, 34 GDO entro il, 35 food.
+// Si trasmette solo l'Exchange, l'unico che era già giusto. Gli altri servizi del catalogo non hanno un
+// equivalente (appuntamento, return) o vanno riattivati sul codice giusto con una decisione apposita.
 export function codiceServizioGls(nome: string): string | null {
   const n = (nome || '').toLowerCase()
   if (/exchange|cambio/.test(n)) return '24'
-  if (/sabato|saturday/.test(n)) return '23'
-  if (/preavviso/.test(n)) return '14'
-  if (/infoservice|info service|sms/.test(n)) return '15'
-  if (/appuntamento/.test(n)) return '16'
-  if (/flex|e-?commerce/.test(n)) return '21'
-  if (/consegna al piano|al piano/.test(n)) return '22'
-  if (/ident/.test(n)) return '25'
-  if (/return|reso/.test(n)) return '27'
-  return null   // es. "Express12"/"Document Return": nessun codice ServiziAccessori → non trasmesso
+  return null   // gli altri nomi non si trasmettono: vedi sopra
 }
 
 export type RisultatoGls = {
@@ -220,6 +246,15 @@ function faultString(xml: string): string | null {
   return estraiTag(xml, 'faultstring')
 }
 
+// <TelefonoDestinatario> sul nazionale: numerico, max 16. Le ultime 10 cifre come per il Cellulare1
+// taglierebbero un fisso di 11 (es. 0331 1234567): si toglie solo il prefisso italiano.
+function telefonoNazionaleGls(tel: unknown): string {
+  let d = String(tel ?? '').replace(/\D/g, '')
+  if (d.startsWith('0039')) d = d.slice(4)
+  else if (d.startsWith('39') && d.length >= 11) d = d.slice(2)
+  return d.length >= 6 ? d.slice(0, 16) : ''
+}
+
 // Costruisce l'XMLInfoParcel per AddParcel (STRUTTURA VERIFICATA). Un <Parcel> PER COLLO.
 export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): string {
   const info =
@@ -247,15 +282,18 @@ export function costruisciXmlInfoParcel(cred: CredenzialiGls, p: ParcelGls): str
       // senza riferimento, ci si agganciava sopra: Hard2Buff → Salerno, 2 pacchi, su GLS 665264142 a
       // 3 colli più la 665264141 (19/10/2026; 9 casi di Quick dal 01/10).
       p.bda ? tag('Bda', String(p.bda).substring(0, 20)) : '',
+      // Telefono del destinatario su ogni collo, come gli altri dati del destinatario: è quello che
+      // l'autista vede per chiamare. Solo cifre, senza il prefisso italiano (+39/0039).
+      tag('TelefonoDestinatario', telefonoNazionaleGls(p.telefono)),
       // Contrassegno / assicurazione / note SOLO sul primo collo (dati di spedizione, non di collo:
       // ripeterli su ogni Parcel rischia di moltiplicarli).
       primo && p.importoContrassegno && p.importoContrassegno > 0 ? tag('Importocontrassegno', euroIt(p.importoContrassegno)) : '',
       primo && p.importoContrassegno && p.importoContrassegno > 0 && p.modalitaIncasso ? tag('ModalitaIncasso', p.modalitaIncasso) : '',
       primo && p.assicurazione && p.assicurazione > 0 ? tag('Assicurazione', euroIt(p.assicurazione)) : '',
-      // Servizi accessori (Sabato/Exchange/Preavviso…): codici 2-cifre, max 6, separati da virgola. Solo primo collo.
+      // Servizi accessori (oggi solo Exchange): codici 2-cifre, max 6, separati da virgola. Solo primo collo.
       primo && p.serviziAccessori && p.serviziAccessori.length ? tag('ServiziAccessori', Array.from(new Set(p.serviziAccessori)).slice(0, 6).join(',')) : '',
       primo && p.note ? tag('Notespedizione', p.note.substring(0, 100)) : '',
-      // Contatti destinatario per il FlexDeliveryService — solo primo collo (dati di spedizione).
+      // Email e cellulare del destinatario per gli avvisi GLS — solo primo collo (dati di spedizione).
       // Email: GLS la vuole <=70. Cellulare1: solo cifre, ULTIME 10 (toglie prefisso +39/0039 e spazi);
       // se ne restano meno di 9 non si manda (evita un valore monco che GLS potrebbe rifiutare).
       primo && p.email && p.email.includes('@') ? tag('Email', p.email.trim().substring(0, 70)) : '',
@@ -282,7 +320,8 @@ function campiParcel(cred: CredenzialiGls, p: ParcelGls, peso: number, idx: numb
   return [
     tag('CodiceContrattoGls', cred.codice_contratto),
     tag('RagioneSociale', (p.ragioneSociale || '').substring(0, 70)),
-    tag('Indirizzo', (p.indirizzo || '').substring(0, 70)),
+    // Indirizzo: sul Parcel GLS ne accetta al massimo 40 (oltre, erroreParcelGls ferma prima di chiamarlo).
+    tag('Indirizzo', (p.indirizzo || '').trim().substring(0, 70)),
     tag('Localita', (p.localita || '').substring(0, 50)),
     tag('Zipcode', capParcel(p.cap)),        // estero: alfanumerico, max 7 (oltre, erroreParcelGls ferma)
     tag('Provincia', SIGLA_GLS_PARCEL_UE[normalizzaPaese(p.paese)] || ''),   // il PAESE, non la provincia
@@ -312,6 +351,12 @@ export function erroreParcelGls(p: ParcelGls): string | null {
   if (String(p.telefono || '').replace(/\D/g, '').length < 6) return 'Per GLS Europa serve il telefono del destinatario.'
   if (!String(p.bda || '').trim()) return 'Per GLS Europa serve un riferimento della spedizione.'
   if (!capParcel(p.cap) || capParcel(p.cap).length > 7) return 'CAP del destinatario non valido per GLS Europa (al massimo 7 caratteri).'
+  // INDIRIZZO OLTRE I 40 CARATTERI: GLS rifiuta il Parcel ("Indirizzo maggiore di 40 caratteri"; il manuale
+  // MU162 dice 35, GLS ne accetta 40). Il 18/11/2026 BOTTEGA PAESANO → Nice, "61 Bis Corniche Fleurie
+  // Bâtiment Les Lilas 2" (44): quattro tentativi rifiutati, al cliente solo un messaggio generico. Lo si
+  // dice prima, col numero. Non si taglia: un pezzo d'indirizzo perso e' un pacco che non arriva.
+  const indirizzo = String(p.indirizzo || '').trim()
+  if (indirizzo.length > 40) return `Indirizzo del destinatario troppo lungo per GLS Europa: massimo 40 caratteri (ora ${indirizzo.length}). Accorcialo e riprova; il resto puoi scriverlo nelle note.`
   return null
 }
 
@@ -367,7 +412,12 @@ export async function creaSpedizioneGls(cred: CredenzialiGls, parcel: ParcelGls)
   const prefisso = (siglaMittente || (cred.sigla_sede || '')).trim()
   const tracking = numeroSpedizione ? (prefisso + numeroSpedizione) : null
   const errGls = estraiTag(inner, 'DescrizioneErrore') || estraiTag(inner, 'Errore')
-  const errore = numeroSpedizione ? null : (fault || errGls || 'GLS non ha restituito un numero spedizione')
+  // IL MOTIVO DEL RIFIUTO GLS lo scrive in <NoteSpedizione> (senza NumeroSpedizione, o col 999999999).
+  // Non lo si leggeva: ogni rifiuto arrivava al cliente come "GLS non ha restituito un numero
+  // spedizione", e nei log la risposta era tagliata prima della nota. Caso vero 18/11/2026, Nice:
+  // "Indirizzo maggiore di 40 caratteri". Con il numero, la nota e' un'altra cosa (GLS Check, "CONTANTE").
+  const notaGls = (estraiTag(inner, 'NoteSpedizione') || '').replace(/\s+/g, ' ').trim()
+  const errore = numeroSpedizione ? null : (fault || errGls || (notaGls ? `GLS: ${notaGls}` : 'GLS non ha restituito un numero spedizione'))
   const numeroColli = (parcel.pesiColli && parcel.pesiColli.length) ? parcel.pesiColli.length : 1
   return { numeroSpedizione, tracking, siglaMittente, siglaSedeDestino, glsCheck, numeroColli, pdfBase64: null, errore, raw: (soap || '').substring(0, 2000) }
 }
@@ -395,32 +445,50 @@ export async function etichettaGls(
   return { pdfBase64: null, errore: faultString(soap) || 'Etichetta non disponibile' }
 }
 
-// Etichette di TUTTI i colli (uno per collo: GetPdfBySped NumeroCollo 1..N). Torna il base64 per
-// collo nell'ordine (indice 0 = collo 1). Best-effort: salta i colli che non tornano.
+// Etichette di TUTTI i colli (uno per collo: GetPdfBySped NumeroCollo 1..N).
+// `perCollo` e' ALLINEATO ai colli (indice 0 = collo 1, null = non ancora pronta); `etichette` sono solo
+// quelle arrivate, nell'ordine dei colli, da unire in un PDF; `mancanti` i numeri dei colli senza.
+// Allineato perche' prima c'era solo la lista di quelle arrivate e chi la scriveva sui colli usava
+// l'indice: col collo 2 non pronto, l'etichetta del 3 finiva sul collo 2 e il 3 restava senza.
+// RIPROVE: GLS genera il PDF con un attimo di ritardo dopo AddParcel, e non per forza per tutti i colli
+// insieme. Chi aveva almeno un'etichetta non riprovava piu': un multicollo poteva restare con un collo
+// senza etichetta, e il pacco partire con un'etichetta in meno (Quick, 11/11/2026: "3 pacchi, 2
+// etichette"). Dopo ogni attesa di `riprove` (ms) si richiedono SOLO i colli che mancano.
 // `mittente`: SOLO dove il contratto lo chiede (lib/etichetta-mittente), il nome dell'intestatario del
 // conto GLS stampato in alto si sostituisce col mittente della spedizione. E' qui perche' da qui passa
 // OGNI etichetta GLS: creazione, ripresa in background e recupero all'apertura.
 export async function etichetteGls(
   cred: CredenzialiGls, numeroSpedizione: string, numeroColli: number,
-  opts?: { bda?: string; tipoPorto?: string; mittente?: { nome?: string | null; destinatario?: string | null } | null }
-): Promise<{ etichette: string[]; errore: string | null }> {
+  opts?: { bda?: string; tipoPorto?: string; mittente?: { nome?: string | null; destinatario?: string | null } | null; riprove?: number[] }
+): Promise<{ etichette: string[]; perCollo: (string | null)[]; mancanti: number[]; errore: string | null }> {
   const n = Math.max(1, Math.round(numeroColli || 1))
-  const { mittente, ...optsGls } = opts || {}
-  const etichette: string[] = []
-  for (let i = 1; i <= n; i++) {
+  const { mittente, riprove = [1500], ...optsGls } = opts || {}
+  const perCollo: (string | null)[] = Array.from({ length: n }, () => null)
+  const prendi = async (i: number) => {
     try {
-      const et = await etichettaGls(cred, numeroSpedizione, { ...optsGls, numeroCollo: String(i) })
-      if (et.pdfBase64) {
-        let pdf = et.pdfBase64
-        if (mittente?.nome) {
+      const et = await etichettaGls(cred, numeroSpedizione, { ...optsGls, numeroCollo: String(i + 1) })
+      if (!et.pdfBase64) return
+      let pdf = et.pdfBase64
+      if (mittente?.nome) {
+        // La sostituzione del mittente non deve far sparire un'etichetta vera: se non riesce, quella di GLS.
+        try {
           const { mittenteEtichettaGls } = await import('@/lib/etichetta-gls')
           pdf = await mittenteEtichettaGls(pdf, mittente)
-        }
-        etichette.push(pdf)
+        } catch { pdf = et.pdfBase64 }
       }
-    } catch { /* la riprende il recupero in background */ }
+      perCollo[i] = pdf
+    } catch { /* la si riprova dopo l'attesa, o la riprende il recupero */ }
   }
-  return { etichette, errore: etichette.length ? null : 'nessuna etichetta disponibile' }
+  for (let i = 0; i < n; i++) await prendi(i)
+  for (const attesa of riprove) {
+    const daRiprovare = perCollo.flatMap((p, i) => (p ? [] : [i]))
+    if (!daRiprovare.length) break
+    await new Promise(r => setTimeout(r, attesa))
+    for (const i of daRiprovare) await prendi(i)
+  }
+  const etichette = perCollo.filter((p): p is string => !!p)
+  const mancanti = perCollo.flatMap((p, i) => (p ? [] : [i + 1]))
+  return { etichette, perCollo, mancanti, errore: etichette.length ? null : 'nessuna etichetta disponibile' }
 }
 
 // Annulla una spedizione GLS (DeleteSped). Torna true se l'annullo è confermato.
@@ -436,6 +504,81 @@ export async function annullaSpedizioneGls(cred: CredenzialiGls, numeroSpedizion
   } catch {
     return false
   }
+}
+
+// REGISTRO DEL CONTO GLS (ListSpedPeriod, sola lettura): le spedizioni che GLS ha davvero, ciascuna con
+// "IN ATTESA DI CHIUSURA." o "CHIUSA.". Quelle cancellate — da noi o da Weblabeling — non ci sono.
+// - Al massimo 5.000 righe per chiamata: si chiede UN giorno per volta, e un giorno che arriva a 5.000 si
+//   dichiara incompleto (il conto più pieno, il 17/11/2026, faceva circa 600 spedizioni al giorno).
+// - L'errore arriva in <DescrizioneErrore>. Una password sbagliata risponde "Funzionalità non abilitata",
+//   come un conto senza la funzione: per noi è la stessa cosa, il registro non si legge.
+// - Giorni in formato AAAAMMGG, ora italiana (vedi giornoGls).
+export type RegistroGls =
+  | { ok: true; spedizioni: Map<string, { stato: string; data: string; colli: number }> }
+  | { ok: false; motivo: string }
+
+export function giornoGls(quando: string | Date, deltaGiorni = 0): string {
+  const t = new Date(quando).getTime() + deltaGiorni * 86400000
+  // en-CA formatta AAAA-MM-GG; il fuso è quello di GLS, non quello del server.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date(t)).replace(/-/g, '')
+}
+
+export async function registroSpedizioniGls(cred: CredenzialiGls, giorni: string[]): Promise<RegistroGls> {
+  const spedizioni = new Map<string, { stato: string; data: string; colli: number }>()
+  const risposte = await Promise.all(giorni.map(async (g) => {
+    const inner =
+      tag('SedeGls', cred.sigla_sede) +
+      tag('CodiceClienteGls', cred.user_webservice) +
+      tag('PasswordClienteGls', cred.password_webservice) +
+      tag('DataInizio', g) + tag('DataFine', g)
+    try { return { g, xml: await chiamaGls('ListSpedPeriod', inner) } }
+    catch { return { g, xml: null as string | null } }
+  }))
+  for (const { g, xml: grezzo } of risposte) {
+    if (grezzo == null) return { ok: false, motivo: 'GLS non risponde' }
+    // Di solito l'XML arriva vero; se arriva come testo dentro il Result, lo si riapre.
+    const xml = /&lt;Parcel&gt;|&lt;ListParcel/.test(grezzo)
+      ? grezzo.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+      : grezzo
+    const errore = (xml.match(/<DescrizioneErrore[^>]*>([^<]*)</) || [])[1]
+    if (errore) return { ok: false, motivo: errore.trim() }
+    if (!/<ListParcel\b/.test(xml)) return { ok: false, motivo: 'risposta GLS non riconosciuta' }
+    let righe = 0
+    for (const m of xml.matchAll(/<Parcel>([\s\S]*?)<\/Parcel>/g)) {
+      righe++
+      const numero = ((m[1].match(/<NumSpedizione>([^<]*)</) || [])[1] || '').replace(/\D/g, '')
+      if (!numero) continue
+      spedizioni.set(numero, {
+        stato: ((m[1].match(/<StatoSpedizione>([^<]*)</) || [])[1] || '').trim(),
+        data: ((m[1].match(/<Data>([^<]*)</) || [])[1] || '').trim(),
+        colli: Number((m[1].match(/<TotaleColli>([^<]*)</) || [])[1]) || 0,
+      })
+    }
+    if (righe >= 5000) return { ok: false, motivo: `registro GLS del ${g} incompleto (5.000 righe)` }
+  }
+  return { ok: true, spedizioni }
+}
+
+// Dove sta UNA spedizione su GLS, cercandola nel registro del giorno in cui è nata (e quelli accanto,
+// per le spedizioni create a cavallo della mezzanotte):
+// - aperta: in attesa di chiusura, GLS non passa ancora a ritirarla;
+// - chiusa: già trasmessa alla sede, il pacco parte;
+// - assente: GLS non ce l'ha (già cancellata);
+// - sconosciuto: il registro non si legge, o GLS scrive uno stato che non conosciamo.
+export type StatoSuGls =
+  | { stato: 'aperta' | 'chiusa' | 'assente' }
+  | { stato: 'sconosciuto'; motivo: string }
+
+export async function statoSpedizioneSuGls(cred: CredenzialiGls, numeroNudo: string, creataIl: string | Date): Promise<StatoSuGls> {
+  const numero = String(numeroNudo || '').replace(/\D/g, '')
+  if (!numero) return { stato: 'sconosciuto', motivo: 'numero GLS mancante' }
+  const reg = await registroSpedizioniGls(cred, [giornoGls(creataIl, -1), giornoGls(creataIl), giornoGls(creataIl, 1)])
+  if (!reg.ok) return { stato: 'sconosciuto', motivo: reg.motivo }
+  const r = reg.spedizioni.get(numero)
+  if (!r) return { stato: 'assente' }
+  if (/ATTESA/i.test(r.stato)) return { stato: 'aperta' }
+  if (/CHIUSA/i.test(r.stato)) return { stato: 'chiusa' }
+  return { stato: 'sconosciuto', motivo: `stato GLS "${r.stato}"` }
 }
 
 // Chiude (= TRASMETTE alla sede GLS) una o più spedizioni per numero NUDO. Senza questa, AddParcel
@@ -483,6 +626,113 @@ export function numeroNudoGls(s: { numero?: string | null; tracking_number?: str
   return n
 }
 
+// SVINCOLO GIACENZE (manuale GLS MU276). È un servizio a parte, fuori dal webservice etichette: un POST
+// di XML con il profilo dell'area personale del sito GLS, cioè codice cliente + password di quell'area. Il profilo
+// deve avere la "gestione giacenze" abilitata sul contratto. GLS risponde per ogni spedizione con
+// <Svincolo>Ok</Svincolo> oppure col motivo del rifiuto ("Password Errata", "Spedizione non trovata",
+// "Giacenza Scaduta"…). Con la password del webservice risponde "Password Errata": provato il 2/11/2026
+// sul conto di Wave con un numero inesistente.
+// TipoSvincolo: 1 riconsegna allo stesso indirizzo, 2 ad altro indirizzo, 3 reso al mittente.
+const GLS_SVINCOLO_ENDPOINT = 'https://www.gls-italy.com/PHPApps/redelivery_parcel.php'
+
+export type SvincoloGls = {
+  numero: string                 // sede + numero, es. NI665432282
+  tipo: 1 | 2 | 3
+  dataRiconsegna?: string        // GG/MM/AA, obbligatoria per 1 e 2
+  note?: string
+  nuovo?: { nome: string; indirizzo: string; localita: string; cap: string; provincia: string }
+}
+
+// Data per GLS (GG/MM/AA). Si riconsegna nel giorno scelto se è ancora davanti; senza una data, o con una
+// data di oggi o già passata, il primo giorno lavorativo dopo oggi (ora italiana): il sabato e la
+// domenica GLS non consegna con il servizio normale. La richiesta del cliente porta spesso la data del
+// giorno in cui l'ha fatta (2/11/2026, NI665450263): confermata dopo, sarebbe andata a GLS già scaduta.
+export function dataSvincoloGls(scelta?: string | null): string {
+  const oggi = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome' }))
+  const d = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() + 1)
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1)
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(scelta || ''))
+  if (m) {
+    const s = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    if (s.getTime() >= d.getTime()) return `${m[3]}/${m[2]}/${m[1].slice(2)}`
+  }
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`
+}
+
+function cdataGls(v: unknown): string {
+  return `<![CDATA[${String(v ?? '').replace(/]]>/g, ']]]]><![CDATA[>')}]]>`
+}
+
+export async function svincolaGiacenzaGls(
+  cred: CredenzialiGls, s: SvincoloGls, timeoutMs = 20000,
+): Promise<{ ok: boolean; esito: string }> {
+  if (!cred.password_weblabeling) {
+    return { ok: false, esito: 'Manca nel contratto la password dell\'area personale del sito GLS: senza, GLS non accetta lo svincolo.' }
+  }
+  // Limiti di GLS sul nuovo indirizzo: tagliare indirizzo o località manderebbe il pacco altrove, quindi
+  // si chiede di accorciarli. Il nome (20 caratteri) si accorcia: serve all'autista, non all'instradamento.
+  if (s.tipo === 2) {
+    const n = s.nuovo
+    if (!n?.indirizzo || !n.localita || !n.cap) return { ok: false, esito: 'Per la consegna a un altro indirizzo servono indirizzo, località e CAP.' }
+    if (n.indirizzo.trim().length > 30) return { ok: false, esito: 'GLS accetta al massimo 30 caratteri per il nuovo indirizzo: accorcialo e riprova.' }
+    if (n.localita.trim().length > 30) return { ok: false, esito: 'GLS accetta al massimo 30 caratteri per la nuova località: accorciala e riprova.' }
+  }
+  const campi = [
+    `<NumeroSpedizione>${cdataGls(s.numero)}</NumeroSpedizione>`,
+    `<TipoSvincolo>${s.tipo}</TipoSvincolo>`,
+    // Le spese della riconsegna sono del mittente: è lui che paga lo svincolo (lo addebitiamo noi).
+    `<SpeseAdMittente>S</SpeseAdMittente>`,
+    s.tipo !== 3 && s.dataRiconsegna ? `<DataRiconsegna>${cdataGls(s.dataRiconsegna)}</DataRiconsegna>` : '',
+    s.note ? `<Note>${cdataGls(String(s.note).substring(0, 65))}</Note>` : '',
+    ...(s.tipo === 2 && s.nuovo ? [
+      `<CognomeNome>${cdataGls(s.nuovo.nome.trim().substring(0, 20).trim())}</CognomeNome>`,
+      `<NuovoIndirizzo>${cdataGls(s.nuovo.indirizzo.trim())}</NuovoIndirizzo>`,
+      `<NuovaLocalita>${cdataGls(s.nuovo.localita.trim())}</NuovaLocalita>`,
+      `<NuovoZipcode>${cdataGls(String(s.nuovo.cap).replace(/\s+/g, '').substring(0, 5))}</NuovoZipcode>`,
+      `<NuovaProvincia>${cdataGls(String(s.nuovo.provincia || '').toUpperCase().substring(0, 3))}</NuovaProvincia>`,
+    ] : []),
+  ].filter(Boolean).join('')
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Info>`
+    + `<SedeProfiloGls>${cdataGls(cred.sigla_sede)}</SedeProfiloGls>`
+    + `<CodiceProfiloGls>${cdataGls(cred.user_webservice)}</CodiceProfiloGls>`
+    + `<PasswordClienteGls>${cdataGls(cred.password_weblabeling)}</PasswordClienteGls>`
+    + `<Redelivery>${campi}</Redelivery></Info>`
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  let testo = ''
+  try {
+    // XML grezzo nel corpo: inviato come campo di un form, GLS risponde con una pagina vuota.
+    const res = await fetch(GLS_SVINCOLO_ENDPOINT, {
+      method: 'POST', headers: { 'Content-Type': 'text/xml; charset=utf-8' }, body: xml, signal: ctrl.signal,
+    })
+    testo = await res.text()
+  } catch (e) {
+    return { ok: false, esito: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)) }
+  } finally {
+    clearTimeout(t)
+  }
+  const esito = (estraiTag(testo, 'Svincolo') || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim()
+  if (!esito) return { ok: false, esito: 'Risposta di GLS non leggibile: ' + testo.replace(/\s+/g, ' ').substring(0, 160) }
+  return { ok: /^ok$/i.test(esito), esito }
+}
+
+// Impronta non reversibile della password per lo svincolo. Quando GLS la rifiuta, si salva nelle impostazioni
+// del contratto (svincolo_gls_password_rifiutata) e non la si rimanda: GLS blocca i profili dopo accessi
+// errati (è successo al conto RITIRO di MULTI a ottobre). Cambiata la password, l'impronta non torna più.
+export async function improntaPasswordWeblabeling(cred: CredenzialiGls): Promise<string> {
+  const { createHash } = await import('crypto')
+  return createHash('sha256').update(String(cred.password_weblabeling || '')).digest('hex').slice(0, 16)
+}
+
+// Prova della password per lo svincolo SENZA toccare nessun pacco: si chiede lo svincolo di una spedizione
+// che non esiste. Se GLS risponde "Spedizione non trovata" vuol dire che profilo e password li ha
+// accettati; altrimenti torna il motivo ("Password Errata", "Profilo GLS inesistente"…).
+export async function provaPasswordWeblabelingGls(cred: CredenzialiGls): Promise<{ ok: boolean; esito: string }> {
+  const r = await svincolaGiacenzaGls(cred, { numero: `${(cred.sigla_sede || '').trim()}000000001`, tipo: 1, dataRiconsegna: dataSvincoloGls() })
+  if (/non\s+trovata/i.test(r.esito)) return { ok: true, esito: 'Password dell\'area personale accettata da GLS.' }
+  return { ok: false, esito: r.esito }
+}
+
 // Chiusura GLS di una DISTINTA (stessa forma di chiudiBorderoSpedisci/chiudiBordereauSpediamopro).
 // Best-effort, mai bloccante. Solo per corrieri di tipo 'gls'. Il numero NUDO sta in
 // raw_response.numero (fallback: le cifre del numero/tracking). GLS non produce un PDF di borderò:
@@ -527,9 +777,16 @@ export async function chiudiGiornataGls(supabase: any, distintaId: string) {
 // sempre — non essendoci, per GLS, il ripiego on-demand che invece hanno DVA e SpediamoPro. Questo lo
 // aggiunge: quando manca, la si scarica ORA e la si salva (etichetta_url + per-collo), come fa la crea.
 // Torna il PDF (unito se multicollo) o null. `admin` deve avere il service role (legge le credenziali).
+//
+// MULTICOLLO A META': serve anche quando l'etichetta c'e' ma mancano dei colli (lo decide
+// lib/etichette, recuperaEtichettaMancante). Le etichette gia' salvate NON si toccano — il cliente puo'
+// averle gia' stampate — e si aggiungono solo quelle dei colli che non l'avevano. Si salva solo se GLS
+// ne ha date di nuove; altrimenti torna null e resta quella che c'era. Usata anche dopo la creazione,
+// in background, con `riprove` piu' lunghe (app/api/spedizioni/crea e app/api/v1/shipments, ramo GLS).
 export async function recuperaEtichettaGlsSalvando(
   admin: any,
-  sped: { id: string; corriere_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any }
+  sped: { id: string; corriere_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any; etichetta_url?: string | null; etichetta_path?: string | null },
+  opz: { riprove?: number[] } = {}
 ): Promise<Buffer | null> {
   const raw = (sped?.raw_response || {}) as any
   if (!raw._gls || !sped?.corriere_id || !sped?.id) return null
@@ -552,31 +809,50 @@ export async function recuperaEtichettaGlsSalvando(
   } catch { /* senza mittente si serve l'etichetta di GLS com'e' */ }
   // Sul Parcel l'etichetta si e' presa (prova del 14/10/2026) passando anche il riferimento Bda, che
   // la creazione salva in raw_response.bda solo per le Parcel: le nazionali restano come prima.
-  const et = await etichetteGls(cred, numeroBare, nColli, { ...(raw.parcel && raw.bda ? { bda: String(raw.bda) } : {}), mittente })
+  const et = await etichetteGls(cred, numeroBare, nColli, { ...(raw.parcel && raw.bda ? { bda: String(raw.bda) } : {}), mittente, ...(opz.riprove ? { riprove: opz.riprove } : {}) })
   if (!et.etichette.length) return null
 
-  // Unione multicollo (una pagina per collo), come alla creazione; mono-collo = diretta.
-  let b64unico = et.etichette[0]
-  if (et.etichette.length > 1) {
+  const { scomponiDataUrl, scaricaEtichetta } = await import('@/lib/etichette')
+  const leggiPdf = async (url?: string | null, path?: string | null): Promise<string | null> => {
+    if (path) { const d = await scaricaEtichetta(admin, path); if (d?.mime === 'application/pdf' && d.buffer.length) return d.buffer.toString('base64') }
+    const d = scomponiDataUrl(url); if (d?.mime === 'application/pdf' && d.buffer.length) return d.buffer.toString('base64')
+    return null
+  }
+  const unisci = async (pezzi: string[]): Promise<string> => {
+    if (pezzi.length === 1) return pezzi[0]
     try {
       const { unisciEtichette } = await import('@/lib/easyparcel')
-      b64unico = (await unisciEtichette(et.etichette)) || et.etichette[0]
-    } catch { /* ripiega sul primo collo */ }
+      return (await unisciEtichette(pezzi)) || pezzi[0]
+    } catch { return pezzi[0] }
   }
-  const etichettaUrl = `data:application/pdf;base64,${b64unico}`
 
-  // Salva l'etichetta unica + quelle per-collo (se colli_dettaglio è presente), così le prossime
-  // aperture la trovano già pronta e non richiamano GLS.
-  const colli = Array.isArray(sped.colli_dettaglio) ? (sped.colli_dettaglio as any[]) : null
-  const nuoviColli = colli && colli.length
-    ? colli.map((c: any, i: number) => ({ ...c, etichetta_url: et.etichette[i] ? `data:application/pdf;base64,${et.etichette[i]}` : (c.etichetta_url || null) }))
-    : null
+  const colli = Array.isArray(sped.colli_dettaglio) && sped.colli_dettaglio.length ? (sped.colli_dettaglio as any[]) : null
+  if (colli) {
+    // Per collo: prima quella gia' salvata, poi la nuova di GLS. Si contano solo quelle che si leggono.
+    const salvate = await Promise.all(colli.map((c: any) => leggiPdf(c?.etichetta_url, c?.etichetta_path)))
+    const aggiunte = colli.map((_c: any, i: number) => (!salvate[i] && et.perCollo[i] ? et.perCollo[i] : null))
+    if (!aggiunte.some(Boolean)) return null   // GLS non ne ha date di nuove: resta quella che c'era
+    const finali = colli.map((_c: any, i: number) => salvate[i] || aggiunte[i]).filter((p): p is string => !!p)
+    const b64unico = await unisci(finali)
+    const nuoviColli = colli.map((c: any, i: number) => (aggiunte[i] ? { ...c, etichetta_url: `data:application/pdf;base64,${aggiunte[i]}` } : c))
+    try {
+      await admin.from('spedizioni').update({ etichetta_url: `data:application/pdf;base64,${b64unico}`, colli_dettaglio: nuoviColli }).eq('id', sped.id)
+    } catch { /* il salvataggio è best-effort: l'importante è restituire il PDF adesso */ }
+    return Buffer.from(b64unico, 'base64')
+  }
+
+  // Senza dettaglio colli: si confronta con l'etichetta della spedizione, contando le pagine (GLS ne fa
+  // una per collo). Si sostituisce solo se quella nuova ha piu' colli.
+  const b64unico = await unisci(et.etichette)
+  const prima = await leggiPdf(sped.etichetta_url, sped.etichetta_path)
+  if (prima) {
+    let pagine = 0
+    try { const { PDFDocument } = await import('pdf-lib'); pagine = (await PDFDocument.load(Buffer.from(prima, 'base64'), { ignoreEncryption: true })).getPageCount() } catch { /* illeggibile: si sostituisce */ }
+    if (pagine >= et.etichette.length) return null
+  }
   try {
-    await admin.from('spedizioni').update({
-      etichetta_url: etichettaUrl, ...(nuoviColli ? { colli_dettaglio: nuoviColli } : {}),
-    }).eq('id', sped.id)
+    await admin.from('spedizioni').update({ etichetta_url: `data:application/pdf;base64,${b64unico}` }).eq('id', sped.id)
   } catch { /* il salvataggio è best-effort: l'importante è restituire il PDF adesso */ }
-
   return Buffer.from(b64unico, 'base64')
 }
 
@@ -608,14 +884,60 @@ export async function creaSpedizioneConEtichettaGls(cred: CredenzialiGls, parcel
 // ─────────────────────────────────────────────────────────────────────────────
 const GLS_TT_ENDPOINT = 'https://infoweb.gls-italy.com/XML/get_xml_track.php'
 
+// MOTIVO DELLA GIACENZA. L'evento della giacenza ("Spedizione in giacenza presso la sede GLS, siamo in
+// attesa di istruzioni", codice 66) non dice perché: lo dice l'evento PRIMA, quello che l'ha causata
+// (69 "Destinatario sconosciuto", 1/7 primo/secondo tentativo fallito, 24 "non e' possibile consegnare"),
+// a volte con la nota dell'autista in <Note> ("Tel errato"). Fino al 16/11/2026 note e codici si
+// scartavano: le 71 giacenze GLS dirette da meta' ottobre erano tutte senza motivo, e M.C. LOGISTICA
+// sceglieva lo svincolo alla cieca (con "Destinatario sconosciuto" la riconsegna allo stesso indirizzo
+// torna indietro). Gli eventi arrivano dal piu' recente, in tuple Data/Ora/Luogo/Stato/Note/Codice.
+function motivoGiacenzaGls(blocco: string): string | null {
+  const eventi: { stato: string; note: string }[] = []
+  let cur: { stato: string; note: string } | null = null
+  const reTag = /<(Data|Stato|Note)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/\1>/gi
+  let m: RegExpExecArray | null
+  while ((m = reTag.exec(blocco))) {
+    const nome = m[1].toLowerCase()
+    const val = m[2].replace(/\s+/g, ' ').trim()
+    if (nome === 'data') { if (cur) eventi.push(cur); cur = { stato: '', note: '' }; continue }
+    if (!cur) cur = { stato: '', note: '' }
+    if (nome === 'stato') cur.stato = val
+    else cur.note = val
+  }
+  if (cur) eventi.push(cur)
+  const iGiacenza = eventi.findIndex(e => mapStatoGls(e.stato) === 'in_giacenza')
+  if (iGiacenza < 0) return null
+  // La causa e' il primo evento prima della giacenza che non sia un passaggio normale: si saltano
+  // la stessa frase di giacenza ripetuta, "Consegna prevista", i transiti, la presa in carico e gli
+  // avvisi di ritardo ("non e' ancora arrivata presso la sede", codice 26).
+  // Fa eccezione "disponibile per il ritiro presso la sede" (codici 10/907): per mapStatoGls e' "in
+  // consegna", ma se e' quello che precede la giacenza il motivo e' che il destinatario non e' passato
+  // a ritirarlo (visto il 16/11 su Quick e Wave: senza questa eccezione il motivo diventava un ritardo
+  // di giorni prima, o il contatore "3g" della nota).
+  const passaggio = ['in_giacenza', 'in_consegna', 'in_transito', 'spedita']
+  const causa = eventi.slice(iGiacenza + 1).find(e => e.stato && (
+    /disponibile per il ritiro/i.test(e.stato)
+    || (!passaggio.includes(mapStatoGls(e.stato) || '') && !/non e' (ancora )?arrivata/i.test(e.stato))
+  ))
+  if (causa && /disponibile per il ritiro/i.test(causa.stato)) return 'Non ritirata dal destinatario presso la sede GLS'
+  // Solo la prima frase: il resto ("ti invitiamo a contattare il mittente…") e' rivolto al destinatario.
+  let testo = (causa?.stato || '').split(/[.,;](?:\s|$)/)[0].trim()
+    .replace(/^non siamo riusciti a raggiungerti/i, 'Destinatario non raggiunto')
+  // Le note fatte solo di un numero ("1", "2", "3g") sono il contatore dei giorni, non un motivo.
+  const notaVera = (n: string) => (n && !/^\d+\s*g?$/i.test(n) ? n : '')
+  const nota = notaVera(causa?.note || '') || notaVera(eventi[iGiacenza].note)
+  if (nota && !testo.toLowerCase().includes(nota.toLowerCase())) testo = testo ? `${testo} — ${nota}` : nota
+  return testo ? testo.slice(0, 200) : null
+}
+
 // Interroga il T&T GLS per numero spedizione e ritorna le stringhe di stato del tracking PRINCIPALE.
 export async function trackingGls(
   cred: CredenzialiGls, numeroNudo: string, timeoutMs = 15000
-): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; raw: string }> {
+): Promise<{ stati: string[]; eventi: { data: string; descrizione: string; luogo: string }[]; motivoGiacenza: string | null; raw: string }> {
   const sede = (cred.sigla_sede || '').trim()
   const contratto = (cred.codice_contratto || '').trim()
   const num = String(numeroNudo || '').replace(/\D/g, '')   // il T&T vuole il numero NUDO (solo cifre)
-  if (!sede || !num) return { stati: [], eventi: [], raw: '' }
+  if (!sede || !num) return { stati: [], eventi: [], motivoGiacenza: null, raw: '' }
   const url = `${GLS_TT_ENDPOINT}?locpartenza=${encodeURIComponent(sede)}&NumSped=${encodeURIComponent(num)}` +
     (contratto ? `&CodCli=${encodeURIComponent(contratto)}` : '')
   const ctrl = new AbortController()
@@ -625,7 +947,7 @@ export async function trackingGls(
     const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/xml, text/xml' } })
     xml = await res.text()
   } catch {
-    return { stati: [], eventi: [], raw: '' }   // rete/timeout: nessun aggiornamento, si riprova al giro dopo
+    return { stati: [], eventi: [], motivoGiacenza: null, raw: '' }   // rete/timeout: nessun aggiornamento, si riprova al giro dopo
   } finally {
     clearTimeout(t)
   }
@@ -638,6 +960,7 @@ export async function trackingGls(
   // sui testi precisi degli eventi.
   const mTrack = /<TRACKING>([\s\S]*?)<\/TRACKING>/i.exec(xml)
   const blocco = mTrack ? mTrack[1] : ''
+  const motivoGiacenza = motivoGiacenzaGls(blocco)
   const stati: string[] = []
   const re = /<Stato>([\s\S]*?)<\/Stato>/gi
   let m: RegExpExecArray | null
@@ -713,9 +1036,9 @@ export async function trackingGls(
       return m !== 'in_giacenza' && (m !== 'consegnata' || tuttiConsegnati)
     })
     const statiItalia = stati.filter(s => mapStatoGls(s) !== 'consegnata')
-    return { stati: [...statiItalia, ...statiEsteri], eventi, raw: xml.substring(0, 2000) }
+    return { stati: [...statiItalia, ...statiEsteri], eventi, motivoGiacenza, raw: xml.substring(0, 2000) }
   }
-  return { stati, eventi, raw: xml.substring(0, 2000) }
+  return { stati, eventi, motivoGiacenza, raw: xml.substring(0, 2000) }
 }
 
 // Mappa una stringa di stato del T&T GLS (evento <Stato>) allo stato interno. Sullo stampo di

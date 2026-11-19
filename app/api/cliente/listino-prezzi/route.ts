@@ -26,7 +26,7 @@ export async function GET() {
     // `su_mittente` serve per DIRE quali colonne dipendono dalla partenza: il motore le esclude dal
     // match della destinazione (lib/pricing: `if (f.zone.su_mittente) continue`) e le usa come
     // supplemento d'origine, ma qui finivano nella griglia come se fossero zone di arrivo.
-    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome,su_mittente),corrieri(nome_contratto,attivo,master_id)')
+    .select('corriere_id,peso_max,prezzo,tipo,fuel,zone(nome,su_mittente,multicollo),corrieri(nome_contratto,attivo,master_id)')
     .eq('listino_id', listinoId).order('peso_max', { ascending: true })
 
   // Contratti in pausa (al proprio livello o SOPRA nella catena): i loro prezzi non devono
@@ -51,10 +51,20 @@ export async function GET() {
         zoneSet: new Set<string>(),
         zoneMittenteSet: new Set<string>(),
         fasce: new Map<string, any>(),
+        // Le zone MULTICOLLO hanno la loro griglia (scheda Multicollo): non si mescolano col collo singolo.
+        zoneMC: new Set<string>(),
+        fasceMC: new Map<string, any>(),
       })
     }
     const e = perCorr.get(cid)
     const zonaNome = (f as any).zone?.nome || '—'
+    if ((f as any).zone?.multicollo) {
+      e.zoneMC.add(zonaNome)
+      const kmc = (f as any).tipo + '|' + (f as any).peso_max
+      if (!e.fasceMC.has(kmc)) e.fasceMC.set(kmc, { peso_max: Number((f as any).peso_max), tipo: (f as any).tipo, fuel: Number((f as any).fuel) || 0, prezzi: {} as Record<string, number> })
+      e.fasceMC.get(kmc).prezzi[zonaNome] = Number((f as any).prezzo)
+      continue
+    }
     e.zoneSet.add(zonaNome)
     if ((f as any).zone?.su_mittente) e.zoneMittenteSet.add(zonaNome)
     const key = (f as any).tipo + '|' + (f as any).peso_max
@@ -89,6 +99,8 @@ export async function GET() {
       peso_min: d?.peso_min !== '' && d?.peso_min != null ? Number(d.peso_min) : null,
       peso_max: d?.peso_max !== '' && d?.peso_max != null ? Number(d.peso_max) : null,
     }
+    // Localita' remota / partenza remota del multicollo: chi paga deve poterle leggere come il resto.
+    if ((s as any).tipo === 'multicollo_supplementi') (row as any).dati = d
     if (!supplPerCorr.has(cid)) supplPerCorr.set(cid, [])
     supplPerCorr.get(cid)!.push(row)
   }
@@ -112,6 +124,7 @@ export async function GET() {
         zone: Array.from(c.zoneSet).sort(ordZona as any),
         zoneMittente: Array.from(c.zoneMittenteSet),
         fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),
+        multicollo: c.zoneMC.size ? { zone: Array.from(c.zoneMC).sort(), fasce: Array.from(c.fasceMC.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max) } : null,
         supplementi: {
           assicurazione: perTipo('assicurazione').sort(ordScaglioni),
           contrassegno: perTipo('contrassegno').sort(ordScaglioni),
@@ -119,6 +132,7 @@ export async function GET() {
           giacenza: [...perTipo('giacenza'), ...perTipo('giacenza_apertura')],
           ritiro: perTipo('ritiro'),
           sponda: perTipo('sponda'),
+          minimo_collo: [...perTipo('minimo_collo'), ...perTipo('multicollo_supplementi')],
         },
       }
     })

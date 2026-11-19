@@ -23,7 +23,7 @@ export default function PrivacyPage() {
     <div style={{ background: '#fff', minHeight: '100vh' }}>
       <div style={box}>
         <h1 style={h1}>Privacy Policy</h1>
-        <div style={small}>MoovExpress — Ultimo aggiornamento: 20 ottobre 2026</div>
+        <div style={small}>MoovExpress — Ultimo aggiornamento: 12 novembre 2026</div>
 
         <h2 style={h2}>1. Titolare del trattamento</h2>
         <p style={p}>
@@ -73,6 +73,7 @@ export default function PrivacyPage() {
           <li style={li}><strong>Corrieri e intermediari di spedizione</strong> scelti per la singola spedizione: solo i dati necessari al ritiro e alla consegna.</li>
           <li style={li}><strong>Canali di vendita collegati</strong> (per esempio Amazon, Shopify, eBay): il numero di tracking e il corriere, per segnare l'ordine come spedito.</li>
           <li style={li}><strong>Fornitori dell'infrastruttura</strong>, che trattano i dati per nostro conto come responsabili del trattamento: hosting e database (server a Londra, Regno Unito), invio di email e SMS di servizio, pagamenti delle ricariche.</li>
+          <li style={li}><strong>Assistente virtuale Moovy</strong>: le domande che scrivi o detti all&apos;assistente sono elaborate da un fornitore di intelligenza artificiale per formulare la risposta. All&apos;assistente non passiamo i dati dei destinatari delle spedizioni; evita di scrivergli dati personali di altri.</li>
         </ul>
         <p style={p}>
           Il servizio e il database funzionano nel Regno Unito, riconosciuto dalla Commissione europea come paese

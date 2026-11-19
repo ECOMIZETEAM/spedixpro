@@ -3,6 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { raggruppaPerInvio } from '@/lib/network-invii'
+import { senzaChili } from '@/lib/rettifiche-perche'
 
 // Cosa il MIO master ha ricevuto dai livelli superiori della catena.
 // RLS: le righe appartengono al master PADRE -> lettura via admin, autorizzazione = target_master_id mio.
@@ -37,6 +39,8 @@ export async function GET(_req: NextRequest) {
     }
   } catch { /* best-effort: non deve mai bloccare la lista */ }
 
+  const COLONNE = 'id,master_id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,colli_ripesati,fattore_volume,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,confermata_il,stato,propagazione,perche,created_at,masters:master_id(nome)'
+  const TETTO_STORICHE = 500
   const [rett, cod, resi] = await Promise.all([
     // SI VEDE SOLO QUELLO CHE E' GIA' STATO ADDEBITATO.
     // Mancava il filtro sulla conferma: appena il master di sopra CARICAVA il file, le righe
@@ -61,18 +65,43 @@ export async function GET(_req: NextRequest) {
       const daDecidere: any[] = []
       for (let da = 0; ; da += 1000) {
         const { data, error } = await adminDb.from('rettifiche')
-          .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
+          .select(COLONNE)
           .eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).is('propagazione', null)
-          .order('created_at', { ascending: false }).range(da, da + 999)
+          .order('created_at', { ascending: false }).order('id', { ascending: false }).range(da, da + 999)
         if (error) { console.error('[NETWORK] rettifiche da decidere:', error.message); break }
         daDecidere.push(...(data || []))
         if (!data || data.length < 1000) break
       }
-      const { data: storiche } = await adminDb.from('rettifiche')
-        .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_volume_iniziale,peso_reale,peso_volume_reale,costo_iniziale,costo_finale,differenza,fuori_sagoma,confermata,stato,propagazione,created_at,masters:master_id(nome)')
+      // LE GIA' DECISE DALL'ADDEBITO PIU' RECENTE, NON DALLA NASCITA. I blocchi seguono il giorno della conferma
+      // (lib/network-invii): leggendole per nascita, una conferma con dentro righe nate giorni prima (i 17
+      // supplementi UPS del 30/10 confermati da MULTI il 07/11) restava a meta' sotto il tetto, col totale sbagliato.
+      // E IL GIORNO IN CUI CADE IL TETTO SI LEGGE TUTTO. Un tetto fisso di righe taglia un giorno a meta': il 04/11
+      // MULTI ha addebitato a Ecomize Solution ~2.370 righe, e le 500 piu' recenti finivano dentro quel giorno. Un
+      // blocco a meta' mostra un totale che non e' quello addebitato; toglierlo lasciava la pagina senza storico.
+      // Si guarda dove cade la 500esima e si legge da 36 ore prima (il suo giorno intero, piu' un margine): il giorno
+      // piu' vecchio, letto a meta', lo toglie raggruppaPerInvio.
+      const base = () => adminDb.from('rettifiche').select(COLONNE)
         .eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).not('propagazione', 'is', null)
-        .order('created_at', { ascending: false }).limit(500)
-      return { data: [...daDecidere, ...(storiche || [])], error: null }
+      const { data: soglia } = await adminDb.from('rettifiche').select('confermata_il')
+        .eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true).not('propagazione', 'is', null)
+        .order('confermata_il', { ascending: false, nullsFirst: false }).range(TETTO_STORICHE - 1, TETTO_STORICHE - 1)
+      const taglio = (soglia as any)?.[0]?.confermata_il as string | null | undefined
+      if (!taglio) {
+        // sotto il tetto (o oltre il tetto ci sono solo righe senza ora, storico molto vecchio): come prima
+        const { data: storiche } = await base()
+          .order('confermata_il', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }).limit(TETTO_STORICHE)
+        return { data: [...daDecidere, ...(storiche || [])], storicheTagliate: (storiche || []).length >= TETTO_STORICHE, error: null }
+      }
+      const da = new Date(new Date(taglio).getTime() - 36 * 3600 * 1000).toISOString()
+      const storiche: any[] = []
+      for (let p = 0; p < 6000; p += 1000) {
+        const { data, error } = await base().gte('confermata_il', da)
+          .order('confermata_il', { ascending: false }).order('id', { ascending: false }).range(p, p + 999)
+        if (error) { console.error('[NETWORK] rettifiche gia\' decise:', error.message); break }
+        storiche.push(...(data || []))
+        if (!data || data.length < 1000) break
+      }
+      return { data: [...daDecidere, ...storiche], storicheTagliate: true, error: null }
     })(),
     adminDb.from('distinte_contrassegni')
       .select('id,numero,totale_iniziale,totale_rimborsato,metodo_pagamento,stato,data_pagamento,accettata_target,created_at,masters:master_id(nome),distinte_contrassegni_righe(numero_spedizione,importo_cod)')
@@ -89,7 +118,8 @@ export async function GET(_req: NextRequest) {
   // a cui girarla: è già a suo carico (il credito gli è stato scalato). Non va mostrata come una
   // scelta "propaga / Le assorbo io" — quel bottone suona come accollarsi il costo di un altro,
   // mentre qui il pacco è suo. Si marca `propria` così la UI la mostra come "tua spedizione".
-  const rettRows = (rett.data || []) as any[]
+  // Le rettifiche senza chili (senzaChili in lib/rettifiche-perche) chi le ha ricevute non le vede.
+  const rettRows = ((rett.data || []) as any[]).filter(r => !senzaChili(r))
   const spedIds = [...new Set(rettRows.map(r => r.spedizione_id).filter(Boolean))]
   const proprieSet = new Set<string>()
   for (let i = 0; i < spedIds.length; i += 300) {
@@ -98,8 +128,34 @@ export async function GET(_req: NextRequest) {
   }
   for (const r of rettRows) r.propria = !!(r.spedizione_id && proprieSet.has(r.spedizione_id))
 
+  // IL PESO SU CUI SI PAGA, SULLE MULTICOLLO (lib/rettifiche-peso-pagato, lo stesso della Conferma e di Rettifica
+  // Costi): i totali della riga non lo dicono, perche' si paga collo per collo. 3UW1WLJ093303 arrivava a Ecomize
+  // Solution come «27,2 → 27,9 kg (vol.)» con 6,28 € di addebito; si paga 28,88 → 30,60 kg, oltre i 30.
+  // I colli ripesati servono solo a questo conto: non escono dalla rotta.
+  const multi = rettRows.filter(r => Array.isArray(r.colli_ripesati) && r.colli_ripesati.length > 1)
+  if (multi.length) {
+    try {
+      const { pesiPagati } = await import('@/lib/rettifiche-peso-pagato')
+      const { pesiDi } = await pesiPagati(adminDb, multi)
+      for (const r of multi) { const p = pesiDi.get(r.id); if (p && p.dopo > 0) r.peso_pagato = p }
+    } catch (e: any) { console.error('[NETWORK] peso su cui si paga:', e?.message) }
+  }
+  for (const r of rettRows) delete r.colli_ripesati
+  // GIRATE SOTTO: per ogni riga caricata, la rettifica nata per chi sta sotto — quanto chiede e se e' gia' confermata
+  // (quindi incassata). Il blocco dice cosi' quanto ti hanno scalato e quanto stai recuperando (Lorenzo, 16/11/2026).
+  // Una figlia sola per riga: la garantisce l'indice unico su origine_rettifica_id.
+  const caricate = rettRows.filter(r => r.propagazione === 'propagata').map(r => r.id)
+  const figlie = new Map<string, { euro: number; confermata: boolean }>()
+  for (let i = 0; i < caricate.length; i += 300) {
+    const { data: ff } = await adminDb.from('rettifiche').select('origine_rettifica_id,differenza,fuori_sagoma,confermata')
+      .in('origine_rettifica_id', caricate.slice(i, i + 300))
+    for (const f of (ff || []) as any[]) figlie.set(f.origine_rettifica_id, {
+      euro: Math.round((-Number(f.differenza || 0) + Number(f.fuori_sagoma || 0)) * 100) / 100, confermata: !!f.confermata })
+  }
+  for (const r of rettRows) if (figlie.has(r.id)) r.figlia = figlie.get(r.id)
+
   return NextResponse.json({
-    rettifiche: rettRows,
+    rettifiche: raggruppaPerInvio(rettRows, !!(rett as any).storicheTagliate),
     contrassegni: cod.data || [],
     resi: resi.data || [],
   })

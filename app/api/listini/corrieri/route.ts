@@ -1,6 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
+import { TIPO_MINIMO_COLLO, minimoACollo } from '@/lib/pricing'
+import { TIPO_MULTICOLLO_SUPPLEMENTI, leggiSupplementiMulticollo, normalizzaSupplementiMulticollo } from '@/lib/multicollo-zone'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -74,7 +77,11 @@ export async function GET(req: NextRequest) {
   // sospeso_sopra: in pausa da un livello superiore -> lo vede col badge, prezzi in sola lettura (è ereditato).
   const { corrieriEreditatiIds } = await import('@/lib/rete-masters')
   const _ereditatiIds = await corrieriEreditatiIds(_admin, utente?.master_id)
-  const corrieri = corrieriBase.map((c:any) => ({ ...c, ereditato: _ereditatiIds.has(c.id), sospeso_sopra: _sospesoSopra(c) }))
+  // Il codice del contratto (CT-…) solo allo staff del master: mai al cliente, all'agente o all'autista.
+  const { codiciContratti } = await import('@/lib/codice-contratto')
+  const { gestisceLaRete } = await import('@/lib/ruoli')
+  const _codici = gestisceLaRete(utente as any) ? await codiciContratti(_admin, utente?.master_id) : new Map<string, string>()
+  const corrieri = corrieriBase.map((c:any) => ({ ...c, codice: _codici.get(c.id) || null, ereditato: _ereditatiIds.has(c.id), sospeso_sopra: _sospesoSopra(c) }))
   const corrieriDisponibili = (tuttiICorrieri||[]).filter(c => !corrieri.some((x:any) => x.id === c.id))
 
   const corriereSelezionato = corrieri.find((c:any) => c.id === corriereId) || corrieri[0]
@@ -137,11 +144,14 @@ export async function GET(req: NextRequest) {
     if (effettivo > 0) listinoOut = { ...listino, fattore_volume: effettivo }
   }
 
+  // I supplementi del corriere (fuori misura…) si mostrano solo sui contratti dove sono accesi.
+  const supplementiCorriere = await corriereConSupplementi(_admin, corriereSelezionato?.id)
+
   return NextResponse.json({
     listino: listinoOut, corrieri, corrieriDisponibili,
     corriereSelezionatoId: corriereSelezionato?.id || '',
     corriereEreditato: !!corriereSelezionato?.ereditato,
-    fasce, supplementi,
+    fasce, supplementi, supplementiCorriere,
   })
 }
 
@@ -195,6 +205,17 @@ export async function POST(req: NextRequest) {
   // (potevano essere sparse sotto listino_id diversi): evita duplicati/orfani e le riconsolida.
   const { data: listiniMaster } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente?.master_id)
   const masterListinoIds = [...new Set([...(listiniMaster || []).map((l: any) => l.id), listinoId].filter(Boolean))]
+  // I supplementi del corriere si riscrivono solo se la pagina li manda: una pagina aperta prima che
+  // esistessero salverebbe senza, e la cancellazione qui sotto li perderebbe.
+  const { data: supplCorrierePrima } = await supabase.from('listini_corrieri_supplementi')
+    .select('tipo,nome,valore,tipo_calcolo,descrizione').in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
+    .eq('tipo', TIPO_SUPPLEMENTO_CORRIERE).order('id', { ascending: true })
+  // Stessa cosa per il minimo a collo: una pagina aperta prima che la voce esistesse la cancellerebbe.
+  const { data: minimoCollPrima } = await supabase.from('listini_corrieri_supplementi')
+    .select('tipo,valore').in('listino_id', masterListinoIds).eq('corriere_id', corriereId).eq('tipo', TIPO_MINIMO_COLLO)
+  // E per localita' remota / partenza remota del multicollo, per la stessa ragione.
+  const { data: supplMCPrima } = await supabase.from('listini_corrieri_supplementi')
+    .select('tipo,descrizione').in('listino_id', masterListinoIds).eq('corriere_id', corriereId).eq('tipo', TIPO_MULTICOLLO_SUPPLEMENTI)
   await supabase.from('listini_corrieri_fasce').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
   await supabase.from('listini_corrieri_supplementi').delete().in('listino_id', masterListinoIds).eq('corriere_id', corriereId)
 
@@ -257,6 +278,27 @@ export async function POST(req: NextRequest) {
         righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: 'sponda', nome: 'Sponda', valore: prezzo_kg, tipo_calcolo: 'per_kg', descrizione: JSON.stringify({ soglia_kg }) })
       }
     }
+  }
+  // MINIMO A COLLO (multicollo, lib/pricing → noloMulticollo): euro per collo; 0 o vuoto = non prezzato.
+  const minimoCollo = supplementi?.minimo_collo !== undefined
+    ? Number(supplementi.minimo_collo) || 0
+    : minimoACollo(minimoCollPrima || [])
+  if (minimoCollo > 0) {
+    righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: TIPO_MINIMO_COLLO, nome: 'Minimo a collo', valore: minimoCollo, tipo_calcolo: 'per_collo' })
+  }
+  // LOCALITA' REMOTA / PARTENZA REMOTA del multicollo (lib/multicollo-zone): null = tolti; non mandati =
+  // restano quelli di prima. Le fasce multicollo arrivano con le altre fasce (sono fasce su zone multicollo).
+  const supplMC = supplementi?.multicollo_supplementi !== undefined
+    ? normalizzaSupplementiMulticollo(supplementi.multicollo_supplementi)
+    : leggiSupplementiMulticollo(supplMCPrima || [])
+  if (supplMC) {
+    righeSupplementi.push({ listino_id: listinoId, corriere_id: corriereId, tipo: TIPO_MULTICOLLO_SUPPLEMENTI, nome: 'Supplementi multicollo', valore: 0, tipo_calcolo: 'al_kg', descrizione: JSON.stringify(supplMC) })
+  }
+  const { createAdminSupabase: _adminSuppl } = await import('@/lib/supabase-admin')
+  if (Array.isArray(supplementi?.supplementiCorriere) && await corriereConSupplementi(_adminSuppl(), corriereId)) {
+    righeSupplementi.push(...righeSupplementoCorriere(supplementi.supplementiCorriere, { listino_id: listinoId, corriere_id: corriereId }))
+  } else {
+    righeSupplementi.push(...(supplCorrierePrima || []).map((r: any) => ({ ...r, listino_id: listinoId, corriere_id: corriereId })))
   }
   if (righeSupplementi.length) {
     const { error } = await supabase.from('listini_corrieri_supplementi').insert(righeSupplementi)

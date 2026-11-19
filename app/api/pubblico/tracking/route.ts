@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { colorePubblico, eventoPubblico, luogoLeggibile } from '@/lib/tracking-pubblico'
+import { eventoPubblico, luogoLeggibile } from '@/lib/tracking-pubblico'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +21,7 @@ const STATO_LABEL: Record<string, string> = {
   annullamento_pending: 'In lavorazione',
 }
 
-const COLS = 'id,master_id,stato,numero,tracking_number,dest_citta,dest_provincia,updated_at,created_at'
+const COLS = 'id,stato,numero,tracking_number,dest_citta,dest_provincia,updated_at,created_at'
 
 // "NON TROVATA" E "NON SONO RIUSCITO A GUARDARE" SONO DUE COSE DIVERSE.
 //
@@ -72,15 +72,7 @@ export async function GET(req: NextRequest) {
   const s: any = esito.riga
   if (!s) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  // WHITE-LABEL: il destinatario vede il marchio del master della spedizione (come nel portale
-  // cliente), con ripiego su MoovExpress. Non espone il mittente/cliente, solo il brand di piattaforma.
-  // Anche il colore del master: la pagina si tinge del suo marchio, come il suo portale.
-  let brand: { nome: string; logo: string | null; colore: string | null } = { nome: 'MoovExpress', logo: null, colore: null }
-  if (s.master_id) {
-    const { data: m } = await admin.from('masters').select('nome,logo_url,colore_primario').eq('id', s.master_id).maybeSingle()
-    if (m?.nome) brand = { nome: m.nome, logo: m.logo_url || null, colore: colorePubblico(m.colore_primario) }
-  }
-
+  // Nessun marchio del master: la pagina e' sempre MoovExpress (vedi app/traccia/CardTracking).
   const { data: ev } = await admin
     .from('tracking_events')
     .select('descrizione,luogo,data_evento')
@@ -89,7 +81,6 @@ export async function GET(req: NextRequest) {
     .limit(50)
 
   return NextResponse.json({
-    brand,
     stato: s.stato,
     stato_label: STATO_LABEL[s.stato] || 'In lavorazione',
     // Numero visibile: il tracking del corriere se c'è, altrimenti il nostro numero interno.

@@ -8,6 +8,7 @@ import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
 import CodiceRitiroMancante from '@/app/components/CodiceRitiroMancante'
+import { giornoRoma, giorniFaRoma, inizioGiornoRomaISO, fineGiornoRomaISO } from '@/lib/date-roma'
 
 const sel = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
 const inp = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}
@@ -19,8 +20,16 @@ const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpac
 function filtriDefault() {
   return {
     clienteId: '', vettore: '', codRitiro: '', stato: '',
-    dal: '', al: '',
   }
+}
+
+// IL PERIODO NON SI RICORDA, SI RICALCOLA A OGNI APERTURA: ultimi 30 giorni di Roma (come il
+// "Ultimi 30 giorni" del calendario). Partiva vuoto e caricava TUTTO lo storico della rete a ogni
+// apertura (MULTIEXPRESS il 15/10: 64.755 ritiri, ~60 MB; negli ultimi 30 giorni 28.703, ~26 MB). E non va salvato con gli altri filtri: una data
+// "oggi" salvata resta ferma al giorno in cui e' stata scritta, ed e' cosi' che il 13/10 si sono
+// scoperti elenchi congelati da settimane.
+function periodoDefault() {
+  return { dal: giorniFaRoma(29), al: giornoRoma() }
 }
 
 export default function ElencoRitiriPage() {
@@ -32,8 +41,11 @@ export default function ElencoRitiriPage() {
   const [cerca, setCerca] = useFiltriPersistenti('ritiri-elenco-master:cerca', '')
   const [perPage, setPerPage] = useFiltriPersistenti('ritiri-elenco-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
-  const [filtri, setFiltri] = useFiltriPersistenti('ritiri-elenco-master:filtri', filtriDefault())
-  const filtriAttivi = filtriToccati(filtri, filtriDefault())
+  // Chiave NUOVA: sotto la vecchia ci sono gli oggetti salvati con dentro dal/al, che riporterebbero
+  // indietro proprio le date che qui non si devono piu' ricordare.
+  const [filtri, setFiltri] = useFiltriPersistenti('ritiri-elenco-master:filtri-senza-date', filtriDefault())
+  const [periodo, setPeriodo] = useState(periodoDefault)
+  const filtriAttivi = filtriToccati({ ...filtri, ...periodo }, { ...filtriDefault(), ...periodoDefault() })
   const attivo = (k: string) => filtriAttivi.has(k)
 
   useEffect(() => {
@@ -49,12 +61,15 @@ export default function ElencoRitiriPage() {
     if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
     if (filtri.vettore) params.set('vettore', filtri.vettore)
     if (filtri.codRitiro) params.set('codRitiro', filtri.codRitiro)
-    if (filtri.dal) params.set('dal', filtri.dal)
-    if (filtri.al) params.set('al', filtri.al)
+    // Giorni di Roma: la rotta usa `dal` cosi' com'e' e a `al` aggiunge le 23:59:59 di Greenwich
+    // (fino alle 2 italiane del giorno dopo): il taglio esatto all'ultimo giorno si fa qui.
+    if (periodo.dal) params.set('dal', inizioGiornoRomaISO(periodo.dal))
+    if (periodo.al) params.set('al', periodo.al)
     try {
       const res = await fetch('/api/ritiri?' + params.toString())
       const d = await res.json()
-      setRitiri(Array.isArray(d) ? d : [])
+      const fine = periodo.al ? Date.parse(fineGiornoRomaISO(periodo.al)) : Infinity
+      setRitiri(Array.isArray(d) ? d.filter((r: any) => Date.parse(r.created_at) <= fine) : [])
     } catch { setRitiri([]) }
     setLoading(false)
   }
@@ -141,7 +156,7 @@ export default function ElencoRitiriPage() {
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Data:</div>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
+            <DateRangePicker dal={periodo.dal} al={periodo.al} onChange={(dal,al)=>setPeriodo({dal,al})} attivo={attivo('data')} />
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>COD Ritiro</div>

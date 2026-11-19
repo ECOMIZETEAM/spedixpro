@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { etichettaModalitaCod } from '@/lib/contrassegno-modalita'
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
   let mappaSped: Record<string, any> = {}
   if (spedIds.length) {
     const { data: speds } = await supabase.from('spedizioni')
-      .select('id,dest_nome,dest_citta,created_at,rif_destinatario').in('id', spedIds)
+      .select('id,dest_nome,dest_citta,created_at,rif_destinatario,contrassegno_modalita').in('id', spedIds)
     for (const s of speds || []) mappaSped[s.id] = s
   }
   const dettaglio = (righe || []).map((r: any) => {
@@ -31,6 +32,8 @@ export async function GET(req: NextRequest) {
     return {
       numeroSpedizione: r.numero_spedizione, destinatario: s.dest_nome || '', citta: s.dest_citta || '',
       dataSpedizione: s.created_at || null, contrIniziale: Number(r.importo_cod || 0), contrRimborsato: Number(r.importo_sistema || 0),
+      // Contanti o assegno (ABM/ACM) sui contratti Poste: il cliente vede come e' stato incassato.
+      incasso: etichettaModalitaCod(s.contrassegno_modalita) || '',
     }
   })
   return NextResponse.json({ distinta, clienteNome: cliente?.ragione_sociale || '', righe: dettaglio })

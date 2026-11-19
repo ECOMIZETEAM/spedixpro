@@ -10,7 +10,10 @@ export async function GET(req: NextRequest) {
   try {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
-      const { data: u } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).maybeSingle()
+      // Con la chiave di servizio: si esce anche dalla pagina del codice, dove la sessione non ha
+      // ancora messo il codice e il database non le farebbe leggere niente.
+      const { createAdminSupabase } = await import('@/lib/supabase-admin')
+      const { data: u } = await createAdminSupabase().from('utenti').select('cliente_id').eq('id', user.id).maybeSingle()
       versoCliente = !!u?.cliente_id
     }
   } catch {}

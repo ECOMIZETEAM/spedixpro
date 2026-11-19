@@ -27,12 +27,9 @@ const PACCHETTI = [1000, 5000, 10000]   // ≥1000, come deciso
 const NON_PER_I_NEGOZI_SHOPIFY = 'Acquisto SMS non disponibile per i negozi collegati da Shopify.'
 const CONTO_ILLEGGIBILE = 'Non riesco a leggere il tuo conto in questo momento. Riprova.'
 
-// Si guarda il master scritto sulla riga del CLIENTE, quello che decide il suo listino e il suo conto.
 // Una lettura fallita non e' un via libera: null, e chi chiama si ferma invece di aprire la cassa.
 async function clienteSoloEtichette(admin: any, clienteId: string): Promise<boolean | null> {
-  const { data, error } = await admin.from('clienti').select('master_id').eq('id', clienteId).maybeSingle()
-  if (error) return null
-  return pagaSoloEtichette(data?.master_id)
+  return pagaSoloEtichette(admin, clienteId)
 }
 
 // Il portale cliente chiede se per lui l'acquisto esiste, per non mostrare prezzi e inviti a farsi

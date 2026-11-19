@@ -102,7 +102,12 @@ export async function POST(req: NextRequest) {
     .update({ stato: 'spedito', spedizione_id: spedizioneId, errore: null })
     .eq('id', ordineId).eq('cliente_id', utente.cliente_id)
 
-  // EVASIONE SUBITO SUL NEGOZIO, non al prossimo giro.
+  // SUBITO SUL NEGOZIO, non al prossimo giro.
+  //
+  // DAL 10/11/2026 QUI NON SI EVADE PIU': l'evasione col tracking parte alla chiusura della distinta
+  // (lib/evasione-ordini, inDistinta). Questa spinta evade solo una spedizione gia' in distinta (raro);
+  // le altre aspettano la distinta, su tutte le piattaforme. Il resto del commento racconta perche' la
+  // spinta sta qui.
   //
   // Finora il tracking tornava allo store SOLO alla creazione della distinta o col recupero ogni 20
   // minuti. Funzionava, ma in differita: chi spedisce dall'app guarda Shopify e vede ancora

@@ -4,6 +4,8 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { bloccaAgente } from '@/lib/agente'
 import { scendiCodDaSpedizione } from '@/lib/condivisione-catena'
+import { eAssegno } from '@/lib/contrassegno-modalita'
+import { fetchAllStretto } from '@/lib/fetch-all'
 
 // ELIMINA una distinta contrassegni SBAGLIATA (es. file caricato per errore). Consentito SOLO:
 // - al master proprietario;
@@ -109,6 +111,32 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{id: s
   const paidThis = Math.round(righe.reduce((s, p) => s + p.importo, 0) * 100) / 100
   if (paidThis > residuo + 0.02) {
     return NextResponse.json({ error: `L'importo (€${paidThis.toFixed(2)}) supera il residuo da saldare (€${residuo.toFixed(2)})` }, { status: 400 })
+  }
+
+  // CONTRASSEGNI INCASSATI CON ASSEGNO (SDA EXPRESS L, ABM/ACM). L'assegno e' intestato al mittente: lungo
+  // la fila si consegna il titolo, non si pagano soldi. Una distinta di assegni si chiude solo col metodo
+  // "assegno"; un bonifico o una compensazione darebbero al cliente i soldi E l'assegno (Lorenzo,
+  // 09/11/2026). Qui e' l'unico punto da cui passa ogni pagamento, verso clienti e verso sotto-master:
+  // per questo la regola sta qui e non nel modulo. Una distinta che mescola assegni e contanti non si paga
+  // (dal 09/11 nascono separate): va annullata e ricreata.
+  {
+    // Lettura STRETTA: "non sono riuscito a leggere le righe" non deve valere "non ci sono assegni".
+    let righeDist: any[]
+    try { righeDist = await fetchAllStretto(() => admin.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_id', id).order('id', { ascending: true })) }
+    catch { return NextResponse.json({ error: 'Righe della distinta non leggibili: riprova. Nessun pagamento registrato.' }, { status: 500 }) }
+    const idsSped = [...new Set((righeDist || []).map((r: any) => r.spedizione_id).filter(Boolean))] as string[]
+    let assegni = 0, letti = 0
+    for (let i = 0; i < idsSped.length; i += 300) {
+      const { data, error } = await admin.from('spedizioni').select('contrassegno_modalita').in('id', idsSped.slice(i, i + 300))
+      if (error) return NextResponse.json({ error: 'Spedizioni della distinta non leggibili: riprova. Nessun pagamento registrato.' }, { status: 500 })
+      for (const sp of (data || [])) { letti++; if (eAssegno((sp as any).contrassegno_modalita)) assegni++ }
+    }
+    if (assegni > 0 && assegni < letti) {
+      return NextResponse.json({ error: `La distinta mescola contrassegni incassati con assegno (${assegni}) e in contanti (${letti - assegni}): annullala e ricreala, gli assegni finiscono in una distinta a parte. Nessun pagamento registrato.` }, { status: 409 })
+    }
+    if (assegni > 0 && righe.some(p => p.metodo !== 'assegno')) {
+      return NextResponse.json({ error: "Questa distinta contiene contrassegni incassati con assegno intestato al mittente: si chiude solo col metodo \"Assegno\", consegnando gli assegni. Nessun bonifico e nessuna compensazione sul credito. Nessun pagamento registrato." }, { status: 400 })
+    }
   }
 
   // DOVE VA LA COMPENSAZIONE verso un master, deciso PRIMA di segnare pagata la distinta. Su un salto a

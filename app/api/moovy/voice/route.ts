@@ -108,7 +108,9 @@ export async function POST(req: Request) {
       const ldv = String(args.ldv || '').trim()
       const sped = await trovaSped(admin, ldv, u, isCliente, isAgente, supabase)
       if (!sped) return json({ reply: `Non ho trovato la spedizione ${ldv} tra le tue.` })
-      return json({ reply: await riformula(groq, messages, call, `Spedizione ${sped.numero} per ${sped.dest_nome || 'destinatario'}: stato ${statoUmano(sped.stato)}.`) })
+      // Senza il nome del destinatario: questa frase va a Groq per la riformulazione, e il destinatario
+      // puo' essere un compratore Amazon, i cui dati non escono verso terzi (politica Amazon 4.6).
+      return json({ reply: await riformula(groq, messages, call, `Spedizione ${sped.numero}: stato ${statoUmano(sped.stato)}.`) })
     }
 
     // ── SCRITTURE: NON eseguo, propongo con conferma ──
@@ -127,7 +129,8 @@ export async function POST(req: Request) {
       const ldv = String(args.ldv || '').trim()
       const sped = await trovaSped(admin, ldv, u, isCliente, isAgente, supabase)
       if (!sped) return json({ reply: `Non ho trovato la spedizione ${ldv} tra le tue.` })
-      const desc = `Eliminare la spedizione ${sped.numero} per ${sped.dest_nome || 'destinatario'}?`
+      // Senza nome: la risposta torna nella conversazione, che al messaggio dopo si rimanda a Groq.
+      const desc = `Eliminare la spedizione ${sped.numero}?`
       return json({ reply: `Confermi: ${desc}`, pendingAction: { azione: 'elimina_spedizione', spedizioneId: sped.id, numero: sped.numero, descrizione: desc } })
     }
 
@@ -147,7 +150,7 @@ async function riformula(groq: any, messages: any[], call: any, risultato: strin
 
 async function trovaSped(admin: any, ldv: string, u: any, isCliente: boolean, isAgente: boolean, supabase: any) {
   if (!ldv) return null
-  let q = admin.from('spedizioni').select('id,numero,dest_nome,stato,cliente_id,master_id').or(`numero.eq.${ldv},tracking_number.eq.${ldv}`)
+  let q = admin.from('spedizioni').select('id,numero,stato,cliente_id,master_id').or(`numero.eq.${ldv},tracking_number.eq.${ldv}`)
   const { data } = await q.limit(1).maybeSingle()
   if (!data) return null
   // scope: cliente = sue; master/agente = rete (agente solo suoi clienti)

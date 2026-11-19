@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { isProviderTecnico } from '@/lib/corriere-logo'
 import WebhookSecretsPanel from '@/app/components/WebhookSecretsPanel'
+import CodiceContratto from '@/app/components/CodiceContratto'
 
 const DISPONIBILI = [
   // Il circuito interno sta per primo: e' l'unico che non dipende da nessuno.
@@ -63,13 +64,14 @@ export default function CorrieriPage() {
   const [salvandoPopup, setSalvandoPopup] = useState(false)
   const [puoDielle, setPuoDielle] = useState(false)   // integrazione riservata: mostra Dielle solo se autorizzato
   const [puoPoste, setPuoPoste] = useState(false)     // integrazione riservata: Poste Delivery Business diretto (KSync)
+  const [puoEcosmos, setPuoEcosmos] = useState(false) // integrazione riservata: Ecosmos, corriere elettrico di Roma
 
   useEffect(() => {
     fetch('/api/corrieri/lista').then(r => r.json()).then(d => {
       setCorrieri(Array.isArray(d) ? d : [])
       setLoading(false)
     }).catch(() => setLoading(false))
-    fetch('/api/corrieri/integrazioni').then(r => r.json()).then(d => { const ris = Array.isArray(d?.riservate) ? d.riservate : []; setPuoDielle(ris.includes('dielle')); setPuoPoste(ris.includes('poste')) }).catch(() => {})
+    fetch('/api/corrieri/integrazioni').then(r => r.json()).then(d => { const ris = Array.isArray(d?.riservate) ? d.riservate : []; setPuoDielle(ris.includes('dielle')); setPuoPoste(ris.includes('poste')); setPuoEcosmos(ris.includes('ecosmos')) }).catch(() => {})
   }, [])
 
   async function toggleAttivo(id: string, attivoAttuale: boolean) {
@@ -179,6 +181,7 @@ export default function CorrieriPage() {
                       ? <span title="Un master superiore lo ha messo in pausa: lo sblocco tocca a lui. Il cliente non lo vede; il tuo listino resta salvato." style={{background:'#fef3c7',color:'#b45309',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>⏸ In pausa (livello superiore)</span>
                       : <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{c.attivo?'Attivo':'In pausa'}</span>}
                     <span style={{background:'#fff7ed',color:'#f97316',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>L{c.livello}</span>
+                    <CodiceContratto codice={c.codice} piccolo />
                   </div>
                 </div>
               </div>
@@ -207,15 +210,21 @@ export default function CorrieriPage() {
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
           <div style={{padding:'14px 18px',borderBottom:'1px solid #f0f0f0',fontSize:'13.5px',fontWeight:'600',color:'#1a1a1a'}}>Aggiungi Corriere</div>
           <div style={{padding:'16px',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'12px'}}>
-            {[...DISPONIBILI, ...(puoPoste ? [{tipo:'poste',nome:'Poste Delivery Business',icona:'poste_delivery_business'}] : []), ...(puoDielle ? [{tipo:'dielle',nome:'Dielle',icona:'dielle'}] : [])].map((c,i) => (
+            {[...DISPONIBILI, ...(puoPoste ? [{tipo:'poste',nome:'Poste Delivery Business',icona:'poste_delivery_business'}] : []), ...(puoDielle ? [{tipo:'dielle',nome:'Dielle',icona:'dielle'}] : []), ...(puoEcosmos ? [{tipo:'ecosmos',nome:'Ecosmos',icona:'ecosmos'}] : [])].map((c,i) => (
               <a key={i} href={'/dashboard/corrieri/aggiungi?tipo='+c.tipo}
-                style={{border:(c.tipo==='interno'||c.tipo==='dielle'||c.tipo==='poste')?'1px solid #f97316':'1px solid #e8e8e8',borderRadius:'8px',textDecoration:'none',display:'block',overflow:'hidden',background:'#fff'}}>
+                style={{border:(c.tipo==='interno'||c.tipo==='dielle'||c.tipo==='poste'||c.tipo==='ecosmos')?'1px solid #f97316':'1px solid #e8e8e8',borderRadius:'8px',textDecoration:'none',display:'block',overflow:'hidden',background:'#fff'}}>
                 {/* Il circuito interno non ha un logo da mettere: il marchio e' quello del master. */}
                 {c.tipo === 'interno' ? (
                   <div style={{height:'90px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'4px',padding:'8px'}}>
                     <div style={{fontSize:'22px',lineHeight:1}}>⬢</div>
                     <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',textAlign:'center'}}>Circuito interno</div>
                     <div style={{fontSize:'10px',color:'#8a8a8a',textAlign:'center'}}>la tua rete</div>
+                  </div>
+                ) : c.tipo === 'ecosmos' ? (
+                  // Ecosmos: nessun logo in /corrieri, tile testuale; visibile solo ai master autorizzati.
+                  <div style={{height:'90px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'4px',padding:'8px'}}>
+                    <div style={{fontSize:'13px',fontWeight:800,color:'#1a1a1a',textAlign:'center',letterSpacing:'0.5px'}}>ecosmos</div>
+                    <div style={{fontSize:'10px',color:'#8a8a8a',textAlign:'center'}}>Roma, consegne elettriche</div>
                   </div>
                 ) : c.tipo === 'dielle' ? (
                   // Dielle non ha un logo da mostrare (è un aggregatore): tile testuale, visibile solo a chi è autorizzato.

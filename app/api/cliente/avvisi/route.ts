@@ -49,8 +49,7 @@ export async function GET() {
   // Ne' a un negozio sotto il master dell'App Store: per lui i pacchetti API con carta non esistono
   // (lib/conti-shopify.ts, decisione di Lorenzo del 21/10/2026), e la griglia dei prezzi lo manderebbe a
   // cercare un'attivazione che /api/cliente/api-piano gli rifiuta.
-  const { data: cli } = await admin.from('clienti').select('master_id').eq('id', clienteId).maybeSingle()
-  if (pagaSoloEtichette(cli?.master_id)) return NextResponse.json({ avviso: null })
+  if ((await pagaSoloEtichette(admin, clienteId)) !== false) return NextResponse.json({ avviso: null })
 
   const { data: piani } = await admin.from('piani_api').select('codice,nome,limite,prezzo').eq('attivo', true).order('ordine')
   return NextResponse.json({ avviso: AVVISO_API, stato: stato || null, piani: piani || [] })

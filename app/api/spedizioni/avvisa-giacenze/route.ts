@@ -3,6 +3,7 @@ import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { inviaEmailGiacenza } from '@/lib/email'
 import { inviaSmsGiacenza } from '@/lib/sms'
+import { spedizioniDaAmazon } from '@/lib/compratore-amazon'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -37,18 +38,28 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const dal = new Date(Date.now() - GIORNI_FINESTRA * 86400000).toISOString()
 
-  const { data: aperte, error } = await admin
+  // Si legge piu' del tetto perche' gli ordini del collegamento Amazon si scartano dopo (al compratore
+  // scrive solo Amazon, lib/compratore-amazon): non avvisati restano in coda, e senza margine
+  // finirebbero per occupare i posti del giro.
+  const { data: lette, error } = await admin
     .from('spedizioni')
     .select('id,numero,master_id,cliente_id,dest_email,dest_nome,mitt_email,mitt_nome,tracking_token,giacenza_motivo,giacenza_stato,corrieri(nome_contratto)')
     .not('giacenza_data', 'is', null)
     .is('giacenza_email_dest_at', null)
     .gte('giacenza_data', dal)
-    .limit(MAX_PER_GIRO)
+    .limit(MAX_PER_GIRO * 4)
 
   if (error) {
     console.error('[GIACENZE][AVVISO] lettura fallita:', error.message)
     return NextResponse.json({ error: 'lettura fallita' }, { status: 500 })
   }
+  let daAmazon: Set<string>
+  try { daAmazon = await spedizioniDaAmazon(admin, (lette || []).map((s: any) => s.id)) }
+  catch (e: any) {
+    console.error('[GIACENZE][AVVISO] controllo ordini Amazon fallito:', e?.message)
+    return NextResponse.json({ error: 'controllo ordini Amazon fallito' }, { status: 500 })
+  }
+  const aperte = (lette || []).filter((s: any) => !daAmazon.has(s.id)).slice(0, MAX_PER_GIRO)
 
   // Preferenza del CLIENTE sulle notifiche al destinatario: e' la stessa che governa l'email di
   // "spedizione creata". Chi l'ha spenta non vuole che scriviamo ai suoi clienti, e vale anche qui.
@@ -76,7 +87,7 @@ export async function GET(req: NextRequest) {
       destEmail: s.dest_email, destNome: s.dest_nome,
       mittEmail: s.mitt_email, mittNome: s.mitt_nome,
       numero: s.numero, corriere: (s as any).corrieri?.nome_contratto || null,
-      motivo: s.giacenza_motivo, trackingToken: s.tracking_token,
+      motivo: s.giacenza_motivo, trackingToken: s.tracking_token, spedizioneId: s.id,
       masterId: s.master_id,
     })
 

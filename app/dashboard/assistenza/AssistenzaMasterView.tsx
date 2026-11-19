@@ -9,6 +9,9 @@ import { AllegatoChat } from '@/app/components/AllegatoChat'
 const STATI: Record<string, { label: string; bg: string; color: string }> = {
   aperto: { label: 'Aperto', bg: '#fff7ed', color: '#ea580c' },
   in_lavorazione: { label: 'In lavorazione', bg: '#eff6ff', color: '#2563eb' },
+  // risolto nei fatti, ma si aspetta il rimborso del corriere: prima finiva confuso tra "In
+  // lavorazione" e "Risolto" (777 ticket parlano di rimborso). Solo ticket, non POD.
+  rimborso: { label: 'In attesa di rimborso', bg: '#f5f3ff', color: '#7c3aed' },
   risolto: { label: 'Risolto', bg: '#f0fdf4', color: '#16a34a' },
   chiuso: { label: 'Chiuso', bg: '#f3f4f6', color: '#6b7280' },
 }
@@ -18,8 +21,11 @@ function Badge({ stato }: { stato: string }) {
 }
 // 'master_per_cliente' = aperto dal master sulla spedizione di un suo cliente (api/assistenza/apri):
 // il ticket e' del cliente, che lo vede, ma la prima riga l'ha scritta l'assistenza.
+// 'master_riservato' = aperto allo stesso modo ma senza farlo vedere al cliente: il nome e' quello
+// del cliente della spedizione, il cliente non ne sa niente.
 const etichettaApertura = (tipo: string) =>
-  tipo === 'master' ? 'Sotto-master' : tipo === 'master_per_cliente' ? 'Cliente · aperto dall\'assistenza' : 'Cliente'
+  tipo === 'master' ? 'Sotto-master' : tipo === 'master_per_cliente' ? 'Cliente · aperto dall\'assistenza'
+    : tipo === 'master_riservato' ? 'Riservato · il cliente non lo vede' : 'Cliente'
 
 export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket' | 'pod' }) {
   const isPod = categoria === 'pod'
@@ -30,7 +36,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
   const [risposta, setRisposta] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [apri, setApri] = useState(false)            // modale nuovo ticket
-  const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '' })
+  const [nuovo, setNuovo] = useState({ oggetto: '', messaggio: '', visibile_cliente: false })
   const [msg, setMsg] = useState('')
   const [cerca, setCerca] = useState('')             // ricerca per LDV
   const [filtroStato, setFiltroStato] = useState('tutti')   // lo storico resta sempre: 'tutti' include i chiusi
@@ -151,6 +157,11 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => { setPodFile(null) }, [sel?.id])   // reset PDF caricato quando cambia/chiude il ticket
+  // Inoltro di una POD: dal 04/11/2026 chi la inoltra al superiore la paga (api/assistenza/[id]/inoltra).
+  // Prima di inoltrare si mostra il costo e si chiede il si', come al cliente che apre la POD.
+  const [inoltroCosto, setInoltroCosto] = useState<{ prezzo: number; padre: string | null } | null>(null)
+  const [inoltroOk, setInoltroOk] = useState(false)
+  useEffect(() => { setInoltroCosto(null); setInoltroOk(false) }, [sel?.id])
 
   // Riconosce un allegato immagine anche se manca il content-type corretto
   const isImg = (a: any) => String(a?.tipo || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|avif)(\?|$)/i.test(String(a?.nome || a?.url || ''))
@@ -176,10 +187,10 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     const j = await r.json()
     setSalvando(false)
     if (j.error) { setMsg(j.error); return }
-    setApri(false); setNuovo({ oggetto: '', messaggio: '' }); carica()
-    // LDV di un cliente diretto: il ticket e' nato del cliente e resta qui, non e' salito. Lo si
+    setApri(false); setNuovo({ oggetto: '', messaggio: '', visibile_cliente: false }); carica()
+    // LDV di un cliente diretto: il ticket (del cliente o riservato) resta qui, non e' salito. Lo si
     // apre subito, cosi' si vede di chi e' e c'e' gia' sotto mano «Inoltra» se va girato sopra.
-    if (j.per_cliente && j.id) apriDettaglio({ id: j.id })
+    if ((j.per_cliente || j.riservato) && j.id) apriDettaglio({ id: j.id })
   }
 
   // Ricerca: per LDV (oggetto), numero pratica (codice) O cliente (aperto_da). Va applicata a TUTTE
@@ -197,6 +208,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
     nuovi: cercati.filter((t: any) => t.non_letto_owner).length,
     aperto: cercati.filter((t: any) => t.stato === 'aperto').length,
     in_lavorazione: cercati.filter((t: any) => t.stato === 'in_lavorazione').length,
+    rimborso: cercati.filter((t: any) => t.stato === 'rimborso').length,
     risolto: cercati.filter((t: any) => t.stato === 'risolto').length,
     chiuso: cercati.filter((t: any) => t.stato === 'chiuso').length,
   }
@@ -250,7 +262,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
           </div>
           {/* Tab di stato con contatori: filtro rapido + colpo d'occhio su quanti ce ne sono. */}
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {[{ k: 'tutti', label: 'Tutti' }, { k: 'nuovi', label: 'Nuovi' }, { k: 'aperto', label: 'Aperti' }, { k: 'in_lavorazione', label: 'In lavorazione' }, { k: 'risolto', label: 'Risolti' }, { k: 'chiuso', label: 'Chiusi' }].map(tab => {
+            {[{ k: 'tutti', label: 'Tutti' }, { k: 'nuovi', label: 'Nuovi' }, { k: 'aperto', label: 'Aperti' }, { k: 'in_lavorazione', label: 'In lavorazione' }, ...(isPod ? [] : [{ k: 'rimborso', label: 'Rimborso' }]), { k: 'risolto', label: 'Risolti' }, { k: 'chiuso', label: 'Chiusi' }].map(tab => {
               const attivo = filtroStato === tab.k
               const n = conta[tab.k] || 0
               const evidNuovi = tab.k === 'nuovi' && n > 0 && !attivo
@@ -300,6 +312,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                       <button onClick={() => apriDettaglio(t)} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>💬 Apri chat</button>
                       {!isPod && t.stato !== 'in_lavorazione' && t.stato !== 'risolto' && (
                         <button onClick={() => aggiorna(t.id, { stato: 'in_lavorazione' })} style={{ padding: '5px 10px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>In lavorazione</button>
+                      )}
+                      {!isPod && !['rimborso', 'risolto', 'chiuso'].includes(t.stato) && (
+                        <button onClick={() => aggiorna(t.id, { stato: 'rimborso' })} style={{ padding: '5px 10px', border: 'none', background: '#7c3aed', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Attesa rimborso</button>
                       )}
                       {t.stato !== 'risolto' && (
                         <button onClick={() => aggiorna(t.id, { stato: 'risolto' })} style={{ padding: '5px 10px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>Segna risolto</button>
@@ -486,6 +501,14 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   {sel.pod_url
                     ? <a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica la POD ricevuta</a>
                     : <div style={{ fontSize: '12.5px', color: '#555' }}>In attesa che il tuo master carichi la POD.</div>}
+                  {/* Dal 04/11/2026 la POD chiesta al superiore si paga: chi l'ha chiesta vede quanto. */}
+                  {sel.pod_prezzo != null && Number(sel.pod_prezzo) > 0 && (
+                    <div style={{ marginTop: '8px', fontSize: '12px', fontWeight: 700, color: sel.pod_addebitato_il ? '#15803d' : '#c2410c' }}>
+                      {sel.pod_addebitato_il
+                        ? `Costo di questa POD: ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))}, addebitati all'apertura.`
+                        : `Costo di questa POD: ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))}.`}
+                    </div>
+                  )}
                 </div>
               )}
               {sel.categoria === 'pod' && (ruoloChat === 'master' || ruoloChat === 'rete') && (
@@ -495,12 +518,13 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   onDrop={e => { e.preventDefault(); setDragPod(false); const f = e.dataTransfer.files?.[0]; if (f) caricaPodDentro(f) }}
                   style={{ background: dragPod ? '#dbeafe' : '#f0f9ff', border: dragPod ? '2px dashed #2563eb' : '2px dashed #bae6fd', borderRadius: '8px', padding: '16px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px', textAlign: 'center' }}>Prova di consegna (POD) — LDV {sel.oggetto}</div>
-                  {/* Solo l'owner (chi ha il cliente e il listino POD) vede l'addebito: non si mostra alla catena a monte. */}
+                  {/* Solo l'owner (chi ha il richiedente e il listino POD) vede l'addebito: non si mostra alla catena a monte.
+                      Il richiedente e' un cliente o, dal 04/11/2026, un master sotto: si scrive il nome, non "il cliente". */}
                   {ruoloChat === 'master' && sel.pod_prezzo != null && Number(sel.pod_prezzo) > 0 && (
                     <div style={{ marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 700, color: sel.pod_addebitato_il ? '#15803d' : '#c2410c' }}>
                       {sel.pod_addebitato_il
-                        ? `✓ Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente per questa POD.`
-                        : `Inviando la POD, o un qualsiasi allegato in chat, verranno addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} al cliente.`}
+                        ? `✓ Addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} a ${sel.aperto_da || 'chi l\'ha chiesta'} per questa POD.`
+                        : `Inviando la POD, o un qualsiasi allegato in chat, verranno addebitati ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(sel.pod_prezzo))} a ${sel.aperto_da || 'chi l\'ha chiesta'}.`}
                     </div>
                   )}
                   {sel.pod_url && !podFile && <div style={{ marginBottom: '10px', textAlign: 'center' }}><a href={linkAllegato(sel.id, sel.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }}>⬇ Scarica POD già inviata</a></div>}
@@ -541,7 +565,9 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                   {ruoloChat === 'rete' && (
                     <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#1a1a1a', color: '#fff', fontSize: '12px', fontWeight: 600 }}>🔒 Risposta interna alla rete: la vede solo la catena dei master — il cliente finale NON la vede.</div>
                   )}
-                  {ruoloChat === 'master' && Array.isArray(sel.rete_master_ids) && sel.rete_master_ids.length > 0 && (
+                  {/* Sul riservato il cliente non c'e': "interno" non cambierebbe niente, e la spunta
+                      farebbe credere che il resto il cliente lo legga. */}
+                  {ruoloChat === 'master' && sel.tipo_apertura !== 'master_riservato' && Array.isArray(sel.rete_master_ids) && sel.rete_master_ids.length > 0 && (
                     <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 600, color: internoMsg ? '#1a1a1a' : '#666', cursor: 'pointer' }}>
                       <input type="checkbox" checked={internoMsg} onChange={e => setInternoMsg(e.target.checked)} style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
                       🔒 Messaggio interno alla rete (il cliente non lo vede)
@@ -562,26 +588,47 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <label title="Allega foto, video o file (max 25 MB)" style={{ padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', cursor: caricandoFile ? 'default' : 'pointer', fontSize: '16px', color: '#6b7280', background: '#fff', lineHeight: 1, opacity: caricandoFile ? 0.6 : 1 }}>{caricandoFile ? '⏳' : '📎'}
                       <input type="file" accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip" multiple disabled={caricandoFile} onChange={e => { if (e.target.files?.length) aggiungiChatFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
                     </label>
-                    <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
+                    <textarea value={testo} onChange={e => setTesto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); inviaMsg() } }} rows={2} placeholder={ruoloChat === 'rete' ? 'Rispondi al master che ti ha inoltrato il ticket…' : sel.tipo_apertura === 'master_riservato' ? (sel.rete_master_ids?.length ? 'Scrivi al master a cui l\'hai inoltrato (il cliente non lo vede)…' : 'Scrivi una nota (il cliente non la vede)…') : (internoMsg ? 'Messaggio interno alla rete…' : 'Rispondi al cliente…')} style={{ flex: 1, padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'none' as const }} />
                     <button disabled={inviando || caricandoFile || (!testo.trim() && !chatFiles.length)} onClick={inviaMsg} style={{ padding: '10px 18px', background: (ruoloChat === 'rete' || internoMsg) ? '#1a1a1a' : '#f97316', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 'default' : 'pointer', opacity: (inviando || caricandoFile || (!testo.trim() && !chatFiles.length)) ? 0.6 : 1 }}>{inviando ? '…' : 'Invia'}</button>
                   </div>
                 </div>
               ))}
 
-              {/* Inoltro alla linea superiore: il ticket resta unico, il cliente non lo sa */}
+              {/* Inoltro a chi fornisce il contratto: il ticket resta unico, il cliente non lo sa */}
               {(ruoloChat === 'master' || ruoloChat === 'rete') && sel.stato !== 'chiuso' && (
                 <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
-                  <button disabled={salvando} onClick={async () => {
-                    setSalvando(true); setMsg('')
-                    const r = await fetch('/api/assistenza/' + sel.id + '/inoltra', { method: 'POST' })
-                    const j = await r.json().catch(() => ({})); setSalvando(false)
-                    if (j.error) { setMsg(j.error); return }
+                  {inoltroCosto && (
+                    <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600, background: '#fff7ed', border: '1px solid #fed7aa', color: '#c2410c' }}>
+                      <div style={{ marginBottom: '8px' }}>Inoltrando questa POD a {inoltroCosto.padre || 'chi ti fornisce il contratto'} ti vengono addebitati {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(inoltroCosto.prezzo)}.</div>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: '#1a1a1a', fontWeight: 500 }}>
+                        <input type="checkbox" checked={inoltroOk} onChange={e => setInoltroOk(e.target.checked)} style={{ marginTop: '2px', accentColor: '#f97316' }} />
+                        <span>Accetto l&apos;addebito di {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(inoltroCosto.prezzo)} subito, all&apos;inoltro.</span>
+                      </label>
+                    </div>
+                  )}
+                  <button disabled={salvando || (!!inoltroCosto && !inoltroOk)} onClick={async () => {
                     setMsg('')
+                    // POD: prima il costo. Se c'e' un prezzo, si mostra e si aspetta il si' (secondo clic).
+                    if (isPod && !inoltroCosto) {
+                      const c = await fetch('/api/assistenza/' + sel.id + '/inoltra').then(x => x.json()).catch(() => null)
+                      if (!c || c.error) { setMsg(c?.error || 'Non riesco a calcolare il costo dell\'inoltro: riprova.'); return }
+                      if (Number(c.prezzo) > 0) { setInoltroCosto({ prezzo: Number(c.prezzo), padre: c.padre || null }); setInoltroOk(false); return }
+                    }
+                    setSalvando(true)
+                    const corpo = inoltroCosto ? { accetto_addebito: true, prezzo_accettato: inoltroCosto.prezzo } : {}
+                    const r = await fetch('/api/assistenza/' + sel.id + '/inoltra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) })
+                    const j = await r.json().catch(() => ({})); setSalvando(false)
+                    if (j.error) {
+                      // Prezzo cambiato (o non ancora mostrato): si rimostra la cifra nuova e si richiede il si'.
+                      if (r.status === 409 && Number(j.pod_prezzo) > 0) { setInoltroCosto({ prezzo: Number(j.pod_prezzo), padre: inoltroCosto?.padre || null }); setInoltroOk(false) }
+                      setMsg(j.error); return
+                    }
+                    setMsg(''); setInoltroCosto(null); setInoltroOk(false)
                     const d = await fetch('/api/assistenza/' + sel.id).then(x => x.json()).catch(() => null)
                     if (d && !d.error) { setThread(d.messaggi || []); setSel((s: any) => ({ ...s, ...d.ticket })) }
                     carica(true)
-                  }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>⤴ Inoltra al mio master superiore</button>
-                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>{isPod ? 'Se la POD non ce l\'hai tu, la carica il master superiore su QUESTA richiesta: arriva al cliente da sola, senza riaprire una seconda richiesta.' : 'Il master superiore vedrà tutta la conversazione; il cliente non ne saprà nulla.'}</span>
+                  }} style={{ padding: '8px 14px', border: '1px solid #1a1a1a', background: '#fff', color: '#1a1a1a', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: salvando || (!!inoltroCosto && !inoltroOk) ? 'not-allowed' : 'pointer', opacity: salvando || (!!inoltroCosto && !inoltroOk) ? 0.5 : 1 }}>{inoltroCosto ? 'Conferma e inoltra' : '⤴ Inoltra a chi mi fornisce il contratto'}</button>
+                  <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888' }}>{isPod ? 'Se la POD non ce l\'hai tu, la carica chi ti fornisce il contratto su QUESTA richiesta: arriva al cliente da sola, senza riaprire una seconda richiesta.' : 'Va a chi ti fornisce il contratto della spedizione (se il ticket non ha una spedizione, al tuo master superiore): vedrà tutta la conversazione, il cliente non ne saprà nulla.'}</span>
                 </div>
               )}
 
@@ -590,6 +637,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
               {(ruoloChat === 'master' || ruoloChat === 'rete') && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid #f1f5f9', paddingTop: '12px', alignItems: 'center' }}>
                   {!isPod && !['chiuso', 'in_lavorazione', 'risolto'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'in_lavorazione' })) setSel((s: any) => ({ ...s, stato: 'in_lavorazione' })) }} style={{ padding: '8px 14px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>In lavorazione</button>}
+                  {!isPod && !['rimborso', 'risolto', 'chiuso'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'rimborso' })) setSel((s: any) => ({ ...s, stato: 'rimborso' })) }} style={{ padding: '8px 14px', border: 'none', background: '#7c3aed', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>💶 In attesa di rimborso</button>}
                   {!['risolto', 'chiuso'].includes(sel.stato) && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'risolto' })) setSel((s: any) => ({ ...s, stato: 'risolto' })) }} style={{ padding: '8px 14px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>Segna risolto</button>}
                   {sel.stato !== 'chiuso' && <button disabled={salvando} onClick={async () => { if (await aggiorna(sel.id, { stato: 'chiuso' })) setSel(null) }} style={{ padding: '8px 14px', border: '1px solid #d1d5db', background: '#fff', color: '#6b7280', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>🔒 Chiudi e archivia</button>}
                   {ruoloChat === 'rete' && sel.stato !== 'chiuso' && <span style={{ fontSize: '11px', color: '#888' }}>Puoi chiuderlo anche per conto del master a cui è stato inoltrato.</span>}
@@ -618,6 +666,15 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <input value={nuovo.oggetto} onChange={e => setNuovo(n => ({ ...n, oggetto: e.target.value }))} placeholder="Numero LDV" style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }} /></div>
               <div><label style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', display: 'block', marginBottom: '5px' }}>Messaggio</label>
                 <textarea value={nuovo.messaggio} onChange={e => setNuovo(n => ({ ...n, messaggio: e.target.value }))} rows={4} style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box', resize: 'vertical' }} /></div>
+              {/* Qui la LDV si scrive a mano e di chi sia la spedizione lo scopre il server: la
+                  domanda vale solo se e' di un cliente diretto, e di partenza e' no (api/assistenza/apri). */}
+              <div style={{ padding: '9px 12px', background: nuovo.visibile_cliente ? '#fff7ed' : '#f8fafc', border: `1px solid ${nuovo.visibile_cliente ? '#fed7aa' : '#e2e8f0'}`, borderRadius: '6px', fontSize: '12px', color: nuovo.visibile_cliente ? '#9a3412' : '#475569', lineHeight: 1.45 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 700, color: '#1a1a1a', cursor: 'pointer', marginBottom: '4px' }}>
+                  <input type="checkbox" checked={nuovo.visibile_cliente} onChange={e => setNuovo(n => ({ ...n, visibile_cliente: e.target.checked }))} style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
+                  Se la LDV è di un tuo cliente, fagli vedere il ticket
+                </label>
+                {nuovo.visibile_cliente ? '👁 Il cliente lo vedrà in Assistenza e leggerà quello che scrivi qui.' : '🔒 Il cliente non lo vedrà.'} Dopo l'invio non si può cambiare.
+              </div>
               {msg && <div style={{ fontSize: '12px', color: '#dc2626' }}>{msg}</div>}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                 <button onClick={() => setApri(false)} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', color: '#1a1a1a' }}>Annulla</button>

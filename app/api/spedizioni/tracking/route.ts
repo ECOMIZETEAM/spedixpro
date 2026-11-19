@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   // Audit accesso PII (visualizzazione dati spedizione/destinatario) — best-effort
   try { const { registraAudit } = await import('@/lib/audit'); await registraAudit({ utenteId: user.id, ruolo: (utente as any)?.ruolo, azione: 'tracking_view', risorsa: spedizione.numero }) } catch {}
   const { data: cliente } = await admin.from('clienti').select('ragione_sociale').eq('id', spedizione.cliente_id).single()
-  const { data: corriere } = await admin.from('corrieri').select('credenziali,tipo,nome_contratto').eq('id', spedizione.corriere_id).single()
+  const { data: corriere } = await admin.from('corrieri').select('credenziali,tipo,nome_contratto,settings').eq('id', spedizione.corriere_id).single()
   if (!corriere) return NextResponse.json({ error: 'Corriere non trovato' }, { status: 404 })
 
   // RIPESATURA: la rimisura fatta dal corriere in impianto, quella PIU' ALTA fra le letture (il collo
@@ -69,6 +69,34 @@ export async function GET(req: NextRequest) {
   const { data: mis } = (consegnata && !multicollo) ? await admin.from('ripesature_misure')
     .select('peso,lunghezza,larghezza,altezza,volume,misurata_il,filiale,letto_il,esito')
     .eq('spedizione_id', spedizione.id).maybeSingle() : { data: null as any }
+  // IL PESO SU CUI IL CORRIERE HA FATTURATO, dalla rettifica di chi guarda. La misura qui sopra e' il peso
+  // della bilancia e i lati; la rettifica arriva sul peso fatturato, che puo' essere il volume. 3UW1UHA285521
+  // (Poste Express M, Il Riccio di C&V EXPRESS): Poste 32 × 26,5 × 13 cm e 1,82 kg, file del fornitore 2,2 kg,
+  // fascia fino a 5 kg. C&V leggeva 1,8 kg e il 04/11 ha cancellato la rettifica verso il cliente. Per le
+  // rettifiche conta il peso del fornitore (Lorenzo, 04/11): si mostra quello della riga, non lo si ricalcola.
+  // Il cliente vede la sua quando e' confermata; il master quella ricevuta da sopra (confermata) o la sua.
+  let fatturatoCorriere: { peso: number; quando: string } | null = null
+  if (!multicollo) {
+    const mio = utente.master_id
+    let qr = admin.from('rettifiche')
+      .select('peso_iniziale,peso_reale,peso_volume_reale,colli_ripesati,confermata,master_id,target_master_id,cliente_id,propagazione,created_at')
+      .eq('spedizione_id', spedizione.id)
+    qr = isCliente ? qr.eq('cliente_id', utente.cliente_id).eq('confermata', true) : qr.or(`target_master_id.eq.${mio},master_id.eq.${mio}`)
+    const { data: rr } = await qr.order('created_at', { ascending: false }).limit(20)
+    const riga = (rr || []).find((x: any) => x.propagazione !== 'annullata'
+      && (isCliente || (x.target_master_id === mio ? x.confermata : x.master_id === mio))
+      && Math.abs((Number(x.peso_reale) || 0) - (Number(x.peso_iniziale) || 0)) > 0.001)
+    if (riga) {
+      const reale = Number(riga.peso_reale) || 0
+      const colli = Array.isArray(riga.colli_ripesati) ? riga.colli_ripesati : []
+      const conMisure = colli.some((c: any) => (Number(c?.length) || 0) && (Number(c?.width) || 0) && (Number(c?.height) || 0))
+      // Senza misure (file dei soli pesi) il peso della riga E' il fatturato. Con le misure vere decide il contratto,
+      // come nella descrizione del movimento della Conferma (pesoSuReale).
+      const { pesoSuReale } = await import('@/lib/agevolazione-misure')
+      const peso = !conMisure || pesoSuReale((corriere as any).settings, colli, reale) ? reale : Math.max(reale, Number(riga.peso_volume_reale) || 0)
+      if (peso > 0) fatturatoCorriere = { peso: Math.round(peso * 100) / 100, quando: riga.created_at }
+    }
+  }
   const ripesatura = {
     consegnata,
     multicollo,
@@ -85,6 +113,7 @@ export async function GET(req: NextRequest) {
       volume: mis.volume, quando: mis.misurata_il, dove: mis.filiale,
     } : null,
     controllata_il: mis?.letto_il || null,
+    fatturato_corriere: fatturatoCorriere,
   }
 
   const cred = corriere.credenziali as Record<string,string>
@@ -177,32 +206,41 @@ export async function GET(req: NextRequest) {
 
     // GLS / BRT DIRETTI: non c'è webhook e nessuno riempie tracking_events → senza questo ramo il popup
     // cadrebbe sulla lettura (vuota) qui sotto e mostrerebbe "nessun evento" per SEMPRE, pur avendo il
-    // badge di stato giusto. Si chiede il tracking LIVE al corriere (come DVA/SpediamoPro). Gli eventi sono
-    // i testi di transito del T&T (senza data: il T&T che interroghiamo espone solo la descrizione dello
-    // stato; la data richiederebbe i campi grezzi del corriere, da mappare su un pacco tracciato reale).
+    // badge di stato giusto. Si chiede il tracking LIVE al corriere (come DVA/SpediamoPro), con data, ora
+    // e luogo di ogni evento.
     if (corriere.tipo === 'gls' || corriere.tipo === 'brt') {
       const raw: any = spedizione.raw_response || {}
       let stati: string[] = []
-      let eventiBrt: { data: string; descrizione: string; luogo: string }[] | null = null
+      let eventiCorriere: { data: string; descrizione: string; luogo: string }[] | null = null
       if (corriere.tipo === 'gls' && raw.numero && cred?.sigla_sede) {
         const { trackingGls, mapStatoGls } = await import('@/lib/gls')
         const r = await trackingGls(cred as any, String(raw.numero)); stati = r.stati
+        // Il popup GLS mostrava solo le descrizioni, senza data né ora (Lorenzo, 30/10/2026): era
+        // scritto quando lib/gls leggeva solo gli stati. Ora gli eventi arrivano con data/ora/luogo.
+        // GLS li manda dal piu' recente; sul Parcel quelli del tratto estero vengono dopo l'Italia,
+        // quindi si riordina per data (gli eventi senza ora, come "creata dal mittente", valgono
+        // inizio giornata e a parità di istante resta l'ordine di GLS).
+        if (r.eventi.length) {
+          const istante = (d: string) => {
+            const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/.exec(d || '')
+            return m ? Number(`${m[3]}${m[2].padStart(2, '0')}${m[1].padStart(2, '0')}${(m[4] || '0').padStart(2, '0')}${m[5] || '00'}`) : 0
+          }
+          eventiCorriere = [...r.eventi].sort((a, b) => istante(b.data) - istante(a.data))
+        }
         let av: string | null = null
         for (const s of stati) { const m = mapStatoGls(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
         await persistiStato(av)
       } else if (corriere.tipo === 'brt' && raw.parcelID && cred?.user && cred?.password) {
         const { trackingBrt, mapStatoBrt } = await import('@/lib/brt')
-        const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati; eventiBrt = r.eventi
+        const r = await trackingBrt(cred as any, String(raw.parcelID)); stati = r.stati; eventiCorriere = r.eventi
         let av: string | null = null
         for (const s of stati) { const m = mapStatoBrt(s); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
         if (r.consegnata && prioritaStato('consegnata') > prioritaStato(av)) av = 'consegnata'
         await persistiStato(av)
       }
-      // BRT: eventi reali con DATA/ORA/filiale, gia' dal piu' recente (niente doppione "consegnata").
-      // Altri (GLS): solo descrizioni, dedup, invertiti per mostrare il piu' recente in alto.
-      const eventi = eventiBrt
-        ? eventiBrt.map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
-        : stati.filter((s, i) => s && stati.indexOf(s) === i).map(s => ({ date: '', description: s, location: '' })).reverse()
+      // Eventi reali con DATA/ORA/luogo, dal piu' recente (gli stati escono dallo stesso giro di lettura:
+      // senza eventi non ci sono nemmeno stati da mostrare).
+      const eventi = (eventiCorriere || []).map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 
@@ -219,6 +257,23 @@ export async function GET(req: NextRequest) {
         await persistiStato(av)
       }
       const eventi = eventiFx.map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
+      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
+    }
+
+    // ECOSMOS: come FedEx, dal vivo. Il giro automatico aggiorna a intervalli; chi apre il dettaglio vede
+    // lo stato di adesso, e l'avanzamento trovato qui si salva subito.
+    if (corriere.tipo === 'ecosmos') {
+      let eventiEc: { data: string; descrizione: string; luogo: string }[] = []
+      if (spedizione.tracking_number && cred?.api_key) {
+        const { trackingEcosmos, mapStatoEcosmos } = await import('@/lib/ecosmos')
+        const r = await trackingEcosmos({ api_key: String(cred.api_key) }, String(spedizione.tracking_number)); eventiEc = r.eventi
+        let av: string | null = null
+        for (const st of r.stati) { const m = mapStatoEcosmos(st); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
+        if (r.consegnata && prioritaStato('consegnata') > prioritaStato(av)) av = 'consegnata'
+        if (r.stati.some((st) => mapStatoEcosmos(st) === 'reso_mittente')) av = 'reso_mittente'
+        await persistiStato(av)
+      }
+      const eventi = eventiEc.map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 

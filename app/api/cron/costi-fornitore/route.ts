@@ -24,6 +24,9 @@ export async function GET(req: NextRequest) {
     const { riconciliaCostiConto } = await import('@/lib/conto-fornitore')
     const esito = await riconciliaCostiConto(admin, { pagine })
     if (esito.scritti) console.log('[CONTO] costi scalati', esito.scritti, 'per', esito.euro.toFixed(2), 'EUR')
+    if (esito.resiSegnati) console.log('[CONTO][RESI] pacchi fatturati come reso messi a reso:', esito.resiSegnati)
+    // Resi fatturati su pacchi mai partiti o consegnati al destinatario: non si addebitano, si contestano.
+    for (const d of esito.daControllare) console.log('[CONTO][RESI] da controllare', d.numero, d.stato, '-', d.motivo)
     return NextResponse.json({ ok: true, ...esito })
   } catch (e: any) {
     console.error('[CONTO] riconciliazione non riuscita:', e?.message)

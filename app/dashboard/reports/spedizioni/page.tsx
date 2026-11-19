@@ -2,31 +2,47 @@
 import { useState, useEffect } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { PROVINCE_ITALIANE } from '@/lib/province-italiane'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
-const STATI = ['in_lavorazione','spedita','in_transito','in_consegna','consegnata','in_giacenza','reso_mittente','annullata','non_consegnato']
+// Stessi nomi dell'Elenco spedizioni. Mancavano i tre stati dell'annullo non ancora eseguito: in quegli
+// stati il pacco e' ancora vivo presso il corriere (al 1-14/10/2026: 268, 63 e 14 spedizioni).
+const STATI: Record<string, string> = {
+  in_lavorazione: 'In Lavorazione', spedita: 'Spedita', in_transito: 'In transito', in_consegna: 'In Consegna',
+  consegnata: 'Consegnata', in_giacenza: 'In Giacenza', reso_mittente: 'Reso al mittente', non_consegnato: 'Non consegnato',
+  annullamento_pending: 'In annullamento', annullamento_manuale: 'Annullo in corso', storno_richiesto: 'Annullo richiesto',
+  annullata: 'Annullata',
+}
+const STATI_COD: Record<string, string> = { in_attesa: 'In attesa', in_distinta: 'In distinta', pagato: 'Pagato', annullato: 'Annullato' }
+const PROVINCE = PROVINCE_ITALIANE
 
 import { useDialog } from '@/app/components/DialogProvider'
 import { inviaReport } from '@/lib/report-client'
+import { giornoRoma } from '@/lib/date-roma'
+import { vettoreFisico } from '@/lib/vettore'
 export default function ReportSpedizioniPage() {
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [staff, setStaff] = useState<any[]>([])
   const [reports, setReports] = useState<any[]>([])
+  const [erroreElenco, setErroreElenco] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
   const [generating, setGenerating] = useState(false)
   const [intest, setIntest] = useState<any>({ nome: '', indirizzo: '', email: '', piva: '', logo_url: null })
+  // Oggi = il giorno di Roma (toISOString da' quello di Greenwich: fra mezzanotte e le 2 era ieri).
+  // Tolti "Tipo Contratto" (non filtrava niente) e "Fatturazione" (il campo e' falso su tutte le
+  // 304.240 spedizioni: nessun codice lo valorizza).
   const [filtri, setFiltri] = useState({
-    clienteId: '', tipoContratto: '', vettore: '', contratto: '',
-    dal: new Date().toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+    clienteId: '', vettore: '', contratto: '',
+    dal: giornoRoma(),
+    al: giornoRoma(),
     agente: '', provincia: '', stato: '', contrassegno: '', formato: 'PDF',
-    suddivisione: '', fatturazione: '', canale: '', statoContrassegno: '',
+    suddivisione: '', canale: '', statoContrassegno: '',
     // CONTENUTO del file, scelta INDIPENDENTE dalla suddivisione (prima erano incollate: file unico
     // dava per forza il solo riepilogo, e il diviso per forza il dettaglio dentro uno ZIP — quindi
     // il dettaglio di UN cliente solo non si poteva avere se non impacchettato in uno zip da un file).
@@ -41,10 +57,12 @@ export default function ReportSpedizioniPage() {
     caricaReports()
   }, [])
 
+  // L'elenco dei report, quando non si legge, risponde { error }: si dice, invece di mostrare
+  // "Nessun report generato" come se non ce ne fossero.
   async function caricaReports() {
-    const res = await fetch('/api/reports/lista?tipo=spedizioni')
-    const data = await res.json()
+    const data = await fetch('/api/reports/lista?tipo=spedizioni').then(x => x.json()).catch(() => null)
     setReports(Array.isArray(data) ? data : [])
+    setErroreElenco(Array.isArray(data) ? '' : 'Elenco dei report non letto: ' + (data?.error || 'errore di rete'))
   }
 
   const setF = (k: string, v: string) => setFiltri(f => ({...f, [k]: v}))
@@ -55,11 +73,11 @@ export default function ReportSpedizioniPage() {
     const t: string[] = ['periodo=' + (filtri.dal||'') + '→' + (filtri.al||'')]
     if (filtri.clienteId) { const c = clienti.find((x:any)=>x.id===filtri.clienteId); t.push('cliente=' + String(c?.ragione_sociale||filtri.clienteId).replace(/\s+/g,'_')) }
     if (filtri.vettore) t.push('vettore=' + filtri.vettore)
+    if (filtri.contratto) t.push('contratto=' + filtri.contratto.replace(/\s+/g,'_'))
     if (filtri.agente) t.push('agente=' + filtri.agente.replace(/\s+/g,'_'))
     if (filtri.provincia) t.push('provincia=' + filtri.provincia)
     if (filtri.stato) t.push('stato=' + filtri.stato)
     if (filtri.contrassegno) t.push('contrassegno=' + filtri.contrassegno)
-    if (filtri.fatturazione) t.push('fatturazione=' + filtri.fatturazione)
     if (filtri.canale) t.push('canale=' + filtri.canale)
     if (filtri.statoContrassegno) t.push('cod=' + filtri.statoContrassegno)
     t.push('contenuto=' + filtri.contenuto)
@@ -71,8 +89,7 @@ export default function ReportSpedizioniPage() {
   async function salvaReport(fileBase64: string, nomeFile: string, formato: string) {
     const j = await inviaReport({ tipo: 'spedizioni', filtri: filtriTesto(), formato, fileBase64, nomeFile, clienteId: filtri.clienteId || null })
     if (!j.success) { await dialog.alert({ title: 'Errore', message: 'Errore salvataggio report: ' + (j.error||'') }); return }
-    const lista = await fetch('/api/reports/lista?tipo=spedizioni').then(x=>x.json())
-    setReports(Array.isArray(lista) ? lista : [])
+    await caricaReports()
   }
 
   async function generaReport() {
@@ -81,19 +98,24 @@ export default function ReportSpedizioniPage() {
       const params = new URLSearchParams()
       if (filtri.clienteId) params.set('clienteId', filtri.clienteId)
       if (filtri.stato) params.set('stato', filtri.stato)
+      // Giorni di Roma: la rotta trasforma 'YYYY-MM-DD' nei confini del giorno italiano.
       if (filtri.dal) params.set('dal', filtri.dal)
-      if (filtri.al) params.set('al', filtri.al + 'T23:59:59')
+      if (filtri.al) params.set('al', filtri.al)
       if (filtri.contrassegno) params.set('contrassegno', filtri.contrassegno)
       if (filtri.provincia) params.set('provincia', filtri.provincia)
-      if (filtri.fatturazione) params.set('fatturazione', filtri.fatturazione)
       if (filtri.canale) params.set('canale', filtri.canale)
       if (filtri.statoContrassegno) params.set('statoContrassegno', filtri.statoContrassegno)
+      // Vettore (fisico) e contratto li applica la rotta, che conosce il tipo di ogni contratto.
+      if (filtri.vettore) params.set('vettore', filtri.vettore)
+      if (filtri.contratto) params.set('contratto', filtri.contratto)
       // Solo spedizioni: le rettifiche hanno il loro report (Report Rettifiche).
       params.set('rettifiche', 'escluse')
 
       const res = await fetch(`/api/reports/spedizioni?${params}`)
-      let spedizioni = await res.json()
-      if (filtri.vettore) spedizioni = spedizioni.filter((s:any) => String(s.corrieri?.nome_contratto||'').split(' ')[0] === filtri.vettore)
+      const dati = await res.json().catch(() => null)
+      // Un errore della rotta non e' "nessun risultato": si dice cosa e' successo.
+      if (!res.ok || !Array.isArray(dati)) { await dialog.alert({ title: 'Errore', message: 'Report non generato: ' + (dati?.error || ('risposta ' + res.status)) }); return }
+      let spedizioni: any[] = dati
       if (filtri.agente) spedizioni = spedizioni.filter((s:any) => (s.clienti?.agente||'') === filtri.agente)
       if (!spedizioni.length) { await dialog.alert({ title: 'Nessun risultato', message: 'Nessuna spedizione trovata con i filtri selezionati.' }); return }
 
@@ -178,30 +200,25 @@ export default function ReportSpedizioniPage() {
         <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px',display:'flex',alignItems:'center',gap:'6px'}}>🔍 Nuovo report</div>
 
         {/* Riga 1 */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>
           <div><label style={lbl}>Cliente</label>
             <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={sel}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
-          <div><label style={lbl}>Tipo Contratto</label>
-            <select value={filtri.tipoContratto} onChange={e=>setF('tipoContratto',e.target.value)} style={sel}>
-              <option value="">Tutti</option>
-              <option value="credito_scalare">Credito a scalare</option>
-              <option value="fattura_mensile">Fattura mensile</option>
-            </select>
-          </div>
           <div><label style={lbl}>Vettore</label>
+            {/* Il vettore FISICO del contratto (GLS diretto, "Q GLS ...", "PF CK ..." sono tutti GLS),
+                non la prima parola del nome. */}
             <select value={filtri.vettore} onChange={e=>setF('vettore',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').split(' ')[0]))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
+              {Array.from(new Set(corrieri.map((c:any)=>vettoreFisico(c)))).filter(Boolean).sort().map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Contratto</label>
             <select value={filtri.contratto} onChange={e=>setF('contratto',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'')))).filter(Boolean).map((v:any)=><option key={v} value={v}>{v}</option>)}
+              {Array.from(new Set(corrieri.map((c:any)=>String(c.nome_contratto||'').trim()))).filter(Boolean).sort().map((v:any)=><option key={v} value={v}>{v}</option>)}
             </select>
           </div>
         </div>
@@ -220,31 +237,24 @@ export default function ReportSpedizioniPage() {
           <div><label style={lbl}>Provincia</label>
             <select value={filtri.provincia} onChange={e=>setF('provincia',e.target.value)} style={sel}>
               <option value="">Tutte</option>
-              {['AG','AL','AN','AO','AR','AP','AT','AV','BA','BT','BL','BN','BG','BI','BO','BZ','BS','BR','CA','CL','CB','CE','CT','CZ','CH','CO','CS','CR','KR','CN','EN','FM','FE','FI','FG','FC','FR','GE','GO','GR','IM','IS','SP','AQ','LT','LE','LC','LI','LO','LU','MC','MN','MS','MT','ME','MI','MO','MB','NA','NO','NU','OG','OT','OR','PD','PA','PR','PV','PG','PU','PE','PC','PI','PT','PN','PZ','PO','RG','RA','RC','RE','RI','RN','RO','SA','SS','SV','SI','SR','SO','TA','TE','TR','TO','TP','TN','TV','TS','UD','VA','VE','VB','VC','VR','VV','VI','VT'].map(p=><option key={p} value={p}>{p}</option>)}
+              {PROVINCE.map(p=><option key={p} value={p}>{p}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Stato</label>
             <select value={filtri.stato} onChange={e=>setF('stato',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              {STATI.map(s=><option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
+              {Object.entries(STATI).map(([k,v])=><option key={k} value={k}>{v}</option>)}
             </select>
           </div>
         </div>
 
         {/* Riga 3 — filtri nuovi */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>
           <div><label style={lbl}>Contrassegno</label>
             <select value={filtri.contrassegno} onChange={e=>setF('contrassegno',e.target.value)} style={sel}>
               <option value="">Tutti</option>
               <option value="si">Con contrassegno</option>
               <option value="no">Senza contrassegno</option>
-            </select>
-          </div>
-          <div><label style={lbl}>Fatturazione</label>
-            <select value={filtri.fatturazione} onChange={e=>setF('fatturazione',e.target.value)} style={sel}>
-              <option value="">Tutte</option>
-              <option value="si">Fatturate</option>
-              <option value="no">Non fatturate</option>
             </select>
           </div>
           <div><label style={lbl}>Canale</label>
@@ -257,11 +267,10 @@ export default function ReportSpedizioniPage() {
             </select>
           </div>
           <div><label style={lbl}>Stato Contrassegno</label>
+            {/* Vale solo per le spedizioni CON contrassegno (la rotta le richiede con importo > 0). */}
             <select value={filtri.statoContrassegno} onChange={e=>setF('statoContrassegno',e.target.value)} style={sel}>
               <option value="">Tutti</option>
-              <option value="in_attesa">In attesa</option>
-              <option value="pagato">Pagato</option>
-              <option value="in_distinta">In distinta</option>
+              {Object.entries(STATI_COD).map(([k,v])=><option key={k} value={k}>{v}</option>)}
             </select>
           </div>
         </div>
@@ -300,7 +309,7 @@ export default function ReportSpedizioniPage() {
           <div style={{display:'flex',alignItems:'flex-end'}}>
             <span style={{fontSize:'11px',color:'#666',lineHeight:1.5}}>
               {filtri.contenuto === 'riepilogo'
-                ? 'Una riga per cliente col totale (Spedizioni, Colli, Prezzo, Iva, Totale).'
+                ? 'Una riga per cliente diretto (e per ogni sotto-master di prima linea) col totale (Spedizioni, Colli, Prezzo, Iva, Totale).'
                 : 'Tutte le spedizioni una per riga, con il totale in fondo.'}
               {' '}
               {filtri.suddivisione
@@ -318,6 +327,7 @@ export default function ReportSpedizioniPage() {
 
       {/* Lista report generati */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
+        {erroreElenco && <div style={{padding:'10px 16px',borderBottom:'1px solid #fecaca',background:'#fef2f2',color:'#b91c1c',fontSize:'12px'}}>{erroreElenco}</div>}
         <div style={{padding:'10px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'12px',fontWeight:'400',color:'#666'}}>
           Mostra{' '}
           <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}

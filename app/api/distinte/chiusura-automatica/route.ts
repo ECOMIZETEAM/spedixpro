@@ -4,6 +4,23 @@ import { fulfillMarketplace } from '@/lib/fulfillMarketplace'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
+import { clientiAutodistintaSpenta, righeFermePerAutodistinta, righeDaRiprendereDopoChiusuraAMano } from '@/lib/autodistinta'
+import { giornoRoma, giorniFaRoma, istanteDaOraRoma } from '@/lib/date-roma'
+
+// IL GIRO E' ALLE 23 DI ROMA, d'estate e d'inverno. Vercel conosce solo l'ora UTC: il calendario
+// (vercel.json) chiama ogni 15 minuti dalle 21:00 alle 23:45 UTC, e qui si lavora solo fra le 23:00 e
+// l'1:00 di Roma — 8 passaggi a sera in entrambe le stagioni. Fino al 17/11/2026 l'ora era scritta in
+// UTC (21:00): d'estate erano le 23, ma dal cambio d'ora del 25/10 il giro partiva alle 22 e le
+// etichette create fra le 22 e le 23 slittavano alla distinta della sera dopo.
+const ORA_GIRO_ROMA = 23
+const FMT_ORA_ROMA = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Rome', hour: '2-digit', hourCycle: 'h23' })
+function finestraDelGiro(ora: Date): { dentro: boolean; taglio: Date } {
+  const h = Number(FMT_ORA_ROMA.format(ora))
+  // Dopo mezzanotte il giro e' ancora quello della sera prima: il taglio resta alle 23 di ieri.
+  const giorno = h >= ORA_GIRO_ROMA ? giornoRoma(ora) : giorniFaRoma(1, ora)
+  const [a, m, g] = giorno.split('-').map(Number)
+  return { dentro: h >= ORA_GIRO_ROMA || h < 1, taglio: istanteDaOraRoma(a, m, g, ORA_GIRO_ROMA) }
+}
 
 // Una sera porta ~7.000 spedizioni da chiudere in ~700 distinte (20/10/2026), e ogni distinta parla col
 // corriere: in un passaggio solo non ci stanno. Il giro gira piu' volte a sera (vercel.json) e ogni
@@ -11,6 +28,9 @@ import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/disti
 // spedizioni ancora senza distinta.
 export const maxDuration = 300
 const TEMPO_PER_PASSAGGIO_MS = 200_000
+// Oltre questo non si comincia un altro blocco di evasioni sui negozi: un blocco da 20 ordini sta nei
+// 70 secondi che restano fino a maxDuration (300).
+const TEMPO_PER_EVASIONE_MS = 230_000
 
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization')
@@ -21,6 +41,8 @@ export async function GET(req: NextRequest) {
 
   const avvio = Date.now()
   const ora = new Date()
+  const { dentro, taglio } = finestraDelGiro(ora)
+  if (!dentro) return NextResponse.json({ ok: true, saltato: 'fuori dal giro delle 23 di Roma' })
   // Finestra dei RESI (sotto): gli ultimi 30 giorni, sono solo documenti.
   const inizio = new Date(ora)
   inizio.setDate(inizio.getDate() - 30)
@@ -32,10 +54,8 @@ export async function GET(req: NextRequest) {
   // 05/10). L'arretrato piu' vecchio NON si chiude da solo: trasmetterebbe oggi ai corrieri etichette di
   // settimane fa, e una GLS trasmessa non si annulla piu' in automatico (scelta di Lorenzo, 21/10/2026).
   const inizioSpedizioni = new Date(ora.getTime() - 3 * 864e5)
-  // Solo le create prima delle 21:00 UTC di stasera (l'ora del primo passaggio): i passaggi successivi
-  // non prendono le etichette fatte nel frattempo, che restano per la sera dopo come sempre.
-  const taglio = new Date(Date.UTC(ora.getUTCFullYear(), ora.getUTCMonth(), ora.getUTCDate(), 21))
-  if (taglio > ora) taglio.setUTCDate(taglio.getUTCDate() - 1)
+  // Solo le create prima delle 23:00 di Roma di stasera (l'ora del primo passaggio, `taglio` qui sopra):
+  // i passaggi successivi non prendono le etichette fatte nel frattempo, che restano per la sera dopo.
 
   const speds: any[] = []
   for (let da = 0; ; da += 1000) {
@@ -56,21 +76,51 @@ export async function GET(req: NextRequest) {
 
   // AUTODISTINTA OFF (impostazioni cliente): il cron NON chiude le spedizioni di questi clienti —
   // le distinte le fanno loro a mano dal portale. Default (nessuna impostazione) = ON.
-  const { data: esclusi } = await supabase.from('clienti').select('id').eq('impostazioni->>autodistinta', 'no')
-  const autodistintaOff = new Set((esclusi || []).map((c: any) => c.id))
+  // Vale per TUTTO il pacco: anche le righe dei master che vendono il contratto condiviso restano ferme finche'
+  // il cliente non chiude la sua, e quando la chiude si riprendono qui (lib/autodistinta, guasto SPIRITUAL 15/11).
+  // Se queste letture falliscono, in questo passaggio non si chiude nessuna spedizione: chiudendo tutto si
+  // trasmetterebbero ai corrieri proprio i pacchi dei clienti spenti. Il passaggio dopo, fra 15 minuti, riprova.
+  let autodistintaOff = new Set<string>()
+  let righeFerme = new Set<string>()
+  let regoleLette = true
+  try {
+    autodistintaOff = await clientiAutodistintaSpenta(supabase)
+    righeFerme = await righeFermePerAutodistinta(supabase, autodistintaOff, new Date(inizioSpedizioni.getTime() - 864e5))
+  } catch (e: any) {
+    regoleLette = false
+    console.error('[DISTINTE][CRON] auto distinta spenta non letta, nessuna spedizione chiusa in questo passaggio:', e?.message)
+  }
+  let righeRiprese = 0
+  if (regoleLette) {
+    try {
+      const riprese = await righeDaRiprendereDopoChiusuraAMano(supabase, autodistintaOff, {
+        chiuseDal: inizioSpedizioni, taglio, righeDal: inizio,
+      })
+      // In testa: sono le piu' vecchie, e se il tempo finisce restano indietro le piu' recenti (vedi sotto).
+      const gia = new Set(speds.map(s => String(s.id)))
+      const nuove = riprese.filter((r: any) => !gia.has(String(r.id)))
+      speds.unshift(...nuove)
+      righeRiprese = riprese.length
+    } catch (e: any) {
+      console.error('[DISTINTE][CRON] righe dei venditori da riprendere non lette (riprova il passaggio dopo):', e?.message)
+    }
+  }
 
   const gruppi: Record<string, any[]> = {}
-  for (const s of (speds || [])) {
+  let righeFermeSaltate = 0
+  for (const s of (regoleLette ? speds : [])) {
     // cliente_id NULL = spedizione PROPRIA del master: prima veniva SALTATA (mai chiusa in distinta).
     // Ora la raggruppo per master+corriere con distinta senza cliente (come la chiusura manuale "m:").
     if (!s.master_id || !s.corriere_id) continue
     if (s.cliente_id && autodistintaOff.has(s.cliente_id)) continue   // autodistinta OFF: chiude lui
+    if (righeFerme.has(String(s.id))) { righeFermeSaltate++; continue }   // riga di venditore di un pacco che il cliente spento non ha ancora chiuso
     const key = s.master_id + '|' + (s.cliente_id || 'PROPRIA') + '|' + s.corriere_id
     if (!gruppi[key]) gruppi[key] = []
     gruppi[key].push(s)
   }
 
   let distinteCreate = 0, spedizioniChiuse = 0, gruppiRimandati = 0
+  const daEvadere: string[] = []
   // I gruppi in ordine di spedizione piu' vecchia (le spedizioni sono lette cosi'): se il tempo finisce,
   // restano indietro le piu' recenti, che il passaggio dopo o la sera dopo riprendono.
   for (const key in gruppi) {
@@ -103,9 +153,8 @@ export async function GET(req: NextRequest) {
         await supabase.from('spedizioni').update({ stato: 'spedita' }).in('id', blocco).eq('distinta_id', distinta.id).eq('stato', 'in_lavorazione')
       }
       distinteCreate++
-      // Tracking ai marketplace collegati (best-effort). UNICA porta: fulfillMarketplace applica la
-      // guardia "mai evadere col numero provvisorio" per tutte le piattaforme.
-      for (let i = 0; i < ids.length; i += 200) { try { await fulfillMarketplace(supabase, ids.slice(i, i + 200)) } catch {} }
+      // L'evasione sui negozi si fa in fondo al passaggio, dopo TUTTE le chiusure al corriere (vedi sotto).
+      daEvadere.push(...ids)
       try { await chiudiBorderoSpedisci(supabase, distinta.id) } catch {}
       try { await chiudiBordereauSpediamopro(supabase, distinta.id) } catch {}
       try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(supabase, distinta.id) } catch {}
@@ -178,6 +227,35 @@ export async function GET(req: NextRequest) {
     }
   } catch (e: any) { console.error('[DISTINTE-RESI][CRON] errore:', e?.message) }
 
+  // TRACKING AI NEGOZI COLLEGATI (best-effort). UNICA porta: fulfillMarketplace applica le guardie per
+  // tutte le piattaforme.
+  // In fondo, dopo le chiusure al corriere di tutte le distinte e dopo i resi: dal 10/11/2026 e' alla
+  // distinta che parte l'evasione vera (prima gli ordini erano gia' evasi all'etichetta e questa chiamata
+  // li saltava), e la sera sono centinaia di chiamate ai negozi. Dentro il giro delle distinte, se la
+  // funzione finiva il tempo a meta' gruppo, quella distinta non arrivava al corriere: niente ritiro.
+  // A blocchi piccoli e solo finche' c'e' tempo: il resto lo riprende il recupero ogni 20 minuti
+  // (app/api/integrazioni/fulfill-retry), che per le spedizioni in distinta e' la stessa evasione.
+  // Solo le spedizioni con un ordine di negozio collegato: la sera sono ~7.000 spedizioni e poche
+  // centinaia hanno un ordine, e a blocchi da 20 tutte le altre sarebbero solo letture a vuoto. Gli
+  // ordini uniti partono col capofila, che ha la sua riga collegata alla spedizione. Una lettura fallita
+  // lascia quelle spedizioni al recupero, come il tempo finito.
+  let evasioneRimandata = 0
+  const conOrdine = new Set<string>()
+  for (let i = 0; i < daEvadere.length; i += 200) {
+    const { data, error } = await supabase.from('ordini_ecommerce').select('spedizione_id').in('spedizione_id', daEvadere.slice(i, i + 200))
+    if (error) console.error('[DISTINTE][CRON] lettura ordini dei negozi:', error.message)
+    for (const r of (data || [])) conOrdine.add(String(r.spedizione_id))
+  }
+  const ordiniDaEvadere = daEvadere.filter(id => conOrdine.has(id))
+  for (let i = 0; i < ordiniDaEvadere.length; i += 20) {
+    if (Date.now() - avvio > TEMPO_PER_EVASIONE_MS) { evasioneRimandata = ordiniDaEvadere.length - i; break }
+    try { await fulfillMarketplace(supabase, ordiniDaEvadere.slice(i, i + 20)) }
+    catch (e: any) { console.error('[DISTINTE][CRON] evasione negozi:', e?.message) }
+  }
+  if (evasioneRimandata) console.warn('[DISTINTE][CRON] evasione negozi lasciata al recupero:', evasioneRimandata, 'spedizioni')
   if (gruppiRimandati) console.warn('[DISTINTE][CRON] tempo finito: distinte rimandate al passaggio successivo', gruppiRimandati)
-  return NextResponse.json({ success: true, distinteCreate, spedizioniChiuse, gruppiRimandati, distinteResiCreate })
+  return NextResponse.json({
+    success: true, distinteCreate, spedizioniChiuse, gruppiRimandati, distinteResiCreate, evasioneRimandata,
+    autodistinta: { lette: regoleLette, clientiSpenti: autodistintaOff.size, righeFermeSaltate, righeRiprese },
+  })
 }

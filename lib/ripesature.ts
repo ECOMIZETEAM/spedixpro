@@ -20,7 +20,23 @@
 // quanto avevamo fatturato e pagava lo stesso — perche' misurava di piu'. Per questo le misure
 // riscontrate contano quanto il peso e vanno portate fino al ricalcolo.
 
-export type ColloRipesato = { peso: number; lunghezza: number; larghezza: number; altezza: number }
+// pesoReale: solo quando il fornitore scrive i pesi senza le misure. Allora `peso` porta il volumetrico (il riprezzo
+// non deve perdere il volume) e il reale sta qui, per le voci che si pagano sul reale come la sponda (lib/pricing).
+export type ColloRipesato = { peso: number; lunghezza: number; larghezza: number; altezza: number; pesoReale?: number }
+
+// Un collo salvato in rettifiche.colli_ripesati (forma del motore prezzi: weight/length/…) di nuovo come
+// ColloRipesato. Lo usano il ricalcolo e la propagazione: senza il peso reale del fornitore, rifacendo il conto la
+// sponda tornerebbe sul volumetrico.
+export function colloDaSalvato(c: any): ColloRipesato {
+  const reale = Number(c?.pesoRealeFornitore)
+  return {
+    peso: Number(c?.weight ?? c?.peso) || 0,
+    lunghezza: Number(c?.length ?? c?.lunghezza) || 0,
+    larghezza: Number(c?.width ?? c?.larghezza) || 0,
+    altezza: Number(c?.height ?? c?.altezza) || 0,
+    ...(reale > 0 ? { pesoReale: reale } : {}),
+  }
+}
 
 export type Ripesatura = {
   idOrdine: string          // chiave del raggruppamento e anti-doppione
@@ -79,9 +95,17 @@ function normalizza(riga: any): Record<string, any> {
 // (ripesatura + eventuale fuori sagoma + eventuale reso, tutto insieme). Il CODICE non e' la LDV: e'
 // il codice provider (raw_response.code) — la rotta lo risolve in tracking_number.
 const RE_SP_CODE  = /Sovrapprezzo spedizione:\s*([0-9A-Za-z]+)/i
-const RE_SP_REALE = /peso reale:\s*([0-9]+(?:\.[0-9]+)?)/i
-const RE_SP_VOL   = /peso volumetrico:\s*([0-9]+(?:\.[0-9]+)?)/i
+// I PESI ARRIVANO COL PUNTO O CON LA VIRGOLA: «Peso reale: 14.9» ma anche «peso reale: 20,40 kg» (quasi tutti gli addebiti
+// del 28-29/10/2026). Letti col solo punto, 20,40 diventava 20: 229 sovrapprezzi su 1.516 riprezzati sotto in una fascia
+// piu' bassa di quella che il fornitore ci aveva fatto pagare (10,85 → 10, 5,6 → 5). Si accettano tutti e due (pesoSP).
+const RE_SP_REALE = /peso reale:\s*([0-9]+(?:[.,][0-9]+)?)/i
+const RE_SP_VOL   = /peso volumetrico:\s*([0-9]+(?:[.,][0-9]+)?)/i
 const RE_SP_DIM   = /(?:dim:|dimensioni:)\s*([0-9.]+x[0-9.]+x[0-9.]+)/i
+// UPS: il fornitore non scrive «peso reale» ne' «volumetrico» ma il PESO TASSATO, quello su cui UPS ha gia' fatto pagare
+// (il maggiore fra i due, arrotondato al mezzo chilo). Senza questa lettura il pacco restava senza peso e la riga finiva
+// tutta a carico di chi carica: sul file del 30/10/2026 di MULTI 65 pacchi UPS, 486,46 €.
+const RE_SP_TASSATO = /peso tassato:\s*([0-9]+(?:[.,][0-9]+)?)/i
+const pesoSP = (v: any) => Number(String(v ?? '').replace(',', '.')) || 0
 // Amount di SpediamoPro: punto decimale ("7.45"), importi piccoli (nessuna migliaia).
 const importoSP = (v: any) => Math.abs(Number(String(v ?? '0').replace(',', '.')) || 0)
 
@@ -97,7 +121,9 @@ const importoSP = (v: any) => Math.abs(Number(String(v ?? '0').replace(',', '.')
 //   consegna su appuntamento 2,46 € — 5 righe esatte a 2,46
 // Non entrano nel listino: si addebitano in aggiunta alla differenza e cascatano INVARIATI lungo la
 // catena. Se il fornitore li cambia, si tocca solo questa tabella.
-export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number }[] = [
+// euro: fisso · euroKg: al kg di peso tassato · per100kg: ogni 100 kg iniziati di peso tassato quando il peso reale supera
+// sogliaRealeKg (sotto vale `euro`). Il conto lo fa tariffaSupplementoSP.
+export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number; euroKg?: number; per100kg?: number; sogliaRealeKg?: number }[] = [
   { nome: 'fuori sagoma', re: /fuori\s*sagoma/i, euro: 16.39 },
   { nome: 'non sovrapponibile', re: /non\s*sovrapponibile/i, euro: 16.39 },
   { nome: 'consegna su appuntamento', re: /consegna\s*su\s*appuntamento/i, euro: 2.46 },
@@ -110,8 +136,27 @@ export const SUPPLEMENTI_SP: { nome: string; re: RegExp; euro: number }[] = [
   //                             52,58 di reso = 78,40, e il reso costa quanto l'andata
   //   super gdo         7,37  — due righe danno 7,25, cioe' 7,37 meno 0,12 di aggiornamento
   { nome: 'fuori dimensione', re: /fuori\s*dimensione/i, euro: 25.82 },
-  { nome: 'super gdo', re: /super\s*gdo/i, euro: 7.37 },
+  // SUPER GDO NON E' UNA CIFRA FISSA. Rifatto il 18/11/2026 su tutte le 28 righe del conto: 7,37 € quando il collo e'
+  // del servizio a peso reale (fino a 5 kg reali); sopra, 5,73 € ogni 100 kg iniziati del peso tassato (il maggiore fra
+  // reale e volumetrico). 151,4 kg → 11,46; 360 kg di volume → 22,92; 43,8 kg → 5,73; 1-5 kg reali → 7,37. Con la cifra
+  // fissa 050220152957691 girava 7,37 su 11,46 e 050062152944717 7,37 su 22,92: MULTI pagava la differenza.
+  { nome: 'super gdo', re: /super\s*gdo/i, euro: 7.37, per100kg: 5.73, sogliaRealeKg: 5 },
+  // UPS (Lorenzo, 05/11/2026: «si certo», da girare sotto come gli altri). Misurate sulle righe del file del 30/10 di MULTI
+  // in cui sono l'unica cosa, col peso tassato nella stessa fascia del dichiarato:
+  //   imballaggio speciale 15,58 €  — 11 righe esatte (5 di fine agosto a 7,79: l'importo della riga fa da tetto)
+  //   correzione indirizzo 11,47 €  — 11 righe esatte; con l'imballaggio fa 27,05, che torna
+  //   surge emergency fee  0,162 € al kg di peso tassato — 3,24 su 20 kg, 1,62 su 10, 2,59 su 16; su alcune righe
+  //                        0,55 fisso, e anche li' vale il tetto dell'importo
+  { nome: 'imballaggio speciale', re: /imballaggio\s*speciale/i, euro: 15.58 },
+  { nome: 'correzione indirizzo', re: /correzione\s*indirizzo/i, euro: 11.47 },
+  { nome: 'surge emergency fee', re: /surge\s*emergency\s*fee/i, euro: 0, euroKg: 0.162 },
 ]
+
+export function tariffaSupplementoSP(s2: (typeof SUPPLEMENTI_SP)[number], kgTassato: number, kgReale: number): number {
+  if (s2.per100kg && kgReale > (s2.sogliaRealeKg ?? 0)) return s2.per100kg * Math.max(1, Math.ceil(kgTassato / 100 - 1e-9))
+  if (s2.euroKg) return s2.euroKg * kgTassato
+  return s2.euro
+}
 
 // Nessuna voce del conto e' piu' senza tariffa. Il meccanismo resta: il giorno che il fornitore ne
 // inventa una nuova, finisce qui e viene segnalata a chi carica invece di sparire dentro il costo.
@@ -246,41 +291,69 @@ function leggiRipesaturePesi(righe: any[]): { righe: Ripesatura[]; scartate: num
 function leggiRipesatureSP(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number } {
   const out: Ripesatura[] = []
   let scartate = 0
-  const visti = new Set<string>()
+  // LO STESSO PACCO SU PIU' RIGHE. Il fornitore a volte addebita due voci dello stesso pacco in due righe separate
+  // (6AABC5BB9DDF1 il 17/09: «peso tassato 9.5 Dim 38x38x32» 1,65 € e «surge emergency fee» 0,55 €). Si teneva solo la
+  // prima e la seconda restava a chi carica senza che nessuno la vedesse (4 pacchi, 6,51 € sul file del 30/10). Ora le
+  // righe diverse dello stesso codice diventano una sola, con gli importi sommati; quelle IDENTICHE (lo stesso export
+  // caricato due volte) restano una.
+  const perCodice = new Map<string, { details: string[]; importi: number[]; importo: number; viste: Set<string> }>()
+  const ordine: string[] = []
   for (const grezza of (righe || [])) {
     const c = normalizza(grezza)
     const details = String(c.details ?? '')
     const mc = RE_SP_CODE.exec(details)
     if (!mc) { scartate++; continue }          // riga non-sovrapprezzo (ricarica, rimessa COD...): si salta
     const code = mc[1].trim()
-    if (visti.has(code)) { scartate++; continue }
-    visti.add(code)
+    const imp = importoSP(c.amounteur ?? c.amount ?? c.importo)
+    const firma = details + '|' + imp.toFixed(2)
+    let g = perCodice.get(code)
+    if (!g) { g = { details: [], importi: [], importo: 0, viste: new Set() }; perCodice.set(code, g); ordine.push(code) }
+    if (g.viste.has(firma)) { scartate++; continue }
+    g.viste.add(firma); g.details.push(details); g.importi.push(imp); g.importo += imp
+  }
+  for (const code of ordine) {
+    const g = perCodice.get(code)!
+    const details = g.details.join(' + ')
+    const importo = Math.round(g.importo * 100) / 100
     const reale = RE_SP_REALE.exec(details); const vol = RE_SP_VOL.exec(details); const dim = RE_SP_DIM.exec(details)
-    const pesoReale = reale ? Number(reale[1]) : 0
-    const pesoVol   = vol ? Number(vol[1]) : 0
+    const pesoReale = reale ? pesoSP(reale[1]) : 0
+    const pesoVol   = vol ? pesoSP(vol[1]) : 0
+    const tassati = g.details.map(d => RE_SP_TASSATO.exec(d)).filter(Boolean).map(m => pesoSP((m as RegExpExecArray)[1]))
+    const pesoTassato = tassati.length ? Math.max(...tassati) : 0
     const mis = dim ? misure(dim[1]) : { lunghezza: 0, larghezza: 0, altezza: 0 }
     const haDim = mis.lunghezza > 0 && mis.larghezza > 0 && mis.altezza > 0
     // Con le dimensioni il motore ricalcola il volume col NOSTRO fattore (giusto per riprezzare sul
     // nostro listino). Senza dimensioni (~22 casi su 500) non puo': si usa come peso il MAX(reale,
     // volumetrico del fornitore) cosi' il riprezzo non perde il volume su cui il fornitore ci ha
-    // addebitato.
-    const collo: ColloRipesato = haDim
+    // addebitato. Col solo peso tassato (UPS) quello e' gia' il peso pagato: niente misure da rifare.
+    // Il reale, se il fornitore lo scrive, si tiene a parte: la sponda si paga sul reale, e col solo
+    // volumetrico nel peso 050038152961262 (50 kg reali, 297 di volume) pagava 11,88 € di sponda mai addebitata.
+    const collo: ColloRipesato = haDim && !(pesoTassato > 0 && !(pesoReale > 0))
       ? { peso: pesoReale, ...mis }
-      : { peso: Math.max(pesoReale, pesoVol), lunghezza: 0, larghezza: 0, altezza: 0 }
+      : { peso: Math.max(pesoReale, pesoVol, pesoTassato), lunghezza: 0, larghezza: 0, altezza: 0, ...(pesoReale > 0 ? { pesoReale } : {}) }
+    const voci = SUPPLEMENTI_SP.filter(s2 => s2.re.test(details))
     out.push({
       idOrdine: code, idVerifiche: [], ldv: code,   // ldv=code TEMPORANEO: la rotta lo rimappa in tracking_number
-      addebitoFornitore: importoSP(c.amounteur ?? c.amount ?? c.importo),
+      addebitoFornitore: importo,
       colli: [collo], dataChiusura: '', mittente: '', destinatario: '',
       codiceProvider: code,
       // MAI PIU' DI QUELLO CHE CI HANNO ADDEBITATO. Il supplemento e' una PARTE dell'importo della
       // riga: se la tariffa che conosciamo fosse piu' alta (il fornitore l'ha scontata, o la riga e'
       // di un periodo con un prezzo diverso) girarla intera vorrebbe dire chiedere a valle piu' di
       // quanto e' uscito. Sul conto vero succede una volta: una riga di super gdo da 5,73.
-      supplementi: Math.min(
-        Math.round(SUPPLEMENTI_SP.filter(s2 => s2.re.test(details)).reduce((a, s2) => a + s2.euro, 0) * 100) / 100,
-        importoSP(c.amounteur ?? c.amount ?? c.importo),
-      ),
-      supplementiNomi: SUPPLEMENTI_SP.filter(s2 => s2.re.test(details)).map(s2 => s2.nome),
+      // RIGA PER RIGA DEL FILE, ognuna col tetto del suo importo: su 6AB2986ACAE17 la «surge emergency fee» e' una riga da
+      // 0,55 e la ripesatura un'altra da 2,52; sommandole prima, la tariffa a chili dava 2,03 di supplemento e sotto si
+      // sarebbe chiesto 1,48 € in piu' di quanto addebitato per quella voce.
+      supplementi: Math.round(g.details.reduce((tot, d, i) => {
+        const kgRiga = pesoSP(RE_SP_TASSATO.exec(d)?.[1]) || pesoTassato || collo.peso
+        // il peso della riga: reale e tassato (il maggiore fra reale, volumetrico e tassato scritti), per le voci a 100 kg
+        const realeRiga = pesoSP(RE_SP_REALE.exec(d)?.[1]) || pesoReale
+        const tassRiga = Math.max(realeRiga, pesoSP(RE_SP_VOL.exec(d)?.[1]) || pesoVol, kgRiga)
+        const tariffa = SUPPLEMENTI_SP.filter(s2 => s2.re.test(d))
+          .reduce((a, s2) => a + tariffaSupplementoSP(s2, s2.per100kg ? tassRiga : kgRiga, realeRiga), 0)
+        return tot + Math.min(Math.round(tariffa * 100) / 100, g.importi[i])
+      }, 0) * 100) / 100,
+      supplementiNomi: voci.map(s2 => s2.nome),
       supplementiSenzaTariffa: SUPPLEMENTI_SENZA_TARIFFA.filter(s2 => s2.re.test(details)).map(s2 => s2.nome),
       reso: /(^|[^a-z])reso([^a-z]|$)/i.test(details),
     })

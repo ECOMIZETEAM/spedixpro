@@ -1,41 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase'
+import { confineGiornoRoma } from '@/lib/date-roma'
+import { sessioneCliente, intestazione, erroreReport } from '../comune'
+import { righeContrassegniCliente } from './calcolo'
+
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ righe: [], master: {}, cliente: {} })
-  const { data: utente } = await supabase.from('utenti').select('cliente_id,master_id').eq('id', user.id).single()
-  const clienteId = utente?.cliente_id
-  const masterId = utente?.master_id
-  if (!clienteId) return NextResponse.json({ righe: [], master: {}, cliente: {} })
-  const { data: cliente } = await supabase.from('clienti').select('ragione_sociale').eq('id', clienteId).single()
-  const { data: master } = await supabase.from('masters')
-    .select('nome,logo_url,indirizzo,cap,citta,provincia,email,email_sede,piva,partita_iva')
-    .eq('id', masterId).single()
+  const s = await sessioneCliente()
+  if ('errore' in s) return s.errore
   const p = req.nextUrl.searchParams
-  const dal = p.get('dal'); const al = p.get('al')
-  const statoSped = p.get('statoSpedizione')
-  let query = supabase.from('spedizioni')
-    .select('numero,dest_nome,contrassegno,stato,stato_contrassegno,created_at')
-    .eq('cliente_id', clienteId)
-    .gt('contrassegno', 0)
-    .order('created_at', { ascending: true })
-  if (dal) query = query.gte('created_at', dal)
-  if (al) query = query.lte('created_at', al + 'T23:59:59')
-  if (statoSped && statoSped !== 'tutti') query = query.eq('stato', statoSped)
-  const { data: speds } = await query
-  // LO STATO VERO, NON "In attesa" PER TUTTI. Qui c'era la stringa fissa: nel PDF del cliente
-  // risultavano da incassare anche i contrassegni gia' rimborsati (2.885 per 202.639 € al
-  // 18/09/2026), quelli in distinta (174) e quelli annullati perche' il pacco e' tornato indietro
-  // (791 per 57.497,91 €). Le etichette sono le stesse della lista del portale.
-  const ETICHETTA: Record<string, string> = {
-    in_attesa: 'In attesa', in_distinta: 'In lavorazione', pagato: 'Pagato', annullato: 'Annullato (reso)',
+  try {
+    const { cliente, master } = await intestazione(s.supabase, s.clienteId, s.masterId)
+    const righe = await righeContrassegniCliente(s.supabase, s.clienteId, {
+      dal: confineGiornoRoma(p.get('dal'), 'dal'),
+      al: confineGiornoRoma(p.get('al'), 'al'),
+      statoSpedizione: p.get('statoSpedizione'),
+      // Il filtro "Stato Contrassegni" della pagina c'era ma non veniva mai mandato.
+      statoContrassegno: p.get('statoContrassegno'),
+    })
+    return NextResponse.json({ righe, master, cliente })
+  } catch (e: any) {
+    return erroreReport(e)
   }
-  const righe = (speds || []).map(s => ({
-    data: s.created_at, spedizione: (s.numero||'') + ' - ' + (s.dest_nome||''),
-    contrassegno: Number(s.contrassegno||0),
-    statoContr: ETICHETTA[(s as any).stato_contrassegno || 'in_attesa'] || 'In attesa',
-    statoSpedizione: s.stato||'',
-  }))
-  return NextResponse.json({ righe, master: master || {}, cliente: { ragione_sociale: cliente?.ragione_sociale || '' } })
 }

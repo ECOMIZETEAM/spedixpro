@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { corriereConSupplementi, righeSupplementoCorriere, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
+import { TIPO_MINIMO_COLLO, minimoACollo } from '@/lib/pricing'
+import { TIPO_MULTICOLLO_SUPPLEMENTI, leggiSupplementiMulticollo, normalizzaSupplementiMulticollo } from '@/lib/multicollo-zone'
 
 // La propagazione a cascata tocca decine di sotto-master: col default (15s) la funzione veniva
 // TRONCATA a meta' -> propagazione parziale e prezzi disallineati a valle, in silenzio.
@@ -183,6 +187,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
       } catch (e) { console.error('Sponda di default dal listino corriere:', e) }
     }
 
+    // MINIMO A COLLO (multicollo, lib/pricing → noloMulticollo): euro per collo, 0 = non prezzato.
+    // NIENTE valore di default dal costo, a differenza della sponda: un minimo non prezzato esclude il
+    // multicollo finche' il master non decide a quanto venderlo (regola di Lorenzo, 10/11/2026).
+    // Se la pagina non lo manda (aperta prima che la voce esistesse) resta quello di prima.
+    {
+      const minimo = supplementi.minimo_collo !== undefined
+        ? Number(supplementi.minimo_collo) || 0
+        : minimoACollo(_supplOld || [])
+      if (minimo > 0) righeSupplementi.push({ listino_id: id, corriere_id, tipo: TIPO_MINIMO_COLLO, nome: 'Minimo a collo', valore: minimo, tipo_calcolo: 'per_collo' })
+      // LOCALITA' REMOTA / PARTENZA REMOTA del multicollo (lib/multicollo-zone): null = tolti, non mandati =
+      // restano quelli di prima. Come il minimo, nessun default dal costo: chi vende decide. Le fasce
+      // multicollo arrivano con le altre fasce (sono fasce su zone multicollo).
+      const supplMC = supplementi.multicollo_supplementi !== undefined
+        ? normalizzaSupplementiMulticollo(supplementi.multicollo_supplementi)
+        : leggiSupplementiMulticollo(_supplOld || [])
+      if (supplMC) righeSupplementi.push({ listino_id: id, corriere_id, tipo: TIPO_MULTICOLLO_SUPPLEMENTI, nome: 'Supplementi multicollo', valore: 0, tipo_calcolo: 'al_kg', descrizione: JSON.stringify(supplMC) })
+    }
+
+    // Supplementi del corriere (fuori misura…): dalla pagina se li manda, altrimenti restano quelli di
+    // prima — una pagina aperta prima che esistessero salverebbe senza, e la cancellazione li perderebbe.
+    if (Array.isArray(supplementi.supplementiCorriere) && await corriereConSupplementi(createAdminSupabase(), corriere_id)) {
+      righeSupplementi.push(...righeSupplementoCorriere(supplementi.supplementiCorriere, { listino_id: id, corriere_id }))
+    } else {
+      for (const r of (_supplOld || []).filter((r: any) => r.tipo === TIPO_SUPPLEMENTO_CORRIERE)) {
+        righeSupplementi.push({ listino_id: id, corriere_id, tipo: r.tipo, nome: r.nome, valore: r.valore, tipo_calcolo: r.tipo_calcolo, descrizione: r.descrizione })
+      }
+    }
+
     if (righeSupplementi.length) {
       const { error } = await supabase.from('listini_clienti_supplementi').insert(righeSupplementi)
       if (error) { await ripristina(); return NextResponse.json({ error: error.message }, { status: 400 }) }
@@ -194,33 +226,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   // tocca decine di master: tenerla DENTRO la risposta faceva aspettare l'utente anche mezzo minuto
   // dopo il clic su Salva. Il listino e' gia' scritto qui sopra (il salvataggio e' completo e
   // atomico dal punto di vista dell'utente); la cascata prosegue con after() e finisce da sola.
+  // Stessa funzione degli aumenti in percentuale: sotto-master e master collegati (ingrosso).
   after(async () => {
-    try {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const { propagaListinoACascata } = await import('@/lib/copia-listino-submaster')
-      const t0 = Date.now()
-      const n = await propagaListinoACascata(createAdminSupabase(), id)
-      console.log(`[LISTINO][PROPAGA] listino ${id} -> ${n} sotto-master in ${Date.now() - t0}ms`)
-    } catch (e) { console.error('Propagazione listino ai sotto-master:', e) }
-  })
-
-  // AUTO RE-SYNC CONDIVISIONE: se questo listino è il prezzo d'ingrosso di un master collegato (è il
-  // listino_cliente_id di un cliente-ledger), riporta i costi sui contratti che gli sono già condivisi —
-  // così ritoccare i prezzi qui aggiorna da solo il costo mostrato al collegato. NON crea contratti nuovi
-  // né sostituisce le sue copie: salvare un listino lo può anche un operatore, e ricreerebbe un contratto
-  // che il collegato ha tolto. Quelli li attiva un master dalla scheda del collegato (Aggiorna / Assegna).
-  // L'addebito era già live. Background, best-effort.
-  after(async () => {
-    try {
-      const { createAdminSupabase } = await import('@/lib/supabase-admin')
-      const { risincronizzaCondivisione } = await import('@/lib/condivisione-engine')
-      const admin = createAdminSupabase()
-      const { data: ledgers } = await admin.from('clienti').select('id').eq('ledger', true).eq('listino_cliente_id', id)
-      for (const l of (ledgers || [])) {
-        const { data: link } = await admin.from('corrieri_condivisi').select('id').eq('cliente_ledger_id', (l as any).id).eq('stato', 'attiva').is('corriere_id', null).maybeSingle()
-        if (link?.id) await risincronizzaCondivisione(admin, link.id)
-      }
-    } catch (e) { console.error('Re-sync condivisione dopo salvataggio listino:', e) }
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const { propagaListinoModificato } = await import('@/lib/listino-modificato')
+    await propagaListinoModificato(createAdminSupabase(), id)
   })
 
   return NextResponse.json({ ok: true, propagazione: 'in corso' })

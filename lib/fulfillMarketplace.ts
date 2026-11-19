@@ -5,10 +5,11 @@ import { fulfillSpedizioniEbay } from '@/lib/ebayFulfill'
 import { fulfillSpedizioniTiktok } from '@/lib/tiktokFulfill'
 import { fulfillSpedizioniTemu } from '@/lib/temuFulfill'
 import { fulfillSpedizioniAmazon } from '@/lib/amazonFulfill'
-import { STATI_SPEDIZIONE_IN_ANNULLO } from '@/lib/evasione-ordini'
+import { STATI_SPEDIZIONE_IN_ANNULLO, inDistinta } from '@/lib/evasione-ordini'
 
 // Spinge il tracking a TUTTI i marketplace collegati per le spedizioni date (Shopify, WooCommerce, Amazon,
-// PrestaShop, eBay, TikTok, Temu). Best-effort e IDEMPOTENTE: ogni fulfill salta gli ordini già 'ok',
+// PrestaShop, eBay, TikTok, Temu), ma solo per quelle gia' in distinta (vedi sotto). Best-effort e
+// IDEMPOTENTE: ogni fulfill salta gli ordini già 'ok',
 // quindi si può chiamare più volte (alla creazione distinta E, in futuro, altrove) senza doppioni.
 // Usato dalla creazione distinta lato CLIENTE, lato MASTER e dalla chiusura automatica, così eBay &
 // co. vengono SEMPRE marcati come spediti col tracking, a prescindere da chi crea la distinta.
@@ -34,11 +35,14 @@ export async function fulfillMarketplace(db: any, spedizioneIds: string[], opz: 
   // compratore riceva l'email di spedizione con un tracking gia' morto. La guardia sta QUI, dove passano
   // tutte e sette le piattaforme, con la lista degli stati scritta in un posto solo (lib/evasione-ordini).
   const { ldvProvvisoria } = await import('@/lib/numero-spedizione')
-  const { data: sped } = await db.from('spedizioni').select('id,tracking_number,stato').in('id', spedizioneIds)
-  const pronti = (sped || [])
+  //
+  // E SI EVADE SOLO DOPO LA DISTINTA (inDistinta, lib/evasione-ordini). Quelle che la aspettano restano non
+  // evase sul negozio; le riprende il recupero ogni 20 minuti, senza consumare tentativi.
+  const { data: sped } = await db.from('spedizioni').select('id,tracking_number,stato,distinta_id').in('id', spedizioneIds)
+  const valide = (sped || [])
     .filter((s: any) => s.tracking_number && !ldvProvvisoria(s.tracking_number))
     .filter((s: any) => !STATI_SPEDIZIONE_IN_ANNULLO.includes(String(s.stato || '')))
-    .map((s: any) => s.id)
+  const pronti = valide.filter((s: any) => inDistinta(s)).map((s: any) => s.id)
   if (!pronti.length) return esiti
 
   // DA QUI IN POI SI USA IL CLIENT ADMIN.

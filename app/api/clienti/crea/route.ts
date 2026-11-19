@@ -3,13 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { inviaCredenzialiCliente } from '@/lib/email'
 import { bloccaAgente } from '@/lib/agente'
 import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
-
-// Almeno 12 caratteri: sotto quella soglia Supabase RIFIUTA la password. Prima erano 10 e la
-// creazione dell'accesso falliva, con l'errore mai letto e l'email di credenziali spedita lo stesso.
-function generaPassword(len = 14): string {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#'
-  return Array.from({length: len}, () => chars[Math.floor(Math.random() * chars.length)]).join('')
-}
+import { generaPassword } from '@/lib/password'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()

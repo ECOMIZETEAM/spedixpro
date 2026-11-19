@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
 
   const { data: sped } = await supabase
     .from('spedizioni')
-    .select('id,numero,tracking_number,etichetta_url,richiedi_ritiro,raw_response')
+    .select('id,numero,tracking_number,etichetta_url,etichetta_path,richiedi_ritiro,raw_response')
     .eq('id', id).maybeSingle()
   if (!sped) return NextResponse.json({ error: 'Spedizione non trovata' }, { status: 404 })
 
@@ -40,6 +40,6 @@ export async function GET(req: NextRequest) {
     provvisorio: /^(TMP|DVA)-/.test(numero),
     codiceRitiro,
     richiediRitiro: !!sped.richiedi_ritiro,
-    etichettaPronta: !!sped.etichetta_url,
+    etichettaPronta: !!(sped.etichetta_url || (sped as any).etichetta_path),
   })
 }

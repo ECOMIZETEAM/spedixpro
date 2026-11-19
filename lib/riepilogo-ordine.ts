@@ -120,14 +120,17 @@ export function disegnaRiepilogoSped(pdf: PDFDocument, font: any, fontBold: any,
       const peso = (cat && Number(cat.peso) > 0) ? Number(cat.peso) : (Number(a.grammi) > 0 ? Number(a.grammi) / 1000 : 0)
       const dims = cat && (cat.lunghezza || cat.larghezza || cat.altezza) ? `${cat.lunghezza || '-'}x${cat.larghezza || '-'}x${cat.altezza || '-'} cm` : ''
       // Nome prodotto INTERO, a capo su più righe: niente più "…" che taglia.
-      paragrafo(String(a.quantita || 1) + '× ' + (a.nome || cat?.nome || sku || '—'), 11, false, nero)
+      // Nome e SKU in GRASSETTO nero (richiesta dei clienti 4/11): chi prepara il pacco cerca quelli
+      // sul foglio; lo SKU stava in grigio piccolo in mezzo a peso e misure e non si trovava.
+      paragrafo(String(a.quantita || 1) + '× ' + (a.nome || cat?.nome || sku || '—'), 11, true, nero)
       if (a.variante) paragrafo(a.variante, 9, false, grigio, ML + 10, usable - 10)
-      const meta = [sku ? 'SKU ' + sku : '', peso > 0 ? peso.toFixed(2).replace(/\.?0+$/, '') + 'kg' : '', dims].filter(Boolean).join('   ·   ')
+      if (sku) paragrafo('SKU ' + sku, 10, true, nero, ML + 10, usable - 10)
+      const meta = [peso > 0 ? peso.toFixed(2).replace(/\.?0+$/, '') + 'kg' : '', dims].filter(Boolean).join('   ·   ')
       if (meta) paragrafo(meta, 9, false, grigio, ML + 10, usable - 10)
       y -= 4
     }
   } else {
-    paragrafo('Contenuto: ' + (s.contenuto || '—'), 11, false, grigio)
+    paragrafo('Contenuto: ' + (s.contenuto || '—'), 11, true, nero)
   }
   sep()
 

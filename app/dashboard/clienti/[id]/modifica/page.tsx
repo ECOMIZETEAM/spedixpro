@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { PROVINCE_IT } from '@/lib/province-it'
+import AzzeraVerifica from '@/app/components/AzzeraVerifica'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
@@ -215,6 +216,11 @@ export default function ModificaClientePage() {
                 </div>
               )}
             </div>
+          </div>
+
+          <div style={sec}>
+            <div style={sech}>Verifica in due passaggi</div>
+            <AzzeraVerifica url={`/api/clienti/${id}/azzera-verifica`} chi="il cliente" />
           </div>
 
           <div style={sec}>

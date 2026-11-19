@@ -53,7 +53,9 @@ export async function GET(_req: NextRequest) {
   const costIds = (lcorr || []).map((l: any) => l.id)
   const costInfo = new Map<string, Map<string, ZonaInfo>>()
   if (costIds.length) {
-    const kf = await fetchAll(() => admin.from('listini_corrieri_fasce').select('id,corriere_id,zona_id,peso_max,prezzo,fuel').in('listino_id', costIds).eq('tipo', 'fino_a'))
+    // Ordine fisso per le pagine di fetchAll (oltre 1000 righe si accavallavano), sempre col campo
+    // dell'indice davanti all'id: il solo id fa scorrere al database la tabella intera.
+    const kf = await fetchAll(() => admin.from('listini_corrieri_fasce').select('id,corriere_id,zona_id,peso_max,prezzo,fuel').in('listino_id', costIds).eq('tipo', 'fino_a').order('listino_id', { ascending: true }).order('id', { ascending: true }))
     for (const f of kf) {
       const cid = (f as any).corriere_id; if (!nomeCorr.has(cid)) continue
       const zona = zn((f as any).zona_id); const pm = Number((f as any).peso_max)
@@ -77,7 +79,7 @@ export async function GET(_req: NextRequest) {
   const sped90 = new Map<string, number>()
   const allClientIds = (cli || []).map((c: any) => c.id)
   for (let i = 0; i < allClientIds.length; i += 100) {
-    const rows = await fetchAll(() => admin.from('spedizioni').select('id,cliente_id').in('cliente_id', allClientIds.slice(i, i + 100)).gte('created_at', dal))
+    const rows = await fetchAll(() => admin.from('spedizioni').select('id,cliente_id').in('cliente_id', allClientIds.slice(i, i + 100)).gte('created_at', dal).order('cliente_id', { ascending: true }).order('created_at', { ascending: false }).order('id', { ascending: false }))
     for (const s of rows) { const cid = (s as any).cliente_id; sped90.set(cid, (sped90.get(cid) || 0) + 1) }
   }
   const volumeListino = (lid: string) => (clientIdsDiListino.get(lid) || []).reduce((n, id) => n + (sped90.get(id) || 0), 0)
@@ -85,7 +87,7 @@ export async function GET(_req: NextRequest) {
   // Prezzi cliente → clientInfo[lid][cid][zonaNome] = { zona_id, bande prezzo all-in }
   const clientInfo = new Map<string, Map<string, Map<string, ZonaInfo>>>()
   for (let i = 0; i < listinoIds.length; i += 50) {
-    const ff = await fetchAll(() => admin.from('listini_clienti_fasce').select('id,listino_id,corriere_id,zona_id,peso_max,prezzo,fuel').in('listino_id', listinoIds.slice(i, i + 50)).eq('tipo', 'fino_a'))
+    const ff = await fetchAll(() => admin.from('listini_clienti_fasce').select('id,listino_id,corriere_id,zona_id,peso_max,prezzo,fuel').in('listino_id', listinoIds.slice(i, i + 50)).eq('tipo', 'fino_a').order('listino_id', { ascending: true }).order('id', { ascending: true }))
     for (const f of ff) {
       const cid = (f as any).corriere_id; if (!nomeCorr.has(cid)) continue
       const lid = (f as any).listino_id; const zona = zn((f as any).zona_id); const pm = Number((f as any).peso_max)

@@ -4,15 +4,12 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { eStaffDelSuperMaster } from '@/lib/ruoli'
 import { seminaDemo } from '@/lib/demo-seed'
 import { DEMO_GIORNI } from '@/lib/demo'
+import { generaPassword } from '@/lib/password'
 
 // Crea un ACCOUNT DEMO pronto all'uso: un master di prova ISOLATO (root a sé, non nella rete reale),
 // pieno di dati finti, che scade da solo dopo DEMO_GIORNI. Solo il super master può generarlo.
 // Ritorna le credenziali (email + password + link): NON manda email, le consegna a chi crea la demo.
 
-function generaPassword(len = 12): string {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-  return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
-}
 function rand(len = 6): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789'
   return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('')

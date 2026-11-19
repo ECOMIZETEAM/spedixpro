@@ -3,9 +3,11 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { vettoreFisico } from '@/lib/vettore'
 
-// Listino POD del master: quanto paga il cliente per ogni richiesta di prova di consegna.
+// Listino POD del master: quanto paga chi gli chiede una prova di consegna — un suo cliente oppure,
+// dal 04/11/2026, un master che sta sotto di lui (`destinatario` 'cliente' o 'master', due listini
+// separati: vedi lib/pod-prezzo e scripts/pod-prezzi-master.sql).
 // Solo il MASTER gestisce le proprie regole (mai cliente/agente). Tutto via service-role con
-// controllo esplicito del perimetro (cliente/corriere devono essere del master). Vedi lib/pod-prezzo.
+// controllo esplicito del perimetro (cliente, master sotto e corriere devono essere del master).
 
 // Chi puo' gestire: un master (ha master_id, non e' cliente ne' agente).
 async function masterCorrente() {
@@ -27,10 +29,13 @@ export async function GET() {
   const admin = createAdminSupabase()
   const M = ctx.masterId
 
-  const [rg, cl, co] = await Promise.all([
-    admin.from('pod_prezzi').select('id,cliente_id,corriere_id,vettore,prezzo,attivo,updated_at').eq('master_id', M),
+  // I master che possono chiedergli una POD sono quelli DIRETTAMENTE sotto: la richiesta di un master
+  // va sempre al suo padre (app/api/assistenza/apri), mai piu' in alto.
+  const [rg, cl, co, ms] = await Promise.all([
+    admin.from('pod_prezzi').select('id,destinatario,cliente_id,sottomaster_id,corriere_id,vettore,prezzo,attivo,updated_at').eq('master_id', M),
     admin.from('clienti').select('id,ragione_sociale').eq('master_id', M).order('ragione_sociale'),
     admin.from('corrieri').select('id,nome_contratto,tipo').eq('master_id', M).eq('attivo', true).order('nome_contratto'),
+    admin.from('masters').select('id,nome').eq('parent_master_id', M).order('nome'),
   ])
   // Il VETTORE lo calcola il server (lib/vettore.ts): la pagina non deve reinventare la regola che
   // dice quali contratti sono "GLS" — sui contratti diretti non sta scritto nel nome.
@@ -38,13 +43,15 @@ export async function GET() {
   return NextResponse.json({
     regole: rg.data || [],
     clienti: cl.data || [],
+    master: ms.data || [],
     corrieri,
     vettori: [...new Set(corrieri.map((c: any) => c.vettore))].sort(),
   })
 }
 
 // POST: crea o aggiorna le regole di UN prezzo su PIU' bersagli e PIU' clienti in una volta sola.
-// `cliente_ids` = i clienti scelti (vuoto = "tutti i clienti", la regola generica),
+// `cliente_ids` = i clienti scelti (vuoto = "tutti i clienti", la regola generica); oppure, con
+// `destinatario: 'master'`, `sottomaster_ids` = i master sotto scelti (vuoto = tutti i master sotto),
 // `corriere_ids` = singoli contratti, `vettori` = tutti i contratti di quel vettore (anche i futuri),
 // nessuno dei due = "tutti i corrieri" (predefinito).
 // Si scrive una regola per ogni COPPIA cliente × bersaglio: "10 clienti, tutti i BRT, 3 €" = 10 regole.
@@ -70,15 +77,28 @@ export async function POST(req: NextRequest) {
   const prezzo = Math.round(Number(body?.prezzo) * 100) / 100
   const attivo = body?.attivo === undefined ? true : !!body.attivo
   if (!isFinite(prezzo) || prezzo < 0) return NextResponse.json({ error: 'Prezzo non valido' }, { status: 400 })
+  // A chi vale: ai CLIENTI (come sempre, e se la pagina non lo dice) o ai MASTER sotto di lui
+  // (`sottomaster_ids`, vuoto = tutti i master sotto). Mai entrambi nella stessa regola.
+  const perMaster = body?.destinatario === 'master'
+  const masterIds: string[] = perMaster ? [...new Set<string>((Array.isArray(body?.sottomaster_ids) ? body.sottomaster_ids : [])
+    .filter(Boolean).map((x: any) => String(x)))] : []
+  if (perMaster && clienteIds.length) return NextResponse.json({ error: 'Una regola vale per i clienti o per i master, non per entrambi' }, { status: 400 })
 
-  // Perimetro: cliente e contratti, se indicati, devono essere del master (mai di un altro). I vettori
-  // devono essere fra quelli che il master ha davvero: una regola su un vettore inesistente non
-  // sbaglia i soldi, ma resta lì a far credere che copra qualcosa.
+  // Perimetro: cliente, master e contratti, se indicati, devono essere del master (mai di un altro).
+  // I master sono quelli DIRETTAMENTE sotto: solo loro possono chiedergli una POD. I vettori devono
+  // essere fra quelli che il master ha davvero: una regola su un vettore inesistente non sbaglia i
+  // soldi, ma resta lì a far credere che copra qualcosa.
   if (clienteIds.length) {
     const { data } = await admin.from('clienti').select('id').eq('master_id', M).in('id', clienteIds)
     const miei = new Set((data || []).map((c: any) => c.id))
     const estranei = clienteIds.filter(id => !miei.has(id))
     if (estranei.length) return NextResponse.json({ error: `${estranei.length > 1 ? 'Clienti non validi' : 'Cliente non valido'}` }, { status: 400 })
+  }
+  if (masterIds.length) {
+    const { data } = await admin.from('masters').select('id').eq('parent_master_id', M).in('id', masterIds)
+    const miei = new Set((data || []).map((m: any) => m.id))
+    const estranei = masterIds.filter(id => !miei.has(id))
+    if (estranei.length) return NextResponse.json({ error: `${estranei.length > 1 ? 'Master non validi' : 'Master non valido'}: possono essere solo quelli direttamente sotto di te` }, { status: 400 })
   }
   const { data: mieiCorr } = await admin.from('corrieri').select('id,nome_contratto,tipo').eq('master_id', M)
   const idsMiei = new Set((mieiCorr || []).map((c: any) => c.id))
@@ -93,29 +113,37 @@ export async function POST(req: NextRequest) {
   ]
   if (!bersagli.length) bersagli.push({ corriere_id: null, vettore: null })
 
-  // Ogni COPPIA cliente × bersaglio e' una regola. Nessun cliente scelto = una riga sola col cliente
-  // nullo, cioe' "vale per tutti".
-  const clientiBersaglio: (string | null)[] = clienteIds.length ? clienteIds : [null]
-  const coppie = clientiBersaglio.flatMap(cli => bersagli.map(b => ({ cliente_id: cli, ...b })))
+  // Ogni COPPIA cliente (o master) × bersaglio e' una regola. Nessuno scelto = una riga sola con
+  // cliente e master nulli, cioe' "vale per tutti" (tutti i clienti, o tutti i master sotto).
+  const destinatario = perMaster ? 'master' : 'cliente'
+  const soggetti: (string | null)[] = (perMaster ? masterIds : clienteIds).length ? (perMaster ? masterIds : clienteIds) : [null]
+  const coppie = soggetti.flatMap(chi => bersagli.map(b => ({
+    destinatario,
+    cliente_id: perMaster ? null : chi,
+    sottomaster_id: perMaster ? chi : null,
+    ...b,
+  })))
 
   // TETTO. Un master con 600 clienti che spunta tutto insieme a 38 contratti chiederebbe 22.800
   // regole in una richiesta sola: la pagina va in timeout a meta' lavoro e restano scritte solo le
   // prime. Meglio dirlo prima, e ricordare che "tutti i clienti" si ottiene NON scegliendone nessuno.
   const TETTO = 1000
   if (coppie.length > TETTO) {
+    const chiPlurale = perMaster ? 'master' : 'clienti'
     return NextResponse.json({
-      error: `Sono ${coppie.length} regole in un colpo solo (${clientiBersaglio.length} clienti × ${bersagli.length} bersagli): troppe. `
-        + `Per valere su tutti i clienti non sceglierne nessuno — è una regola sola. Altrimenti falle a gruppi, massimo ${TETTO} per volta.`,
+      error: `Sono ${coppie.length} regole in un colpo solo (${soggetti.length} ${chiPlurale} × ${bersagli.length} bersagli): troppe. `
+        + `Per valere su tutti i ${chiPlurale} non sceglierne nessuno — è una regola sola. Altrimenti falle a gruppi, massimo ${TETTO} per volta.`,
     }, { status: 400 })
   }
 
   // Le gemelle si cercano TUTTE IN UNA VOLTA, non una query per regola: a 300 regole erano 600
   // andate e ritorno al database dentro una richiesta che ne ha 60 di tempo. La unique e' su
   // un'espressione (coalesce dei NULL), quindi l'upsert del database non si puo' usare: la
-  // corrispondenza la si fa qui, su una chiave costruita a mano.
-  const chiave = (c: any) => `${c.cliente_id || ''}|${c.corriere_id || ''}|${c.vettore || ''}`
+  // corrispondenza la si fa qui, su una chiave costruita a mano — la stessa della unique, A CHI vale
+  // compreso: "tutti i clienti, BRT" e "tutti i master, BRT" sono due regole diverse.
+  const chiave = (c: any) => `${c.destinatario || 'cliente'}|${c.cliente_id || ''}|${c.sottomaster_id || ''}|${c.corriere_id || ''}|${c.vettore || ''}`
   const { data: esistenti, error: errLettura } = await admin.from('pod_prezzi')
-    .select('id,cliente_id,corriere_id,vettore').eq('master_id', M)
+    .select('id,destinatario,cliente_id,sottomaster_id,corriere_id,vettore').eq('master_id', M)
   if (errLettura) return NextResponse.json({ error: errLettura.message }, { status: 400 })
   const idDi = new Map((esistenti || []).map((r: any) => [chiave(r), r.id as string]))
 
@@ -124,7 +152,7 @@ export async function POST(req: NextRequest) {
   for (const c of coppie) {
     const id = idDi.get(chiave(c))
     if (id) daAggiornare.push(id)
-    else daCreare.push({ master_id: M, cliente_id: c.cliente_id, corriere_id: c.corriere_id, vettore: c.vettore, prezzo, attivo })
+    else daCreare.push({ master_id: M, destinatario: c.destinatario, cliente_id: c.cliente_id, sottomaster_id: c.sottomaster_id, corriere_id: c.corriere_id, vettore: c.vettore, prezzo, attivo })
   }
 
   // Il prezzo e' lo stesso per tutte: un solo UPDATE su tutti gli id, non uno per riga.
@@ -147,7 +175,9 @@ export async function POST(req: NextRequest) {
     create: daCreare.length,
     aggiornate: daAggiornare.length,
     totale: coppie.length,
+    destinatario,
     clienti: clienteIds.length,
+    master: masterIds.length,
   })
 }
 

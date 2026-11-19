@@ -109,6 +109,33 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ success: true, stato: 'annullamento_manuale', message: 'Annullamento richiesto: verrà completato dall\'assistenza e il credito stornato alla conferma.' })
   }
 
+  // DIELLE: stesso ramo di spedizioni/elimina — coda del DETENTORE subito, rimborso alla sua conferma
+  // (il fornitore non ha annullo via API: lib/annullaSpedizione).
+  if (corr?.tipo === 'dielle') {
+    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const { error: manErr } = await admin.from('spedizioni').update({
+      stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
+      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: null, annullamento_errore: null,
+    }).eq('id', id)
+    if (manErr) return NextResponse.json({ error: manErr.message }, { status: 400 })
+    return NextResponse.json({ success: true, stato: 'annullamento_manuale', message: 'Annullamento richiesto: verrà completato dall\'assistenza e il credito stornato alla conferma.' })
+  }
+
+  // PACCO GLS CONDIVISO FRA RETI: stesso ramo di spedizioni/elimina, SUBITO e sul pacco intero (lib/annullo-gls).
+  // Con le 48 ore la gamba GLS del detentore non sarebbe stata in attesa, e la chiusura di sera l'avrebbe
+  // trasmessa a GLS prima dell'annullo.
+  if (corr?.tipo === 'moovexpress' || corr?.tipo === 'gls') {
+    const { data: tr } = await admin.from('spedizioni').select('tracking_number').eq('id', id).maybeSingle()
+    const { gambePaccoGls, annullaPaccoGls } = await import('@/lib/annullo-gls')
+    const gambe = await gambePaccoGls(admin, tr?.tracking_number)
+    if (gambe) {
+      const r = await annullaPaccoGls(admin, gambe, { da: null })
+      if (r.ok) return NextResponse.json({ success: true, stato: 'annullata', message: 'Spedizione annullata e credito stornato.' })
+      await admin.from('spedizioni').update({ annullamento_errore: `Annullo non riuscito: ${r.motivo}` }).eq('id', id)
+      return NextResponse.json({ error: `Annullo non riuscito: ${r.motivo}` }, { status: 409 })
+    }
+  }
+
   // STESSA regola della UI: la cancellazione va in ATTESA 48h (annullamento_pending), poi il cron
   // invia l'annullo al corriere e fa lo storno. Niente annullata immediata (no bypass del pending).
   const { error: updErr } = await admin.from('spedizioni').update({

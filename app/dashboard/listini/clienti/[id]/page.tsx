@@ -1,7 +1,10 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import { fattoreVolumeCorriere } from '@/lib/pricing'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { corriereConSupplementi } from '@/lib/supplementi-corriere'
 import ListinoEditor from './ListinoEditor'
+import { leggiSupplementiMulticollo, type SupplementiMulticollo } from '@/lib/multicollo-zone'
 
 export default async function ModificaListinoPage({
   params, searchParams
@@ -14,7 +17,7 @@ export default async function ModificaListinoPage({
   if (!user) redirect('/')
   const { id } = await params
   const { corriere: corriereQuery, preventivo: preventivoId } = await searchParams
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const { data: listino } = await supabase.from('listini_clienti').select('*').eq('id', id).single()
   if (!listino) redirect('/dashboard/listini')
   let { data: corrieriAssegnati } = await supabase.from('listini_clienti_corrieri')
@@ -51,7 +54,12 @@ export default async function ModificaListinoPage({
   const nomeById = new Map<string, string>((tuttiICorrieri||[]).map((c:any) => [c.id, c.nome_contratto]))
   const pausaCatena = (c:any) => sospesoDallaCatena(nomeById.get(c.id) || c.nome_contratto, sospesiSopra)
   const usabile = (c:any) => attivoById.get(c.id) !== false && !pausaCatena(c)
-  corrieri = corrieri.map((c:any) => ({ ...c, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
+  // Il codice del contratto (CT-…) solo allo staff del master (lib/codice-contratto).
+  const { gestisceLaRete } = await import('@/lib/ruoli')
+  const codici = gestisceLaRete(utente as any)
+    ? await (await import('@/lib/codice-contratto')).codiciContratti((await import('@/lib/supabase-admin')).createAdminSupabase(), utente?.master_id)
+    : new Map<string, string>()
+  corrieri = corrieri.map((c:any) => ({ ...c, codice: codici.get(c.id) || null, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
     .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
   // Da AGGIUNGERE al listino: ANCHE i contratti in pausa. Il master deve poter CREARE/preparare i prezzi
   // di un contratto sospeso; il CLIENTE non lo vedrà comunque (lo filtra /api/cliente/listino-prezzi).
@@ -61,7 +69,7 @@ export default async function ModificaListinoPage({
     .map((c:any) => ({ ...c, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
     .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
   const corriereSelezionato = corrieri?.find((c:any) => c.id === corriereQuery) || corrieri?.[0]
-  const { data: zone } = await supabase.from('zone').select('id,nome').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')
+  const { data: zone } = await supabase.from('zone').select('id,nome,multicollo,su_mittente').eq('master_id', utente?.master_id).eq('corriere_id', corriereSelezionato?.id||'').order('nome')
   const { data: fasceEsistenti } = await supabase.from('listini_clienti_fasce').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'').order('peso_max')
   const { data: supplementiEsistenti } = await supabase.from('listini_clienti_supplementi').select('*').eq('listino_id', id).eq('corriere_id', corriereSelezionato?.id||'')
   const { data: clientiAssegnati } = await supabase.from('clienti').select('id,ragione_sociale,email').eq('listino_cliente_id', id)
@@ -78,6 +86,9 @@ export default async function ModificaListinoPage({
   const costiSupplMaster: Record<string, { valore: number; perc: number }> = {}
   // Il mio NOLO per fascia, col fuel: e' la base su cui si pagano giacenze e accessori a percentuale.
   const costiNoloMaster: Record<string, number> = {}
+  // I miei supplementi multicollo (localita' remota / partenza remota) per lo stesso contratto: il costo
+  // sotto ogni riga. Le fasce multicollo stanno in costiMaster come tutte le altre (per zona).
+  let costoSupplMC: SupplementiMulticollo | null = null
   if (corriereSelezionato?.id && utente?.master_id) {
     const { data: listiniCorr } = await supabase.from('listini_corrieri').select('id').eq('master_id', utente.master_id)
     const idsCorr = (listiniCorr || []).map((l: any) => l.id)
@@ -110,6 +121,7 @@ export default async function ModificaListinoPage({
         const v = (s as any).tipo === 'accessorio' ? (Number(d?.prezzo ?? (s as any).valore ?? 0) || 0) : (Number((s as any).valore) || 0)
         costiSupplMaster[k] = { valore: v, perc: Number(d?.perc) || 0 }
       }
+      costoSupplMC = leggiSupplementiMulticollo(suppCosto || [])
     }
   }
 
@@ -120,6 +132,7 @@ export default async function ModificaListinoPage({
   const fattoreCostoMaster = (corriereSelezionato?.id && utente?.master_id)
     ? await fattoreVolumeCorriere(supabase, utente.master_id, corriereSelezionato.id)
     : 5000
+  const conSupplementi = await corriereConSupplementi(createAdminSupabase(), corriereSelezionato?.id)
 
   return (
     <>
@@ -143,6 +156,8 @@ export default async function ModificaListinoPage({
       costiMaster={costiMaster}
       costiSupplMaster={costiSupplMaster}
       costiNoloMaster={costiNoloMaster}
+      conSupplementi={conSupplementi}
+      costoSupplMC={costoSupplMC}
       tipoListino="cliente"
     />
     </>

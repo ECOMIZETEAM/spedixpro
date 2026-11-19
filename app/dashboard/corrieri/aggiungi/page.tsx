@@ -1,6 +1,7 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import TestGls from './TestGls'
+import TestEcosmos from './TestEcosmos'
 
 async function salvaCorriere(formData: FormData) {
   'use server'
@@ -15,10 +16,10 @@ async function salvaCorriere(formData: FormData) {
   const credenziali: Record<string,string> = {}
   const settings: Record<string,string|boolean> = {}
 
-  // INTEGRAZIONI RISERVATE (dielle, poste-diretto/KSync): le può aggiungere/modificare solo un master in
+  // INTEGRAZIONI RISERVATE (dielle, poste-diretto/KSync, ecosmos): le può aggiungere/modificare solo un master in
   // masters.integrazioni_riservate (difesa server, oltre a non mostrarle nel menu). Così non ci si aggancia
   // indovinando l'URL ?tipo=. La lista la decide il super master (colonna protetta dal trigger).
-  if (tipo === 'dielle' || tipo === 'poste') {
+  if (tipo === 'dielle' || tipo === 'poste' || tipo === 'ecosmos') {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const { data: m } = await createAdminSupabase().from('masters').select('integrazioni_riservate').eq('id', utente.master_id).maybeSingle()
     const ris = (m as any)?.integrazioni_riservate
@@ -39,6 +40,8 @@ async function salvaCorriere(formData: FormData) {
     credenziali.user_webservice = formData.get('user_webservice') as string || ''
     credenziali.password_webservice = formData.get('password_webservice') as string || ''
     credenziali.codice_contratto = formData.get('codice_contratto') as string || ''
+    // Facoltativa: serve solo allo svincolo delle giacenze (servizio GLS a parte, lib/gls.svincolaGiacenzaGls).
+    credenziali.password_weblabeling = formData.get('password_weblabeling') as string || ''
     settings.tipo_collo = formData.get('tipo_collo') as string || 'Normale'
     // Nazionale (Italia) o Parcel (Europa): e' un altro servizio GLS con le stesse credenziali, e
     // decide dove il contratto puo' spedire (lib/gls.ts, servizioGls).
@@ -89,10 +92,21 @@ async function salvaCorriere(formData: FormData) {
     credenziali.costCenterCode = formData.get('costCenterCode') as string || ''
     credenziali.ambiente = (formData.get('ambiente') as string) === 'prod' ? 'prod' : 'demo'
     credenziali.baseUrl = formData.get('baseUrl') as string || ''
+    // Utente e password del web service di KSync: se ci sono, la lettera si crea direttamente su KSync
+    // invece che dal ponte (lib/ksync.ts, creaKsyncDiretto). Il ponte si e' fermato l'11/11/2026.
+    credenziali.wsUtente = ((formData.get('wsUtente') as string) || '').trim()
+    credenziali.wsPassword = formData.get('wsPassword') as string || ''
     settings.product = formData.get('product') as string || ''
     settings.codice_contrassegno = formData.get('codice_contrassegno') as string || ''
     settings.modalita_pagamento_cod = formData.get('modalita_pagamento_cod') as string || ''
     settings.codice_assicurazione = formData.get('codice_assicurazione') as string || ''
+  } else if (tipo === 'ecosmos') {
+    // Ecosmos (corriere elettrico di Roma): una chiave API per account (lib/ecosmos.ts). Un contratto per
+    // SERVIZIO (in giornata, 24 ore, 72 ore): ognuno ha copertura e prezzi suoi. Il servizio e' una scelta
+    // fra tre codici fissi, non un testo: un codice scritto male fermerebbe tutte le spedizioni.
+    credenziali.api_key = ((formData.get('api_key') as string) || '').trim()
+    const srvEc = formData.get('servizio_ecosmos') as string
+    settings.servizio = ['same_day', 'express_24h', 'standard_72h'].includes(srvEc) ? srvEc : 'express_24h'
   } else if (tipo === 'inpost') {
     // InPost diretto — Global API OAuth2 (merchant.inpost-group.com). Un account = clientId/secretId/
     // organizationId + ambiente (stage per collaudo, prod per il live). Le spedizioni verso locker usano
@@ -194,6 +208,11 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['user_webservice','User Webservice (API)','username','text'],
       ['password_webservice','Password Webservice (API)','••••••••','password'],
       ['codice_contratto','Codice Contratto','es. 123456','text'],
+      // Lo svincolo vuole la password dell'AREA PERSONALE del sito GLS, non quella del Weblabeling. Il campo
+      // nel DB si chiama ancora password_weblabeling (le password salvate restano valide), ma l'etichetta no:
+      // il 16/11/2026 M.C. LOGISTICA, seguendo la scritta "Weblabeling", ne ha messe due che GLS ha rifiutato,
+      // con 12 giacenze ferme dal 12/11.
+      ['password_weblabeling','Password area personale sito GLS (svincolo giacenze)','quella con cui entri su gls-italy.com, non il Weblabeling','password',true],
     ],
   },
   sda: {
@@ -254,6 +273,14 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['accessorio_crono','Accessorio crono','es. LK, FP','text',true],
     ],
   },
+  ecosmos: {
+    titolo: 'Ecosmos',
+    info: 'Consegne con mezzi elettrici a Roma e nei comuni vicini. Incolla la chiave API che ti ha dato Ecosmos (inizia con eco_live_) e scegli il servizio: crea un contratto per ogni servizio che vuoi vendere. Il ritiro lo fa Ecosmos dal mittente, senza prenotarlo: le spedizioni fatte entro le 13 partono in giornata. Ritiro e consegna devono essere entrambi nella zona coperta.',
+    campi: [
+      ['nome_contratto','Nome del contratto','es. Ecosmos 24 ore','text'],
+      ['api_key','Chiave API','eco_live_…','password'],
+    ],
+  },
   poste: {
     titolo: 'Poste Delivery Business',
     info: 'Contratto Poste Delivery Business diretto. Un account (Client ID/Secret ID/centro di costo) con dentro più prodotti: crea un contratto per OGNI prodotto Poste indicando il suo codice. Scegli l’ambiente: Demo per collaudare, Produzione quando è tutto pronto.',
@@ -267,6 +294,8 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       ['codice_contrassegno','Codice servizio contrassegno','es. APT000918','text',true],
       ['modalita_pagamento_cod','Modalità pagamento contrassegno','es. CON','text',true],
       ['codice_assicurazione','Codice servizio assicurazione','opzionale','text',true],
+      ['wsUtente','Utente web service','se compilato, le lettere di vettura si creano direttamente','text',true],
+      ['wsPassword','Password web service','••••••••','password',true],
       ['baseUrl','URL server (override)','solo se diverso dal default','text',true],
     ],
   },
@@ -370,6 +399,16 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
               </div>
             </>
           )}
+          {tipo === 'ecosmos' && (
+            <div>
+              <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Servizio</label>
+              <select name="servizio_ecosmos" defaultValue={['same_day','express_24h','standard_72h'].includes(settingsEsistenti.servizio) ? settingsEsistenti.servizio : 'express_24h'} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                <option value="express_24h">Consegna in 24 ore (giorno lavorativo dopo il ritiro)</option>
+                <option value="same_day">Consegna in giornata (solo parte della zona)</option>
+                <option value="standard_72h">Consegna entro 72 ore</option>
+              </select>
+            </div>
+          )}
           {tipo === 'sda' && (
             <div>
               <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Contratto</label>
@@ -444,6 +483,7 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
 
       {/* Test connessione: solo per un contratto GLS diretto già salvato (proprietario). */}
       {tipo === 'gls' && corriereEsistente && <TestGls corriereId={corriereEsistente.id} />}
+      {tipo === 'ecosmos' && corriereEsistente && <TestEcosmos corriereId={corriereEsistente.id} />}
     </div>
   )
 }

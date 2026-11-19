@@ -98,9 +98,10 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
     corriereId: sped?.corriere_id,
   })
   if (!ris || !(ris.prezzo > 0)) return null
-  // Il motore somma la sponda al prezzo di fascia: qui si riscorpora e si toglie.
-  const sponda = await spondaListinoCliente(admin, listinoId, ris.corriere_id, ris.peso_fatturato)
-  return Math.max(0, r2(ris.prezzo - sponda)) || null
+  // Il motore somma la sponda al prezzo di fascia: si toglie quella che ha sommato lui (ris.sponda).
+  // Prima la si ricalcolava qui con una formula copiata, sul peso fatturato: quando la regola e' passata
+  // al peso reale (18/11/2026) la copia avrebbe tolto una sponda diversa da quella sommata.
+  return Math.max(0, r2(ris.prezzo - (Number(ris.sponda) || 0))) || null
 }
 
 // IL NOLO DEL CLIENTE PER CIO' CHE SUCCEDE DOPO LA PARTENZA (reso, riconsegna, nuovo destinatario):
@@ -121,20 +122,6 @@ export async function noloClienteDopoPartenza(admin: any, sped: any, listinoId: 
   return (await noloCliente(admin, sped, listinoId)) ?? 0
 }
 
-// Sponda idraulica del listino cliente: sopra la soglia, tot € per ogni kg fatturato.
-// Serve solo per RIMUOVERLA dalla base del reso (stessa formula del motore prezzi).
-async function spondaListinoCliente(admin: any, listinoId: string, corriereId: string | null, pesoFatturato: number): Promise<number> {
-  if (!corriereId) return 0
-  try {
-    const { data: sp } = await admin.from('listini_clienti_supplementi')
-      .select('descrizione,valore').eq('listino_id', listinoId).eq('corriere_id', corriereId).eq('tipo', 'sponda').maybeSingle()
-    if (!sp) return 0
-    let d: any = null; try { d = JSON.parse(sp.descrizione) } catch { /* descrizione non JSON */ }
-    const soglia = Number(d?.soglia_kg) || 0
-    const prezzoKg = Number(sp.valore) || 0
-    return soglia > 0 && prezzoKg > 0 && pesoFatturato >= soglia ? r2(pesoFatturato * prezzoKg) : 0
-  } catch { return 0 }
-}
 
 // NOLO di un MASTER per quella spedizione, dal SUO listino corrieri: fascia + fuel, e nient'altro.
 // Stessa regola del cliente — sul ritorno non si paga ne' contrassegno ne' assicurazione ne'
@@ -179,12 +166,20 @@ export type RigaReso = {
   da_giacenza?: boolean               // e' lo svincolo stesso a chiamare: la guardia non si applica
 }
 
+// 'costo_fornitore_gia_registrato': la riga del titolare non si scrive perche' il corriere gli ha gia'
+// addebitato il reso e il conto l'ha registrato (scripts/reso-titolare-costo-fornitore.sql). Per chi
+// chiama vale come pagato: il titolare il reso l'ha pagato, al corriere.
 export type EsitoReso = {
   spedizione_id: string
-  esito: 'addebitato' | 'gia_addebitato' | 'zero' | 'inesistente'
+  esito: 'addebitato' | 'gia_addebitato' | 'costo_fornitore_gia_registrato' | 'zero' | 'inesistente'
   importo?: number
   cliente_id?: string | null
   master_target_id?: string | null
+}
+
+// Qualcuno ha pagato quel reso (adesso, prima, o direttamente al corriere): il pacco puo' uscire dalla coda.
+export function resoPagato(esiti: EsitoReso[]): boolean {
+  return esiti.some(e => e.esito === 'addebitato' || e.esito === 'gia_addebitato' || e.esito === 'costo_fornitore_gia_registrato')
 }
 
 export async function addebitaResi(admin: any, righe: RigaReso[], createdBy?: string | null): Promise<EsitoReso[]> {
@@ -200,9 +195,12 @@ export async function addebitaResi(admin: any, righe: RigaReso[], createdBy?: st
 
 // Quanto quel soggetto aveva pagato la spedizione andata: e' il ripiego quando nel suo listino la
 // riga del reso non c'e' proprio (diverso da configurata a zero, che vuol dire reso gratis).
+// La POD (riferimento POD-, dal 04/11/2026) non e' andata: un reso su un pacco con la POD pagata
+// costerebbe la POD in piu'.
 export async function pagatoDaMaster(admin: any, spedizioneId: string, masterId: string): Promise<number> {
   const { data } = await admin.from('movimenti')
-    .select('importo').eq('spedizione_id', spedizioneId).eq('master_target_id', masterId)
+    .select('importo,riferimento').eq('spedizione_id', spedizioneId).eq('master_target_id', masterId)
     .in('tipo', ['spedizione', 'rettifica'])
-  return Math.abs((data || []).reduce((a: number, m: any) => a + (Number(m.importo) || 0), 0))
+  return Math.abs((data || []).filter((m: any) => !/^POD-/.test(String(m.riferimento || '')))
+    .reduce((a: number, m: any) => a + (Number(m.importo) || 0), 0))
 }

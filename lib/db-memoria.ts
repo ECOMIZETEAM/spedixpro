@@ -37,7 +37,7 @@
  * soltanto: se succede, l'anteprima si rompe con un messaggio chiaro invece di muovere credito in
  * silenzio.
  * LIMITE: la garanzia vale per chi usa il client che RICEVE. Una funzione che se ne crea uno suo
- * (createAdminSupabase() chiamato dentro, come fa lib/cap-speciali.ts) ne resta fuori.
+ * (createAdminSupabase() chiamato dentro) ne resta fuori.
  *
  * SI COMPORTA COME IL COSTRUTTORE VERO. In supabase-js `from(t).select(...)` apre una query, e da
  * li' ogni filtro MODIFICA quella query e la restituisce: `const q = ...select(); q.eq(...); await q`

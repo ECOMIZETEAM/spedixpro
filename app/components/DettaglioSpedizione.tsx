@@ -112,6 +112,21 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
   const accessori = (s.servizi_accessori || []).map((e: any) => `${e.nome}${e.importo ? ' (€' + Number(e.importo).toFixed(2) + ')' : ''}`).join(', ')
   const colliDett = Array.isArray(dett?.colli_dettaglio) ? dett.colli_dettaglio : []
   const multicollo = Number(s.colli) > 1
+  // IL PESO SU CUI SI PAGA, non solo il reale (regola di Lorenzo: la schermata deve spiegare il prezzo). Sulle multicollo
+  // ogni collo conta il maggiore fra il suo peso e il suo volume, poi si somma (lib/pricing, calcolaPesoFatturato): il
+  // totale reale da solo inganna. 3UW1WLJ114071 (CONTORNO, 18/11/2026): 30 kg reali, 10 kg in 50x30x35 (10,5 di volume)
+  // + 20 kg in 40x2x37, si paga su 30,5 kg e la spedizione e' nella fascia 30-50; il dettaglio diceva solo «30 kg».
+  const kg = (n: number) => (Math.round(n * 100) / 100).toLocaleString('it-IT')
+  const pesoSuCuiSiPaga = Number(s.peso_fatturato) || 0
+  // Il divisore col quale e' stato fatto quel conto non e' sulla riga: si ricava dal volume salvato, e si usa solo se
+  // torna tondo (4000, 5000, 6000…). Se non torna, i colli si mostrano senza i chili di volume, mai con un divisore inventato.
+  const volumeColli = colliDett.reduce((t: number, c: any) => t + ((Number(c.lunghezza) * Number(c.larghezza) * Number(c.altezza)) || 0), 0)
+  const divisore = (() => {
+    const pv = Number(s.peso_volume) || 0
+    if (!pv || !volumeColli) return null
+    const f = volumeColli / pv, tondo = Math.round(f / 1000) * 1000
+    return tondo > 0 && Math.abs(f - tondo) / tondo < 0.02 ? tondo : null
+  })()
   const puoCorreggere = !!onModificata && !!s.cliente_id && s.stato !== 'annullata'
 
   return (
@@ -161,7 +176,10 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
               <F label="Data" value={s.created_at ? new Date(s.created_at).toLocaleString('it-IT') : '—'} />
               <F label="Colli" value={s.colli} />
               <F label="Peso reale" value={s.peso_reale != null ? `${s.peso_reale} kg` : '—'} />
-              <F label="Dimensioni" value={dims} />
+              <F label="Peso su cui si paga" value={pesoSuCuiSiPaga > 0
+                ? <span style={{ fontWeight: 700 }}>{kg(pesoSuCuiSiPaga)} kg{pesoSuCuiSiPaga > (Number(s.peso_reale) || 0) + 0.005 && <span style={{ display: 'block', fontSize: '11px', fontWeight: 500, color: '#666' }}>{multicollo ? 'ogni collo conta il maggiore fra peso e volume' : 'conta il volume, più del peso'}</span>}</span>
+                : '—'} />
+              <F label="Dimensioni" value={multicollo && colliDett.length ? 'collo per collo, qui sotto' : dims} />
               <F label="Contrassegno" value={Number(s.contrassegno) > 0 ? eur(s.contrassegno) : '—'} />
               <F label="Assicurazione" value={Number(s.assicurazione) > 0 ? eur(s.assicurazione) : '—'} />
               <F label="Valore merce" value={Number(s.valore_merce) > 0 ? eur(s.valore_merce) : '—'} />
@@ -178,7 +196,17 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
                 {colliDett.map((c: any, i: number) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < colliDett.length - 1 ? '1px solid #f0f0f0' : 'none', fontSize: '13px' }}>
                     <span style={{ color: '#666' }}>Collo {c.numero || i + 1}</span>
-                    <span style={{ fontWeight: 600, color: '#1a1a1a' }}>{c.peso != null && c.peso !== '' ? `${c.peso} kg` : '—'} · {[c.lunghezza, c.larghezza, c.altezza].every((x: any) => Number(x) > 0) ? `${c.lunghezza}×${c.larghezza}×${c.altezza} cm` : '— cm'}</span>
+                    <span style={{ fontWeight: 600, color: '#1a1a1a', textAlign: 'right' }}>
+                      {c.peso != null && c.peso !== '' ? `${c.peso} kg` : '—'} · {[c.lunghezza, c.larghezza, c.altezza].every((x: any) => Number(x) > 0) ? `${c.lunghezza}×${c.larghezza}×${c.altezza} cm` : '— cm'}
+                      {(() => {
+                        const vol = divisore && [c.lunghezza, c.larghezza, c.altezza].every((x: any) => Number(x) > 0) ? Number(c.lunghezza) * Number(c.larghezza) * Number(c.altezza) / divisore : null
+                        if (vol == null) return null
+                        const peso = Number(c.peso) || 0
+                        return <span style={{ display: 'block', fontSize: '11.5px', fontWeight: 500, color: vol > peso ? '#9a3412' : '#666' }}>
+                          volume {kg(vol)} kg · si paga su <b>{kg(Math.max(peso, vol))} kg</b>
+                        </span>
+                      })()}
+                    </span>
                   </div>
                 ))}
               </div>

@@ -109,6 +109,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
       return NextResponse.json({ ...base, status: nuovo || sped.stato, events: events.length ? events : await eventiSalvati() })
     }
 
+    if (corriere.tipo === 'gls') {
+      // GLS DIRETTO: la cronologia la scrive il giro del tracking (app/api/tracking/aggiorna), con data e
+      // ora di ogni evento; lo stato salvato e' il suo. E' la risposta che il ponte della condivisione
+      // rilegge per il compratore. Senza questo ramo si finiva nella chiamata a Spedisci qui sotto, su
+      // un dominio che un contratto GLS non ha.
+      return NextResponse.json({ ...base, events: await eventiSalvati() })
+    }
+
     if (corriere.tipo === 'moovexpress') {
       // CONDIVISIONE CONTRATTI: si rilancia la domanda al VENDITORE (la sua `/api/v1/tracking`) con la
       // api_key del contratto. Lo stato torna già nel nostro vocabolario; a più salti ogni livello inoltra
@@ -127,6 +135,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
     // Spedisci: tracking sul dominio del contratto
     const res = await fetch(`https://${cred.master_domain}/api/v2/shipping/tracking/${encodeURIComponent(sped.tracking_number || '')}`, {
       headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
+      // Il 04/11/2026 Spedisci lasciava le connessioni appese e questa rotta restava ferma fino ai 300 s
+      // (026032010029772, due volte alle 15:03). Oltre il tempo massimo si va nel catch qui sotto, che
+      // risponde con la cronologia salvata.
+      signal: AbortSignal.timeout(15_000),
     })
     const text = await res.text()
     let data: any; try { data = JSON.parse(text) } catch { data = {} }

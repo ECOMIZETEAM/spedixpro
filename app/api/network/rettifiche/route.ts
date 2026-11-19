@@ -3,6 +3,9 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase, createAdminSupabaseConMemoria } from '@/lib/supabase-admin'
+import { controllaListiniClienti, daSistemareDaMotivo, type DaSistemare } from '@/lib/network-da-fare'
+import type { ContoSotto } from '@/lib/rettifiche-perche'
+import { CAMPI_CARICA, primaDelMotore, ingressoMotore, decidiCarica, contoDelLivello } from '@/lib/network-carica'
 
 // Riprezzare una spedizione vuol dire ricostruire tutta la sua catena: su un blocco intero sono
 // centinaia di viaggi al database.
@@ -60,7 +63,7 @@ export async function POST(req: NextRequest) {
   const tutteMie: any[] = []
   for (let i = 0; i < ids.length; i += 500) {
     const { data, error } = await adminDb.from('rettifiche')
-      .select('id,spedizione_id,numero_spedizione,peso_iniziale,peso_reale,colli_ripesati,rif_fornitore,propagazione,fuori_sagoma,supplementi_nomi')
+      .select(CAMPI_CARICA)
       .in('id', ids.slice(i, i + 500)).eq('target_master_id', mio).neq('master_id', mio).eq('confermata', true)
     if (error) { console.error('[NETWORK] lettura rettifiche selezionate:', error.message); break }
     tutteMie.push(...(data || []))
@@ -98,10 +101,13 @@ export async function POST(req: NextRequest) {
 
   if (decisione !== 'propagata') {
     await adminDb.from('rettifiche').update({ propagazione: decisione }).in('id', righe.map((r: any) => r.id))
+    if (decisione === 'assorbita') await scriviPercheAssorbita(adminDb, righe.map((r: any) => r.id), 'assorbita_a_mano')
+    // Decisa: il promemoria di «Cosa devi fare» non serve piu'.
+    await scriviDaSistemare(adminDb, mio, [], new Map(), righe.map((r: any) => r.id))
     return NextResponse.json({ ok: true, assorbite: righe.length, inAttesaSopra: attesaLdv.length })
   }
 
-  const { calcolaRipesature, qualcunoSottoDeve } = await import('@/lib/ripesature-calcolo')
+  const { calcolaRipesature, volumiDelLivello } = await import('@/lib/ripesature-calcolo')
   let create = 0, aZero = 0
   const saltate: { ldv: string; perche: string }[] = []
   // SCARTO PULITO ≠ problema. Quando il collo ripesato cade nello STESSO scaglione/blocco del
@@ -112,6 +118,16 @@ export async function POST(req: NextRequest) {
   const idFatte: string[] = []      // figlia creata (o già esistente) → 'propagata'
   const idAzzerate: string[] = []   // differenza a zero → 'assorbita'. Tutte le ALTRE saltate NON
                                     // vengono più marcate: restano propagazione=null e ritentabili.
+  const contiUguali = new Map<string, ContoSotto>()   // i numeri con cui si e' visto che sotto si paga uguale
+  // IL MOTIVO RESTA SCRITTO SULLA RIGA (rettifiche.da_sistemare), non solo nel messaggio di risposta. Il 12/11/2026
+  // Ecomize Solution ha caricato 849 righe a blocchi in un'ora: il motivo di 3UW1UHA334029 (listino della cliente fermo
+  // a 5 kg, pacco ripesato 19,85) e' comparso in un messaggio che il «Carica» dopo ha sostituito. Ora la pagina lo
+  // rilegge da qui (riquadro «Cosa devi fare», lib/network-da-fare) finche' la riga non passa.
+  const motivi = new Map<string, DaSistemare>()
+  const salta = (r: any, perche: string, extra: Parameters<typeof daSistemareDaMotivo>[1] = {}) => {
+    saltate.push({ ldv: r.numero_spedizione, perche })
+    motivi.set(r.id, daSistemareDaMotivo(perche, extra))
+  }
 
   // ── TUTTE LE RIGHE IN UN COLPO SOLO ──
   //
@@ -120,101 +136,46 @@ export async function POST(req: NextRequest) {
   // riga invece di ~0,9. Su un pomeriggio da 2.228 rettifiche accettare voleva dire ore, ed e'
   // esattamente la differenza che si sentiva con i contrassegni, dove accettare e' solo un flag.
   // Il motore torna gli esiti NELLO STESSO ORDINE in cui gli sono arrivate le righe.
+  // Senza misure o senza spedizione non si riprezza: il motivo lo dice primaDelMotore (lib/network-carica).
   const lavorabili = (righe as any[]).filter((r: any) => {
-    const colli = Array.isArray(r.colli_ripesati) ? r.colli_ripesati : []
-    if (!colli.length) {
-      // Senza le misure si potrebbe riprezzare col solo peso, ma il supplemento lo fa il VOLUME:
-      // meta' delle righe uscirebbe negativa, cioe' un rimborso al posto di un addebito. Meglio
-      // dirlo che tirare a indovinare su dei soldi.
-      saltate.push({ ldv: r.numero_spedizione, perche: 'senza le misure ripesate: caricata prima che venissero conservate' })
-      return false
-    }
-    if (!r.spedizione_id) { saltate.push({ ldv: r.numero_spedizione, perche: 'spedizione non collegata' }); return false }
+    const no = primaDelMotore(r)
+    if (no) { salta(r, no); return false }
     return true
   })
   // Si riusa lo STESSO motore del caricamento del file: ricostruisce la catena, legge dai
   // movimenti quello che ogni livello ha gia' pagato — rettifiche comprese, cosi' la stessa
   // differenza non si chiede due volte — e riprezza il collo vero a ogni livello col suo listino.
   // Client CON MEMORIA (nuovo a ogni richiesta): listini e zone una volta per blocco, non una per riga.
-  const esiti = await calcolaRipesature(createAdminSupabaseConMemoria(), lavorabili.map((r: any) => ({
-    idOrdine: r.rif_fornitore || r.id, idVerifiche: [], ldv: r.numero_spedizione,
-    addebitoFornitore: 0,
-    colli: (r.colli_ripesati as any[]).map((c: any) => ({
-      peso: Number(c.weight) || 0, lunghezza: Number(c.length) || 0,
-      larghezza: Number(c.width) || 0, altezza: Number(c.height) || 0,
-    })),
-    dataChiusura: '', mittente: '', destinatario: '',
-  })))
+  const esiti = await calcolaRipesature(createAdminSupabaseConMemoria(), lavorabili.map(ingressoMotore))
 
   const daScrivere: any[] = []
   for (let iRiga = 0; iRiga < lavorabili.length; iRiga++) {
     const r = lavorabili[iRiga]
     const colli = r.colli_ripesati as any[]
     const esito = esiti[iRiga]
-    if (!esito?.trovata) { saltate.push({ ldv: r.numero_spedizione, perche: esito?.motivo || 'spedizione non trovata' }); continue }
-    if (esito.catenaCompleta === false) { saltate.push({ ldv: r.numero_spedizione, perche: 'catena dei listini incompleta' }); continue }
-
-    // A CHI: il mio figlio DIRETTO, quello subito prima di me nella catena. Se sotto di me non c'e'
-    // nessun master, il destinatario e' il cliente. "Non sono nella catena" (indice -1) non e' "sono
-    // l'ultimo": in quel caso non si scrive niente, altrimenti la rettifica cadrebbe addosso al
-    // cliente finale di un ramo che non e' mio.
-    const cat = esito.catenaDalBasso || []
-    const idx = cat.indexOf(mio)
-    if (idx < 0) { saltate.push({ ldv: r.numero_spedizione, perche: 'non sei nella catena di questa spedizione' }); continue }
-    const figlio = idx > 0 ? cat[idx - 1] : null
-    const liv = figlio
-      ? esito.livelli.find(l => l.masterId === figlio)
-      : esito.livelli.find(l => l.clienteId)
-    const fs = Number(r.fuori_sagoma) || 0
-    // Senza il livello del figlio non c'e' nulla su cui costruire la figlia (ne' costo ne' il cliente
-    // destinatario): resta da decidere, ritentabile.
-    if (!liv) { saltate.push({ ldv: r.numero_spedizione, perche: 'catena/listino del livello sotto non ricostruito: riprova quando sara\' disponibile' }); continue }
-    // SOLO RECUPERI, MAI RIMBORSI: la RIPESATURA si gira solo se il listino del figlio prezza il collo
-    // (dovuto non null) e c'e' qualcosa da recuperare (differenza >= 0.01). Il FUORI SAGOMA invece e'
-    // un importo FISSO che per regola scende INVARIATO a prescindere dal listino: se c'e', la figlia
-    // si crea COMUNQUE — anche quando il collo ripesato e' oltre la fascia massima del figlio — con la
-    // sola parte ripesatura a zero, altrimenti il supplemento si fermerebbe a questo livello.
-    const reweighGirabile = liv.differenza != null && liv.differenza >= 0.01
-    if (!reweighGirabile && fs === 0) {
-      // Niente supplemento e niente ripesatura da girare: se il listino non copre proprio il collo
-      // (differenza null) e' ritentabile; se lo copre ma esce <= 0 e' una scelta presa (assorbita).
-      if (liv.differenza == null) {
-        // Il listino del cliente non arriva a questo peso (ultima fascia superata, nessuna regola
-        // "oltre") o a questa zona. NON è un vicolo cieco: il master alza la fascia sul listino del
-        // suo cliente e RIPREME Accetta — allora prezza e passa. Il messaggio glielo dice, col peso
-        // vero, invece di suggerire di assorbire (che sarebbe farsi carico di un costo del cliente).
-        // IL PESO SI SCRIVE PER INTERO, con il decimale. Arrotondato faceva impazzire chi leggeva:
-        // un collo da 5,34 kg usciva come «non copre 5 kg» su un listino che la fascia 0–5 ce l'ha
-        // eccome — sembrava un guasto nostro, ed era solo il collo che la supera di tre etti
-        // (visto il 12/09/2026 su BRILLITALIA, Epos Caffè, FEDEL FARMA).
-        const pesoFatt = Math.max(Number(esito.pesoDopo) || 0, Number(esito.pesoVolumeDopo) || 0)
-        const quanto = pesoFatt ? pesoFatt.toFixed(1).replace('.', ',') + ' kg' : 'questo peso'
-        saltate.push({ ldv: r.numero_spedizione, perche: `il listino di ${liv.chi || 'questo cliente'} si ferma prima di ${quanto}: il collo ripesato lo supera (o la sua zona non è prevista) → alza l'ultima fascia sul suo listino e ripremi Accetta, passerà.` })
-        continue
-      }
-      // Il listino del figlio prezza il collo (differenza != null) ma riprezzando esce <= 0: stesso
-      // scaglione dell'addebito, il cliente pagherebbe uguale. Niente da recuperare → SCARTO pulito
-      // (assorbita), non un avviso: non ha senso dire "alza la fascia" (la fascia c'è, è la stessa).
-      // TRANNE se sotto il figlio qualcuno deve ancora pagare: allora la figlia nasce A ZERO, cosi' la
-      // catena prosegue (vedi qualcunoSottoDeve). Il 15/10 Wave ne aveva scartate 2 cosi', e Velox e i
-      // suoi clienti non potevano piu' essere rettificati.
-      if (!qualcunoSottoDeve(esito, figlio)) {
-        scartate.push({ ldv: r.numero_spedizione, perche: 'il cliente pagherebbe uguale col suo listino (stesso scaglione di peso): niente da recuperare' }); idAzzerate.push(r.id); continue
-      }
+    // La decisione e' una regola sola, con il conto fatto all'arrivo (lib/network-carica, decidiCarica).
+    const d = decidiCarica(r, esito, mio)
+    if (d.tipo === 'salta') { salta(r, d.perche, d.extra); continue }
+    if (d.tipo === 'uguale') {
+      scartate.push({ ldv: r.numero_spedizione, perche: 'il cliente pagherebbe uguale col suo listino (stesso scaglione di peso): niente da recuperare' }); idAzzerate.push(r.id)
+      contiUguali.set(r.id, contoDelLivello(d.liv)); continue
     }
-    const soloPassaggio = !reweighGirabile && fs === 0
-    // reweighGirabile garantisce già differenza != null, ma TS non lo propaga: fisso a numero.
-    const diffFiglia = reweighGirabile && liv.differenza != null ? liv.differenza : 0
+    const { liv, figlio, diffFiglia, fs, soloPassaggio, penale, tardivo } = d
 
     daScrivere.push({
       master_id: mio, spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
       cliente_id: figlio ? null : liv.clienteId,
       target_master_id: figlio,
-      peso_iniziale: esito.pesoRealePrima, peso_volume_iniziale: esito.pesoVolumePrima,   // dichiarato: reale + volumetrico
-      peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo,   // il volume, cosi' si vede perche' il costo sale
+      // dichiarato e ripesato: reale + volumetrico, il volume col divisore del figlio (e' lui che paga),
+      // cosi' si vede perche' il costo sale
+      peso_iniziale: esito.pesoRealePrima, peso_reale: esito.pesoDopo, ...volumiDelLivello(esito, liv),
+      // Il supplemento arrivato dopo tiene lo stesso peso prima e dopo, come la riga di sopra: con i chili del motore
+      // trg_rettifica_no_doppia_ripesatura lo prenderebbe per una seconda ripesatura e qui sotto passerebbe per
+      // "gia' propagata", senza figlia.
+      ...(tardivo ? { peso_iniziale: (r as any).peso_reale, peso_reale: (r as any).peso_reale, peso_volume_iniziale: volumiDelLivello(esito, liv).peso_volume_reale } : {}),
       // dovuto null (collo oltre fascia, solo fuori sagoma) → pari a pagato, differenza 0. A zero per
       // passaggio: resta quello pagato, un dovuto piu' basso sembrerebbe un rimborso che non c'e'.
-      costo_iniziale: liv.pagato, costo_finale: soloPassaggio ? liv.pagato : (liv.dovuto ?? liv.pagato),
+      costo_iniziale: liv.pagato, costo_finale: (soloPassaggio || penale || tardivo) ? liv.pagato : (liv.dovuto ?? liv.pagato),
       differenza: -diffFiglia,            // la colonna e' "quanto restituisco": un addebito e' negativo (0 se solo fuori sagoma)
       fuori_sagoma: fs,                   // il supplemento fisso scende INVARIATO, NON si riprezza
       supplementi_nomi: (r as any).supplementi_nomi || null,   // e col nome, altrimenti sotto si legge "fuori sagoma" per tutto
@@ -239,7 +200,7 @@ export async function POST(req: NextRequest) {
         // 23505 = l'indice unico ha respinto una seconda propagazione della stessa riga. Voluto.
         if (!error) { create++; if (riga._aZero) aZero++; idFatte.push(r.id) }
         else if (error.code === '23505') { saltate.push({ ldv: r.numero_spedizione, perche: 'gia\' propagata' }); idFatte.push(r.id) }
-        else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); saltate.push({ ldv: r.numero_spedizione, perche: 'non riuscita' }) }
+        else { console.error('[RETTIFICHE][PROPAGA]', r.numero_spedizione, error.message); salta(r, 'non riuscita') }
       }
     }))
   }
@@ -253,6 +214,8 @@ export async function POST(req: NextRequest) {
   // A BLOCCHI: con migliaia di id un solo .in() diventa una richiesta enorme e il database la rifiuta.
   for (let i = 0; i < idFatte.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'propagata' }).in('id', idFatte.slice(i, i + 500))
   for (let i = 0; i < idAzzerate.length; i += 500) await adminDb.from('rettifiche').update({ propagazione: 'assorbita' }).in('id', idAzzerate.slice(i, i + 500))
+  await scriviPercheAssorbita(adminDb, idAzzerate, 'paga_uguale', contiUguali)
+  await scriviDaSistemare(adminDb, mio, lavorabili, motivi, [...idFatte, ...idAzzerate])
 
   const ritentabili = righe.length - idFatte.length - idAzzerate.length
   return NextResponse.json({
@@ -264,4 +227,61 @@ export async function POST(req: NextRequest) {
     scartate,
     inAttesaSopra: attesaLdv.length, dettaglioAttesaSopra: attesaLdv.slice(0, 100),
   })
+}
+
+// PERCHE' E' STATA ASSORBITA, scritto sulla riga (rettifiche.perche): col bottone «Assorbi» del master, o scartata dal
+// portale perche' col listino di chi sta sotto il peso nuovo costa uguale. Lo legge Rettifica Costi → «non girate sotto»
+// (app/api/rettifiche/eliminate): fino al 13/11/2026 le due cose finivano nella stessa frase, «non girata sotto (o sotto
+// non c'era niente da recuperare)», e il master non sapeva se l'aveva scelto lui o il portale. Non muove soldi: se la
+// scrittura non riesce si perde solo la frase.
+// Con i numeri (paga_uguale) ogni riga ha i suoi e si scrive da sola, otto alla volta; senza, a blocchi.
+async function scriviPercheAssorbita(adminDb: any, ids: string[], tipo: 'assorbita_a_mano' | 'paga_uguale', conti?: Map<string, ContoSotto>) {
+  try {
+    const il = new Date().toISOString()
+    if (!conti?.size) {
+      for (let i = 0; i < ids.length; i += 500) {
+        const { error } = await adminDb.from('rettifiche').update({ perche: { tipo, il } }).in('id', ids.slice(i, i + 500))
+        if (error) { console.error('[NETWORK] perche assorbita:', error.message); return }
+      }
+      return
+    }
+    let k = 0
+    await Promise.all(Array.from({ length: Math.min(8, ids.length) }, async () => {
+      while (k < ids.length) {
+        const id = ids[k++]
+        const { error } = await adminDb.from('rettifiche').update({ perche: { tipo, il, ...(conti.get(id) || {}) } }).eq('id', id)
+        if (error) console.error('[NETWORK] perche assorbita:', error.message)
+      }
+    }))
+  } catch (e: any) { console.error('[NETWORK] perche assorbita:', e?.message || e) }
+}
+
+// Scrive sulle righe non girate il loro motivo (rettifiche.da_sistemare) e lo toglie da quelle decise. Non muove soldi e
+// non cambia lo stato: se la scrittura non riesce si perde solo il promemoria, il «Carica» e' gia' fatto.
+async function scriviDaSistemare(adminDb: any, mio: string, lavorabili: any[], motivi: Map<string, DaSistemare>, decise: string[]) {
+  try {
+    // Per un cliente col listino corto il riquadro dice anche fin dove arriva il listino e in che zona: lo stesso controllo
+    // di «Cosa devi fare», cosi' la frase sulla riga e quella del riquadro sono la stessa.
+    const daRivedere = lavorabili.filter((r: any) => { const m = motivi.get(r.id); return !!m && !!m.cliente_id && m.codice === 'listino_corto' })
+    if (daRivedere.length) {
+      const piu = await controllaListiniClienti(createAdminSupabaseConMemoria(), mio, daRivedere)
+      for (const [id, m] of piu) motivi.set(id, m)
+    }
+    const quando = new Date().toISOString()
+    const gruppi = new Map<string, string[]>()
+    for (const [id, m] of motivi) {
+      const k = JSON.stringify({ ...m, quando })
+      if (!gruppi.has(k)) gruppi.set(k, [])
+      gruppi.get(k)!.push(id)
+    }
+    for (const [k, ids] of gruppi) {
+      for (let i = 0; i < ids.length; i += 500) {
+        const { error } = await adminDb.from('rettifiche').update({ da_sistemare: JSON.parse(k) }).in('id', ids.slice(i, i + 500)).eq('target_master_id', mio)
+        if (error) { console.error('[NETWORK] da_sistemare:', error.message); return }
+      }
+    }
+    for (let i = 0; i < decise.length; i += 500) {
+      await adminDb.from('rettifiche').update({ da_sistemare: null }).in('id', decise.slice(i, i + 500)).not('da_sistemare', 'is', null)
+    }
+  } catch (e: any) { console.error('[NETWORK] da_sistemare:', e?.message) }
 }

@@ -12,12 +12,13 @@ import InpostLockerPicker, { type InpostPuntoScelto } from '@/app/components/Inp
 const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
+import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -165,6 +166,8 @@ export default function NuovaSpedizioneCliente() {
     : selected?._corriere_tipo === 'V' ? [['C','CONTANTE'],['A','ASSEGNO']]
     : (selected?._corriere_tipo === 'SO' && selected?._spedisci_assegno) ? [['C','CONTANTE'],['AB','ASSEGNO BANCARIO'],['AC','ASSEGNO CIRCOLARE']]
     : (selected?._corriere_tipo === 'brt' && selected?._brt_assegno) ? [['C','CONTANTE'],['BM','ASSEGNO BANCARIO']]
+    // Contratti che finiscono su Poste (SDA EXPRESS L, anche dietro i ponti): il flag lo mette annotaPuntoPoste.
+    : selected?._poste_assegno ? OPZIONI_INCASSO_POSTE
     : [['C','CONTANTE']]
   const accDisponibili = (selected?.accessori_disponibili || [])
   // Importo accessorio = prezzo fisso + % del PREZZO SPEDIZIONE (nolo+fuel+sponda), come dice il campo
@@ -178,7 +181,7 @@ export default function NuovaSpedizioneCliente() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
-  const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string}}|null>(null)
+  const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string,avviso?:string}}|null>(null)
   // SICUREZZA LDV: appena si comincia una NUOVA spedizione (si compila il destinatario) dopo una
   // creazione, si toglie il banner con "Scarica LDV" della spedizione PRECEDENTE, così non si stampa
   // per abitudine la LDV vecchia sul pacco nuovo (due colli con la stessa lettera di vettura). Il form
@@ -423,7 +426,7 @@ export default function NuovaSpedizioneCliente() {
     // PuntoPoste (contratti a deposito): niente ritiro a domicilio — il pacco si porta al punto. Non
     // chiamo /api/ritiri/crea (lo rifiuterebbe): eviterei solo un falso "ritiro non prenotato".
     const conRitiro = richiediRitiro && !selected?._deposito
-    let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string}|undefined
+    let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string,avviso?:string}|undefined
     if (conRitiro && data.spedizioneId) {
       try {
         const rr = await fetch('/api/ritiri/crea', {
@@ -437,7 +440,7 @@ export default function NuovaSpedizioneCliente() {
           })
         })
         const rj = await rr.json().catch(()=>({}))
-        ritiroEsito = (!rr.ok || rj.error) ? { errore: rj.error || 'Ritiro non riuscito' } : { ok:true, pickupId: rj.pickupId }
+        ritiroEsito = (!rr.ok || rj.error) ? { errore: rj.error || 'Ritiro non riuscito' } : { ok:true, pickupId: rj.pickupId, avviso: rj.avviso }
       } catch { ritiroEsito = { errore: 'Ritiro non riuscito: il corriere non ha risposto. Riprova.' } }
     }
     if (daOrdine) {
@@ -503,7 +506,7 @@ export default function NuovaSpedizioneCliente() {
           : <span style={{color:'#dc2626',fontSize:'13px'}}>⚠️ Etichetta non generata</span>}
       </div>}
       {successo?.ritiro && (successo.ritiro.ok
-        ? <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#166534'}}>📦 Ritiro prenotato{successo.ritiro.pickupId?<> — <strong>{successo.ritiro.pickupId}</strong></>:''}</div>
+        ? <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#166534'}}>📦 Ritiro prenotato{successo.ritiro.pickupId?<> — <strong>{successo.ritiro.pickupId}</strong></>:''}{successo.ritiro.avviso?<div style={{marginTop:'4px',color:'#92400e'}}>{successo.ritiro.avviso}</div>:null}</div>
         : <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#b91c1c'}}>⚠️ Spedizione creata, ma <strong>ritiro NON prenotato</strong>: {successo.ritiro.errore}</div>)}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',alignItems:'start'}}>

@@ -18,6 +18,19 @@ export type ApiContext = {
   rateLimit?: { conteggio: number; limite: number } | null
 }
 
+// CHIAMATE RIFIUTATE (DPP Amazon 2.6.2: allarmi su chiamate non autorizzate ripetute e frequenze fuori
+// dal normale). Prima una chiave sbagliata riceveva 401 e non lasciava traccia. Le guarda
+// controllo_allarmi() ogni 15 minuti (scripts/allarmi-sicurezza.sql). Mai la chiave, nemmeno un pezzo:
+// il motivo e, se la chiave esiste, il suo id. Un errore qui non cambia la risposta all'integratore.
+async function registraRifiuto(admin: any, motivo: string, chiaveId: string | null): Promise<void> {
+  try {
+    const { error } = await admin.from('chiamate_rifiutate').insert({ porta: 'api_v1', motivo, chiave_id: chiaveId })
+    if (error) console.error('[API][RIFIUTO] non registrato:', motivo, error.message)
+  } catch (e: any) {
+    console.error('[API][RIFIUTO] non registrato:', motivo, e?.message)
+  }
+}
+
 // Autentica una richiesta API pubblica tramite header Authorization: Bearer <api_key>.
 // La chiave è PER CONTRATTO -> risolve cliente + master + corriere (contratto).
 export async function autenticaApiKey(req: Request): Promise<ApiContext | null> {
@@ -25,11 +38,14 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
   const token = auth.replace(/^Bearer\s+/i, '').trim()
   if (!token) return null
   const admin = createAdminSupabase()
-  const { data } = await admin
+  const { data, error: errChiave } = await admin
     .from('api_keys')
     .select('id,cliente_id,master_id,corriere_id,attivo')
     .eq('chiave', token)
     .maybeSingle()
+  // Un guasto nella lettura non e' una chiave sbagliata: non si registra come rifiuto.
+  if (!data && !errChiave) await registraRifiuto(admin, 'chiave_sconosciuta', null)
+  if (data?.attivo === false) await registraRifiuto(admin, 'chiave_revocata', data.id)
   if (!data || data.attivo === false) return null
 
   // IL CLIENTE DEVE ESSERE ANCORA ATTIVO.
@@ -42,6 +58,7 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
     admin.from('clienti').select('attivo').eq('id', data.cliente_id).maybeSingle(),
     admin.from('corrieri').select('attivo').eq('id', data.corriere_id).maybeSingle(),
   ])
+  if (cli?.attivo === false) await registraRifiuto(admin, 'cliente_disattivato', data.id)
   if (!cli || cli.attivo === false) return null
   if (cor && cor.attivo === false) return null
 
@@ -85,6 +102,9 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
     })
     const r: any = rl || {}
     if (r.permesso === false) rateLimit = { conteggio: Number(r.conteggio || 0), limite: Number(r.limite || 0) }
+    // Una riga per minuto in cui il freno scatta (la prima chiamata respinta), non una per chiamata:
+    // chi martella non deve poter riempire il registro.
+    if (r.permesso === false && Number(r.conteggio) === LIMITE_RATE_GLOBALE + 1) await registraRifiuto(admin, 'frequenza', data.id)
   } catch (e: any) {
     console.error('[API][RATE] controllo non riuscito:', e?.message)
   }

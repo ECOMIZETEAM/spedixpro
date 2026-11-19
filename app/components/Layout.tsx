@@ -13,7 +13,7 @@ import CorniceNuova from './grafica/CorniceNuova'
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
 // rete: visibile solo ai master che possono gestire la propria rete di sotto-master.
-type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean }
+type NavSub = { label: string, href: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, soloContabilita?: boolean }
 type NavItem = { label: string, href?: string, icon: string, perm?: string, always?: boolean, external?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean, sub?: NavSub[] }
 
 const NAV: NavItem[] = [
@@ -22,11 +22,16 @@ const NAV: NavItem[] = [
     { label: 'Elenco Spedizioni', href: '/dashboard/spedizioni', perm: 'admin.shippings.index' },
     { label: 'Giacenze', href: '/dashboard/spedizioni/giacenze', perm: 'admin.stocks.index' },
     { label: 'Rettifica Costi', href: '/dashboard/spedizioni/rettifica', perm: 'admin.shippings.weight_corrections.index' },
+    // La pagina la vede chi può caricare rettifiche; la rotta poi lascia passare solo il detentore di un BRT.
+    { label: 'Controllo Fattura Corriere', href: '/dashboard/spedizioni/controllo-fattura', perm: 'admin.shippings.weight_corrections.index' },
     { label: 'Spedizioni Cancellate', href: '/dashboard/spedizioni/cancellate', perm: 'admin.shippings.cancelled.index' },
   ]},
   { label: 'Contrassegni', href: '/dashboard/contrassegni', icon: '¤', sub: [
     { label: 'Lista Contrassegni', href: '/dashboard/contrassegni', perm: 'admin.cod.index' },
     { label: 'Distinte Contrassegni', href: '/dashboard/contrassegni/distinte', perm: 'admin.codlists.index' },
+    // La compensazione di BRT la riceve il detentore: la pagina la vede chi vede le distinte, la rotta poi
+    // cerca le spedizioni Moove solo fra i contratti BRT suoi.
+    { label: 'Check Contrassegni', href: '/dashboard/contrassegni/check', perm: 'admin.codlists.index' },
   ]},
   { label: 'Ritiri', href: '/dashboard/ritiri', icon: '↩', sub: [
     { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo', perm: 'admin.pickups.index' },
@@ -52,6 +57,7 @@ const NAV: NavItem[] = [
   { label: 'Listini Prezzi', href: '/dashboard/listini', icon: '€', sub: [
     { label: 'Nuovo Listino', href: '/dashboard/listini/clienti/nuovo', perm: 'admin.pricelists.create' },
     { label: 'Listini Clienti', href: '/dashboard/listini', perm: 'admin.pricelists.index' },
+    { label: 'Aumenta prezzi', href: '/dashboard/listini/aumenti', perm: 'admin.pricelists.edit' },
     { label: 'Listino Corrieri', href: '/dashboard/listini/corrieri/nuovo', perm: 'admin.pricelists.vector' },
     { label: 'Listini da adeguare', href: '/dashboard/listini/da-adeguare', perm: 'admin.pricelists.index' },
     { label: 'Check Volumetrici', href: '/dashboard/listini/check-volumetrici', perm: 'admin.pricelists.index' },
@@ -91,6 +97,7 @@ const NAV: NavItem[] = [
     // 20/10). La voce resta, e scripts/controlla-link-menu.mjs la lascia passare con un'eccezione
     // esplicita; finche' manca, chi la apre trova la 404 del portale con la via per tornare indietro.
     { label: 'Nuova Fattura', href: '/dashboard/fatture/nuova', perm: 'admin.invoice.create' },
+    { label: 'Fattura proforma', href: '/dashboard/fatture/proforma', perm: 'admin.invoice.create' },
   ]},
   { label: 'Lista Movimenti', href: '/dashboard/movimenti', icon: '≣' },
   // Senza perm: solo titolare e admin (isFull). Ci sono gli stipendi, l'operatore non la vede (lib/costi-gestione).
@@ -117,9 +124,12 @@ const NAV: NavItem[] = [
     { label: 'Contrassegni & Rischio', href: '/dashboard/statistiche/contrassegni' },
     { label: 'Fatturazione', href: '/dashboard/statistiche/fatturazione' },
     { label: 'Check Ricariche', href: '/dashboard/statistiche/check-ricariche' },
+    // Solo titolare e admin dei master dove la contabilita' e' accesa (lib/contabilita-banca).
+    { label: 'Estratto conto', href: '/dashboard/statistiche/estratto-conto', soloContabilita: true },
     { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto', soloMultiexpress: true },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
+  { label: 'Allarmi di sicurezza', href: '/dashboard/sicurezza', icon: '⚑', superMaster: true },
   { label: 'Controllo Giacenze', href: '/dashboard/controllo-giacenze', icon: '🛰', superMaster: true },
   { label: 'Centrale di Controllo', href: '/dashboard/controllo', icon: '🎛', superMaster: true },
   { label: 'Abbonamenti API', href: '/dashboard/api-clienti', icon: '⚿', superMaster: true },
@@ -143,7 +153,7 @@ const NAV: NavItem[] = [
   { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean, graficaNuova?: boolean, graficaScelta?: string, graficaLuce?: string, graficaEntrata?: boolean, graficaProposta?: string } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean, graficaNuova?: boolean, graficaScelta?: string, graficaLuce?: string, graficaEntrata?: boolean, graficaProposta?: string, contabilita?: boolean } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
@@ -153,14 +163,16 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const isMultiexpress = user?.isMultiexpress ?? false
   const ottimizzaMargini = user?.ottimizzaMargini ?? false
   const vedeReteCompleta = user?.vedeReteCompleta ?? false
+  const contabilita = user?.contabilita ?? false
   // Nell'app la voce Abbonamento non c'è: la pagina è un acquisto per gli store (lib/app-nativa).
   const app = useAppNativa()
 
   // Un elemento e visibile se: admin/master (isFull), oppure marcato always,
   // oppure ha una chiave permesso attiva. Senza perm e non-full = nascosto (solo admin).
   // Le voci "rete" (gestione sotto-master) richiedono in più il flag gestioneRete.
-  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean }) => {
+  const puoVedere = (x: { href?: string, perm?: string, always?: boolean, rete?: boolean, reteCompleta?: boolean, agente?: boolean, agenteOk?: boolean, superMaster?: boolean, soloMultiexpress?: boolean, soloOttimizzaMargini?: boolean, mioCosto?: boolean, soloContabilita?: boolean }) => {
     if (app && x.href === '/dashboard/abbonamento') return false
+    if (x.soloContabilita) return contabilita   // estratto conto: il conto in banca, solo titolare e admin
     if (x.soloOttimizzaMargini) return ottimizzaMargini   // voce riservata ai master col flag (oggi solo Ecomize LL)
     if (x.soloMultiexpress) return isMultiexpress   // voce riservata a MULTIEXPRESS (Rettifiche automatiche)
     if (x.reteCompleta) return vedeReteCompleta   // voce riservata a chi vede l'INTERA rete (root): Accessi Rete
@@ -198,11 +210,18 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
     return init
   })
 
+  // I conteggi della barra si richiedono a intervalli, ma solo se la scheda e' davanti agli occhi.
+  // Una scheda del portale lasciata aperta dietro le altre continuava a chiedere tutto, giorno e notte:
+  // il 04/11/2026 il solo pallino della rete (/api/network/badge) era la lettura che pesava di piu' sul
+  // database (10.341 richieste in quattro ore di sera, il 27% del suo tempo). Il primo caricamento e
+  // quello a ogni cambio pagina restano; tornando sulla scheda il numero si aggiorna al giro successivo.
+  const sePagVisibile = (load: () => void) => () => { if (typeof document === 'undefined' || !document.hidden) load() }
+
   // Badge notifiche assistenza (ticket nuovi / aggiornamenti)
   const [ticketBadge, setTicketBadge] = useState<{ count: number; ticket: number; pod: number }>({ count: 0, ticket: 0, pod: 0 })
   useEffect(() => {
     const load = () => fetch('/api/assistenza/non-letti').then(r => r.json()).then(d => setTicketBadge({ count: d.count || 0, ticket: d.ticket || 0, pod: d.pod || 0 })).catch(() => {})
-    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 30000); return () => clearInterval(t)
   }, [path])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
 
@@ -212,7 +231,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/logistica/da-preparare?count=1').then(r => r.json()).then(d => setPreparaBadge(d.count || 0)).catch(() => {})
-    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 30000); return () => clearInterval(t)
   }, [path, ruolo])
 
   // Badge "Check Ricariche": alert bonifici (cliente non ha pagato / incasso non confermato). Stile ticket.
@@ -220,7 +239,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/statistiche/check-ricariche?count=1').then(r => r.json()).then(d => setRicariAlert(d.count || 0)).catch(() => {})
-    load(); const t = setInterval(load, 60000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 60000); return () => clearInterval(t)
   }, [path, ruolo])
 
   // Badge RETE: "Dal mio network" (rettifiche/COD/resi da accettare) e "Rettifica Costi" (rettifiche
@@ -230,7 +249,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/network/badge').then(r => r.json()).then(d => setReteBadge({ daAccettare: d.daAccettare || 0, daAccettareImporto: d.daAccettareImporto || 0, daConfermare: d.daConfermare || 0, daConfermareImporto: d.daConfermareImporto || 0 })).catch(() => {})
-    load(); const t = setInterval(load, 30000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 30000); return () => clearInterval(t)
   }, [path, ruolo])
   const eur = (n: number) => '€ ' + Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -241,7 +260,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   useEffect(() => {
     if (!['master', 'admin', 'operatore'].includes(ruolo)) return
     const load = () => fetch('/api/master/credito').then(r => r.json()).then(d => { if (d && d.mostra) setCreditoTop(d) }).catch(() => {})
-    load(); const t = setInterval(load, 120000); return () => clearInterval(t)
+    load(); const t = setInterval(sePagVisibile(load), 120000); return () => clearInterval(t)
   }, [ruolo, path])
 
   // ── Responsive: sidebar a scomparsa (drawer) su mobile ──

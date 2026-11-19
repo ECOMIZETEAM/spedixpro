@@ -1,9 +1,11 @@
+import { eAssegno } from '@/lib/contrassegno-modalita'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { isAgente, bloccaAgente } from '@/lib/agente'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
+import { fermaIResi, spedizioniRese } from '@/lib/cod-resi-fermi'
 
 // La creazione delle distinte fa molti round-trip: col default la funzione poteva essere uccisa
 // a meta' (testata creata, righe no) lasciando distinte fantasma col totale pieno.
@@ -44,19 +46,45 @@ export async function GET() {
     }
   } catch (e: any) { console.error('[COD][DA-CARICARE][auto-recupero rimesse]', e?.message) }
 
-  const righe = await fetchAll(() => admin.from('cod_da_caricare')
+  const tutteLeRighe = await fetchAll(() => admin.from('cod_da_caricare')
     .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,created_at')
-    .eq('master_id', utente.master_id).order('created_at', { ascending: true }))
-  if (!righe.length) return NextResponse.json({ gruppi: [], totale: 0, spedizioni: 0 })
+    .eq('master_id', utente.master_id).order('created_at', { ascending: true }).order('id', { ascending: true }))
+  if (!tutteLeRighe.length) return NextResponse.json({ gruppi: [], totale: 0, spedizioni: 0 })
 
-  const cliIds = Array.from(new Set(righe.map((r: any) => r.cliente_id).filter(Boolean)))
-  const mstIds = Array.from(new Set(righe.map((r: any) => r.target_master_id).filter(Boolean)))
+  // RESI FERMATI (solo MULTIEXPRESS, lib/cod-resi-fermi.ts): fuori dai gruppi, in un elenco a parte.
+  const rese = fermaIResi(utente.master_id) ? await spedizioniRese(admin, tutteLeRighe.map((r: any) => r.spedizione_id)) : new Set<string>()
+  const righe = tutteLeRighe.filter((r: any) => !rese.has(r.spedizione_id))
+  const ferme = tutteLeRighe.filter((r: any) => rese.has(r.spedizione_id))
+
+  const cliIds = Array.from(new Set(tutteLeRighe.map((r: any) => r.cliente_id).filter(Boolean)))
+  const mstIds = Array.from(new Set(tutteLeRighe.map((r: any) => r.target_master_id).filter(Boolean)))
   const [{ data: cli }, { data: mst }] = await Promise.all([
     cliIds.length ? admin.from('clienti').select('id,ragione_sociale').in('id', cliIds) : Promise.resolve({ data: [] as any[] }),
     mstIds.length ? admin.from('masters').select('id,nome').in('id', mstIds) : Promise.resolve({ data: [] as any[] }),
   ])
   const nomeCli = new Map((cli || []).map((c: any) => [c.id, c.ragione_sociale]))
   const nomeMst = new Map((mst || []).map((m: any) => [m.id, m.nome]))
+
+  // CONTRATTO di ogni contrassegno. La sosta mette insieme il file del corriere e le rimesse della rete,
+  // e un totale unico non si confronta con nessun file: il 16/11/2026 M.C. LOGISTICA aveva 3.788 € per un
+  // cliente contro un file GLS da 2.336, e la differenza (1.452 € di SDA arrivati come rimessa da MULTI)
+  // dal totale non si vedeva. Il NOME del contratto, non il tipo: e' quello che il master conosce, e il
+  // tipo tecnico porterebbe a video il nome del fornitore.
+  const contrattoDi = new Map<string, string>()
+  const spedIds = Array.from(new Set(righe.map((r: any) => r.spedizione_id).filter(Boolean)))
+  for (let i = 0; i < spedIds.length; i += 300) {
+    const { data: sp } = await admin.from('spedizioni').select('id,corrieri(nome_contratto)').in('id', spedIds.slice(i, i + 300))
+    for (const s of (sp || []) as any[]) contrattoDi.set(s.id, String(s.corrieri?.nome_contratto || '').trim() || 'Altro')
+  }
+  const perContratto = (m: Map<string, { spedizioni: number; totale: number }>) => Array.from(m.entries())
+    .map(([nome, v]) => ({ nome, spedizioni: v.spedizioni, totale: Math.round(v.totale * 100) / 100 }))
+    .sort((a, b) => b.totale - a.totale)
+  const totaliContratto = new Map<string, { spedizioni: number; totale: number }>()
+  const somma = (m: Map<string, { spedizioni: number; totale: number }>, nome: string, importo: number) => {
+    const v = m.get(nome) || { spedizioni: 0, totale: 0 }
+    v.spedizioni++; v.totale += importo
+    m.set(nome, v)
+  }
 
   const mappa = new Map<string, any>()
   for (const r of righe as any[]) {
@@ -67,22 +95,49 @@ export async function GET() {
       mappa.set(chiave, {
         chiave, tipo: r.cliente_id ? 'cliente' : (r.target_master_id ? 'sotto-master' : 'proprio'),
         nome: r.cliente_id ? (nomeCli.get(r.cliente_id) || '—') : (r.target_master_id ? (nomeMst.get(r.target_master_id) || '—') : 'Contrassegni propri (già incassati)'),
-        spedizioni: 0, totale: 0, aZero: 0, origini: new Set<string>(),
+        spedizioni: 0, totale: 0, aZero: 0, origini: new Set<string>(), contratti: new Map(),
       })
     }
     const g = mappa.get(chiave)
     g.spedizioni++; g.totale += Number(r.importo) || 0
     if (!(Number(r.importo) > 0)) g.aZero++
     g.origini.add(r.origine)
+    const contratto = contrattoDi.get(r.spedizione_id) || 'Altro'
+    somma(g.contratti, contratto, Number(r.importo) || 0)
+    somma(totaliContratto, contratto, Number(r.importo) || 0)
   }
   const gruppi = Array.from(mappa.values())
-    .map(g => ({ ...g, totale: Math.round(g.totale * 100) / 100, origini: Array.from(g.origini) }))
+    .map(({ contratti, ...g }) => ({ ...g, totale: Math.round(g.totale * 100) / 100, origini: Array.from(g.origini), perContratto: perContratto(contratti) }))
     .sort((a, b) => (a.tipo === b.tipo ? b.totale - a.totale : a.tipo === 'cliente' ? -1 : 1))
+
+  // I resi fermi con quello che serve a decidere: LDV, a chi scenderebbero, per quanto, chi l'ha spedito e a chi.
+  const resiFermi: any[] = []
+  if (ferme.length) {
+    const info = new Map<string, any>()
+    const ids = ferme.map((r: any) => r.spedizione_id)
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data: sp } = await admin.from('spedizioni').select('id,numero,mitt_nome,dest_nome,dest_citta,created_at,reso_il').in('id', ids.slice(i, i + 300))
+      for (const s of (sp || [])) info.set((s as any).id, s)
+    }
+    for (const r of ferme as any[]) {
+      const s = info.get(r.spedizione_id) || {}
+      resiFermi.push({
+        spedizione_id: r.spedizione_id, numero: s.numero || '—', importo: Math.round((Number(r.importo) || 0) * 100) / 100,
+        mitt_nome: s.mitt_nome || '', dest_nome: s.dest_nome || '', dest_citta: s.dest_citta || '',
+        spedita_il: s.created_at || null, reso_il: s.reso_il || null,
+        verso: r.cliente_id ? (nomeCli.get(r.cliente_id) || '—') : (r.target_master_id ? (nomeMst.get(r.target_master_id) || '—') : 'Contrassegni propri'),
+      })
+    }
+    resiFermi.sort((a, b) => String(a.verso).localeCompare(String(b.verso)) || String(a.numero).localeCompare(String(b.numero)))
+  }
 
   return NextResponse.json({
     gruppi,
     totale: Math.round(gruppi.reduce((s, g) => s + g.totale, 0) * 100) / 100,
     spedizioni: righe.length,
+    perContratto: perContratto(totaliContratto),
+    resiFermi,
+    resiTotale: Math.round(resiFermi.reduce((s, r) => s + r.importo, 0) * 100) / 100,
   })
 }
 
@@ -100,7 +155,9 @@ export async function POST(req: NextRequest) {
   // delle sue spedizioni, le altre restano in sosta. Il POST poi le raggruppa comunque per
   // destinatario e crea una distinta per gruppo — quindi selezioni miste (più clienti) funzionano.
   const spedizioniSel: string[] = Array.isArray(body.spedizioni) ? body.spedizioni.filter(Boolean).map(String) : []
-  if (!destinatari.length && !spedizioniSel.length) return NextResponse.json({ error: 'Seleziona almeno un contrassegno da caricare' }, { status: 400 })
+  // Resi fermati che il master sceglie di far scendere (riquadro a parte, solo MULTIEXPRESS).
+  const resiSel: string[] = Array.isArray(body.resi) ? body.resi.filter(Boolean).map(String) : []
+  if (!destinatari.length && !spedizioniSel.length && !resiSel.length) return NextResponse.json({ error: 'Seleziona almeno un contrassegno da caricare' }, { status: 400 })
 
   const admin = createAdminSupabase()
   const cliIds = destinatari.filter(d => d.startsWith('c:')).map(d => d.slice(2))
@@ -111,6 +168,38 @@ export async function POST(req: NextRequest) {
   //    secondo non ottiene nulla (Postgres serializza le delete sulla stessa riga) → niente
   //    distinte doppie. Se poi qualcosa va storto, le righe vengono RIMESSE in sosta.
   const claim: any[] = []
+  let resiFermati = 0
+  if (fermaIResi(mio)) {
+    // MULTIEXPRESS: i resi non si prendono con il gruppo né con la tendina, solo se scelti nel loro
+    // riquadro (lib/cod-resi-fermi.ts). Le righe scelte si prendono per spedizione, una per una: un
+    // reso non viene mai tolto dalla sosta e rimesso, resta dov'è.
+    const inSosta = await fetchAll(() => admin.from('cod_da_caricare')
+      .select('spedizione_id,cliente_id,target_master_id').eq('master_id', mio).order('id', { ascending: true }))
+    const rese = await spedizioniRese(admin, inSosta.map((r: any) => r.spedizione_id))
+    const vuoleResi = new Set(resiSel), singole = new Set(spedizioniSel)
+    const scelte = new Set<string>()
+    for (const r of inSosta as any[]) {
+      const nelGruppo = (r.cliente_id && cliIds.includes(r.cliente_id))
+        || (r.target_master_id && mstIds.includes(r.target_master_id))
+        || (vuoleProprio && !r.cliente_id && !r.target_master_id)
+      if (rese.has(r.spedizione_id)) {
+        if (vuoleResi.has(r.spedizione_id)) scelte.add(r.spedizione_id)
+        else if (nelGruppo || singole.has(r.spedizione_id)) resiFermati++
+        continue
+      }
+      if (nelGruppo || singole.has(r.spedizione_id)) scelte.add(r.spedizione_id)
+    }
+    const ids = Array.from(scelte)
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data } = await admin.from('cod_da_caricare').delete()
+        .eq('master_id', mio).in('spedizione_id', ids.slice(i, i + 300))
+        .select('id,spedizione_id,importo,cliente_id,target_master_id,origine,origine_id')
+      claim.push(...(data || []))
+    }
+    if (!claim.length && resiFermati) {
+      return NextResponse.json({ success: true, distinteCreate: 0, totaleCaricato: 0, spedizioniCaricate: 0, giaCaricate: 0, senzaImporto: 0, nonRiuscite: 0, resiFermati })
+    }
+  } else {
   if (cliIds.length) {
     const { data } = await admin.from('cod_da_caricare').delete()
       .eq('master_id', mio).in('cliente_id', cliIds)
@@ -140,6 +229,7 @@ export async function POST(req: NextRequest) {
       claim.push(...(data || []))
     }
   }
+  }
   if (!claim.length) return NextResponse.json({ error: 'Nessun contrassegno da caricare per la selezione (forse è già stato caricato).' }, { status: 400 })
 
   // Rimette in sosta le righe non andate a buon fine: nessun contrassegno si perde mai.
@@ -160,10 +250,10 @@ export async function POST(req: NextRequest) {
     // Dati spedizione: numero LDV e contrassegno DI SISTEMA (importo_sistema deve restare il valore
     // a sistema, non quello del file: serve al confronto file-vs-sistema).
     const spedIds = Array.from(new Set(claim.map(r => r.spedizione_id)))
-    const infoSped = new Map<string, { numero: string; cod: number }>()
+    const infoSped = new Map<string, { numero: string; cod: number; assegno: boolean }>()
     for (let i = 0; i < spedIds.length; i += 300) {
-      const { data: sp } = await admin.from('spedizioni').select('id,numero,contrassegno').in('id', spedIds.slice(i, i + 300))
-      for (const s of (sp || [])) infoSped.set((s as any).id, { numero: (s as any).numero, cod: Number((s as any).contrassegno) || 0 })
+      const { data: sp } = await admin.from('spedizioni').select('id,numero,contrassegno,contrassegno_modalita').in('id', spedIds.slice(i, i + 300))
+      for (const s of (sp || [])) infoSped.set((s as any).id, { numero: (s as any).numero, cod: Number((s as any).contrassegno) || 0, assegno: eAssegno((s as any).contrassegno_modalita) })
     }
 
     // ANTI-DUPLICATO mirato: solo le spedizioni in gioco, usando la colonna denormalizzata
@@ -180,7 +270,10 @@ export async function POST(req: NextRequest) {
     for (const r of claim) {
       if (giaMie.has(r.spedizione_id)) { giaInDistinta.push(r); continue }        // gia' gestita: non torna in sosta
       if (!(Number(r.importo) > 0)) { senzaImporto.push(r); continue }            // importo 0: resta in sosta
-      const k = r.cliente_id ? `c:${r.cliente_id}` : (r.target_master_id ? `m:${r.target_master_id}` : 'proprio')
+      // Gli ASSEGNI (ABM/ACM) in una distinta loro: si chiude consegnando l'assegno, mai con soldi
+      // (lib/contrassegno-modalita). Nello stesso totale dei contanti verrebbero pagati due volte.
+      const k = (r.cliente_id ? `c:${r.cliente_id}` : (r.target_master_id ? `m:${r.target_master_id}` : 'proprio'))
+        + (infoSped.get(r.spedizione_id)?.assegno ? '|assegni' : '')
       if (!perDest.has(k)) perDest.set(k, [])
       perDest.get(k)!.push(r)
     }
@@ -189,7 +282,8 @@ export async function POST(req: NextRequest) {
     let create = 0, totaleCaricato = 0, spedizioniCaricate = 0
     const falliti: any[] = []
 
-    for (const [k, rows] of perDest) {
+    for (const [chiave, rows] of perDest) {
+      const k = chiave.split('|')[0]
       const totale = Math.round(rows.reduce((s, r) => s + (Number(r.importo) || 0), 0) * 100) / 100
       const versoCliente = k.startsWith('c:')
       const versoProprio = k === 'proprio'   // COD del master stesso: già incassato → distinta subito 'pagata'
@@ -248,6 +342,7 @@ export async function POST(req: NextRequest) {
       giaCaricate: giaInDistinta.length,
       senzaImporto: senzaImporto.length,
       nonRiuscite: falliti.length,
+      resiFermati,                 // solo MULTIEXPRESS: resi selezionati col gruppo e rimasti fermi
     })
   } catch (e: any) {
     await rimettiInSosta(claim)     // errore imprevisto: tutto torna in sosta, niente va perso

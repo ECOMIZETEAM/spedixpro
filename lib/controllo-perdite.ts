@@ -55,10 +55,13 @@ export async function trovaSpedizioniInPerdita(giorni = 14, limitRighe = 3000): 
   for (let i = 0; i < ids.length; i += 300) {
     const chunk = ids.slice(i, i + 300)
     for (let from = 0; ; from += 1000) {
-      const { data: mvs } = await admin.from('movimenti').select('spedizione_id,master_id,master_target_id,cliente_id,importo,tipo')
+      const { data: mvs } = await admin.from('movimenti').select('spedizione_id,master_id,master_target_id,cliente_id,importo,tipo,riferimento')
         .in('tipo', ['spedizione', 'rettifica']).in('spedizione_id', chunk).order('id').range(from, from + 999)
       if (!mvs?.length) break
       for (const mv of mvs) {
+        // La POD (riferimento POD-, dal 04/11/2026) non e' nolo: contata qui darebbe perdite finte a
+        // chi la paga e nasconderebbe quelle vere di chi la incassa.
+        if (/^POD-/.test(String((mv as any).riferimento || ''))) continue
         const imp = Number((mv as any).importo || 0), sp = (mv as any).spedizione_id
         if ((mv as any).cliente_id) {
           sumVendita.set(sp, (sumVendita.get(sp) || 0) + imp)

@@ -64,7 +64,8 @@ export async function POST(req: NextRequest) {
   // contratto (es. E&A per SpediamoPro) — dal caricare la MIA tratta e rimborsarlo. L'anti-doppio è
   // PER-MASTER: le distinte sono personali del livello. Backstop DB: uniq_righe_cod_sped_per_master.
   const giaInMieDistinteSet = new Set<string>()
-  for (const r of await fetchAll(() => adminDb.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_master_id', masterId))) {
+  // Ordine fisso: oltre 1000 righe le pagine si accavallavano e una LDV gia' in distinta poteva mancare.
+  for (const r of await fetchAll(() => adminDb.from('distinte_contrassegni_righe').select('spedizione_id').eq('distinta_master_id', masterId).order('id', { ascending: true }))) {
     if ((r as any).spedizione_id) giaInMieDistinteSet.add((r as any).spedizione_id)
   }
 
@@ -73,19 +74,34 @@ export async function POST(req: NextRequest) {
     for (const kk in rigaRaw) { riga[String(kk).trim().toLowerCase()] = (rigaRaw as any)[kk] }
     // 'shipment' = export contrassegni SpediamoPro (codice spedizione del provider, es. 6A54B0F9AB03D)
     // 'nr. ldv' = Distinta Contrassegni di SDA (la carica LOGIXIA per SDA EXPRESS L, vedi lib/cod-file-righe.ts)
-    const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || riga['nr. ldv'] || '').trim()
+    // 'nr ldv' (senza punto) = Lista Contrassegni SDA con lo stato della pratica (vedi 'status ctr' sotto)
+    const ldv = String(riga['ldv'] || riga['lettera di vettura'] || riga['n. spedizione'] || riga['numero'] || riga['shipment'] || riga['nr. ldv'] || riga['nr ldv'] || '').trim()
     // Importo VERSATO dal corriere. Nei file Ecomize/Em express c'e' 'pagato' (quanto il corriere ha
     // davvero versato) accanto a 'contrassegno' (il nominale): a scendere al cliente e' il PAGATO.
     // Restano gli alias storici + 'COD amount [EUR]' (SpediamoPro). Virgola decimale gestita.
     // Distinta SDA: 'Incasso COR (€)' e' quanto SDA ha incassato e rimborsato ('Importo CTR' e' il nominale).
-    let importoRaw = riga['pagato'] ?? riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno']
+    // Lista Contrassegni del portale SDA (CSV col punto e virgola, la scarica LOGIXIA): 'Lettera di Vettura',
+    // 'Importo contrassegno', 'Data di accredito'. Il 30/10/2026 'importo contrassegno' non era tra i nomi
+    // conosciuti: 367 contrassegni da 27.759,19 € sono entrati in sosta a 0 €.
+    // Lista Contrassegni SDA con lo stato: 'Imp. Contr. Spedizione'.
+    let importoRaw = riga['pagato'] ?? riga['importo'] ?? riga['importocod'] ?? riga['importo cod'] ?? riga['contrassegno'] ?? riga['importo contrassegno'] ?? riga['imp. contr. spedizione']
     if (importoRaw == null) { const k = Object.keys(riga).find(x => x.startsWith('cod amount')); if (k) importoRaw = riga[k] }
     const colIncassoSda = Object.keys(riga).find(x => x.startsWith('incasso cor'))
     if (importoRaw == null && colIncassoSda) importoRaw = riga[colIncassoSda]
+    // Il separatore dei decimali e' l'ULTIMO fra punto e virgola; l'altro e' delle migliaia. Con la sola
+    // sostituzione della prima virgola "1.999,99" diventava 1,999 euro e "1,234.56" 1,234: nessun errore,
+    // un contrassegno pagato mille volte meno. Simboli e spazi ("€ 12,50") fuori.
+    const testoImporto = String(importoRaw ?? 0).replace(/[^\d.,-]/g, '')
+    const sepDecimali = Math.max(testoImporto.lastIndexOf(','), testoImporto.lastIndexOf('.'))
+    const importoNorm = sepDecimali < 0 ? testoImporto
+      : testoImporto.slice(0, sepDecimali).replace(/[.,]/g, '') + '.' + testoImporto.slice(sepDecimali + 1)
     // Al centesimo: dal foglio Excel l'importo arriva come numero e porta i resti della virgola mobile
     // (84,90 letto 84.90000000000001), che finirebbero cosi' nell'area di sosta e nei totali.
-    const importoCod = Math.round((parseFloat(String(importoRaw ?? 0).replace(',', '.')) || 0) * 100) / 100
+    const importoCod = Math.round((parseFloat(importoNorm) || 0) * 100) / 100
     if (!ldv) { segnaErrore('', 'riga senza LDV'); continue }
+    // In fondo alla Lista Contrassegni SDA ci sono i totali ('CON;27759,19' = contanti, 'TOTALE;27759,19'):
+    // non sono spedizioni, e "non trovata a sistema" faceva pensare a due contrassegni persi.
+    if (/^(totale.*|con|ass|contanti|assegno|assegni)$/i.test(ldv)) { segnaErrore(ldv, 'riga di totale del file, non è una spedizione'); continue }
     // Colonna Status (SpediamoPro): in distinta vanno SOLO i contrassegni gia' PAGATI dal corriere.
     const statusRiga = String(riga['status'] ?? '').trim().toLowerCase()
     if (statusRiga && !['paid', 'pagato', 'pagata'].includes(statusRiga)) { saltateNonPagate++; continue }
@@ -96,6 +112,13 @@ export async function POST(req: NextRequest) {
     // contrassegno non l'ha ancora rimborsato → si salta.
     if (colIncassoSda && !(importoCod > 0)) { saltateNonPagate++; continue }
     if (('rimborso sda il' in riga) && !String(riga['rimborso sda il'] ?? '').trim()) { saltateNonPagate++; continue }
+    // Lista Contrassegni SDA: stessa regola sulla data di accredito e sull'importo.
+    if (('data di accredito' in riga) && !String(riga['data di accredito'] ?? '').trim()) { saltateNonPagate++; continue }
+    if (('importo contrassegno' in riga) && !(importoCod > 0)) { saltateNonPagate++; continue }
+    // Lista Contrassegni SDA con lo stato della pratica: "Status CTR" e "Data Accr. (a Cliente)" NON decidono
+    // niente. Il file elenca anche i contrassegni che SDA non ha ancora accreditato (il 06/11/2026: 711 righe,
+    // tutte "Da Lavorare"), ma lo carica LOGIXIA quando ha deciso che sono da pagare (Lorenzo, 06/11).
+    if (('imp. contr. spedizione' in riga) && !(importoCod > 0)) { saltateNonPagate++; continue }
     codFile += importoCod
 
     // Match ESATTO per primo (usa l'indice su numero → veloce): copre la stragrande maggioranza.

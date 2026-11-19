@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   for (let from = 0; from < 5000; from += 1000) {
     const { data } = await admin.from('movimenti').select('spedizione_id')
       .eq('tipo', 'spedizione').gte('created_at', da).not('spedizione_id', 'is', null)
-      .order('created_at', { ascending: false }).range(from, from + 999)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, from + 999)
     for (const m of (data || [])) if ((m as any).spedizione_id) ids.add((m as any).spedizione_id)
     if (!data || data.length < 1000) break
   }

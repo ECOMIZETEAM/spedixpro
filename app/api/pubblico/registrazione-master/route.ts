@@ -3,22 +3,22 @@ import { randomInt, randomBytes } from 'crypto'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { pianoById } from '@/lib/piani'
 import { inviaRichiestaPartner } from '@/lib/email'
+import { MASTER_VETRINA } from '@/lib/vetrina'
 
 /* AUTO-REGISTRAZIONE MASTER dal SITO PUBBLICO (www.moovexpress.com/prezzi → "Attiva questo piano").
  *
  * Stessa filosofia della registrazione clienti (app/api/pubblico/registrazione), con UNA differenza
- * fondamentale: il master NON nasce operativo. Un master sotto MULTIEXPRESS può creare clienti e
+ * fondamentale: il master NON nasce operativo. Un master sotto MOOVY può creare clienti e
  * usare i contratti della rete — troppo per una porta pubblica. Quindi qui si crea solo una RICHIESTA:
  *   - master `attivo = false`, `registrazione_stato = 'da_approvare'`;
  *   - NESSUN accesso/credenziali (li crea l'admin quando approva, dal portale);
  *   - il piano scelto e la preferenza contratti (nostri/propri) restano registrati per la revisione.
  *
- * Difese da porta pubblica come le altre: perimetro FISSO a codice (parent = MULTIEXPRESS, mai dal
- * corpo), CORS stretto, freno per IP, trappola. Il corpo si legge campo per campo: un `parent_master_id`,
+ * Difese da porta pubblica come le altre: perimetro FISSO a codice (parent = il master della vetrina,
+ * lib/vetrina.ts, mai dal corpo), CORS stretto, freno per IP, trappola. Il corpo si legge campo per campo: un `parent_master_id`,
  * un `abbonamento_*`, un `attivo` inviati da fuori non arrivano MAI all'insert.
  */
 
-const MULTIEXPRESS = 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b'
 const ORIGINI = ['https://www.moovexpress.com', 'https://moovexpress-web.vercel.app']
 
 const visti = new Map<string, number[]>()
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     const slug = `${slugify(ragioneSociale)}-${suffisso()}`.slice(0, 60)
     const { data, error } = await admin.from('masters').insert({
       nome: ragioneSociale, slug, email, telefono, piva, partita_iva: piva,
-      parent_master_id: MULTIEXPRESS,        // PERIMETRO FISSO, mai dal corpo
+      parent_master_id: MASTER_VETRINA,      // PERIMETRO FISSO, mai dal corpo
       tipo_contratto: 'credito_scalare',
       attivo: false,                          // non opera finché non lo approva l'admin
       autoregistrato_il: new Date().toISOString(),
@@ -130,13 +130,17 @@ export async function POST(req: NextRequest) {
   const linkStato = `https://www.moovexpress.com/stato-richiesta/${token}`
   try { await inviaRichiestaPartner({ to: email, nome: ragioneSociale, piano: piano.nome, link: linkStato }) } catch {}
 
-  // Avvisa la piattaforma: la richiesta va rivista e approvata (la vede MULTIEXPRESS e il root).
+  // Avvisa chi deve approvare. La campanella (app/api/notifiche/mie) mostra solo le notifiche del PROPRIO
+  // master, non risale la catena come il pannello da approvare: quindi una riga al master della vetrina
+  // (MOOVY) e una al suo padre (MULTIEXPRESS), che le riceveva fino al 27/10 e approva come prima.
   try {
-    await admin.from('notifiche').insert({
-      master_id: MULTIEXPRESS, cliente_id: null, gruppi: ['Amministratore'],
-      oggetto: 'Nuova richiesta rivenditore', link: '/dashboard/clienti/master',
-      messaggio: `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : contrattiPreferenza === 'misto' ? 'MISTI (nostri+suoi)' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`,
-    })
+    const { data: vetrina } = await admin.from('masters').select('parent_master_id').eq('id', MASTER_VETRINA).maybeSingle()
+    const destinatari = [MASTER_VETRINA, vetrina?.parent_master_id].filter(Boolean) as string[]
+    const messaggio = `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : contrattiPreferenza === 'misto' ? 'MISTI (nostri+suoi)' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`
+    await admin.from('notifiche').insert(destinatari.map(m => ({
+      master_id: m, cliente_id: null, gruppi: ['Amministratore'],
+      oggetto: 'Nuova richiesta rivenditore', link: '/dashboard/clienti/master', messaggio,
+    })))
   } catch {}
 
   return NextResponse.json({

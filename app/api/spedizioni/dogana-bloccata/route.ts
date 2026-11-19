@@ -62,8 +62,9 @@ export async function GET(req: NextRequest) {
         eoriNoto = cli?.eori || null
       }
 
-      const messaggio = `Spedizione ${s.numero} verso ${s.dest_paese} ferma in dogana.\n`
-        + `Per sbloccarla il corriere richiede:\n`
+      // Non "ferma in dogana": il pacco non e' partito, e' la LDV che manca (stesso testo del badge in lista).
+      const messaggio = `Spedizione ${s.numero} verso ${s.dest_paese}: servono documenti doganali.\n`
+        + `Il pacco non è ancora partito: il corriere emette la lettera di vettura solo dopo aver ricevuto:\n`
         + `- Codice EORI del mittente${eoriNoto ? ' (in anagrafica: ' + eoriNoto + ')' : ''}\n`
         + `- Contenuto dettagliato, articolo per articolo, con il valore di ciascuno\n`
         + `- Email del destinatario\n`

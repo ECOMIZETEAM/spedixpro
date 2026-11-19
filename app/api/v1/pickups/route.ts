@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { spediamoproCreatePickup, spediamoproWaitPickupCode } from '@/lib/spediamopro'
+import { prenotaRitiroSpediamopro } from '@/lib/ritiro-spediamopro'
+import { inviaRitiroSpedisci } from '@/lib/ritiro-spedisci'
+import { avvisoDataSpostata } from '@/lib/ritiro-giorno'
 import { erroreRitiroPulito } from '@/lib/errore-corriere'
 import { pickupTimeSpedisci } from '@/lib/spedisci'
 import { ritiroPrenotabileConPickups, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
 
-// API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key.
+// API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key
+// (SpediamoPro, Spedisci, Poste diretto e i ponti che finiscono su Poste diretto, come SDA EXPRESS L).
 // Auth: Authorization: Bearer <api_key>
 // Body: { shipmentIds:[uuid], date:'YYYY-MM-DD' (giorno LAVORATIVO, no sab/dom), timeFrom?, timeTo?, from:{name,street1,city,state,postalCode,phone,email?}, notes? }
 // NB: from.phone è OBBLIGATORIO (>=6 cifre): i corrieri lo richiedono per prenotare il ritiro.
@@ -75,13 +78,59 @@ export async function POST(req: NextRequest) {
 
   // Solo spedizioni del cliente e del contratto della key
   const { data: spedizioni } = await admin.from('spedizioni')
-    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email')
+    .select('id,numero,tracking_number,raw_response,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,dest_nome,dest_indirizzo,dest_citta,dest_provincia,dest_cap,dest_paese,dest_email,mitt_nome,mitt_indirizzo,mitt_citta,mitt_provincia,mitt_cap,ritiro_id')
     .in('id', shipmentIds).eq('cliente_id', ctx.clienteId).eq('corriere_id', ctx.corriereId)
   if (!spedizioni?.length) return NextResponse.json({ error: 'Spedizioni non trovate' }, { status: 400 })
 
-  const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali').eq('id', ctx.corriereId).single()
+  const { data: corriere } = await admin.from('corrieri').select('id,tipo,credenziali,settings').eq('id', ctx.corriereId).single()
   if (!corriere) return NextResponse.json({ error: 'Contratto non trovato' }, { status: 400 })
   const cred = corriere.credenziali as Record<string, string>
+
+  // ── POSTE DIRETTO, anche attraverso un ponte di condivisione (SDA EXPRESS L) ──
+  // Le stesse funzioni del portale (lib/ritiro-poste): sul ponte prenota il contratto vero dello stesso
+  // pacco. Se quel contratto non e' Poste diretto, qui non c'e' un ramo e lo si dice.
+  if (corriere.tipo === 'poste' || corriere.tipo === 'moovexpress') {
+    const { contrattoCheRitira, prenotaRitiroPoste } = await import('@/lib/ritiro-poste')
+    // Un secondo invio dello stesso lotto (risposta persa, nuovo tentativo) prenoterebbe presso il
+    // corriere un secondo ritiro per gli stessi pacchi: quelli gia' in un ritiro restano fuori.
+    const daRitirare = spedizioni.filter((s: any) => !s.ritiro_id)
+    if (!daRitirare.length) {
+      const { data: esistente } = await admin.from('ritiri').select('id,cod_ritiro,data_ritiro').eq('id', (spedizioni[0] as any).ritiro_id).maybeSingle()
+      return NextResponse.json({
+        id: esistente?.id || null, codice_ritiro: esistente?.cod_ritiro || null, pickupId: esistente?.cod_ritiro || null,
+        stato: 'richiesto', date: esistente?.data_ritiro || null, giaPrenotato: true,
+        avviso: 'Queste spedizioni sono gia\' in un ritiro prenotato: non ne e\' stato prenotato un altro.',
+      })
+    }
+    const ritira = await contrattoCheRitira(admin, corriere, (daRitirare[0] as any).tracking_number)
+    if ('errore' in ritira) return NextResponse.json({ error: messaggioRitiroNonPrenotabileViaApi(corriere.tipo) }, { status: 400 })
+    if (ritira.corriere?.tipo !== 'poste') return NextResponse.json({ error: messaggioRitiroNonPrenotabileViaApi(corriere.tipo) }, { status: 400 })
+    const esito = await prenotaRitiroPoste(admin, {
+      corriere: ritira.corriere, masterId: ctx.masterId, clienteId: ctx.clienteId, spedizioni: daRitirare as any[],
+      mittente: {
+        nome: from.name, indirizzo: from.street1, citta: from.city, cap: from.postalCode,
+        provincia: from.state, paese: from.country, telefono: pulisciTelefono(from.phone), email: from.email,
+      },
+      data: String(body.date), fascia: pickupTimeSpedisci(body.timeFrom) === 'PM' ? 'PM' : 'AM',
+      note: body.notes, contenuto: body.notes,
+    })
+    if (!esito.ok && esito.motivo === 'registrazione') {
+      console.error('[API][PICKUP][POSTE] salvataggio ritiro fallito:', esito.errore)
+      return NextResponse.json({ error: `Ritiro creato presso il corriere (${esito.codice}) ma non registrato a sistema: contatta l'assistenza indicando questo codice.` }, { status: 500 })
+    }
+    if (!esito.ok) return NextResponse.json({ error: esito.errore }, { status: 400 })
+    const esclusi = spedizioni.length - daRitirare.length
+    // Chi integra ha chiesto una data precisa: se il corriere l'ha rifiutata e il ritiro e' andato al
+    // giorno dopo, la risposta porta la data vera e lo dice, come per Spedisci qui sotto.
+    const avvisi = [
+      avvisoDataSpostata(String(body.date), esito.data),
+      esclusi ? `${esclusi} ${esclusi === 1 ? 'spedizione era gia\'' : 'spedizioni erano gia\''} in un ritiro prenotato e non ${esclusi === 1 ? 'e\' stata inclusa' : 'sono state incluse'}.` : null,
+    ].filter(Boolean)
+    return NextResponse.json({
+      id: esito.ritiroId, codice_ritiro: esito.codice, pickupId: esito.codice, stato: 'richiesto', date: esito.data,
+      ...(avvisi.length ? { avviso: avvisi.join(' ') } : {}),
+    })
+  }
 
   const colliTotali = spedizioni.reduce((s: number, x: any) => s + (x.colli || 1), 0)
   const pesoTotale = spedizioni.reduce((s: number, x: any) => s + (parseFloat(String(x.peso_reale)) || 1), 0)
@@ -117,27 +166,26 @@ export async function POST(req: NextRequest) {
       if (cc) courierCode = cc
     }
     if (!shipmentApiIds.length) return NextResponse.json({ error: 'Impossibile recuperare gli ID spedizione' }, { status: 400 })
-    try {
-      const pk = await spediamoproCreatePickup(cred.authcode, {
-        contactInfo: {
-          name: from.name, address: from.street1, postalCode: from.postalCode, city: from.city,
-          country: from.country || 'IT', phone: pulisciTelefono(from.phone), email: from.email || undefined,
-          province: from.state || undefined,
-        },
-        date: body.date, from: fascia.from, to: fascia.to, shipments: shipmentApiIds, courier: courierCode,
-      })
-      let code: string | null = pk.code || null
-      if (!code && pk.id) code = await spediamoproWaitPickupCode(cred.authcode, pk.id)
-      const { data: nuovo, error } = await salvaRitiro(code || String(pk.id))
-      if (error) { console.error('[API][PICKUP] salvataggio ritiro fallito:', error.message); return NextResponse.json({ error: `Ritiro creato presso il corriere (${pk.code}) ma non registrato a sistema: contatta l'assistenza indicando questo codice.` }, { status: 500 }) }
-      return NextResponse.json({ id: nuovo.id, pickupId: code || pk.id, stato: 'richiesto', date: body.date })
-    } catch (e: any) {
-      return NextResponse.json({ error: erroreRitiroPulito(e) }, { status: 400 })
-    }
+    // Le stesse correzioni del portale (lib/ritiro-spediamopro): lunghezze, giorno, indirizzo del mittente.
+    const s0: any = spedizioni[0]
+    const esito = await prenotaRitiroSpediamopro(cred.authcode, {
+      contactInfo: {
+        name: from.name, address: from.street1, postalCode: from.postalCode, city: from.city,
+        country: from.country || 'IT', phone: pulisciTelefono(from.phone), email: from.email || undefined,
+        province: from.state || undefined,
+      },
+      mittenteSpedizione: { nome: s0.mitt_nome, indirizzo: s0.mitt_indirizzo, cap: s0.mitt_cap, citta: s0.mitt_citta, provincia: s0.mitt_provincia },
+      date: body.date, from: fascia.from, to: fascia.to, shipments: shipmentApiIds, courier: courierCode,
+    })
+    if (!esito.ok) return NextResponse.json({ error: erroreRitiroPulito(esito.errore) }, { status: 400 })
+    const { data: nuovo, error } = await salvaRitiro(esito.codice, esito.data)
+    if (error) { console.error('[API][PICKUP] salvataggio ritiro fallito:', error.message); return NextResponse.json({ error: `Ritiro creato presso il corriere (${esito.codice}) ma non registrato a sistema: contatta l'assistenza indicando questo codice.` }, { status: 500 }) }
+    const avviso = avvisoDataSpostata(String(body.date), esito.data)
+    return NextResponse.json({ id: nuovo.id, pickupId: esito.codice, stato: 'richiesto', date: esito.data, ...(avviso ? { avviso } : {}) })
   }
 
-  // I contratti che questa rotta non sa prenotare (easyparcel, ponti, Poste diretto, …) sono gia'
-  // usciti in cima: da qui in giu' resta solo SPEDISCI.
+  // I contratti che questa rotta non sa prenotare (easyparcel, …) sono gia' usciti in cima, Poste
+  // diretto e i ponti qui sopra: da qui in giu' resta solo SPEDISCI.
 
   // ── SPEDISCI ──
   const primaSped: any = spedizioni[0]
@@ -177,52 +225,17 @@ export async function POST(req: NextRequest) {
   if (body.notes) payload.specialInstruction = body.notes
   if (shipmentId) payload.shipmentId = shipmentId
 
-  // Timeout: l'API del corriere a volte si appende (Poste). Senza limite → 504. Con AbortController → errore pulito.
-  const ctrl = new AbortController()
-  const toId = setTimeout(() => ctrl.abort(), 25000)
-  let res: Response
-  try {
-    res = await fetch(`${baseUrl}/pickup/create`, {
-      method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal,
-    })
-  } catch {
-    clearTimeout(toId)
-    // Chi integra parla solo con noi: niente rimandi al portale del corriere.
-    return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto; se persiste, contatta l\'assistenza.' }, { status: 504 })
-  }
-  clearTimeout(toId)
-  let text = await res.text()
-
-  // RITIRO IN GIORNATA rifiutato: come il portale (/api/ritiri/crea), riprovo col primo giorno
-  // LAVORATIVO utile invece di far fallire il ritiro. Qui però è un partner API che ha chiesto una
-  // data precisa: se la sposto glielo DICO (data reale in risposta + avviso), non in silenzio. Il
-  // rifiuto arriva con testi diversi e che cambiano nel tempo: "PICKUP_DATE = today...", "Time slot
-  // not compatible with today's date", "...ritiro nella mattina stessa".
-  let dataRitiroFinale = String(body.date)
-  if (!res.ok && /PICKUP_DATE\s*=\s*today|time slot not compatible with today|nella mattina stessa/i.test(text)) {
-    const prossimo = new Date(String(body.date) + 'T12:00:00')
-    do { prossimo.setDate(prossimo.getDate() + 1) } while ([0, 6].includes(prossimo.getDay()))
-    dataRitiroFinale = prossimo.toISOString().slice(0, 10)
-    payload.pickupDate = dataRitiroFinale
-    const ctrl2 = new AbortController()
-    const to2 = setTimeout(() => ctrl2.abort(), 25000)
-    try {
-      res = await fetch(`${baseUrl}/pickup/create`, {
-        method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl2.signal,
-      })
-      text = await res.text()
-      if (!res.ok) dataRitiroFinale = String(body.date)   // fallito anche il giorno dopo: la data non è cambiata
-    } catch {
-      clearTimeout(to2)
-      return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto.' }, { status: 504 })
-    }
-    clearTimeout(to2)
-  }
-
-  let r: any; try { r = JSON.parse(text) } catch { r = { error: text.substring(0, 300) } }
+  // Invio, nomi oltre 35 caratteri e "non oggi" stanno in lib/ritiro-spedisci, come per il portale.
+  // Qui pero' chi integra ha chiesto una data precisa: se il corriere la sposta, la risposta porta la
+  // data vera e un avviso, non la cambia in silenzio. La scadenza tiene la richiesta sotto i 30 secondi.
+  const invio = await inviaRitiroSpedisci(baseUrl, cred.password, payload, Date.now() + 27000)
+  // Chi integra parla solo con noi: niente rimandi al portale del corriere.
+  if (invio.timeout) return NextResponse.json({ error: 'Il corriere non ha risposto in tempo per il ritiro. Riprova tra qualche minuto; se persiste, contatta l\'assistenza.' }, { status: 504 })
+  const dataRitiroFinale = invio.data
+  const r: any = invio.risposta || {}
   // L'errore del fornitore a valle va SEMPRE ripulito (nomi tecnici/dominio) prima di uscire — come
   // fa il ramo SpediamoPro qui sopra. Senza, il testo grezzo del provider arriverebbe al partner.
-  if (!res.ok || r.error) return NextResponse.json({ error: r?.error ? erroreRitiroPulito(r.error) : `Errore ${res.status}` }, { status: 400 })
+  if (!invio.ok) return NextResponse.json({ error: r?.error ? erroreRitiroPulito(r.error) : `Errore ${invio.status}` }, { status: 400 })
 
   // Codice ritiro del corriere: spedisci può restituirlo come pickupId (CP…) o, in alcune versioni,
   // come id/uuid/code/reference. Prendo il primo disponibile così salviamo sempre il riferimento giusto.
@@ -232,6 +245,6 @@ export async function POST(req: NextRequest) {
   // NB: `id` = riferimento interno MoovExpress (UUID). `codice_ritiro`/`pickupId` = codice del CORRIERE (es. CP…).
   return NextResponse.json({
     id: nuovo.id, codice_ritiro: codiceCorriere, pickupId: codiceCorriere, stato: 'richiesto', date: dataRitiroFinale,
-    ...(dataRitiroFinale !== String(body.date) ? { avviso: `Ritiro in giornata non disponibile: spostato al primo giorno lavorativo utile (${dataRitiroFinale}).` } : {}),
+    ...(avvisoDataSpostata(String(body.date), dataRitiroFinale) ? { avviso: avvisoDataSpostata(String(body.date), dataRitiroFinale) } : {}),
   })
 }

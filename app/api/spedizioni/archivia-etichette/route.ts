@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { archiviaLotto } from '@/lib/etichette'
+import { archiviaLotto, liberaEtichetteArchiviate, oraDiNotteRoma } from '@/lib/etichette'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+export const maxDuration = 300
 
 // LE ETICHETTE ESCONO DAL DATABASE.
 //
@@ -32,7 +32,22 @@ export const maxDuration = 120
 
 // Il lavoro vero sta in lib/etichette.ts: lo chiama anche tmp-recupero, che e' un cron gia' vivo.
 // Questa rotta resta come innesco dedicato e per poterla lanciare a mano quando serve.
+//
+// Da quando questo innesco gira davvero (ogni 10 minuti) fa anche la seconda meta': toglie dalla
+// riga il base64 gia' archiviato (liberaEtichetteArchiviate). A inizio novembre 2026 erano ~450.000
+// le spedizioni archiviate col PDF ancora dentro, e il giro di tmp-recupero da solo ne chiude al
+// massimo 150 ogni quarto d'ora. Si fa SOLO di notte (vedi oraDiNotteRoma). Misurato la prima notte (05/11, 01:10):
+// 244 righe in 49 secondi a 4 per volta, CPU del database all'11% e ~90 operazioni al secondo sul
+// disco. A quel passo il pregresso avrebbe chiesto piu' di un mese: di notte il giro e' piu' lungo.
 export async function GET(req: NextRequest) {
   const _b = bloccaCronNonAutorizzato(req); if (_b) return _b
-  return NextResponse.json(await archiviaLotto(createAdminSupabase(), 100))
+  const inizio = Date.now()
+  const admin = createAdminSupabase()
+  const archiviate = await archiviaLotto(admin, 100)
+  // Dentro i 300 secondi della funzione, con margine: quello che resta dopo l'archiviazione.
+  const resta = 270_000 - (Date.now() - inizio)
+  const liberate = oraDiNotteRoma() && resta > 10_000
+    ? await liberaEtichetteArchiviate(admin, 3000, { entroMs: Math.min(210_000, resta), inParallelo: 6 })
+    : null
+  return NextResponse.json({ ...archiviate, liberate })
 }

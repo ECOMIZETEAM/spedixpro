@@ -26,7 +26,7 @@ export async function GET(_req: NextRequest) {
   if (ruolo === 'cliente' || utente?.cliente_id) {
     if (!utente?.cliente_id) return NextResponse.json({ ricevuti: [], miei: [] })
     const miei = await fetchAll(() => admin.from('tickets').select(cols)
-      .eq('cliente_id', utente.cliente_id).order('updated_at', { ascending: false }))
+      .eq('cliente_id', utente.cliente_id).order('updated_at', { ascending: false }).order('id', { ascending: false }))
     // Al cliente la catena di inoltro non va mostrata: uscivano nel corpo della risposta e
     // bastava guardarla per sapere che la richiesta era stata girata più in alto, e a chi.
     const nome = await risolviNomiAttuali(admin, miei || [])
@@ -43,10 +43,11 @@ export async function GET(_req: NextRequest) {
 
   // Master: ricevuti (owner) + miei (aperti verso la linea superiore) + RETE (inoltrati a me
   // da un master sotto di me: partecipo alla catena, il cliente non mi vede).
+  // + id dopo updated_at: a parità di ora le pagine da 1000 si accavallano (righe doppie o perse).
   const [ricevuti, miei, rete] = await Promise.all([
-    fetchAll(() => admin.from('tickets').select(cols).eq('owner_master_id', masterId).order('updated_at', { ascending: false })),
-    fetchAll(() => admin.from('tickets').select(cols).eq('aperto_master_id', masterId).order('updated_at', { ascending: false })),
-    fetchAll(() => admin.from('tickets').select(cols).contains('rete_master_ids', [masterId]).order('updated_at', { ascending: false })),
+    fetchAll(() => admin.from('tickets').select(cols).eq('owner_master_id', masterId).order('updated_at', { ascending: false }).order('id', { ascending: false })),
+    fetchAll(() => admin.from('tickets').select(cols).eq('aperto_master_id', masterId).order('updated_at', { ascending: false }).order('id', { ascending: false })),
+    fetchAll(() => admin.from('tickets').select(cols).contains('rete_master_ids', [masterId]).order('updated_at', { ascending: false }).order('id', { ascending: false })),
   ])
   // rete_nuovo va calcolato PRIMA di mascherare (usa il rete_non_letti pieno), poi si maschera la
   // catena oltre il proprio bersaglio d'inoltro (come nel dettaglio) e si deriva l'assegnazione DEL

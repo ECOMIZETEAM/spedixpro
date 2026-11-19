@@ -15,7 +15,8 @@ export async function trovaRettificheDaGirare(): Promise<ControlloRisultato> {
     const { data } = await admin.from('rettifiche')
       .select('numero_spedizione,master_id,target_master_id,differenza,fuori_sagoma,peso_reale,peso_volume_reale,created_at')
       .not('target_master_id', 'is', null).eq('confermata', true).is('propagazione', null)
-      .order('created_at', { ascending: false }).range(from, from + 999)
+      // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, from + 999)
     if (!data?.length) break; rows.push(...data); if (data.length < 1000) break
   }
 

@@ -73,8 +73,27 @@ export async function GET(req: NextRequest) {
           continue
         }
       }
+      // PACCO GLS CONDIVISO FRA RETI: le richieste nuove si chiudono subito (spedizioni/elimina, v1 DELETE);
+      // qui arrivano solo quelle rimaste in attesa da prima, o da una porta che non lo sa ancora. Stessa
+      // regola: DeleteSped e tutte le gambe stornate, oppure no se GLS l'ha gia' in distinta (lib/annullo-gls).
+      if (corr?.tipo === 'moovexpress' || corr?.tipo === 'gls') {
+        const { gambePaccoGls, annullaPaccoGls } = await import('@/lib/annullo-gls')
+        const gambe = await gambePaccoGls(admin, (s as any).tracking_number)
+        if (gambe) {
+          const r = await annullaPaccoGls(admin, gambe, { da: (s as any).annullamento_da || null })
+          if (r.ok) { annullate++; continue }
+          await admin.from('spedizioni').update({
+            stato: (s as any).stato_precedente || 'in_lavorazione',
+            annullamento_richiesto_at: null,
+            annullamento_errore: `Annullo rifiutato dal corriere: ${r.motivo}`,
+          }).eq('id', s.id)
+          rifiutate++
+          continue
+        }
+      }
       // SPEDISCI: nessun annullo via API (contratto non nostro) → coda manuale al DETENTORE.
-      if (corr?.tipo === 'spedisci') {
+      // DIELLE uguale: l'annullo lo fa il fornitore su richiesta del detentore (lib/annullaSpedizione).
+      if (corr?.tipo === 'spedisci' || corr?.tipo === 'dielle') {
         const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
         await admin.from('spedizioni').update({
           stato: 'annullamento_manuale', annullamento_owner_id: ownerId, annullamento_errore: null,

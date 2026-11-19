@@ -1,4 +1,4 @@
-import type { EsitoRipesatura } from '@/lib/ripesature-calcolo'
+import { volumiDelLivello, type EsitoRipesatura } from '@/lib/ripesature-calcolo'
 
 // CREA UNA RETTIFICA da una ripesatura gia' calcolata, per il master indicato: chi apre la rettifica
 // verso il suo figlio diretto (il detentore del contratto; per SDA EXPRESS L Wave, dal 24/10/2026).
@@ -57,10 +57,81 @@ export async function fattureGiaPagate(admin: any, rif: string[]): Promise<Set<s
   return pagate
 }
 
+// IL COSTO DEL FORNITORE SU QUEL PACCO C'E' GIA'? fattureGiaPagate riconosce una riga di fattura solo se torna con lo
+// STESSO riferimento (codice 6A..., numero di riga DVA). Un file di SOLI PESI porta gli stessi addebiti con la LDV come
+// riferimento e il costo lo calcola il portale: il 04/11/2026 i file "RETTIFICHE SPEDIAMOPRO/DVA TUTTE 0411" di MULTI
+// hanno creato 4.259 righe "solo a carico" su pacchi gia' pagati (4.788 € scritti due volte se confermate). Qui si guarda
+// il PACCO: un costo gia' registrato a chi carica (RIPFORN-, al netto degli storni) o una sua riga viva che lo porta.
+// soloRigheFattura: conta solo le righe con l'importo del fornitore (riferimento diverso dalla LDV); le righe di soli
+// pesi in attesa si escluderebbero a vicenda alla conferma, e nessuna registrerebbe il costo.
+export async function pacchiConCostoGia(admin: any, masterId: string, spedizioni: string[],
+  opz: { escludiRiga?: string; soloRigheFattura?: boolean } = {}): Promise<Set<string>> {
+  const con = new Set<string>()
+  const ids = Array.from(new Set(spedizioni.filter(Boolean)))
+  for (let i = 0; i < ids.length; i += 150) {
+    const fetta = ids.slice(i, i + 150)
+    const { data: mm, error: em } = await admin.from('movimenti').select('spedizione_id,riferimento')
+      .in('spedizione_id', fetta).eq('tipo', 'rettifica').eq('master_target_id', masterId).is('cliente_id', null).like('riferimento', '%RIPFORN-%')
+    if (em) throw new Error('costo gia registrato: ' + em.message)
+    const netto = new Map<string, number>()
+    for (const m of (mm || []) as any[]) netto.set(m.spedizione_id, (netto.get(m.spedizione_id) || 0) + (String(m.riferimento).startsWith('STORNO-') ? -1 : 1))
+    for (const [s, n] of netto) if (n > 0) con.add(s)
+    const { data: rr, error: er } = await admin.from('rettifiche').select('id,spedizione_id,numero_spedizione,rif_fornitore,propagazione')
+      .in('spedizione_id', fetta).eq('master_id', masterId).gt('costo_fornitore', 0)
+    if (er) throw new Error('costo gia portato da una riga: ' + er.message)
+    for (const r of (rr || []) as any[]) {
+      if (r.id === opz.escludiRiga || r.propagazione === 'annullata') continue
+      if (opz.soloRigheFattura && (!r.rif_fornitore || r.rif_fornitore === r.numero_spedizione)) continue
+      con.add(r.spedizione_id)
+    }
+  }
+  return con
+}
+
+// LA STIMA DEL PORTALE CEDE ALLA FATTURA. E' l'ordine inverso di pacchiConCostoGia: prima si conferma la riga di un file
+// di soli pesi (costo calcolato dal portale, chiave RIPFORN-<LDV>), poi quella col codice del fornitore sullo stesso pacco.
+// Il 04/11/2026 alle 21:03 MULTI ha confermato verso sotto le righe "SPEDIAMOPRO TUTTE 0411 PARTE 3" (incassi giusti) e il
+// portale ha registrato 117 stime, mentre le righe del file sovrapprezzi del 30/10 sugli stessi pacchi erano ancora in
+// attesa: confermandole il costo sarebbe entrato due volte (1UW07WF391215: stima 0,95 + fattura 1,98, e il fornitore ha
+// addebitato 1,98 una volta sola). Torna le stime ancora vive del pacco, da stornare quando la fattura e' registrata
+// (lo sa chi chiama: l'ha appena scritta, o la sua chiave c'era gia'): decide l'importo del fornitore, non il portale.
+export async function stimeDaSostituire(admin: any, masterId: string, spedizioneId: string, rifFattura: string):
+  Promise<{ riferimento: string; importo: number }[]> {
+  const { data: sp, error: es } = await admin.from('spedizioni').select('numero,tracking_number').eq('id', spedizioneId).maybeSingle()
+  if (es) throw new Error('stime del portale: ' + es.message)
+  const basi = [sp?.numero, sp?.tracking_number].filter(Boolean).map((x: string) => `RIPFORN-${x}`)
+  // un riferimento uguale alla LDV non e' una fattura: e' la stima stessa
+  if (!basi.length || basi.includes(`RIPFORN-${rifFattura}`)) return []
+  const { data: mm, error: em } = await admin.from('movimenti').select('riferimento,importo')
+    .eq('spedizione_id', spedizioneId).eq('tipo', 'rettifica').eq('master_target_id', masterId).is('cliente_id', null).like('riferimento', '%RIPFORN-%')
+  if (em) throw new Error('stime del portale: ' + em.message)
+  const vive = new Map<string, number>()
+  const stornate = new Set<string>()
+  for (const m of (mm || []) as any[]) {
+    const k = String(m.riferimento)
+    if (k.startsWith('STORNO-')) stornate.add(k.slice(7)); else vive.set(k, Number(m.importo))
+  }
+  for (const k of stornate) vive.delete(k)
+  // stessa chiave o le sue successive -2…-9 (vedi chiaveLibera nella Conferma)
+  const diBase = (k: string, b: string) => k === b || (k.startsWith(b + '-') && /^\d$/.test(k.slice(b.length + 1)))
+  return [...vive].filter(([k]) => basi.some(b => diBase(k, b))).map(([riferimento, importo]) => ({ riferimento, importo }))
+}
+
 export async function creaRettificaDaEsito(
   admin: any, masterId: string, esito: EsitoRipesatura
 ): Promise<EsitoCrea> {
   if (!esito.trovata || !esito.spedizioneId) return { creata: false, motivo: 'spedizione non trovata' }
+
+  // SUI PACCHI SPEDITI CON SPEDIAMOPRO LA RETTIFICA NASCE SOLO DAL SUO ADDEBITO. Chi paga la ripesatura e' il conto
+  // del fornitore, non la misura di Poste: fatta prima con OneTracking, sotto si chiedeva una cifra diversa da quella
+  // che il fornitore poi addebitava, o che non addebitava mai. Nella rete Ecomize (confronto col conto del fornitore
+  // del 18/11/2026, Poste Delivery Business S): 445 pacchi rettificati che il fornitore non ha mai fatto pagare
+  // (+862 €), 272 su un peso piu' alto del suo (+1.030 €), e 266 dove il suo addebito piu' alto e' rimasto «solo a
+  // carico» di chi carica perche' il pacco era gia' rettificato (−336 €). Il file del fornitore passa comunque dal
+  // controllo OneTracking al caricamento (lib/ripesature-controllo).
+  // Sta qui perche' da qui passano tutte e due le porte del flusso continuo (giro automatico e misure dal Mac).
+  const { data: sp } = await admin.from('spedizioni').select('code:raw_response->>code').eq('id', esito.spedizioneId).maybeSingle()
+  if (/^6A/i.test(String((sp as any)?.code || ''))) return { creata: false, motivo: 'contratto SpediamoPro: si rettifica dal suo addebito' }
 
   const cat = esito.catenaDalBasso || []
   const mio = cat.indexOf(masterId)
@@ -95,8 +166,8 @@ export async function creaRettificaDaEsito(
     spedizione_id: esito.spedizioneId, numero_spedizione: esito.ldv,
     cliente_id: figlio ? null : liv.clienteId,
     target_master_id: figlio,
-    peso_iniziale: esito.pesoRealePrima, peso_volume_iniziale: esito.pesoVolumePrima,
-    peso_reale: esito.pesoDopo, peso_volume_reale: esito.pesoVolumeDopo || 0,
+    // il volume col divisore del figlio, che e' chi paga (vedi volumiDelLivello)
+    peso_iniziale: esito.pesoRealePrima, peso_reale: esito.pesoDopo, ...volumiDelLivello(esito, liv),
     costo_iniziale: liv.pagato, costo_finale: liv.dovuto,
     differenza: -liv.differenza,          // colonna "quanto restituisco": un addebito e' negativo
     stato: 'da_rettificare',

@@ -2,14 +2,14 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { registraAudit } from '@/lib/audit'
-import { leggiEtichettaCompleta } from '@/lib/etichette'
+import { leggiEtichettaCompleta, recuperaEtichettaMancante } from '@/lib/etichette'
 import { attendiTmp } from '@/lib/tmp-completa'
 
 // Su una spedizione provvisoria la rotta aspetta la LDV fino a ~20 s (vedi sotto): il tetto deve
 // lasciare spazio anche a un tentativo lento del fornitore.
 export const maxDuration = 60
 
-const CAMPI = 'id,numero,stato,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id,corriere_id,rif_ordine,contenuto'
+const CAMPI = 'id,numero,stato,etichetta_url,etichetta_path,colli_dettaglio,raw_response,cliente_id,corriere_id,colli,rif_ordine,contenuto'
 
 // Scarica l'etichetta (LDV) PDF della spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -26,12 +26,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // leggiEtichettaCompleta sa dove vive il PDF (Storage o base64) ED è MULTICOLLO: su una spedizione
   // a più colli unisce tutte le etichette in un unico PDF, così chi si integra via API non riceve il
   // solo primo collo. Prima usava leggiEtichetta (singola) e non leggeva nemmeno colli_dettaglio.
-  // SDA EXPRESS L esce com'e' arrivata da Poste (resaSda:false): da qui la catena della condivisione
-  // scarica l'etichetta e la SALVA sulla riga del compratore (lib/moovexpress). Servita gia' riscritta,
-  // il cliente finale avrebbe avuto la resa coi dati della gamba a monte invece che della sua riga, e
-  // rileggerla per riscriverla cancellava i codici (provato il 13/10). La resa pulita la fa il portale
-  // di chi stampa, sulla sua riga; chi si integra via API riceve la stessa 1011 di sempre.
-  let et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
+  // SDA EXPRESS L: la resa pulita va a chi si integra davvero via API (i partner). La catena della
+  // condivisione invece chiama con la chiave di un cliente-LEDGER (il master compratore, es.
+  // "MULTIEXPRESS (ingrosso)") e SALVA quello che riceve sulla riga a valle (lib/moovexpress): a lei la
+  // 1011 com'e'. Servita gia' riscritta, il cliente finale avrebbe avuto la resa coi dati della gamba a
+  // monte invece che della sua riga (la resa la fa il portale di chi stampa, sulla sua riga). Se il
+  // cliente non si legge, la 1011: mai una resa salvata dalla catena per sbaglio.
+  const resaSda = async () => {
+    const { data: cl } = await admin.from('clienti').select('ledger').eq('id', ctx.clienteId).maybeSingle()
+    return !!cl && cl.ledger !== true
+  }
+  let et = await leggiEtichettaCompleta(admin, s as any, { resaSda })
 
   // SPEDIZIONE NATA PROVVISORIA (DVA, "TMP-<ordine>"): invece di rispondere subito che l'etichetta non
   // c'e', la si va a chiedere al fornitore e si aspetta qualche secondo (lib/tmp-completa, attendiTmp).
@@ -43,8 +48,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     await attendiTmp(admin, s.id)
     const { data: riletta } = await admin.from('spedizioni').select(CAMPI).eq('id', id).maybeSingle()
     if (riletta) s = riletta
-    et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
+    et = await leggiEtichettaCompleta(admin, s as any, { resaSda })
   }
+  // ETICHETTA NON SALVATA ALLA CREAZIONE (GLS che la genera in ritardo, o un ponte), o MULTICOLLO GLS
+  // con dei colli senza: la si riprende ora (lib/etichette, recuperaEtichettaMancante; senza un caso GLS
+  // torna quella letta). E' anche la porta da cui passa la catena della condivisione: senza, la riga del
+  // compratore restava senza etichetta, o con un collo in meno, per sempre.
+  et = await recuperaEtichettaMancante(admin, s as any, et)
   if (!et) {
     // ANCORA NON PRONTA: 503 con Retry-After, non 404. Il 404 diceva "non esiste", e chi lo riceveva
     // non riprovava: lo salvava come se fosse l'etichetta. Il corpo resta JSON, come ogni errore.

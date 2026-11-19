@@ -1,24 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabase } from '@/lib/supabase'
+import { sessioneCliente } from '../comune'
+
+// L'elenco dei report archiviati dal cliente. Un errore di lettura si dice: prima tornava un elenco
+// vuoto e la pagina scriveva "Nessun report generato" anche a chi ne aveva.
 export async function GET(req: NextRequest) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('cliente_id').eq('id', user.id).single()
-  const clienteId = utente?.cliente_id
-  if (!clienteId) return NextResponse.json([])
+  const s = await sessioneCliente()
+  if ('errore' in s) return s.errore
   const tipo = req.nextUrl.searchParams.get('tipo')
-  try {
-    let query = supabase.from('reports_generati')
-      .select('*')
-      .eq('cliente_id', clienteId)
-      .order('created_at', { ascending: false })
-      .limit(50)
-    if (tipo) query = query.eq('tipo', tipo)
-    const { data, error } = await query
-    if (error) return NextResponse.json([])
-    return NextResponse.json(data || [])
-  } catch {
-    return NextResponse.json([])
-  }
+  let query = s.supabase.from('reports_generati')
+    .select('*')
+    .eq('cliente_id', s.clienteId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (tipo) query = query.eq('tipo', tipo)
+  const { data, error } = await query
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json(data || [])
 }

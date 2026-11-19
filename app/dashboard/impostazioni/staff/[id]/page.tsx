@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import AzzeraVerifica from '@/app/components/AzzeraVerifica'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
@@ -157,6 +158,12 @@ export default function ModificaStaffPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Azzeramento verifica in due passaggi: agisce subito, non con "Salva modifiche". */}
+      <div style={sec}>
+        <div style={sech}>Verifica in due passaggi</div>
+        <AzzeraVerifica url={`/api/staff/${id}/azzera-verifica`} chi="il collaboratore" />
       </div>
 
       <div style={{display:'flex',gap:'8px',maxWidth:'560px'}}>

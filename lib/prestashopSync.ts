@@ -16,6 +16,23 @@ const filtroPeriodo = (dal: string, al: string) => `filter[date_add]=[${dal}%200
 
 const aBlocchi = <T>(arr: T[], n: number): T[][] => { const out: T[][] = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out }
 
+// NOME E AZIENDA, TUTTI E DUE. PrestaShop tiene l'azienda in un campo a parte dell'indirizzo
+// (`company`) e noi prendevamo solo nome e cognome: "Antonio Lombardo" arrivava senza "Laboratorio
+// Analisi Europa-Lentini" e il cliente doveva riscriverla a mano nella LDV (LABELSHOP.IT, 456 ordini
+// su 496 con l'azienda, 16/11/2026). Ora arrivano insieme, nell'ordine del negozio, e nel modulo della
+// spedizione si accorcia se serve. Se l'azienda ripete il nome ("Roberto Lorettu" / "Lorettu Roberto")
+// non si scrive due volte; se lo contiene ("Ing. Francesco Caporali") vale l'azienda, che dice di piu'.
+function nomeConAzienda(nome: string, azienda: string): string {
+  const a = String(azienda || '').trim()
+  if (!a) return nome
+  if (!nome) return a
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
+  const parole = (s: string) => norm(s).split(' ').sort().join(' ')
+  if (norm(a).includes(norm(nome))) return a
+  if (norm(nome).includes(norm(a)) || parole(nome) === parole(a)) return nome
+  return `${nome} ${a}`
+}
+
 // Sincronizza gli ordini PrestaShop pagati/validi in ordini_ecommerce.
 // PrestaShop normalizza i dati: ordine → indirizzo → cliente → stato/paese (risorse separate),
 // quindi per ogni ordine risolviamo indirizzo + email + provincia + paese (con cache).
@@ -137,7 +154,7 @@ export async function sincronizzaOrdiniPrestashop(db: any, integr: any, range?: 
     const paese = negate.has('countries') ? 'IT' : await paeseIso(addr?.id_country)
 
     const destinatario = {
-      nome: `${addr?.firstname || ''} ${addr?.lastname || ''}`.trim(),
+      nome: nomeConAzienda(`${addr?.firstname || ''} ${addr?.lastname || ''}`.trim(), addr?.company),
       indirizzo: [addr?.address1, addr?.address2].filter(Boolean).join(' '),
       citta: addr?.city || '',
       provincia: prov,

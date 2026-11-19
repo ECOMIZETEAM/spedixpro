@@ -17,6 +17,7 @@
 
 import { parseScaglioniSupp, scaglioniPerPeso, supplPresenteMax, commissioneSupp, type ScaglioneSupp } from '@/lib/pricing'
 import { chiaveServizioGiacenza, predefinitoGiacenzaCliente, peggioreSuNolo, type Nolo } from '@/lib/sotto-costo-formule'
+import { leggiSupplementiMulticollo, supplementiSottoCosto, TIPO_MULTICOLLO_SUPPLEMENTI } from '@/lib/multicollo-zone'
 
 export type RigaSottoCosto = {
   chiave: string
@@ -58,8 +59,9 @@ export async function rilevaSottoCosto(admin: any, masterId: string): Promise<Ri
   const corrIds = (mieiCorrieri || []).map((c: any) => c.id)
   if (!corrIds.length) return []
   const nomeCorr = new Map<string, string>((mieiCorrieri || []).map((c: any) => [c.id, c.nome_contratto || 'Contratto']))
-  const { data: zone } = await admin.from('zone').select('id,nome,corriere_id').in('corriere_id', corrIds)
+  const { data: zone } = await admin.from('zone').select('id,nome,corriere_id,multicollo').in('corriere_id', corrIds)
   const nomeZona = new Map<string, string>((zone || []).map((z: any) => [z.id, z.nome || 'Zona']))
+  const zoneMC = new Set<string>((zone || []).filter((z: any) => z.multicollo).map((z: any) => z.id))
 
   const { data: listini } = await admin.from('listini_clienti').select('id,nome').eq('master_id', masterId)
   const nomeListino = new Map<string, string>((listini || []).map((l: any) => [l.id, l.nome || 'Listino']))
@@ -98,11 +100,13 @@ export async function rilevaSottoCosto(admin: any, masterId: string): Promise<Ri
   // FASCE: stessa zona, stessa fascia di peso. Intanto si raccolgono i noli fascia per fascia: sono
   // la base dei servizi a percentuale (giacenze, accessori).
   const noli = new Map<string, Nolo[]>()   // listino|corriere -> noli in comune col mio costo
+  const vendeMulticollo = new Set<string>()   // listino|corriere con almeno una fascia multicollo prezzata
   for (const f of await leggiTutte(admin, 'listini_clienti_fasce', 'id,listino_id,corriere_id,zona_id,peso_max,prezzo,fuel', 'listino_id', ids)) {
     const mioCosto = costoFascia.get(`${f.corriere_id}|${f.zona_id}|${f.peso_max}`)
     if (mioCosto == null) continue          // fascia che non ho: non ho un costo da confrontare
     const prezzo = conFuel(f.prezzo, f.fuel)
     const zona = nomeZona.get(f.zona_id) || '—'
+    if (prezzo > 0 && zoneMC.has(f.zona_id)) vendeMulticollo.add(`${f.listino_id}|${f.corriere_id}`)
     if (prezzo > 0) {
       const k = `${f.listino_id}|${f.corriere_id}`
       if (!noli.has(k)) noli.set(k, [])
@@ -261,15 +265,43 @@ export async function rilevaSottoCosto(admin: any, masterId: string): Promise<Ri
       }
     }
 
-    // ── ALTRI (ritiro…): come prima, fisso contro fisso e percentuale contro percentuale.
+    // ── SUPPLEMENTI MULTICOLLO (localita' remota / partenza remota, lib/multicollo-zone): stessa funzione
+    // dell'editor. Le FASCE multicollo sono fasce normali e passano dal controllo delle fasce qui sopra.
+    // Riga SENZA supplemento_id: "Adegua" riscriverebbe la descrizione (cioe' tutti i supplementi): si
+    // corregge dall'editor, scheda Multicollo.
+    {
+      const sC = leggiSupplementiMulticollo(costo), sV = leggiSupplementiMulticollo(cli)
+      // Solo dove il multicollo si vende a zone (fasce multicollo) o i supplementi sono scritti.
+      const sotto = vendeMulticollo.has(k) || sV ? supplementiSottoCosto(sV, sC) : []
+      if (sotto.length) {
+        let peggio: { d: number; v: number; c: number; dove: string; manca: boolean } | null = null
+        for (const k of sotto) {
+          const [tipo, zona] = k.split('|') as ['remota' | 'partenza', string]
+          const riga = sV?.[tipo]?.[zona]
+          const v = riga?.minimo || 0, c = sC?.[tipo]?.[zona]?.minimo || 0
+          if (!peggio || v - c < peggio.d) peggio = { d: v - c, v, c, dove: `${tipo === 'remota' ? 'località remota' : 'partenza remota'} ${zona}`, manca: !riga }
+        }
+        const sRow = cli.find((x: any) => x.tipo === TIPO_MULTICOLLO_SUPPLEMENTI)
+        righe.push({
+          ...base(listinoId, corriereId), zona: 'multicollo', tipo: 'supplemento', chiave: `mc:${sRow?.id || listinoId + '|' + corriereId}`,
+          descrizione: `Multicollo, ${peggio!.dove}${peggio!.manca ? ' (manca nel listino: si vende a prezzo normale)' : ''} — si corregge dall'editor, scheda Multicollo`,
+          prezzo_cliente: r2(peggio!.v), costo_tuo: r2(peggio!.c), differenza: r2(peggio!.d),
+        })
+      }
+    }
+
+    // ── ALTRI (ritiro, minimo a collo…): come prima, fisso contro fisso e percentuale contro percentuale.
+    // Il minimo a collo che MANCA, sui contratti che lo richiedono (settings del detentore), non e' una
+    // perdita: senza la voce il multicollo non si vende (lib/pricing → noloMulticollo). Si segnala solo
+    // quello scritto sotto costo.
     for (const s of cli) {
-      if (['giacenza', 'giacenza_apertura', 'contrassegno', 'assicurazione', 'accessorio', 'sponda'].includes(s.tipo)) continue
+      if (['giacenza', 'giacenza_apertura', 'contrassegno', 'assicurazione', 'accessorio', 'sponda', TIPO_MULTICOLLO_SUPPLEMENTI].includes(s.tipo)) continue
       const c = costo.find((x: any) => x.tipo === s.tipo && String(x.nome || '').toLowerCase().trim() === String(s.nome || '').toLowerCase().trim())
       if (!c) continue
       const v = Number(s.valore) || 0, p = percDi(s.descrizione), cv = Number(c.valore) || 0, cp = percDi(c.descrizione)
       if (v >= cv - 0.005 && p >= cp - 0.005) continue
       righe.push({
-        ...base(listinoId, corriereId), zona: s.tipo, tipo: 'supplemento', chiave: `s:${s.id}`, supplemento_id: s.id,
+        ...base(listinoId, corriereId), zona: s.tipo === 'supplemento_corriere' ? 'supplementi del corriere' : s.tipo === 'minimo_collo' ? 'multicollo' : s.tipo, tipo: 'supplemento', chiave: `s:${s.id}`, supplemento_id: s.id,
         descrizione: `${s.nome || s.tipo}${p < cp - 0.005 ? ` (tu ${cp}%, lui ${p}%)` : ''}`,
         prezzo_cliente: v, costo_tuo: cv, differenza: r2(v - cv),
       })

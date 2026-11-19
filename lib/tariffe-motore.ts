@@ -8,7 +8,7 @@
  * Riscrivere il calcolo li' avrebbe creato due verita' sui prezzi, e il giorno che se ne
  * cambia una l'altra resta indietro in silenzio. Qui la regola e' una sola e la chiamano
  * in due: la rotta del portale (con la sessione) e quella pubblica (che forza il Listino
- * Standard Web di MULTIEXPRESS).
+ * Standard Web del master della vetrina, lib/vetrina.ts).
  *
  * Chi lo modifica tocca ENTRAMBE le porte. */
 
@@ -21,7 +21,8 @@ import { EMAIL_PER_CORRIERE,
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
-import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti } from '@/lib/pricing'
+import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, importoSponda, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti, TIPO_MINIMO_COLLO, minimoACollo, noloMulticollo, regoleMulticollo, noloMulticolloZone, type RegolaMulticollo } from '@/lib/pricing'
+import { TIPO_MULTICOLLO_SUPPLEMENTI } from '@/lib/multicollo-zone'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
 // arrivare al browser, nemmeno dentro il JSON (vedi lib/corriere-logo.ts).
 import { siglaContratto, marchioCorriere } from '@/lib/corriere-logo'
@@ -138,26 +139,19 @@ export async function calcolaTariffeCliente(
     }
   }
 
-  // Sponda idraulica: sopra soglia_kg si aggiunge prezzo_kg € per ogni kg oltre la soglia (peso fatturato).
-  const spondaPerCorriere = new Map<string, { soglia: number; prezzoKg: number }>()
+  // Sponda idraulica: la regola e' una sola, in lib/pricing importoSponda — sul peso REALE, come la fa
+  // pagare il fornitore. Qui si contava sul peso della fascia (il volumetrico), e il preventivo mostrava
+  // una sponda che poi il fornitore non chiedeva.
+  const spondaPerCorriere = new Map<string, any>()
   if (cliente.listino_cliente_id) {
     const { data: supplS } = await supabase
       .from('listini_clienti_supplementi')
       .select('corriere_id, descrizione, valore')
       .eq('listino_id', cliente.listino_cliente_id).eq('tipo', 'sponda')
-    for (const s of (supplS || [])) {
-      let d:any = null; try { d = JSON.parse(s.descrizione) } catch {}
-      const soglia = Number(d?.soglia_kg) || 0
-      const prezzoKg = Number(s.valore) || 0
-      if (soglia > 0 && prezzoKg > 0) spondaPerCorriere.set(s.corriere_id, { soglia, prezzoKg })
-    }
+    for (const s of (supplS || [])) spondaPerCorriere.set(s.corriere_id, s)
   }
-  function calcolaSponda(corriereId: string, pesoFatt: number): number {
-    const cfg = spondaPerCorriere.get(corriereId)
-    if (!cfg) return 0
-    // La soglia è solo il trigger: da lì in su il prezzo/kg si applica sul TOTALE dei kg.
-    if (pesoFatt < cfg.soglia) return 0
-    return Math.round(pesoFatt * cfg.prezzoKg * 100) / 100
+  function calcolaSponda(corriereId: string, pesoRealeTot: number): number {
+    return Math.round(importoSponda(spondaPerCorriere.get(corriereId), pesoRealeTot) * 100) / 100
   }
 
   // Extra / servizi accessori per corriere (dal listino cliente): opzioni che il cliente
@@ -320,7 +314,7 @@ export async function calcolaTariffeCliente(
   // solo se piena. Tiebreaker `id` per una paginazione stabile (peso_max non è univoco).
   const buildFasce = () => adminDb
     .from('listini_clienti_fasce')
-    .select('*, zone(id,nome,su_mittente)')
+    .select('*, zone(id,nome,su_mittente,multicollo)')
     .eq('listino_id', cliente.listino_cliente_id)
     .order('peso_max', { ascending: true }).order('id', { ascending: true })
   const { data: fasce0, error: errFasce } = await buildFasce().range(0, 999)
@@ -345,6 +339,10 @@ export async function calcolaTariffeCliente(
     console.error('[TARIFFE] lettura fasce fallita', cliente.listino_cliente_id, errFasce.message)
     return { errore: 'Errore tecnico nel calcolo delle tariffe: riprova tra poco. Se persiste contatta l\'assistenza (il listino non c\'entra).', stato: 500 }
   }
+  // Le fasce delle ZONE MULTICOLLO non sono prezzi del collo singolo: fuori da tutto il match qui sotto.
+  // Le usa solo il multicollo (noloMulticolloZone), per contratto.
+  const fasceMCtutte = (fasce || []).filter((f: any) => (f.zone as any)?.multicollo)
+  fasce = (fasce || []).filter((f: any) => !(f.zone as any)?.multicollo)
   if (!fasce?.length) {
     return { errore: 'Listino vuoto — configura le fasce prezzi', stato: 400 }
   }
@@ -445,6 +443,26 @@ export async function calcolaTariffeCliente(
   let esclusiContrassegno = 0, esclusiAssic = 0, esclusiQuota = 0
   let ultimoErroreQuota = ''
 
+  // MINIMO A COLLO del listino del cliente e regola del contratto (lib/pricing → noloMulticollo): la
+  // stessa regola dell'addebito. Solo col multicollo: per un collo solo non si legge niente in piu'.
+  const minimoCollo = new Map<string, number>()
+  const supplMC = new Map<string, any[]>()   // minimo a collo e supplementi multicollo, per contratto
+  let regoleMC = new Map<string, RegolaMulticollo>()
+  if (tuttiColli.length > 1) {
+    const idsMC = Array.from(fascePerCorriere.keys())
+    const [{ data: supMC }, regole] = await Promise.all([
+      supabase.from('listini_clienti_supplementi').select('corriere_id,tipo,valore,descrizione')
+        .eq('listino_id', cliente.listino_cliente_id).in('tipo', [TIPO_MINIMO_COLLO, TIPO_MULTICOLLO_SUPPLEMENTI]).in('corriere_id', idsMC),
+      regoleMulticollo(idsMC),
+    ])
+    for (const s of (supMC || []) as any[]) {
+      if (!supplMC.has(s.corriere_id)) supplMC.set(s.corriere_id, [])
+      supplMC.get(s.corriere_id)!.push(s)
+      if (s.tipo === TIPO_MINIMO_COLLO) minimoCollo.set(s.corriere_id, Math.max(minimoCollo.get(s.corriere_id) || 0, minimoACollo([s])))
+    }
+    regoleMC = regole
+  }
+
   // CONTRATTI IN PAUSA — ramo CLIENTE (qui passa la quasi totalita' delle spedizioni).
   // Il controllo esisteva solo nel ramo "spedizione propria" del master: nel ramo cliente il
   // contratto sospeso veniva quotato col suo prezzo, l'utente lo sceglieva, compilava tutto e
@@ -506,23 +524,42 @@ export async function calcolaTariffeCliente(
     const _prs = settsC?.peso_reale_soglia
     const _usaRealeSoglia = !!_prs?.attivo && Number(_prs.kg) > 0 && pesoReale <= Number(_prs.kg)
     const pesoPerFascia = ((!!settsC.agevolazione_peso_reale && entroMisureAgevolate(settsC, tuttiColli)) || _usaRealeSoglia) ? pesoReale : pesoFatturatoC
-    const fasciaGiusta = trovaFascia(fasceDelCorriere, pesoPerFascia)
+    // MULTICOLLO A ZONE del listino del cliente (lib/pricing → noloMulticolloZone, lo stesso del costo e
+    // dell'addebito): se ci sono fasce multicollo, il nolo viene da li' e la fascia del collo singolo non conta.
+    const tabMC = tuttiColli.length > 1 ? await noloMulticolloZone(adminDb, {
+      fasceMC: fasceMCtutte.filter((f: any) => f.corriere_id === corriereId),
+      suppl: supplMC.get(corriereId) || [], regola: regoleMC.get(corriereId), packages: tuttiColli, paese: paeseDest, cap: capDest,
+      divisore: fattorePerCorr.get(corriereId) || fattore, zonaDest: (fasceDelCorriere[0]?.zone as any)?.nome, corriereId,
+      fasceTutte: fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
+      mitt: { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' }, dest: { cap: capDest, provincia, paese: paeseDest },
+    }) : null
+    if (tabMC && !tabMC.esito) { esclusiQuota++; ultimoErroreQuota = 'multicollo non prezzato per questo corriere'; continue }
+    const esitoTab = tabMC?.esito || null
+    const fasciaGiusta = esitoTab ? fasceDelCorriere[0] : trovaFascia(fasceDelCorriere, pesoPerFascia)
     if (!fasciaGiusta) continue   // peso oltre l'ultima fascia e nessuna "oltre X ogni" → corriere escluso
-    if (Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere
+    if (!esitoTab && Number(fasciaGiusta.prezzo) <= 0) continue   // prezzo 0 per questa zona/peso -> non mostrare il corriere
     if (codRichiesto && contrassegnoOff.has(corriereId)) continue
 
     const corriere = (fasciaGiusta as any).corrieri
+    const prezzoBase = esitoTab ? esitoTab.nolo : Number(fasciaGiusta.prezzo)
 
-    if (calcolaContrassegno(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (codRichiesto) esclusiContrassegno++; continue }
-    if (calcolaAssicurazione(corriereId, Number(fasciaGiusta.prezzo)) === null) { if (assicImporto > 0) esclusiAssic++; continue }
+    if (calcolaContrassegno(corriereId, prezzoBase) === null) { if (codRichiesto) esclusiContrassegno++; continue }
+    if (calcolaAssicurazione(corriereId, prezzoBase) === null) { if (assicImporto > 0) esclusiAssic++; continue }
 
-    // Sponda e peso fatturato usano il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico).
-    const nolo = Number(fasciaGiusta.prezzo)
-    const fuelPct = Number((fasciaGiusta as any).fuel) || 0
+    // Multicollo: il minimo a collo prima del fuel, come nell'addebito. null = su questo listino il
+    // multicollo di questo contratto non si vende (voce non prezzata, o paese escluso).
+    const noloMC = esitoTab ? esitoTab.nolo : noloMulticollo(Number(fasciaGiusta.prezzo), tuttiColli.length, minimoCollo.get(corriereId) || 0, regoleMC.get(corriereId), paeseDest)
+    if (noloMC === null) { esclusiQuota++; ultimoErroreQuota = 'multicollo non prezzato per questo corriere'; continue }
+    const minimoVince = !esitoTab && noloMC > Number(fasciaGiusta.prezzo)
+    // Il peso fatturato usa il peso EFFETTIVO (reale se agevolazione attiva ed entro misure, altrimenti volumetrico);
+    // la sponda invece si paga sul peso REALE (lib/pricing importoSponda).
+    const nolo = noloMC
+    const fuelPct = esitoTab ? esitoTab.fuelPct : (Number((fasciaGiusta as any).fuel) || 0)
     const costoFuel = nolo * fuelPct / 100
-    const sponda = calcolaSponda(corriereId, pesoPerFascia)
+    const sponda = calcolaSponda(corriereId, pesoReale)
     // Supplemento ORIGINE (zona mittente disagiato) di QUESTO corriere. 0 se non configurato.
-    const mittSupp = await supplementoMittente(
+    // Con la tabella multicollo la partenza remota e' gia' nel nolo.
+    const mittSupp = esitoTab ? 0 : await supplementoMittente(
       adminDb,
       fasce.filter((f: any) => (f.corrieri as any)?.id === corriereId),
       { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' },
@@ -550,13 +587,19 @@ export async function calcolaTariffeCliente(
       zona: isEstero ? (PAESI[paeseDest] || paeseDest) : ((fasciaGiusta as any)?.zone?.nome || zonaNome),
       peso_reale: pesoReale,
       peso_volume: pesoVolumeC.toFixed(2),
-      peso_fatturato: pesoPerFascia.toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione)
+      peso_fatturato: (esitoTab ? esitoTab.pesoTotale : pesoPerFascia).toFixed(2),   // peso EFFETTIVO su cui è calcolato il prezzo (reale se agevolazione; col multicollo a tabella quello del fornitore)
       corriere_nome: corriere?.nome_contratto || 'Corriere',
       limiti_collo: descriviLimiti(settsC, pesoReale),   // indicazione limiti collo (scaglione applicabile al peso)
       // Avviso fuori sagoma (solo dove il contratto ha la regola, es. GLS di MULTIEXPRESS): NON blocca e
       // NON addebita — il supplemento lo fattura il corriere (rientra post-fattura). Solo un cartello.
       avviso_fuori_sagoma: avvisoFuoriSagoma(settsC, tuttiColli),
-      listino_fascia: `fino a ${fasciaGiusta.peso_max}kg`,
+      listino_fascia: esitoTab
+        ? (esitoTab.minimo >= esitoTab.nolo
+          ? `${tuttiColli.length} colli × ${(minimoCollo.get(corriereId) || 0).toFixed(2).replace('.', ',')} € (minimo a collo)`
+          : `multicollo ${String(esitoTab.pesoTotale).replace('.', ',')} kg in tutto (fino a ${esitoTab.fasciaFinoA} kg)`)
+        : minimoVince
+        ? `${tuttiColli.length} colli × ${(minimoCollo.get(corriereId) || 0).toFixed(2).replace('.', ',')} € (minimo a collo)`
+        : `fino a ${fasciaGiusta.peso_max}kg`,
       // I servizi accessori si OFFRONO solo dove si TRASMETTONO davvero: canali diretti gls/brt, E
       // SPEDISCI di marca GLS (PROVATO 3/9: spedisci inoltra i codici al corriere, es. Exchange 200001 →
       // GLS 24 sull'etichetta — vedi codiceServizioSpedisci in corriere-logo). Sugli altri rivenditori

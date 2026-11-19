@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { normalizzaMarkup, creaApplicaMarkup } from '@/lib/markup-fasce'
-import { propagaListinoACascata } from '@/lib/copia-listino-submaster'
+import { propagaListinoModificato } from '@/lib/listino-modificato'
 
 // Duplica UN corriere (fasce + supplementi + config) da un listino a:
 //  - un listino ESISTENTE (targetListinoId), oppure
@@ -91,8 +91,10 @@ export async function POST(req: NextRequest) {
   // aspettare l'utente; se il listino non è assegnato a nessuno è un no-op.
   const listinoFinale = targetId as string
   after(async () => {
-    try { await propagaListinoACascata(createAdminSupabase(), listinoFinale) }
-    catch (e) { console.error('propaga dopo duplica-corriere ai sotto-master:', e) }
+    // Stessa propagazione del salvataggio del listino: sotto-master E master collegati. Se il listino è
+    // l'ingrosso di un collegato, il contratto appena portato qui gli compare (lib/listino-modificato).
+    try { await propagaListinoModificato(createAdminSupabase(), listinoFinale) }
+    catch (e) { console.error('propaga dopo duplica-corriere:', e) }
   })
 
   return NextResponse.json({ id: targetId, creato, nome_corriere: corr.nome_contratto })

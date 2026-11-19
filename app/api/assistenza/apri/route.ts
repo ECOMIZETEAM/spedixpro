@@ -7,7 +7,8 @@ import { addebitaPod } from '@/lib/pod-addebito'
 // Apertura di un ticket di assistenza.
 // - Cliente: il ticket va al proprio master (owner = master del cliente).
 // - Sotto-master: il ticket va alla linea superiore (owner = parent del proprio master).
-// - Master su una spedizione di un SUO cliente diretto: il ticket e' del cliente (vedi sotto).
+// - Master su una spedizione di un SUO cliente diretto: il ticket resta al master, e il cliente lo
+//   vede solo se il master lo sceglie all'apertura (vedi sotto).
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -90,37 +91,54 @@ export async function POST(req: NextRequest) {
   if (!record.spedizione_id) {
     const ldv = oggetto.trim()
     if (ldv.length >= 4 && ldv.length <= 40) {
-      // case-insensitive: l'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo.
-      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id,stato').ilike('numero', ldv).limit(2)
+      // L'oggetto può essere minuscolo (es. 1uw07wf…), il numero è maiuscolo: si cerca la LDV com'è
+      // scritta, in maiuscolo e in minuscolo, per UGUAGLIANZA. Prima era un ilike, che su `numero` non
+      // usa l'indice: ogni apertura scorreva tutta la tabella delle spedizioni (piano verificato il
+      // 04/11/2026: scansione completa contro una lettura d'indice; vedi il crash del 26/10).
+      const { data: sps } = await admin.from('spedizioni').select('id,cliente_id,master_id,corriere_id,stato')
+        .in('numero', [...new Set([ldv, ldv.toUpperCase(), ldv.toLowerCase()])]).limit(2)
       if (sps && sps.length === 1 && await autorizzatoSp(sps[0])) { record.spedizione_id = (sps[0] as any).id; spCorriereId = (sps[0] as any).corriere_id || null; spStato = (sps[0] as any).stato || null; spClienteId = (sps[0] as any).cliente_id || null }
     }
   }
 
-  // ── TICKET DEL MASTER SULLA SPEDIZIONE DI UN SUO CLIENTE: E' DEL CLIENTE. ──────────────────────
+  // ── TICKET DEL MASTER SULLA SPEDIZIONE DI UN SUO CLIENTE: RESTA AL MASTER, E SE LUI VUOLE E' DEL CLIENTE. ─
   // Il cliente spesso chiede al master su WhatsApp ("il pacco e' fermo, novita'?") e il master apre
   // il ticket dalla spedizione. Prima nasceva come ticket del master verso la SUA linea superiore e
   // il cliente non ne sapeva niente: TK-06836, Ecomize LL sulla LDV 282343J004032 di Blood ("risulta
   // smarrita, possiamo aprire segnalazione per rimborso?"), Blood non vedeva ne' il ticket ne' il
   // bollino sulla spedizione — e come lui i clienti di 469 ticket cosi' da luglio a ottobre 2026.
-  // Ora nasce COME SE L'AVESSE APERTO IL CLIENTE, con il master come sua assistenza: il cliente lo
-  // vede e legge la conversazione col master; se serve, il master lo inoltra a mano alla sua linea
-  // superiore e da li' valgono le regole dell'inoltro (i messaggi di sopra il cliente non li vede).
+  // Ora, se il master lo sceglie (vedi sotto), nasce COME SE L'AVESSE APERTO IL CLIENTE, con il
+  // master come sua assistenza: il cliente lo vede e legge la conversazione col master; se serve, il
+  // master lo inoltra a mano alla sua linea superiore e da li' valgono le regole dell'inoltro (i
+  // messaggi di sopra il cliente non li vede).
   // Non sale da solo: decisione del committente, 26/10/2026.
   // Solo i ticket: una POD aperta cosi' verrebbe addebitata al cliente (si paga all'apertura).
   // Solo il cliente DIRETTO: su quello di un sotto-master l'assistenza del cliente e' il sotto-master.
+  //
+  // FARLO VEDERE AL CLIENTE LO DECIDE IL MASTER, ALL'APERTURA, E NON SI CAMBIA DOPO. Non sempre il
+  // master scrive per il cliente: nei primi tre giorni, su 39 ticket aperti cosi', 22 sono stati
+  // inoltrati sopra e diversi parlavano del cliente in terza persona (TK-07695, NUOVAPOSTA 2.0 sulla
+  // spedizione di RACCOLTO E MANGIATO: "CI COMUNICA IL CLIENTE CHE PESA DI MENO" — e il cliente
+  // l'aveva gia' letto). Senza la spunta il ticket e' RISERVATO: resta al master come quello visibile
+  // (lo inoltra lui, se serve), ma senza cliente_id. E' cliente_id che apre al cliente ogni porta —
+  // elenco, dettaglio, allegati, bollino sulla spedizione (lib/ticket-accesso) — quindi senza, non
+  // ne trova nessuna. Di partenza non e' spuntata; dopo non si cambia: nasconderlo non toglie quello
+  // che il cliente ha gia' letto, mostrarlo gli farebbe leggere quello scritto per il superiore.
+  // Decisioni del committente, 29/10/2026.
   let perCliente = false
+  const visibileCliente = body?.visibile_cliente === true
   if (ruolo !== 'cliente' && categoria === 'ticket' && spClienteId) {
     const { data: cliSp } = await admin.from('clienti').select('master_id,ragione_sociale').eq('id', spClienteId).maybeSingle()
     if (cliSp && cliSp.master_id === masterId) {
       perCliente = true
       const persona = [utente?.nome, utente?.cognome].filter(Boolean).join(' ') || 'Assistenza'
       record.owner_master_id = masterId
-      record.cliente_id = spClienteId
+      record.cliente_id = visibileCliente ? spClienteId : null
       record.aperto_master_id = null          // altrimenti il master risulterebbe il richiedente (lib/ticket-accesso)
       record.aperto_da = cliSp.ragione_sociale || 'Cliente'
-      record.tipo_apertura = 'master_per_cliente'
+      record.tipo_apertura = visibileCliente ? 'master_per_cliente' : 'master_riservato'
       record.non_letto_owner = false          // l'ha scritto lui: non e' un "Nuovo" da leggere
-      record.aperto_letto = false             // il pallino va al cliente
+      record.aperto_letto = !visibileCliente  // il pallino va al cliente, se c'e' un cliente che lo legge
       record.assegnazioni = { [masterId]: { id: user.id, nome: persona } }   // chi apre se ne occupa
     }
   }
@@ -148,13 +166,30 @@ export async function POST(req: NextRequest) {
   // POD mandata come allegato in chat arrivava gratis). La cifra accettata dev'essere quella di adesso:
   // se il listino e' cambiato fra l'anteprima e l'invio si rifiuta e si mostra la nuova, invece di
   // addebitare una cifra diversa da quella che il cliente ha visto.
-  if (categoria === 'pod' && record.cliente_id) {
+  // Dal 04/11/2026 vale uguale per il MASTER che chiede la POD al suo master superiore: paga quanto
+  // dice il listino POD del superiore per i master sotto di lui (decisione del committente: prima
+  // non la pagava nessuno — QUICK SRL a MULTIEXPRESS, TK-07821 e altre nove in tre settimane).
+  // La chiede solo chi governa il master: agente e autista no, perche' a pagare e' il master.
+  const podDelMaster = categoria === 'pod' && !record.cliente_id && record.tipo_apertura === 'master' && !!record.owner_master_id
+  // E al superiore la si chiede solo se il pacco viaggia su un contratto che lui VENDE (lib/pod-prezzo,
+  // superioreVendeContratto): su un contratto del master sotto non ha ne' il pacco ne' il corriere.
+  if (podDelMaster) {
+    const { vedeLaRete } = await import('@/lib/perimetro')
+    if (!vedeLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato a chiedere la POD per il master' }, { status: 403 })
+    const { superioreVendeContratto } = await import('@/lib/pod-prezzo')
+    if (!(await superioreVendeContratto(admin, record.owner_master_id, spCorriereId))) {
+      return NextResponse.json({ error: 'Questa spedizione viaggia su un contratto che il tuo master superiore non vende: la POD non si può chiedere a lui. Chiedila a chi ti fornisce quel contratto.' }, { status: 400 })
+    }
+  }
+  if (categoria === 'pod' && (record.cliente_id || podDelMaster)) {
     const { risolviPrezzoPod } = await import('@/lib/pod-prezzo')
-    record.pod_prezzo = await risolviPrezzoPod(admin, {
-      masterId: record.owner_master_id,
-      clienteId: record.cliente_id,
-      corriereId: spCorriereId,
-    })
+    try {
+      record.pod_prezzo = await risolviPrezzoPod(admin, record.cliente_id
+        ? { masterId: record.owner_master_id, clienteId: record.cliente_id, corriereId: spCorriereId }
+        : { masterId: record.owner_master_id, sottoMasterId: masterId, corriereId: spCorriereId })
+    } catch {
+      return NextResponse.json({ error: 'Non riesco a calcolare il costo della POD in questo momento: riprova tra poco.' }, { status: 503 })
+    }
     if (record.pod_prezzo > 0) {
       const cifra = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(record.pod_prezzo)
       if (body?.accetto_addebito !== true) {
@@ -172,24 +207,31 @@ export async function POST(req: NextRequest) {
   //    PER-SPEDIZIONE: su un'ALTRA spedizione può aprire liberamente. Vale sia per i ticket sia per le
   //    POD. Se il ticket non è collegato a una spedizione (LDV non riconosciuta) non si blocca nulla:
   //    non c'è un perimetro su cui deduplicare. ──
+  //    Anche 'rimborso' (in attesa del rimborso del corriere) conta come aperta: chi chiede novita'
+  //    scrive in quella, non ne apre una seconda (decisione del committente, 28/10/2026).
   if (record.spedizione_id) {
     let q = admin.from('tickets').select('codice,cliente_id')
       .eq('categoria', categoria)
       .eq('spedizione_id', record.spedizione_id)
-      .in('stato', ['aperto', 'in_lavorazione'])
+      .in('stato', ['aperto', 'in_lavorazione', 'rimborso'])
     // Per il ticket aperto PER il cliente conta anche quello che il cliente ha gia' aperto da se'
     // (o che il master gli ha gia' aperto): la spedizione ha UNA conversazione col cliente, e il
     // master la porta avanti — e se serve la inoltra — da quella. Conta anche un vecchio ticket del
     // master verso la sua linea superiore ancora aperto sulla stessa spedizione.
+    // Il RISERVATO invece e' una conversazione del master, non del cliente: lo ferma solo un altro
+    // ticket riservato suo, o un suo vecchio ticket verso la linea superiore, sulla stessa spedizione.
+    // Quello del cliente no: il master deve poter scrivere senza che il cliente legga.
     q = ruolo === 'cliente'
       ? q.eq('cliente_id', utente!.cliente_id)
-      : perCliente
+      : perCliente && visibileCliente
         ? q.or(`cliente_id.eq.${record.cliente_id},and(aperto_master_id.eq.${masterId},tipo_apertura.eq.master)`)
-        : q.eq('aperto_master_id', masterId).eq('tipo_apertura', 'master')
+        : perCliente
+          ? q.or(`and(owner_master_id.eq.${masterId},tipo_apertura.eq.master_riservato),and(aperto_master_id.eq.${masterId},tipo_apertura.eq.master)`)
+          : q.eq('aperto_master_id', masterId).eq('tipo_apertura', 'master')
     const { data: gia } = await q.limit(1).maybeSingle()
     if (gia) {
-      if (perCliente && (gia as any).cliente_id) {
-        return NextResponse.json({ error: `${record.aperto_da} ha già un ticket aperto su questa spedizione (${(gia as any).codice}): lo trovi in Assistenza. Scrivi lì e, se serve, inoltralo da lì al tuo master superiore.` }, { status: 400 })
+      if (perCliente && visibileCliente && (gia as any).cliente_id) {
+        return NextResponse.json({ error: `${record.aperto_da} ha già un ticket aperto su questa spedizione (${(gia as any).codice}): lo trovi in Assistenza. Scrivi lì e, se serve, inoltralo da lì a chi ti fornisce il contratto.` }, { status: 400 })
       }
       const cosa = categoria === 'pod' ? 'una richiesta POD aperta' : 'una richiesta di assistenza aperta'
       return NextResponse.json({ error: `Hai già ${cosa} su questa spedizione (${(gia as any).codice}): aspetta che sia risolta prima di aprirne un'altra.` }, { status: 400 })
@@ -223,8 +265,9 @@ export async function POST(req: NextRequest) {
   if (data?.id) {
     // Chi APRE è sempre il lato "richiedente" della chat = 'cliente' (anche un sotto-master che apre
     // verso la linea superiore: lui chiede, l'owner risponde come 'master'). Coerente con la GET/POST.
-    // Eccezione: il master che apre PER il suo cliente scrive come assistenza, esattamente come le
-    // sue risposte (POST /api/assistenza/[id]): messaggio pubblico, il cliente lo legge.
+    // Eccezione: il master che apre sulla spedizione del suo cliente scrive come assistenza,
+    // esattamente come le sue risposte (POST /api/assistenza/[id]): messaggio pubblico, che il
+    // cliente legge se il ticket e' suo, e il master superiore se gli viene inoltrato.
     await admin.from('ticket_messaggi').insert(perCliente ? {
       ticket_id: data.id,
       autore: 'master',
@@ -245,8 +288,10 @@ export async function POST(req: NextRequest) {
   }
   // ADDEBITO ALL'APERTURA (lib/pod-addebito, una volta sola). Se non riesce, la richiesta resta "da
   // addebitare" e si riprova quando l'assistenza manda la POD: aprirla non si blocca per questo.
-  const podAddebitato = categoria === 'pod' && record.cliente_id && data?.id ? await addebitaPod(admin, data.id, user.id) : 0
-  // per_cliente: il nome del cliente a cui il ticket appartiene, perche' chi l'ha aperto sappia che
-  // il cliente lo legge e che verso l'alto va inoltrato a mano.
-  return NextResponse.json({ success: true, id: data?.id, codice: data?.codice, pod_prezzo: record.pod_prezzo ?? null, pod_addebitato: podAddebitato, per_cliente: perCliente ? record.aperto_da : null })
+  const podAddebitato = categoria === 'pod' && (record.cliente_id || podDelMaster) && data?.id ? await addebitaPod(admin, data.id, user.id) : 0
+  // per_cliente / riservato: il nome del cliente della spedizione, perche' chi l'ha aperto sappia se
+  // il cliente lo legge o no, e che in entrambi i casi verso l'alto va inoltrato a mano.
+  return NextResponse.json({ success: true, id: data?.id, codice: data?.codice, pod_prezzo: record.pod_prezzo ?? null, pod_addebitato: podAddebitato,
+    per_cliente: perCliente && visibileCliente ? record.aperto_da : null,
+    riservato: perCliente && !visibileCliente ? record.aperto_da : null })
 }

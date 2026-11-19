@@ -7,7 +7,7 @@ import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 export async function sincronizzaZonaAiDiscendenti(admin: any, ownerZonaId: string): Promise<void> {
   if (!ownerZonaId) return
   const { data: z } = await admin.from('zone')
-    .select('id,nome,master_id,corriere_id,con_fuel,su_mittente, corrieri(nome_contratto)').eq('id', ownerZonaId).maybeSingle()
+    .select('id,nome,master_id,corriere_id,con_fuel,su_mittente,multicollo, corrieri(nome_contratto)').eq('id', ownerZonaId).maybeSingle()
   const corrNome = (z as any)?.corrieri?.nome_contratto
   const zonaNome = (z as any)?.nome
   const ownerMaster = (z as any)?.master_id
@@ -15,12 +15,18 @@ export async function sincronizzaZonaAiDiscendenti(admin: any, ownerZonaId: stri
   // Una zona di PARTENZA (su_mittente) deve restare tale anche nelle copie dei sub: senza, il figlio
   // la vedrebbe come zona DESTINAZIONE e prezzerebbe i CAP di partenza come arrivo. Propaghiamo il flag.
   const suMitt = !!(z as any)?.su_mittente
+  // Lo stesso per il MULTICOLLO: una copia senza il segno sarebbe una destinazione del collo singolo con
+  // righe "tutto il paese", che vincerebbe sulle zone vere (lib/multicollo-zone).
+  const multicollo = !!(z as any)?.multicollo
   if (!corrNome || !zonaNome || !ownerMaster) return
 
   // CAP correnti del proprietario (paginati: possono superare i 1000)
   const capsOwner: any[] = []
   for (let from = 0; ; from += 1000) {
-    const { data } = await admin.from('zone_cap').select('paese,provincia,cap,citta').eq('zona_id', ownerZonaId).range(from, from + 999)
+    // ORDINE FISSO, o le pagine si accavallano: questo elenco SOSTITUISCE i CAP della zona in ogni
+    // sotto-master (delete + insert qui sotto), quindi un CAP perso qui sparirebbe da tutta la rete e
+    // quella destinazione verrebbe prezzata con un'altra zona. Verificato il 27/10: copie ancora intatte.
+    const { data } = await admin.from('zone_cap').select('paese,provincia,cap,citta').eq('zona_id', ownerZonaId).order('id', { ascending: true }).range(from, from + 999)
     if (!data?.length) break
     capsOwner.push(...data)
     if (data.length < 1000) break
@@ -45,13 +51,13 @@ export async function sincronizzaZonaAiDiscendenti(admin: any, ownerZonaId: stri
     let subZonaId = (zsub as any)?.id
     if (!subZonaId) {
       const { data: nz } = await admin.from('zone')
-        .insert({ nome: zonaNome, corriere_id: subCorrId, master_id: (cs as any).master_id, con_fuel: conFuel, su_mittente: suMitt })
+        .insert({ nome: zonaNome, corriere_id: subCorrId, master_id: (cs as any).master_id, con_fuel: conFuel, su_mittente: suMitt, multicollo })
         .select('id').single()
       subZonaId = (nz as any)?.id
     } else {
       // La copia esiste già: riallineo i flag al proprietario (una zona che diventa/torna di partenza
       // deve aggiornarsi anche sui figli, altrimenti resta destinazione e prezza male).
-      await admin.from('zone').update({ con_fuel: conFuel, su_mittente: suMitt }).eq('id', subZonaId)
+      await admin.from('zone').update({ con_fuel: conFuel, su_mittente: suMitt, multicollo }).eq('id', subZonaId)
     }
     if (!subZonaId) continue
     // Rispecchio i CAP del proprietario (delete + insert dei correnti, paginato).

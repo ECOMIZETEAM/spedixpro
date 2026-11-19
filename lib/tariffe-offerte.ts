@@ -16,7 +16,7 @@
  * a leggere i contratti (prima proseguiva senza mettere nessun flag). Chi mostra l'elenco a una
  * persona puo' catturare l'errore e mostrare tutto, come fa la rotta del preventivo; chi sceglie da
  * solo no: senza flag un PuntoPoste passerebbe per consegna a domicilio. */
-import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
+import { modalitaConsegna } from '@/lib/punti-consegna'
 
 // Marca le tariffe dei contratti "PuntoPoste" (PDB-P2H/P2TAB/P2UP) coi flag _deposito (il mittente
 // sceglie dove depositare: Ufficio Postale/Punto Poste) e _consegna_punto (tipologia RTZ/FMP del punto
@@ -25,15 +25,17 @@ import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
 export async function annotaPuntoPoste(admin: any, risultati: any[]) {
   const ids = [...new Set(risultati.map((r: any) => r._corriere_id).filter(Boolean))]
   if (!ids.length) return
-  const { data: corr, error } = await admin.from('corrieri').select('id,tipo,credenziali,settings').in('id', ids)
+  const { data: corr, error } = await admin.from('corrieri').select('id,master_id,tipo,nome_contratto,credenziali,settings').in('id', ids)
   // Il client non solleva da solo quando la lettura fallisce: torna `error` e nessun dato. Senza
   // questo controllo si usciva di qui con zero flag, cioe' "nessun contratto e' a un punto".
   if (error) throw new Error('lettura contratti a un punto: ' + error.message)
   const perId = new Map<string, any>((corr || []).map((c: any) => [c.id, c]))
   for (const r of risultati) {
     const c = perId.get(r._corriere_id); if (!c) continue
-    const cred = c.credenziali || {}
-    if (c.tipo === 'inpost' && (c.settings as any)?.consegna === 'locker') {
+    // La regola sta in lib/punti-consegna: la legge anche l'API pubblica, che spedisce a un punto
+    // con gli stessi contratti. Qui si traduce solo nei flag che il form del portale si aspetta.
+    const m = modalitaConsegna(c)
+    if (m.inpostLocker) {
       // InPost LOCKER: consegna a un LOCKER/PUDO (non a domicilio). Flag distinto dal PuntoPoste perché
       // usa il SUO selettore (InpostLockerPicker) e la SUA ricerca punti. Il Domicilio InPost (stesso
       // tipo, senza consegna=locker) resta consegna a casa e NON mostra alcun punto.
@@ -41,16 +43,53 @@ export async function annotaPuntoPoste(admin: any, risultati: any[]) {
     } else if (c.tipo === 'spediamopro') {
       // SpediamoPro: SOLO consegna a un punto (deliveryPudo), nessun deposito. _consegna_punto = il
       // corriere per la ricerca punti (brt/inpost/sda). Serve al form per mostrare il selettore-punto.
-      const courier = spediamoproPudoCourier(cred.service_id)
-      if (courier) r._consegna_punto = courier
+      if (m.courierSp) r._consegna_punto = m.courierSp
       // Qui il codice di ritiro arriva al destinatario per email: il form la chiede prima di comprare
       // (il server ricontrolla, vedi il ramo spediamopro di /api/spedizioni/crea).
-      if (courier) r._email_obbligatoria = true
+      if (m.emailObbligatoria) r._email_obbligatoria = true
     } else {
-      const cfg = pudoConfigDaVettore(cred.vettore)
-      if (cfg.deposito) r._deposito = true
-      if (cfg.consegnaTipologia) r._consegna_punto = cfg.consegnaTipologia
+      if (m.deposito) r._deposito = true
+      if (m.tipologiaDva) r._consegna_punto = m.tipologiaDva
     }
+  }
+  // L'assegno e' solo una voce in piu' nella tendina: se non si riesce a capirlo, si resta a contanti.
+  // Non deve mai far fallire l'elenco ne' l'anteprima dei prezzi degli import, che non catturano.
+  try { await annotaAssegnoPoste(admin, risultati, perId) } catch { /* resta solo contanti */ }
+}
+
+// ASSEGNO SUI CONTRATTI POSTE (SDA EXPRESS L). La tendina "Modalità di incasso" offre contanti, assegno
+// bancario e assegno circolare solo se il pacco finisce su un contratto Poste diretto: quello della tariffa,
+// o quello in fondo alla fila dei ponti di condivisione (Wave, MULTIEXPRESS e i loro sotto-master spediscono
+// sul contratto di LOGIXIA).
+// Il contratto d'origine scritto nel ponte non basta: le copie scese dall'albero non ce l'hanno (GTS EXPRESS,
+// 09/11/2026: ponte SDA EXPRESS L senza origine, eppure spedisce su LOGIXIA). La spedizione vera risale la
+// fila PER NOME (risolviCatenaCondivisione), ma farlo qui costava ~1 s in piu' per ogni elenco corrieri,
+// che si apre di continuo. Quindi la stessa regola, letta al contrario: un ponte finisce su Poste se tutti i
+// contratti veri col suo nome sono Poste. Due letture per elenco. Se un giorno nasce un contratto non Poste
+// con lo stesso nome, la seconda lettura lo vede e la tendina torna a solo contanti.
+// Un errore qui lascia la tendina com'era (solo contanti), non blocca l'elenco.
+async function annotaAssegnoPoste(admin: any, risultati: any[], perId: Map<string, any>) {
+  const nome = (s: any) => String(s || '').trim().toLowerCase()
+  const ponti: any[] = []
+  for (const r of risultati) {
+    const c = perId.get(r._corriere_id); if (!c) continue
+    if (c.tipo === 'poste') r._poste_assegno = true
+    else if (c.tipo === 'moovexpress') ponti.push(r)
+  }
+  if (!ponti.length) return
+  const { data: poste, error } = await admin.from('corrieri').select('nome_contratto').eq('tipo', 'poste')
+  if (error) return
+  const nomiPoste = new Set((poste || []).map((c: any) => nome(c.nome_contratto)))
+  const candidati = [...new Set(ponti.map(r => nome(perId.get(r._corriere_id)?.nome_contratto)).filter(n => nomiPoste.has(n)))]
+  if (!candidati.length) return
+  const { data: altri, error: e2 } = await admin.from('corrieri').select('nome_contratto')
+    .not('tipo', 'in', '(moovexpress,poste)')
+    .or(candidati.map(n => `nome_contratto.ilike.${n.replace(/[%_,()*\\]/g, '_')}`).join(','))
+  if (e2) return
+  const nonSoloPoste = new Set((altri || []).map((c: any) => nome(c.nome_contratto)))
+  for (const r of ponti) {
+    const n = nome(perId.get(r._corriere_id)?.nome_contratto)
+    if (nomiPoste.has(n) && !nonSoloPoste.has(n)) r._poste_assegno = true
   }
 }
 

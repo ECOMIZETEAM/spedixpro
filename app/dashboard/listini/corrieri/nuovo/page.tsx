@@ -1,7 +1,12 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import { logoCorriere, serviziAccessoriDefault } from '@/lib/corriere-logo'
 import EditorMarkupFasce, { type MarkupOut } from '@/app/components/EditorMarkupFasce'
+import CodiceContratto from '@/app/components/CodiceContratto'
+import { vociSupplementoDa, type VoceSupplemento } from '@/lib/supplementi-corriere'
+import TabellaSupplementiCorriere from '@/app/components/TabellaSupplementiCorriere'
+import SupplementiMulticollo from '@/app/components/SupplementiMulticollo'
+import { leggiSupplementiMulticollo, type SupplementiMulticollo as SupplMC } from '@/lib/multicollo-zone'
 
 const inp = {padding:'6px 8px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const inpFull = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'5px',fontSize:'13px',color:'#1a1a1a',background:'#fff',width:'100%',textAlign:'right' as const,boxSizing:'border-box' as const}
@@ -59,6 +64,10 @@ function buildFasceInit(fasceEsistenti: any[]): Fascia[] {
     return Number(a.kg) - Number(b.kg)
   })
 }
+
+// Fasce di partenza della scheda Multicollo su un listino ancora vuoto: quelle sul peso totale con cui
+// prezza il fornitore (lib/multicollo-zone), oltre 200 kg a "oltre X ogni".
+const FASCE_MC_DEFAULT = (): Fascia[] => [...[5,10,15,20,30,40,50,60,70,100,120,140,160,180,200].map(kg => ({ tipo:'fino_a', kg:String(kg), prezzi:{}, fuel:'0' })), { tipo:'oltre', kg:'1', prezzi:{}, fuel:'0' }]
 
 function buildRigheDa(supplementi: any[], tipo: string, fallback: RigaSuppl[]): RigaSuppl[] {
   const righe = (supplementi||[]).filter(s => s.tipo === tipo)
@@ -135,10 +144,19 @@ export default function ListinoCorrierePage() {
     {nome:'Consegna parziale e distruggi',prezzo:0,perc:0},
   ])
   const [aperturaGiacenza, setAperturaGiacenza] = useState(0)
+  // Supplementi del corriere (fuori misura…): solo sui contratti dove sono accesi (lib/supplementi-corriere).
+  const [conSupplementi, setConSupplementi] = useState(false)
+  const [supplementiCorriere, setSupplementiCorriere] = useState<VoceSupplemento[]>([])
   const [ritiroPrezzo, setRitiroPrezzo] = useState(0)
   const [ritiroPercNolo, setRitiroPercNolo] = useState(0)
   const [spondaSoglia, setSpondaSoglia] = useState(150)
   const [spondaPrezzoKg, setSpondaPrezzoKg] = useState(0)
+  // Minimo a collo (multicollo): euro per collo, 0 = non prezzato (lib/pricing → noloMulticollo).
+  const [minimoCollo, setMinimoCollo] = useState(0)
+  // MULTICOLLO (lib/multicollo-zone): fasce sulle zone multicollo del contratto (scheda Multicollo, stessa
+  // griglia di Pesi / Zone) e localita' remota / partenza remota.
+  const [fasceMC, setFasceMC] = useState<Fascia[]>([])
+  const [supplMC, setSupplMC] = useState<SupplMC | null>(null)
 
   // ── Duplica il COSTO di questo contratto in un LISTINO CLIENTE (nuovo o esistente) + maggiorazione ──
   const [dupOpen, setDupOpen] = useState(false)
@@ -194,10 +212,15 @@ export default function ListinoCorrierePage() {
     setSoloLetturaCorriere(!!data.corriereEreditato)
     setFattore(Number(data.listino?.fattore_volume) || 5000)
     setSoloPesoReale(!!data.listino?.solo_peso_reale)
-    setFasce(buildFasceInit(data.fasce || []))
-    // Zone reali definite in Gestione Zone per il corriere selezionato (colonne prezzi)
+    // Zone reali definite in Gestione Zone per il corriere selezionato (colonne prezzi). Le zone MULTICOLLO
+    // hanno la loro scheda: le loro fasce non si mescolano con quelle del collo singolo.
     const zTutte = await fetch('/api/zone').then(r => r.json()).catch(() => [])
-    setZoneCorr((Array.isArray(zTutte) ? zTutte : []).filter((z: any) => z.corriere_id === (data.corriereSelezionatoId || '')))
+    const zDelCorr = (Array.isArray(zTutte) ? zTutte : []).filter((z: any) => z.corriere_id === (data.corriereSelezionatoId || ''))
+    setZoneCorr(zDelCorr)
+    const idsMC = new Set<string>(zDelCorr.filter((z: any) => z.multicollo).map((z: any) => z.id))
+    setFasce(buildFasceInit((data.fasce || []).filter((f: any) => !idsMC.has(f.zona_id))))
+    const fMC = (data.fasce || []).filter((f: any) => idsMC.has(f.zona_id))
+    setFasceMC(fMC.length ? buildFasceInit(fMC) : FASCE_MC_DEFAULT())
     setRigheAssic(buildRigheDa(data.supplementi||[], 'assicurazione', [rigaVuota()]))
     setRigheContr(buildRigheDa(data.supplementi||[], 'contrassegno', [rigaVuota(), rigaVuota()]))
     // Servizi accessori DIVERSI per marca del corriere caricato (GLS≠Poste≠SDA): il master vede subito i
@@ -207,6 +230,8 @@ export default function ListinoCorrierePage() {
     setGiacenzeServizi(prev => buildServiziDa(data.supplementi||[], 'giacenza', prev))
     const aperturaRiga = (data.supplementi||[]).find((s:any) => s.tipo === 'giacenza_apertura')
     setAperturaGiacenza(aperturaRiga ? Number(aperturaRiga.valore)||0 : 0)
+    setConSupplementi(!!data.supplementiCorriere)
+    setSupplementiCorriere(vociSupplementoDa(data.supplementi||[]))
     const ritiroRiga = (data.supplementi||[]).find((s:any) => s.tipo === 'ritiro')
     setRitiroPrezzo(ritiroRiga ? Number(ritiroRiga.valore)||0 : 0)
     const ritiroDescr = ritiroRiga ? parseDescr(ritiroRiga.descrizione) : null
@@ -215,6 +240,8 @@ export default function ListinoCorrierePage() {
     const spondaDescr = spondaRiga ? parseDescr(spondaRiga.descrizione) : null
     setSpondaSoglia(spondaDescr?.soglia_kg ? Number(spondaDescr.soglia_kg)||150 : 150)
     setSpondaPrezzoKg(spondaRiga ? Number(spondaRiga.valore)||0 : 0)
+    setMinimoCollo(Math.max(0, ...(data.supplementi||[]).filter((s:any) => s.tipo === 'minimo_collo').map((s:any) => Number(s.valore)||0)))
+    setSupplMC(leggiSupplementiMulticollo(data.supplementi||[]))
     setLoading(false); setPronto(true)
   }
 
@@ -248,12 +275,16 @@ export default function ListinoCorrierePage() {
     await carica(idDaSelezionare)
   }
 
-  function addFascia() { setFasce(prev=>[...prev,{tipo:'fino_a',kg:'',prezzi:{},fuel:'0'}]) }
-  function removeFascia(i:number) { setFasce(prev=>prev.filter((_,idx)=>idx!==i)) }
-  function setFasciaKg(i:number,val:string) { setFasce(prev=>prev.map((f,idx)=>idx===i?{...f,kg:val}:f)) }
-  function setFasciaPrezzo(i:number,zona:string,val:string) { setFasce(prev=>prev.map((f,idx)=>idx===i?{...f,prezzi:{...f.prezzi,[zona]:val}}:f)) }
-  function setFasciaFuel(i:number,val:string) { setFasce(prev=>prev.map((f,idx)=>idx===i?{...f,fuel:val}:f)) }
-  function setFasciaTipo(i:number,val:string) { setFasce(prev=>prev.map((f,idx)=>idx===i?{...f,tipo:val}:f)) }
+  // Le stesse operazioni per le due griglie (Pesi / Zone e Multicollo): cambia solo l'elenco su cui lavorano.
+  type SetFasce = (f: (prev: Fascia[]) => Fascia[]) => void
+  const opFasce = (set: SetFasce) => ({
+    add: () => set(prev=>[...prev,{tipo:'fino_a',kg:'',prezzi:{},fuel:'0'}]),
+    remove: (i:number) => set(prev=>prev.filter((_,idx)=>idx!==i)),
+    kg: (i:number,val:string) => set(prev=>prev.map((f,idx)=>idx===i?{...f,kg:val}:f)),
+    prezzo: (i:number,zona:string,val:string) => set(prev=>prev.map((f,idx)=>idx===i?{...f,prezzi:{...f.prezzi,[zona]:val}}:f)),
+    fuel: (i:number,val:string) => set(prev=>prev.map((f,idx)=>idx===i?{...f,fuel:val}:f)),
+    tipo: (i:number,val:string) => set(prev=>prev.map((f,idx)=>idx===i?{...f,tipo:val}:f)),
+  })
   function setRigaAssic(i:number,k:keyof RigaSuppl,v:string) { setRigheAssic(prev=>prev.map((r,idx)=>idx===i?{...r,[k]:v}:r)) }
   function setRigaContr(i:number,k:keyof RigaSuppl,v:string) { setRigheContr(prev=>prev.map((r,idx)=>idx===i?{...r,[k]:v}:r)) }
 
@@ -264,7 +295,7 @@ export default function ListinoCorrierePage() {
     setSaving(true); setErrore('')
 
     const fasceArr: any[] = []
-    for (const f of fasce) {
+    for (const f of [...fasce, ...(zoneMC.length ? fasceMC : [])]) {
       const peso_max = parseFloat(f.kg) || 0
       for (const [zona_id, prezzo] of Object.entries(f.prezzi)) {
         const p = parseFloat(String(prezzo))
@@ -280,6 +311,10 @@ export default function ListinoCorrierePage() {
       giacenze: { servizi: giacenzeServizi, apertura: aperturaGiacenza },
       ritiro: { prezzo: ritiroPrezzo, perc_nolo: ritiroPercNolo },
       sponda: { soglia_kg: spondaSoglia, prezzo_kg: spondaPrezzoKg },
+      minimo_collo: minimoCollo,
+      // Solo dove il contratto ha zone multicollo: altrove non si manda e il server lascia com'era.
+      ...(zoneMC.length ? { multicollo_supplementi: supplMC } : {}),
+      ...(conSupplementi ? { supplementiCorriere } : {}),
     }
 
     const res = await fetch('/api/listini/corrieri', {
@@ -301,6 +336,77 @@ export default function ListinoCorrierePage() {
     borderBottom:tab===t?'2px solid #f97316':'2px solid transparent',
     whiteSpace:'nowrap' as const
   })
+
+  // Zone del collo singolo e zone multicollo del contratto aperto (Gestione Zone, segno "multicollo").
+  const zoneMono = zoneCorr.filter((z: any) => !z.multicollo)
+  const zoneMC = zoneCorr.filter((z: any) => z.multicollo)
+
+  // LA GRIGLIA PESI / ZONE: una sola, per il collo singolo e per il multicollo (stessa grafica, stesse
+  // regole: "fino a", "oltre X ogni", taglie, fuel). Cambiano solo le fasce e le colonne di zona.
+  const grigliaPesi = (lista: Fascia[], set: SetFasce, zoneLista: any[], avvisoVuoto: ReactNode, piede: string) => { const op = opFasce(set); return (
+        <div>
+          {!zoneLista.length && (
+            <div style={{margin:'12px',padding:'12px 14px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',fontSize:'12.5px',color:'#9a3412'}}>
+              {avvisoVuoto}
+            </div>
+          )}
+          <div style={{overflowX:'auto' as const}}>
+            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
+              <thead>
+                <tr style={{background:'#f9fafb'}}>
+                  <th style={{padding:'8px 10px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'left' as const}}>Peso (kg)</th>
+                  <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700'}}></th>
+                  {zoneLista.map(z=>(
+                    <th key={z.id} style={{padding:'8px 8px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'center' as const,whiteSpace:'nowrap' as const}}>{z.nome} €</th>
+                  ))}
+                  <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'center' as const}}>Fuel %</th>
+                  <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',width:'36px'}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((f,i)=>(
+                  <tr key={i} style={{borderBottom:'1px solid #e5e7eb',background:i%2===0?'#fff':'#fafafa'}}>
+                    <td style={{padding:'6px 10px',whiteSpace:'nowrap' as const}}>
+                      <select value={f.tipo} onChange={e=>op.tipo(i,e.target.value)} style={{padding:'4px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a'}}>
+                        <option value="fino_a">Fino a:</option>
+                        <option value="oltre">oltre X ogni</option>
+                        <option value="piccola">Piccola (box S)</option>
+                        <option value="media">Media (box M)</option>
+                        <option value="grande">Grande (box L)</option>
+                      </select>
+                    </td>
+                    <td style={{padding:'6px 6px'}}>
+                      {TAGLIE.includes(f.tipo) ? (
+                        <span style={{fontSize:'11px',color:'#999',fontStyle:'italic'}}>a taglia box</span>
+                      ) : (
+                      <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+                        <input type="number" value={f.kg} onChange={e=>op.kg(i,e.target.value)} style={{...inp,width:'65px',textAlign:'right' as const}}/>
+                        <span style={{fontSize:'11px',color:'#666'}}>kg</span>
+                      </div>
+                      )}
+                    </td>
+                    {zoneLista.map(z=>(
+                      <td key={z.id} style={{padding:'4px 4px',textAlign:'center' as const}}>
+                        <input type="number" step="0.01" value={f.prezzi[z.id]||''} onChange={e=>op.prezzo(i,z.id,e.target.value)} style={{...inp,width:'70px',textAlign:'right' as const}} placeholder="0.00"/>
+                      </td>
+                    ))}
+                    <td style={{padding:'4px 6px',textAlign:'center' as const}}>
+                      <input type="number" step="0.01" value={f.fuel||''} onChange={e=>op.fuel(i,e.target.value)} style={{...inp,width:'55px',textAlign:'right' as const}} placeholder="0"/>
+                    </td>
+                    <td style={{padding:'4px 6px',textAlign:'center' as const}}>
+                      <button onClick={()=>op.remove(i)} style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'50%',width:'22px',height:'22px',cursor:'pointer',color:'#dc2626',fontSize:'14px',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:'10px 16px',borderTop:'1px solid #e5e7eb',display:'flex',gap:'16px',alignItems:'center'}}>
+            <button onClick={op.add} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer',padding:0}}>+ Aggiungi fascia</button>
+            <span style={{fontSize:'11px',color:'#999'}}>{piede}</span>
+          </div>
+        </div>
+  ) }
 
   // Corpo dell'editor del contratto attualmente aperto (dentro la tendina).
   const editorContratto = (
@@ -334,72 +440,31 @@ export default function ListinoCorrierePage() {
       {/* Tabs — sempre cliccabili anche in sola lettura (pointer-events:auto sovrascrive il blocco):
           così si possono vedere Assicurazione/Contrassegni/Giacenze ecc., ma non modificarli. */}
       <div style={{display:'flex',borderBottom:'1px solid #d1d5db',padding:'0 16px',overflowX:'auto' as const,pointerEvents:'auto' as const}}>
-        {[['pesi','Pesi / Zone'],['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
+        {[['pesi','Pesi / Zone'],...(zoneMC.length?[['multicollo','Multicollo']]:[]),['assicurazione','Assicurazione'],['contrassegni','Contrassegni'],['servizi','Servizi accessori'],['giacenze','Giacenze'],['ritiro','Ritiro'],['extra','Extra']].map(([k,l])=>(
           <button key={k} style={tabStyle(k)} onClick={()=>setTab(k)}>{l}</button>
         ))}
       </div>
 
-      {tab==='pesi' && (
+      {tab==='pesi' && grigliaPesi(fasce, setFasce, zoneMono,
+        <>Nessuna zona definita per questo corriere. Vai su <b>Gestione Zone</b> e crea le zone (es. ITALIA, SICILIA, SARDEGNA…): compariranno qui come colonne prezzo.</>,
+        'Usa "oltre X ogni" per i pesi oltre l\'ultima fascia (es. oltre 50kg, +0,38 € ogni 1 kg). Così copri anche i 1000 kg. Per i locker (InPost) usa Piccola/Media/Grande: il prezzo va a taglia del box, non a peso.')}
+
+      {/* MULTICOLLO: stessa griglia, sulle zone multicollo del contratto; il prezzo e' sul PESO TOTALE della
+          spedizione (lib/multicollo-zone). Sotto: minimo a collo, localita' remota, partenza remota. */}
+      {tab==='multicollo' && (
         <div>
-          {!zoneCorr.length && (
-            <div style={{margin:'12px',padding:'12px 14px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',fontSize:'12.5px',color:'#9a3412'}}>
-              Nessuna zona definita per questo corriere. Vai su <b>Gestione Zone</b> e crea le zone (es. ITALIA, SICILIA, SARDEGNA…): compariranno qui come colonne prezzo.
-            </div>
-          )}
-          <div style={{overflowX:'auto' as const}}>
-            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
-              <thead>
-                <tr style={{background:'#f9fafb'}}>
-                  <th style={{padding:'8px 10px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'left' as const}}>Peso (kg)</th>
-                  <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700'}}></th>
-                  {zoneCorr.map(z=>(
-                    <th key={z.id} style={{padding:'8px 8px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'center' as const,whiteSpace:'nowrap' as const}}>{z.nome} €</th>
-                  ))}
-                  <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',color:'#1a1a1a',fontWeight:'700',textAlign:'center' as const}}>Fuel %</th>
-                  <th style={{padding:'8px 6px',borderBottom:'1px solid #d1d5db',width:'36px'}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {fasce.map((f,i)=>(
-                  <tr key={i} style={{borderBottom:'1px solid #e5e7eb',background:i%2===0?'#fff':'#fafafa'}}>
-                    <td style={{padding:'6px 10px',whiteSpace:'nowrap' as const}}>
-                      <select value={f.tipo} onChange={e=>setFasciaTipo(i,e.target.value)} style={{padding:'4px 6px',border:'1px solid #d1d5db',borderRadius:'4px',fontSize:'12px',color:'#1a1a1a'}}>
-                        <option value="fino_a">Fino a:</option>
-                        <option value="oltre">oltre X ogni</option>
-                        <option value="piccola">Piccola (box S)</option>
-                        <option value="media">Media (box M)</option>
-                        <option value="grande">Grande (box L)</option>
-                      </select>
-                    </td>
-                    <td style={{padding:'6px 6px'}}>
-                      {TAGLIE.includes(f.tipo) ? (
-                        <span style={{fontSize:'11px',color:'#999',fontStyle:'italic'}}>a taglia box</span>
-                      ) : (
-                      <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
-                        <input type="number" value={f.kg} onChange={e=>setFasciaKg(i,e.target.value)} style={{...inp,width:'65px',textAlign:'right' as const}}/>
-                        <span style={{fontSize:'11px',color:'#666'}}>kg</span>
-                      </div>
-                      )}
-                    </td>
-                    {zoneCorr.map(z=>(
-                      <td key={z.id} style={{padding:'4px 4px',textAlign:'center' as const}}>
-                        <input type="number" step="0.01" value={f.prezzi[z.id]||''} onChange={e=>setFasciaPrezzo(i,z.id,e.target.value)} style={{...inp,width:'70px',textAlign:'right' as const}} placeholder="0.00"/>
-                      </td>
-                    ))}
-                    <td style={{padding:'4px 6px',textAlign:'center' as const}}>
-                      <input type="number" step="0.01" value={f.fuel||''} onChange={e=>setFasciaFuel(i,e.target.value)} style={{...inp,width:'55px',textAlign:'right' as const}} placeholder="0"/>
-                    </td>
-                    <td style={{padding:'4px 6px',textAlign:'center' as const}}>
-                      <button onClick={()=>removeFascia(i)} style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'50%',width:'22px',height:'22px',cursor:'pointer',color:'#dc2626',fontSize:'14px',display:'flex',alignItems:'center',justifyContent:'center'}}>−</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{margin:'12px 16px 0',padding:'10px 14px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'8px',fontSize:'12.5px',color:'#4b5563',lineHeight:1.5}}>
+            Con <b>due o più colli</b> il prezzo è il più alto fra <b>colli × minimo per collo</b> e la fascia della <b>zona multicollo</b> sul <b>peso totale</b> della spedizione, più località remota e partenza remota. Il peso totale si conta collo per collo: misure al centimetro in su, volume, il più alto fra peso e volume arrotondato a mezzo chilo in su, poi la somma. Il collo singolo resta su <b>Pesi / Zone</b>.
           </div>
-          <div style={{padding:'10px 16px',borderTop:'1px solid #e5e7eb',display:'flex',gap:'16px',alignItems:'center'}}>
-            <button onClick={addFascia} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'600',cursor:'pointer',padding:0}}>+ Aggiungi fascia</button>
-            <span style={{fontSize:'11px',color:'#999'}}>Usa "oltre X ogni" per i pesi oltre l'ultima fascia (es. oltre 50kg, +0,38 € ogni 1 kg). Così copri anche i 1000 kg. Per i locker (InPost) usa Piccola/Media/Grande: il prezzo va a taglia del box, non a peso.</span>
+          {grigliaPesi(fasceMC, setFasceMC, zoneMC,
+            <>Nessuna zona multicollo su questo corriere. In <b>Gestione Zone</b> crea le zone col segno <b>multicollo</b>: compariranno qui come colonne prezzo.</>,
+            'Fasce sul peso totale della spedizione. Usa "oltre X ogni" per i pesi oltre l\'ultima fascia.')}
+          <div style={{padding:'0 16px 18px'}}>
+            <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'22px 0 4px'}}>Minimo per collo</div>
+            <div style={{fontSize:'12px',color:'#666',marginBottom:'10px'}}>Con due o più colli la spedizione costa almeno <b>numero di colli × minimo</b>.</div>
+            <input type="number" step="0.001" value={minimoCollo||''} onChange={e=>setMinimoCollo(parseFloat(e.target.value)||0)} disabled={soloLetturaCorriere} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/>
+            <SupplementiMulticollo chi="corriere" valore={supplMC} onChange={setSupplMC} sola={soloLetturaCorriere}
+              zoneRemote={zoneMono.filter((z:any)=>!z.su_mittente).map((z:any)=>z.nome)} zonePartenza={zoneMono.filter((z:any)=>z.su_mittente).map((z:any)=>z.nome)} />
           </div>
         </div>
       )}
@@ -528,6 +593,7 @@ export default function ListinoCorrierePage() {
             <input type="number" step="0.01" value={aperturaGiacenza||''} onChange={e=>setAperturaGiacenza(parseFloat(e.target.value)||0)} style={{...inp,width:'80px',textAlign:'right' as const}} placeholder="0"/>
           </div>
           <div style={{fontSize:'11px',color:'#f97316',marginTop:'4px'}}>* Il costo sarà addebitato solo nella fase di svincolo da parte del cliente</div>
+          {conSupplementi && <TabellaSupplementiCorriere voci={supplementiCorriere} onChange={setSupplementiCorriere} sola={soloLetturaCorriere} chi="corriere" />}
         </div>
       )}
 
@@ -565,6 +631,16 @@ export default function ListinoCorrierePage() {
             </div>
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 per disattivare la sponda su questo contratto.</div>
+
+          {!zoneMC.length && <>
+          <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'28px 0 4px'}}>Multicollo: minimo a collo</div>
+          <div style={{fontSize:'12px',color:'#666',marginBottom:'14px'}}>Con due o più colli la spedizione costa almeno <b>numero di colli × minimo</b>; se la fascia sul peso totale è più cara, vale la fascia. Es: minimo 7,85 € → 4 colli da 5 kg = 4 × 7,85 = 31,40 €, anche se la fascia dei 20 kg costa 13,43 €.</div>
+          <div>
+            <label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Minimo per collo (€)</label>
+            <input type="number" step="0.01" value={minimoCollo||''} onChange={e=>setMinimoCollo(parseFloat(e.target.value)||0)} disabled={soloLetturaCorriere} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/>
+          </div>
+          <div style={{fontSize:'11px',color:'#999',marginTop:'10px'}}>Lascia 0 se il contratto non ha un minimo a collo. Se il corriere lo richiede e non è prezzato, il multicollo su questo contratto non è disponibile.</div>
+          </>}
         </div>
       )}
     </div>
@@ -645,6 +721,7 @@ export default function ListinoCorrierePage() {
                     <span style={{width:'40px',height:'40px',borderRadius:'8px',background:aperto?'#f97316':'#f3f4f6',color:aperto?'#fff':'#6b7280',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'12px',fontWeight:'700',flexShrink:0}}>{iniziali(c.nome_contratto)}</span>
                   )}
                   <span style={{flex:1,fontSize:'14px',fontWeight:'600',color:'#1a1a1a',display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap' as const}}>{c.nome_contratto}
+                    <CodiceContratto codice={c.codice} piccolo />
                     {c.sospeso_sopra && <span title="Un master superiore lo ha messo in pausa: tu lo vedi e ne prepari i prezzi, ma il cliente non lo vede finché non viene riattivato a monte." style={{background:'#fef2f2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'20px',fontSize:'10.5px',fontWeight:700,padding:'2px 8px'}}>⏸ In pausa da un livello superiore</span>}</span>
                   <span style={{fontSize:'18px',color:'#9ca3af',transform:aperto?'rotate(90deg)':'none',transition:'transform 0.15s'}}>›</span>
                 </div>

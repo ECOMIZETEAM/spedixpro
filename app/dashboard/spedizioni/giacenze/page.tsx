@@ -6,6 +6,7 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -20,8 +21,9 @@ function filtriDefault() {
     clienteId:'', vettore:'', contratto:'',
     // Default AMPIO (ultimo anno): le giacenze aperte vanno viste tutte, non solo quelle di oggi.
     // Il filtro lato server è su giacenza_data (entrata in giacenza), non sulla data di spedizione.
-    dal: new Date(Date.now() - 365*24*60*60*1000).toISOString().split('T')[0],
-    al: new Date().toISOString().split('T')[0],
+    // Giorni di Roma: col giorno UTC, fra mezzanotte e le 2 "oggi" era ancora ieri.
+    dal: giorniFaRoma(365),
+    al: giornoRoma(),
     stato:''
   }
 }
@@ -30,6 +32,7 @@ export default function GiacenzePage() {
   const [giacenze, setGiacenze] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [errore, setErrore] = useState('')
   const [cerca, setCerca] = useFiltriPersistenti('giacenze-master:cerca', '')
   const [perPage, setPerPage] = useFiltriPersistenti('giacenze-master:perPage', 10)
   const [pagina, setPagina] = useState(1)
@@ -49,8 +52,10 @@ export default function GiacenzePage() {
     if (filtri.stato) params.set('stato', filtri.stato)
     if (filtri.dal) params.set('dal', filtri.dal)
     if (filtri.al) params.set('al', filtri.al)
+    // Una lettura fallita si dice: prima la pagina mostrava "nessuna giacenza", come se non ce ne fossero.
     const res = await fetch(`/api/giacenze?${params}`)
-    const data = await res.json()
+    const data = await res.json().catch(() => null)
+    setErrore(Array.isArray(data) ? '' : (data?.error || 'Lettura delle giacenze non riuscita'))
     setGiacenze(Array.isArray(data) ? data : [])
     setLoading(false)
   }
@@ -168,6 +173,8 @@ export default function GiacenzePage() {
 
         {loading ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
+        ) : errore ? (
+          <div style={{padding:'60px',textAlign:'center' as const,color:'#b91c1c'}}>{errore}</div>
         ) : !giacenzeFiltrate.length ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>
             <div style={{fontSize:'36px',marginBottom:'12px'}}>📦</div>

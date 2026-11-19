@@ -31,6 +31,11 @@ export function eTitolareOAdmin(u: UtenteRuolo): boolean {
   return r(u) === 'master' || r(u) === 'admin'
 }
 
+/** I COLLABORATORI di un master: gli accessi che il titolare e gli admin gestiscono dalla pagina Staff.
+ *  Il titolare (ruolo 'master') e i login cliente hanno lo stesso master_id, ma qui non ci sono: con il
+ *  solo controllo sul master_id se ne potevano toccare password e accesso (vedi app/api/staff). */
+export const RUOLI_STAFF = ['admin', 'operatore', 'agente', 'autista']
+
 /** Puo' almeno GUARDARE le cose della rete: come sopra, piu' l'agente, che vede pero' soltanto i
  *  propri clienti — il filtro per cliente resta a carico di chi chiama. */
 export function vedeLaRete(u: UtenteRuolo): boolean {

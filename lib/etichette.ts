@@ -102,17 +102,27 @@ export async function leggiEtichetta(
 ): Promise<EtichettaLetta | null> {
   if (sped?.etichetta_path) {
     const da = await scaricaEtichetta(admin, sped.etichetta_path)
-    if (da) return da
+    if (da) return inPdfSeImmagine(da)
     // Il percorso c'e' ma il file no: non ci si ferma qui, si prova comunque il base64.
     console.error('[ETICHETTE] percorso presente ma file mancante', sped.etichetta_path)
   }
   const dal = scomponiDataUrl(sped?.etichetta_url)
-  if (dal) return { ...dal, ext: estensioneDa(dal.mime) }
+  if (dal) return inPdfSeImmagine({ ...dal, ext: estensioneDa(dal.mime) })
   const legacy = sped?.raw_response?.labelData
   if (legacy) {
     try { return { buffer: Buffer.from(legacy, 'base64'), mime: 'application/pdf', ext: 'pdf' } } catch { }
   }
   return null
+}
+
+// UPS da' una GIF (o uno ZIP di GIF nel multicollo): la si serve come PDF verticale 10x15, vedi
+// lib/etichetta-immagine. Si guardano i BYTE, non il tipo dichiarato: fino al 21/10 la catena della
+// condivisione salvava le GIF come application/pdf.
+async function inPdfSeImmagine(et: EtichettaLetta): Promise<EtichettaLetta> {
+  const { eGif, eZip, etichettaImmagineInPdf } = await import('@/lib/etichetta-immagine')
+  if (!eGif(et.buffer) && !eZip(et.buffer)) return et
+  const pdf = await etichettaImmagineInPdf(et.buffer)
+  return pdf ? { buffer: pdf, mime: 'application/pdf', ext: 'pdf' } : et
 }
 
 // COME leggiEtichetta, MA MULTICOLLO. Se la spedizione ha più colli e ognuno ha la SUA etichetta,
@@ -160,6 +170,23 @@ export async function nomeMasterEtichetta(admin: any, masterId?: string | null):
 // di un altro collo. La stampa SINGOLA non aveva il problema (passa da leggiEtichettaCompleta, che
 // il percorso lo legge): le due strade dicevano cose diverse sulla stessa spedizione.
 export async function sorgentiEtichettePerStampa(
+  admin: any,
+  sped: { etichetta_url?: string | null; etichetta_path?: string | null; colli_dettaglio?: any; raw_response?: any }
+): Promise<Array<{ url?: string; bytes?: Uint8Array }>> {
+  // Chi stampa in blocco apre ogni sorgente come PDF: una GIF UPS gli dava "ETICHETTA NON
+  // DISPONIBILE". Le immagini arrivano gia' convertite, come nella stampa singola.
+  const sorgenti = await sorgentiGrezze(admin, sped)
+  return Promise.all(sorgenti.map(async s => {
+    // Un data URL si decodifica solo se comincia come una GIF (R0lGOD) o uno ZIP (UEsDB): gli altri
+    // sono PDF, e la stampa in blocco ne passa centinaia.
+    const byte = s.bytes || (s.url && /^data:[^,]*;base64,(R0lGOD|UEsDB)/.test(s.url) ? scomponiDataUrl(s.url)?.buffer : null)
+    if (!byte?.length) return s
+    const et = await inPdfSeImmagine({ buffer: Buffer.from(byte), mime: '', ext: '' })
+    return et.mime === 'application/pdf' ? { bytes: new Uint8Array(et.buffer) } : s
+  }))
+}
+
+async function sorgentiGrezze(
   admin: any,
   sped: { etichetta_url?: string | null; etichetta_path?: string | null; colli_dettaglio?: any; raw_response?: any }
 ): Promise<Array<{ url?: string; bytes?: Uint8Array }>> {
@@ -214,9 +241,13 @@ export async function sorgentiEtichettePerStampa(
 // che il cliente scarica sta sul contratto condiviso; su 'poste' ci sono solo le gambe interne, che
 // nessun cliente apre (13/10: 11.934 righe cliente in una settimana, tutte su 'moovexpress'). Guardando
 // solo 'poste' la nuova resa non arrivava a nessuno. L'etichetta e' la stessa 1011 in entrambi i casi.
+// SDA EXPRESS L2 (18/11/2026) e' lo stesso contratto di LOGIXIA con le stesse credenziali, venduto a Wave a
+// un altro prezzo: stessa LDV, stesso A4 di KSync. Fuori da questo elenco usciva l'A4 con tre copie per
+// pagina, e sulla Zebra al 47%. CONSEGNA DIRETTA resta fuori come prima.
+const NOMI_SDA_EXPRESS_L = new Set(['SDA EXPRESS L', 'SDA EXPRESS L2'])
 export function contrattoSdaExpressL(corr: { tipo?: string | null; nome_contratto?: string | null } | null | undefined): boolean {
   return (corr?.tipo === 'poste' || corr?.tipo === 'moovexpress')
-    && String(corr?.nome_contratto || '').trim().toUpperCase() === 'SDA EXPRESS L'
+    && NOMI_SDA_EXPRESS_L.has(String(corr?.nome_contratto || '').trim().toUpperCase())
 }
 
 // INTERRUTTORE della resa pulita SDA EXPRESS L. PER SPEGNERLA: false e rilascio; da quel momento
@@ -229,9 +260,11 @@ export async function leggiEtichettaCompleta(
   // resaSda: la resa pulita SDA EXPRESS L va CHIESTA, e la chiedono solo le porte di stampa (true, o una
   // funzione che decide in base a chi stampa: la si chiama solo se il contratto e' SDA). Senza, esce la
   // 1011 com'e' arrivata da Poste: un punto nuovo che salva l'etichetta e dimentica l'opzione salva
-  // l'originale, non una resa. L'API v1 non la chiede: da li' la catena della condivisione scarica
-  // l'etichetta e la SALVA sulla riga del compratore (lib/moovexpress).
-  opz: { resaSda?: boolean | (() => Promise<boolean>) } = {}
+  // l'originale, non una resa. L'API v1 la chiede solo per i partner: la catena della condivisione
+  // (chiavi dei clienti-ledger) scarica da li' l'etichetta e la SALVA sulla riga del compratore.
+  // 'zebra' = chi stampa ha la Zebra (lib/formato-etichetta, resaSdaAdatta): la resa girata in verticale
+  // se l'originale e' l'A4 di KSync, la 1011 com'e' se l'originale e' quella (lib/etichetta-sda).
+  opz: { resaSda?: boolean | 'zebra' | (() => Promise<boolean | 'zebra'>) } = {}
 ): Promise<EtichettaLetta | null> {
   const et = await leggiEtichettaGrezza(admin, sped)
   const resaChiesta = RESA_SDA_ATTIVA && !!opz.resaSda
@@ -247,10 +280,13 @@ export async function leggiEtichettaCompleta(
       // SDA EXPRESS L (Poste Delivery Business): la 1011 che torna da Poste e' ruotata e coi campi
       // accavallati. La ri-rendiamo nel layout pulito approvato, COPIANDO i codici originali (restano
       // quelli di SDA, scansionabili). Qualunque problema → torna l'etichetta ORIGINALE (vedi sotto).
-      if (resaChiesta && contrattoSdaExpressL(corr) && (typeof opz.resaSda === 'function' ? await opz.resaSda() : true)) {
-        const { riscriviEtichettaSdaExpressL, datiEtichettaSda } = await import('@/lib/etichetta-sda')
+      const modo = resaChiesta && contrattoSdaExpressL(corr)
+        ? (typeof opz.resaSda === 'function' ? await opz.resaSda() : opz.resaSda)
+        : false
+      if (modo) {
+        const { riscriviEtichettaSdaExpressL, resaSdaPerZebra, datiEtichettaSda } = await import('@/lib/etichetta-sda')
         const dati = await datiEtichettaSda(admin, sped.numero)
-        if (dati) return { ...et, buffer: await riscriviEtichettaSdaExpressL(et.buffer, dati) }
+        if (dati) return { ...et, buffer: modo === 'zebra' ? await resaSdaPerZebra(et.buffer, dati) : await riscriviEtichettaSdaExpressL(et.buffer, dati) }
       }
       if (!perFornitori) return et
       if ((corr as any)?.tipo === 'spediamopro') {
@@ -314,6 +350,104 @@ async function leggiEtichettaGrezza(
   return null
 }
 
+// L'ETICHETTA CHE ALLA CREAZIONE NON C'ERA ANCORA: la si prende adesso e la si salva sulla riga.
+//
+// GLS diretto: GLS genera il PDF con un attimo di ritardo dopo AddParcel (lib/gls,
+// recuperaEtichettaGlsSalvando).
+// PONTE fra reti (corriere tipo 'moovexpress'): la riga del compratore salva l'etichetta che il venditore
+// le da' alla creazione, e dopo non la richiedeva piu'. Il 10/11/2026 le 28 GLS di DE ROSA SRL (cliente
+// di QUICK sul GLS NI W LIGHT di Wave) sono nate cosi': GLS non aveva ancora il PDF, la riga di Wave e'
+// rimasta senza, la rotta etichetta dell'API non la riprendeva, e quella di Quick non l'ha mai avuta.
+// In stampa usciva "ETICHETTA NON DISPONIBILE" su pacchi gia' creati su GLS. Qui la si richiede al
+// venditore, che a sua volta, se manca anche a lui, la riprende dal corriere con questa stessa funzione.
+//
+// Un posto solo per le porte che stampano: dettaglio, elenco (singola e in blocco) e API. Mai bloccante.
+//
+// MULTICOLLO GLS CON COLLI SENZA ETICHETTA (11/11/2026): `attuale` e' quella gia' letta. Se c'e' ma ha
+// meno pagine dei colli — GLS ne fa una per collo — si riprendono i colli che mancano (lib/gls,
+// recuperaEtichettaGlsSalvando); prima qui si entrava solo senza nessuna etichetta, e un multicollo con
+// un collo non pronto alla creazione restava cosi' per sempre: il pacco partiva con un'etichetta in meno.
+// Vale anche per i PONTI che finiscono su un GLS: la riga del compratore ha il PDF che il venditore le
+// ha dato alla creazione, e lo si richiede (il venditore, a sua volta, riprende i colli da GLS). Gli altri
+// corrieri non si toccano: il conto delle pagine per collo vale solo per GLS. Torna sempre la migliore
+// fra le due, quindi le porte possono chiamarla sempre: senza un caso GLS torna subito `attuale`.
+export async function recuperaEtichettaMancante(
+  admin: any,
+  sped: { id: string; corriere_id?: string | null; master_id?: string | null; colli?: number | null; raw_response?: any; colli_dettaglio?: any; etichetta_url?: string | null; etichetta_path?: string | null },
+  attuale: EtichettaLetta | null = null,
+): Promise<EtichettaLetta | null> {
+  const raw = (sped?.raw_response || {}) as any
+  if (!raw._gls && !raw._moovexpress) return attuale
+  const nColli = Math.max(1, Math.round(Number(sped?.colli) || 1))
+  let pagineAttuale = 0
+  if (attuale) {
+    if (nColli <= 1 || attuale.mime !== 'application/pdf') return attuale
+    if (raw._moovexpress && !(await ponteFinisceSuGls(admin, raw))) return attuale
+    pagineAttuale = await pagineDi(attuale.buffer)
+    if (pagineAttuale >= nColli) return attuale
+  }
+  try {
+    if (raw._gls) {
+      const { recuperaEtichettaGlsSalvando } = await import('@/lib/gls')
+      const buf = await recuperaEtichettaGlsSalvando(admin, sped)
+      return buf?.length ? { buffer: buf, mime: 'application/pdf', ext: 'pdf' } : attuale
+    }
+    if (raw._moovexpress && raw.label_url && sped.corriere_id) {
+      // master_id letto qui e non dalle porte: nella loro select accenderebbe la riscrittura del
+      // mittente in leggiEtichettaCompleta.
+      let masterId = sped.master_id || null
+      if (!masterId) { const { data: m } = await admin.from('spedizioni').select('master_id').eq('id', sped.id).maybeSingle(); masterId = m?.master_id || null }
+      if (!masterId) return attuale
+      const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto').eq('id', sped.corriere_id).maybeSingle()
+      if (corr?.tipo !== 'moovexpress') return attuale
+      // La chiave e' quella con cui la riga e' stata creata (app/api/spedizioni/crea, ramo moovexpress).
+      const { risolviChiaveDispatch } = await import('@/lib/condivisione-catena')
+      const cred = await risolviChiaveDispatch(admin, masterId, corr.nome_contratto)
+      if (!cred) return attuale
+      const { etichettaMoovexpress } = await import('@/lib/moovexpress')
+      const lab = await etichettaMoovexpress(cred as any, String(raw.label_url))
+      if (!lab.buffer.length) return attuale
+      // Con un'etichetta gia' salvata, si sostituisce solo se quella del venditore ha piu' colli.
+      if (attuale && (lab.mime !== 'application/pdf' || (await pagineDi(lab.buffer)) <= pagineAttuale)) return attuale
+      // Salvata come alla creazione: sulla spedizione e su ogni collo (una LDV, un file per tutto il pacco).
+      const dataUrl = `data:${lab.mime};base64,${lab.buffer.toString('base64')}`
+      const colli = Array.isArray(sped.colli_dettaglio) ? (sped.colli_dettaglio as any[]) : null
+      try {
+        await admin.from('spedizioni').update({
+          etichetta_url: dataUrl, ...(colli?.length ? { colli_dettaglio: colli.map((c: any) => ({ ...c, etichetta_url: dataUrl })) } : {}),
+        }).eq('id', sped.id)
+      } catch { /* il salvataggio e' best-effort: l'importante e' restituire l'etichetta adesso */ }
+      return { buffer: lab.buffer, mime: lab.mime, ext: estensioneDa(lab.mime) }
+    }
+  } catch (e: any) {
+    console.error('[ETICHETTE] recupero etichetta mancante', sped?.id, e?.message)
+  }
+  return attuale
+}
+
+async function pagineDi(buf: Buffer): Promise<number> {
+  try {
+    const { PDFDocument } = await import('pdf-lib')
+    return (await PDFDocument.load(new Uint8Array(buf), { ignoreEncryption: true })).getPageCount()
+  } catch { return 0 }
+}
+
+// Il ponte arriva a un GLS? Si scende di venditore in venditore (le gambe stanno nello stesso database)
+// finche' non si trova la riga del corriere vero. Pochi salti al massimo: oggi le catene ne hanno 1-2.
+async function ponteFinisceSuGls(admin: any, raw: any): Promise<boolean> {
+  let idVenditore = raw?.venditore_spedizione_id ? String(raw.venditore_spedizione_id) : ''
+  for (let salto = 0; idVenditore && salto < 4; salto++) {
+    const { data } = await admin.from('spedizioni')
+      .select('gls:raw_response->>_gls, ponte:raw_response->>_moovexpress, venditore:raw_response->>venditore_spedizione_id')
+      .eq('id', idVenditore).maybeSingle()
+    if (!data) return false
+    if (String((data as any).gls) === 'true') return true
+    if (String((data as any).ponte) !== 'true') return false
+    idVenditore = (data as any).venditore ? String((data as any).venditore) : ''
+  }
+  return false
+}
+
 // ARCHIVIA UN LOTTO: prende le righe che hanno ancora il PDF dentro, lo mette su Storage e scrive
 // il percorso. NON cancella il base64: finche' non c'e' la prova sul campo, le copie restano due.
 //
@@ -371,65 +505,187 @@ export async function archiviaLotto(admin: any, quante = 100): Promise<{
 // LIBERA il base64 GIÀ ARCHIVIATO. archiviaLotto scrive `etichetta_path` ma TIENE il base64 in
 // `etichetta_url` come rete di sicurezza "finché non c'è la prova sul campo". Questa è la prova: per
 // ogni riga già archiviata rilegge il file da Storage e lo confronta byte-per-byte col base64; solo
-// se combacia, azzera `etichetta_url`. Fa lo stesso con le etichette PER-COLLO dei multicollo dentro
-// `colli_dettaglio` (le archivia su Storage con percorso per-collo, poi toglie il base64). MAI
-// cancellare una copia inline senza aver verificato che quella su Storage è integra: se il file manca
-// o è diverso, il base64 resta. È il grosso dello spazio del TOAST (etichette duplicate).
-export async function liberaEtichetteArchiviate(admin: any, quante = 80): Promise<{
-  esaminate: number; url_liberati: number; colli_archiviati: number; saltate: number
+// se il file con quei byte c'è, azzera `etichetta_url`. Fa lo stesso con le etichette PER-COLLO dei
+// multicollo dentro `colli_dettaglio`. MAI cancellare una copia inline senza aver verificato che
+// quella su Storage è integra. È il grosso dello spazio del database (etichette duplicate).
+//
+// NESSUN BYTE SI PERDE E NESSUN FILE SI SOVRASCRIVE CON BYTE DIVERSI. Il 05/11/2026 su 150 righe
+// prese da questo giro 133 venivano saltate a ogni passata, per sempre: il base64 nella riga non era
+// piu' quello archiviato. Le riscriveva il giro del tracking, che vedendo `etichetta_url` vuoto
+// credeva l'etichetta mancante e la riscaricava dal fornitore (su DVA solo il PRIMO collo: es.
+// 3UW1WLJ015159, archiviata a 2 pagine, nella riga ne era tornata 1). Quelle righe restavano in testa
+// alla scelta e il giro liberava 0-27 etichette su 150: a fine ottobre ~450.000 spedizioni avevano
+// ancora il PDF dentro, e il database cresceva di 8 GB al giorno. Ora ogni caso si chiude:
+//  - file uguale al base64          → si toglie il base64;
+//  - file presente ma diverso       → il base64 si salva ACCANTO (…-riga-<impronta>.pdf) e si toglie
+//                                     dalla riga; il percorso resta quello che le stampe leggono oggi;
+//  - file assente (lo dice l'elenco della cartella, non un download fallito) → il base64 si carica
+//                                     proprio li', e chi legge trova gli stessi byte di prima.
+// Se l'elenco della cartella non risponde, la riga resta com'e' e si riprova al giro dopo.
+//
+// La scelta parte da un punto a caso delle prime 1.500: se restasse qualche riga che non si puo'
+// chiudere (un etichetta_url che non e' un PDF), non tornerebbe a bloccare la testa della coda.
+// Le colonne pesanti si leggono a gruppi di pochi: 150 righe con colli_dettaglio insieme (le SDA
+// EXPRESS L hanno ~1,7 MB per collo) erano centinaia di MB in un colpo solo nella memoria del database.
+export async function liberaEtichetteArchiviate(admin: any, quante = 80, opz: {
+  entroMs?: number        // tempo massimo del giro: si chiude il gruppo in corso e ci si ferma
+  inParallelo?: number    // righe lavorate insieme (e lette insieme con le colonne pesanti)
+  provaAVuoto?: boolean   // nessuna scrittura: dice solo cosa farebbe, riga per riga
+  soloIds?: string[]      // solo queste spedizioni (prove, o un caso da chiudere a mano)
+} = {}): Promise<{
+  esaminate: number; url_liberati: number; colli_archiviati: number; copie_accanto: number
+  riparati: number; saltate: number; righe?: Array<{ numero: string; esito: string }>
 }> {
+  const scadenza = Date.now() + (opz.entroMs ?? 60_000)
+  const insieme = Math.max(1, Math.min(10, opz.inParallelo ?? 1))
+  const vuoto = !!opz.provaAVuoto
   const impronta = (b: Buffer) => createHash('sha1').update(b).digest('hex')
+  const esito = { esaminate: 0, url_liberati: 0, colli_archiviati: 0, copie_accanto: 0, riparati: 0, saltate: 0,
+    ...(vuoto ? { righe: [] as Array<{ numero: string; esito: string }> } : {}) }
+
   // L'indice parziale idx_sped_libera_base64 (etichetta_path not null AND etichetta_url not null)
   // rende questa ricerca istantanea e si RESTRINGE man mano che si liberano le righe.
-  const { data: righe } = await admin.from('spedizioni')
-    .select('id,numero,created_at,etichetta_url,etichetta_path,colli_dettaglio')
+  const scegli = (da: number) => admin.from('spedizioni')
+    .select('id,numero,created_at,etichetta_path')
     .not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
-    .limit(quante)
-
-  let url_liberati = 0, colli_archiviati = 0, saltate = 0
-  for (const r of righe || []) {
-    const upd: any = {}
-
-    // (1) etichetta_url: azzera SOLO se la copia su Storage esiste e combacia.
-    const inline = scomponiDataUrl(r.etichetta_url)
-    if (inline?.buffer?.length) {
-      const suStorage = await scaricaEtichetta(admin, r.etichetta_path)
-      if (suStorage?.buffer?.length && impronta(suStorage.buffer) === impronta(inline.buffer)) {
-        upd.etichetta_url = null
-      }
+    .range(da, da + quante - 1)
+  const scegliRighe = async (): Promise<any[]> => {
+    if (opz.soloIds?.length) {
+      const { data } = await admin.from('spedizioni').select('id,numero,created_at,etichetta_path')
+        .in('id', opz.soloIds).not('etichetta_path', 'is', null).not('etichetta_url', 'is', null)
+      return data || []
     }
-    // Se etichetta_url NON è un data-url (http, o già svuotato in questa passata) non si tocca.
+    const partenza = Math.floor(Math.random() * 1500)
+    let { data } = await scegli(partenza)
+    if (!data?.length && partenza) ({ data } = await scegli(0))
+    return data || []
+  }
 
-    // (2) colli_dettaglio: archivia le etichette per-collo base64 e toglie il base64 (solo se ok).
-    const colli = Array.isArray(r.colli_dettaglio) ? (r.colli_dettaglio as any[]) : null
+  // Elenco della cartella, cercando per nome: e' l'unico modo di sapere che un file NON c'e' (un
+  // download fallito puo' essere un intoppo di rete). null = non lo so.
+  const esiste = async (path: string): Promise<boolean | null> => {
+    const i = path.lastIndexOf('/')
+    const nome = path.slice(i + 1)
+    const { data, error } = await admin.storage.from(BUCKET).list(i > 0 ? path.slice(0, i) : '', { limit: 100, search: nome })
+    return error || !data ? null : (data as any[]).some(f => f.name === nome)
+  }
+  // Carica e RILEGGE: torna il percorso solo se il file riletto ha esattamente quei byte.
+  const caricaVerificato = async (path: string, d: { buffer: Buffer; mime: string }): Promise<string | null> => {
+    if (vuoto) return path
+    const { error } = await admin.storage.from(BUCKET).upload(path, d.buffer, { contentType: d.mime, upsert: true })
+    if (error) { console.error('[LIBERA-ETICHETTE] caricamento fallito', path, error.message); return null }
+    const r = await scaricaEtichetta(admin, path)
+    return r?.buffer?.length && impronta(r.buffer) === impronta(d.buffer) ? path : null
+  }
+  // Dove stanno, su Storage, ESATTAMENTE i byte `d`, a partire dal percorso `atteso`:
+  //  - 'uguale'  : il file in `atteso` ha gia' quei byte;
+  //  - 'accanto' : in `atteso` c'e' un file DIVERSO → i byte vanno in `accanto` (mai sopra l'altro);
+  //  - 'riparato': in `atteso` non c'e' niente → i byte vanno li';
+  //  - null      : non si sa (download o elenco non riusciti) → non si tocca niente.
+  const sistema = async (atteso: string, accanto: string, d: { buffer: Buffer; mime: string }):
+    Promise<{ path: string; come: 'uguale' | 'accanto' | 'riparato' } | null> => {
+    const su = await scaricaEtichetta(admin, atteso)
+    if (su?.buffer?.length) {
+      if (impronta(su.buffer) === impronta(d.buffer)) return { path: atteso, come: 'uguale' }
+      const p = await caricaVerificato(accanto, d)
+      return p ? { path: p, come: 'accanto' } : null
+    }
+    if ((await esiste(atteso)) !== false) return null
+    const p = await caricaVerificato(atteso, d)
+    return p ? { path: p, come: 'riparato' } : null
+  }
+
+  const lavora = async (r: any, pesante: any) => {
+    const upd: any = {}
+    const note: string[] = []
+    const quando = r.created_at ? new Date(r.created_at) : new Date()
+    const cartella = percorsoEtichetta(r.id, quando, 'x').replace(/\/[^/]+$/, '')
+
+    // (1) etichetta della spedizione. Le stampe leggono PRIMA `etichetta_path`: resta quello.
+    const inline = scomponiDataUrl(pesante?.etichetta_url)
+    if (inline?.buffer?.length) {
+      const ext = estensioneDa(inline.mime)
+      const s = await sistema(String(r.etichetta_path), `${cartella}/sped-riga-${impronta(inline.buffer).slice(0, 8)}.${ext}`, inline)
+      if (s) {
+        upd.etichetta_url = null
+        note.push('sped:' + s.come)
+        if (s.come === 'accanto') esito.copie_accanto++
+        if (s.come === 'riparato') esito.riparati++
+      } else note.push('sped:non-so')
+    } else note.push('sped:non-pdf')
+    // Se etichetta_url NON è un data-url (http, o testo) non si tocca.
+
+    // (2) etichette per collo. Chi stampa il collo legge il SUO percorso se c'e', altrimenti il base64:
+    // dopo, deve trovare gli stessi byte di prima.
+    const colli = Array.isArray(pesante?.colli_dettaglio) ? (pesante.colli_dettaglio as any[]) : null
     if (colli && colli.some((c: any) => typeof c?.etichetta_url === 'string' && c.etichetta_url.startsWith('data:'))) {
-      const quando = r.created_at ? new Date(r.created_at) : new Date()
+      const nuovi = colli.map((c: any) => c)
       let cambiato = false
-      const nuovi = colli.map((c: any) => c)   // copia, la riempio sotto
       for (let i = 0; i < colli.length; i++) {
         const d = scomponiDataUrl(colli[i]?.etichetta_url)
         if (!d?.buffer?.length) continue
+        const ext = estensioneDa(d.mime)
+        const giaPath = colli[i]?.etichetta_path ? String(colli[i].etichetta_path) : null
         // numero collo per il percorso: l'indice i+1 è sempre affidabile (il campo `numero` a volte è la LDV).
-        const path = await caricaEtichetta(admin, r.id, d.buffer, d.mime, quando, i + 1)
-        if (!path) continue
-        const riletto = await scaricaEtichetta(admin, path)
-        if (riletto?.buffer?.length && impronta(riletto.buffer) === impronta(d.buffer)) {
-          nuovi[i] = { ...colli[i], etichetta_url: null, etichetta_path: path }
-          cambiato = true; colli_archiviati++
-        }
+        const atteso = giaPath || percorsoEtichetta(r.id, quando, ext, i + 1)
+        const s = await sistema(atteso, `${cartella}/collo-${i + 1}-riga-${impronta(d.buffer).slice(0, 8)}.${ext}`, d)
+        if (!s) { note.push(`collo${i + 1}:non-so`); continue }
+        // Col percorso gia' presente e il file al suo posto, il collo si leggeva GIA' da li': resta li'.
+        // Senza percorso si leggeva il base64: il percorso nuovo e' quello che ne contiene i byte.
+        const path = giaPath && s.come === 'accanto' ? giaPath : s.path
+        nuovi[i] = { ...colli[i], etichetta_url: null, etichetta_path: path }
+        cambiato = true; esito.colli_archiviati++
+        if (s.come === 'accanto') esito.copie_accanto++
+        if (s.come === 'riparato') esito.riparati++
+        note.push(`collo${i + 1}:${s.come}`)
       }
       if (cambiato) upd.colli_dettaglio = nuovi
     }
 
-    if (Object.keys(upd).length) {
-      const { error } = await admin.from('spedizioni').update(upd).eq('id', r.id)
-      if (error) { console.error('[LIBERA-ETICHETTE]', r.numero, error.message); saltate++; continue }
-      if ('etichetta_url' in upd) url_liberati++
-    } else saltate++
+    if (esito.righe) esito.righe.push({ numero: r.numero, esito: note.join(' ') })
+    if (!Object.keys(upd).length) { esito.saltate++; return }
+    if (vuoto) { if ('etichetta_url' in upd) esito.url_liberati++; return }
+    const { error } = await admin.from('spedizioni').update(upd).eq('id', r.id)
+    if (error) { console.error('[LIBERA-ETICHETTE]', r.numero, error.message); esito.saltate++; return }
+    if ('etichetta_url' in upd) esito.url_liberati++
   }
-  const esito = { esaminate: (righe || []).length, url_liberati, colli_archiviati, saltate }
-  if (esito.esaminate) console.log('[LIBERA-ETICHETTE]', JSON.stringify(esito))
+
+  // La scelta torna al massimo 1.000 righe (tetto delle risposte): finche' c'e' tempo se ne prende
+  // un'altra. Ci si ferma se un giro intero non ha liberato niente, per non rigirare a vuoto su righe
+  // che non si possono chiudere.
+  let fermo = false
+  while (!fermo && Date.now() < scadenza) {
+    const righe = await scegliRighe()
+    if (!righe.length) break
+    const primaDelGiro = esito.url_liberati + esito.colli_archiviati
+    for (let i = 0; i < righe.length && Date.now() < scadenza; i += insieme) {
+      const gruppo = righe.slice(i, i + insieme)
+      const { data: pesanti, error } = await admin.from('spedizioni')
+        .select('id,etichetta_url,colli_dettaglio').in('id', gruppo.map(r => r.id))
+      if (error) { console.error('[LIBERA-ETICHETTE] lettura fallita', error.message); fermo = true; break }
+      const per = new Map((pesanti || []).map((p: any) => [p.id, p]))
+      esito.esaminate += gruppo.length
+      await Promise.all(gruppo.map(r => lavora(r, per.get(r.id)).catch((e: any) => {
+        console.error('[LIBERA-ETICHETTE]', r.numero, e?.message); esito.saltate++
+      })))
+    }
+    if (vuoto || opz.soloIds?.length || righe.length < Math.min(quante, 1000) || esito.url_liberati + esito.colli_archiviati === primaDelGiro) fermo = true
+  }
+  if (esito.esaminate) console.log('[LIBERA-ETICHETTE]', JSON.stringify({ ...esito, righe: undefined }))
   return esito
+}
+
+// IL BASE64 SI TOGLIE SOLO DI NOTTE (21-6, ora italiana). Ogni ~4 GB tolti dalle righe il database
+// fa partire da solo la pulizia della tabella delle etichette (autovacuum del TOAST di spedizioni,
+// soglia 2%), che per una decina di minuti porta il disco al suo massimo: la notte del 05/11/2026
+// dall'1:36 all'1:48 ~2 GB di WAL al minuto e ~130 MB/s. Di notte non se ne accorge nessuno; di
+// giorno, col ritmo dei giri, sarebbe capitata verso le 16 addosso a chi spedisce. Le etichette nuove
+// si archiviano anche di giorno: il base64 resta nella riga fino alla notte, e le stampe leggono uguale.
+// Si chiude alle 6 e non alle 7: l'ultima pulizia della notte (quella del 05/11 e' finita alle 7:48)
+// deve finire prima che si cominci a lavorare.
+export function oraDiNotteRoma(quando = new Date()): boolean {
+  const ora = Number(new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: 'numeric', hourCycle: 'h23' }).format(quando))
+  return ora >= 21 || ora < 6
 }
 
 // Vero se la spedizione ha un'etichetta, in QUALUNQUE forma. Da usare al posto dei controlli

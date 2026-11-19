@@ -1,6 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
+import PagatoriBonifico from '@/app/components/PagatoriBonifico'
+import AzzeraVerifica from '@/app/components/AzzeraVerifica'
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
 const lbl = {fontSize:'11.5px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
@@ -25,7 +28,11 @@ export default function ModificaMasterPage() {
   const [saldo, setSaldo] = useState(0)
   const [impCredito, setImpCredito] = useState('')
   const [descCredito, setDescCredito] = useState('Ricarica credito')
-  const [bonificoFattoM, setBonificoFattoM] = useState(false)   // "bonifico gia' effettuato" (Check Ricariche)
+  // A che punto e' il bonifico (Check Ricariche, tutti i master); come ha pagato e chi (lib/contabilita-banca)
+  // solo sui master dove la funzione e' accesa.
+  const [pagamento, setPagamento] = useState<ValorePagamento>(PAGAMENTO_INIZIALE)
+  const [contabilita, setContabilita] = useState(false)
+  const [versionePagatori, setVersionePagatori] = useState(0)
   const [savingCredito, setSavingCredito] = useState(false)
   const [msgCredito, setMsgCredito] = useState('')
   const [errCredito, setErrCredito] = useState('')
@@ -55,11 +62,13 @@ export default function ModificaMasterPage() {
     try {
       const res = await fetch('/api/movimenti/crea', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ clienteId: `m:${id}`, tipo: imp>0?'ricarica':'rettifica', descrizione: descCredito.trim(), importo: imp, bonificoEffettuato: imp>0 ? bonificoFattoM : false })
+        body: JSON.stringify({ clienteId: `m:${id}`, tipo: imp>0?'ricarica':'rettifica', descrizione: descCredito.trim(), importo: imp, bonificoEffettuato: imp>0 && pagamento.stato !== 'attesa', bonificoArrivato: imp>0 && pagamento.stato === 'arrivato',
+          ...(contabilita && imp > 0 ? { metodo: pagamento.metodo, mittente: pagamento.mittente } : {}) })
       })
       const d = await res.json(); setSavingCredito(false)
       if (d.error) { setErrCredito(d.error); return }
-      setSaldo(Number(d.saldo ?? saldo)); setImpCredito(''); setBonificoFattoM(false); setMsgCredito('✓ Credito aggiornato')
+      setSaldo(Number(d.saldo ?? saldo)); setImpCredito(''); setMsgCredito('✓ Credito aggiornato')
+      setPagamento(PAGAMENTO_INIZIALE); setVersionePagatori(v => v + 1)
     } catch { setErrCredito('Errore di rete'); setSavingCredito(false) }
   }
 
@@ -167,16 +176,15 @@ export default function ModificaMasterPage() {
           </div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'-4px'}}>Scrivi <b>200</b> per aggiungere, <b>-50</b> per togliere credito.</div>
           {parseFloat(String(impCredito).replace(',','.')) > 0 && (
-            <label style={{display:'flex',alignItems:'flex-start',gap:'8px',fontSize:'12.5px',color:'#1a1a1a',cursor:'pointer',lineHeight:1.4}}>
-              <input type="checkbox" checked={bonificoFattoM} onChange={e=>setBonificoFattoM(e.target.checked)} style={{width:'15px',height:'15px',accentColor:'#f97316',marginTop:'1px'}}/>
-              <span>Il bonifico è <b>già stato effettuato</b> — nel Check Ricariche parte come "bonifico fatto". Se non lo spunti, resta "in attesa".</span>
-            </label>
+            <PagamentoRicarica target={`m:${id}`} valore={pagamento} onChange={setPagamento} onAttiva={setContabilita} />
           )}
           <button onClick={salvaCredito} disabled={savingCredito}
             style={{alignSelf:'flex-start',background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',padding:'9px 18px',fontSize:'13px',fontWeight:700,cursor:'pointer',opacity:savingCredito?0.6:1}}>
             {savingCredito?'Salvo...':'Applica al credito'}</button>
         </div>
       </div>
+
+      <PagatoriBonifico target={`m:${id}`} versione={versionePagatori} style={{ marginBottom: '16px', maxWidth: '560px' }} />
 
       {/* Reset password — identico al cliente */}
       <div style={sec}>
@@ -202,6 +210,12 @@ export default function ModificaMasterPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Azzeramento verifica in due passaggi del titolare: agisce subito, non con "Salva modifiche". */}
+      <div style={sec}>
+        <div style={sech}>Verifica in due passaggi</div>
+        <AzzeraVerifica url={`/api/master/${id}/azzera-verifica`} chi="il master" />
       </div>
 
       <div style={{display:'flex',gap:'8px',maxWidth:'560px'}}>

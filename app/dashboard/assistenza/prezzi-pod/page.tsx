@@ -1,7 +1,8 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-// Listino POD del master: quanto paga il cliente per ogni richiesta di prova di consegna.
+// Listino POD del master: quanto paga il cliente per ogni richiesta di prova di consegna — e, dal
+// 04/11/2026, quanto paga un master direttamente sotto quando la chiede lui (listino a parte).
 // Regole a PRIORITA' (dalla piu' specifica): cliente+contratto > cliente+vettore > cliente >
 // contratto > vettore > predefinito.
 // Il cliente vede il prezzo prima di aprire la richiesta, lo accetta e lo paga subito all'apertura
@@ -11,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 // rifare 38 volte la stessa regola) e si puo' prezzare un VETTORE intero — "tutti i GLS 2 €" — che
 // copre anche i contratti che nasceranno domani. Quali contratti siano "GLS" lo dice il server
 // (lib/vettore.ts): sui contratti diretti non sta scritto nel nome.
-type Regola = { id: string; cliente_id: string | null; corriere_id: string | null; vettore: string | null; prezzo: number; attivo: boolean }
+type Regola = { id: string; destinatario?: string; cliente_id: string | null; sottomaster_id?: string | null; corriere_id: string | null; vettore: string | null; prezzo: number; attivo: boolean }
 type Corr = { id: string; nome_contratto: string; vettore: string }
 type Opz = { id: string; nome: string }
 
@@ -38,13 +39,14 @@ const rigaTendina: React.CSSProperties = { display: 'flex', alignItems: 'center'
 const pannello: React.CSSProperties = { position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, right: 0, minWidth: '320px', maxHeight: '340px', overflowY: 'auto',
   background: '#fff', border: '1px solid #d1d5db', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.12)', padding: '8px' }
 
-// Selettore a caselle dei CLIENTI: se ne spuntano quanti se ne vuole e il prezzo si scrive una volta
-// per tutti — "questi dieci clienti, tutti i BRT, 3 €".
+// Selettore a caselle dei CLIENTI (o dei MASTER sotto, dal 04/11/2026: stessa tendina, altre parole):
+// se ne spuntano quanti se ne vuole e il prezzo si scrive una volta per tutti — "questi dieci
+// clienti, tutti i BRT, 3 €".
 //
 // Nessuna spunta NON vuol dire "nessun cliente": vuol dire la regola generica, quella che vale per
 // tutti e che si applica a chi non ne ha una sua. E' la stessa logica dei corrieri qui sotto, e per
 // un master con 600 clienti resta anche il modo piu' economico di dire "tutti": una regola, non 600.
-function SelettoreClienti({ clienti, sel, setSel }: { clienti: Opz[]; sel: string[]; setSel: (v: string[]) => void }) {
+function SelettoreClienti({ clienti, sel, setSel, uno = 'cliente', molti = 'clienti' }: { clienti: Opz[]; sel: string[]; setSel: (v: string[]) => void; uno?: string; molti?: string }) {
   const [aperto, setAperto] = useState(false)
   const [cerca, setCerca] = useState('')
   const box = useChiudiFuori(aperto, () => setAperto(false))
@@ -54,9 +56,9 @@ function SelettoreClienti({ clienti, sel, setSel }: { clienti: Opz[]; sel: strin
   const toggle = (id: string) => setSel(sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id])
   const tuttiFiltratiSel = !!filtrati.length && filtrati.every(c => sel.includes(c.id))
 
-  const riassunto = sel.length === 0 ? 'Tutti i clienti (predefinito)'
-    : sel.length === 1 ? (clienti.find(c => c.id === sel[0])?.nome || '1 cliente')
-    : `${sel.length} clienti`
+  const riassunto = sel.length === 0 ? `Tutti i ${molti} (predefinito)`
+    : sel.length === 1 ? (clienti.find(c => c.id === sel[0])?.nome || `1 ${uno}`)
+    : `${sel.length} ${molti}`
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
@@ -67,12 +69,12 @@ function SelettoreClienti({ clienti, sel, setSel }: { clienti: Opz[]; sel: strin
       </button>
       {aperto && (
         <div style={pannello}>
-          <input autoFocus value={cerca} onChange={e => setCerca(e.target.value)} placeholder="Cerca cliente…"
+          <input autoFocus value={cerca} onChange={e => setCerca(e.target.value)} placeholder={`Cerca ${uno}…`}
             style={{ ...inp, padding: '7px 10px', marginBottom: '6px' }} />
           {sel.length > 0 && (
             <button type="button" onClick={() => setSel([])}
               style={{ ...rigaTendina, width: '100%', background: 'none', border: 'none', color: '#b91c1c', fontWeight: 600 }}>
-              ✕ Togli la selezione (vale per tutti i clienti)
+              ✕ Togli la selezione (vale per tutti i {molti})
             </button>
           )}
           {filtrati.length > 1 && (
@@ -81,10 +83,10 @@ function SelettoreClienti({ clienti, sel, setSel }: { clienti: Opz[]; sel: strin
                 ? sel.filter(id => !filtrati.some(c => c.id === id))
                 : [...new Set([...sel, ...filtrati.map(c => c.id)])])}
               style={{ ...rigaTendina, width: '100%', background: 'none', border: 'none', color: '#c2410c', fontWeight: 600 }}>
-              {tuttiFiltratiSel ? '□' : '☑'} {tuttiFiltratiSel ? 'Deseleziona' : 'Seleziona'} i {filtrati.length} {q ? 'trovati' : 'clienti'}
+              {tuttiFiltratiSel ? '□' : '☑'} {tuttiFiltratiSel ? 'Deseleziona' : 'Seleziona'} i {filtrati.length} {q ? 'trovati' : molti}
             </button>
           )}
-          {!filtrati.length && <div style={{ ...rigaTendina, color: '#9ca3af' }}>Nessun cliente trovato.</div>}
+          {!filtrati.length && <div style={{ ...rigaTendina, color: '#9ca3af' }}>Nessun {uno} trovato.</div>}
           {filtrati.map(c => (
             <label key={c.id} style={{ ...rigaTendina, borderRadius: '5px', background: sel.includes(c.id) ? '#fff7ed' : 'transparent' }}>
               <input type="checkbox" checked={sel.includes(c.id)} onChange={() => toggle(c.id)} />
@@ -189,6 +191,11 @@ export default function PrezziPodPage() {
   const [selCorr, setSelCorr] = useState<string[]>([])
   const [selVett, setSelVett] = useState<string[]>([])
   const [selRighe, setSelRighe] = useState<string[]>([])
+  // Dal 04/11/2026 una regola puo' valere per i MASTER direttamente sotto (QUICK che chiede la POD a
+  // MULTIEXPRESS), non solo per i clienti: due listini separati, si sceglie qui per quale si scrive.
+  const [master, setMaster] = useState<Opz[]>([])
+  const [chi, setChi] = useState<'cliente' | 'master'>('cliente')
+  const [selMaster, setSelMaster] = useState<string[]>([])
 
   const carica = async () => {
     setLoading(true)
@@ -197,6 +204,7 @@ export default function PrezziPodPage() {
     if (r.ok) {
       setRegole(j.regole || [])
       setClienti((j.clienti || []).map((c: any) => ({ id: c.id, nome: c.ragione_sociale })))
+      setMaster((j.master || []).map((m: any) => ({ id: m.id, nome: m.nome })))
       setCorrieri(j.corrieri || [])
     } else setMsg({ t: 'err', x: j.error || 'Errore di caricamento' })
     setSelRighe([])
@@ -204,11 +212,15 @@ export default function PrezziPodPage() {
   }
   useEffect(() => { carica() }, [])
 
+  const perMaster = (r: Regola) => r.destinatario === 'master'
   const nomeCliente = (id: string | null) => id ? (clienti.find(c => c.id === id)?.nome || 'Cliente') : 'Tutti i clienti'
+  const nomeMaster = (id: string | null | undefined) => id ? (master.find(m => m.id === id)?.nome || 'Master') : 'Tutti i master sotto di te'
+  const nomeChi = (r: Regola) => perMaster(r) ? nomeMaster(r.sottomaster_id) : nomeCliente(r.cliente_id)
   const nomeCorriere = (id: string | null) => id ? (corrieri.find(c => c.id === id)?.nome_contratto || 'Corriere') : 'Tutti i corrieri'
-  // Ordine di lettura = ordine di priorita': predefinito, vettore, contratto, cliente, cliente+bersaglio.
-  const rank = (r: Regola) => (r.cliente_id ? 4 : 0) + (r.corriere_id ? 2 : 0) + (r.vettore ? 1 : 0)
-  const regoleOrd = [...regole].sort((a, b) => rank(a) - rank(b) || nomeCliente(a.cliente_id).localeCompare(nomeCliente(b.cliente_id)))
+  // Ordine di lettura: prima le regole dei clienti, poi quelle dei master; dentro, ordine di priorita':
+  // predefinito, vettore, contratto, uno solo, uno solo + bersaglio.
+  const rank = (r: Regola) => (perMaster(r) ? 8 : 0) + ((r.cliente_id || r.sottomaster_id) ? 4 : 0) + (r.corriere_id ? 2 : 0) + (r.vettore ? 1 : 0)
+  const regoleOrd = [...regole].sort((a, b) => rank(a) - rank(b) || nomeChi(a).localeCompare(nomeChi(b)))
 
   const salva = async () => {
     const p = Number(String(prezzo).replace(',', '.'))
@@ -216,14 +228,17 @@ export default function PrezziPodPage() {
     setSalvando(true); setMsg(null)
     const r = await fetch('/api/assistenza/pod-prezzi', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cliente_ids: selCli, corriere_ids: selCorr, vettori: selVett, prezzo: p }),
+      body: JSON.stringify(chi === 'master'
+        ? { destinatario: 'master', sottomaster_ids: selMaster, corriere_ids: selCorr, vettori: selVett, prezzo: p }
+        : { cliente_ids: selCli, corriere_ids: selCorr, vettori: selVett, prezzo: p }),
     })
     const j = await r.json().catch(() => ({}))
     setSalvando(false)
     if (r.ok) {
-      const suClienti = j.clienti > 1 ? ` su ${j.clienti} clienti` : ''
-      setMsg({ t: 'ok', x: `${j.totale} regol${j.totale > 1 ? 'e' : 'a'}${suClienti}: ${j.create} nuov${j.create === 1 ? 'a' : 'e'}, ${j.aggiornate} aggiornat${j.aggiornate === 1 ? 'a' : 'e'}` })
-      setPrezzo(''); setSelCorr([]); setSelVett([]); setSelCli([]); carica()
+      const quanti = chi === 'master' ? j.master : j.clienti
+      const su = quanti > 1 ? ` su ${quanti} ${chi === 'master' ? 'master' : 'clienti'}` : ''
+      setMsg({ t: 'ok', x: `${j.totale} regol${j.totale > 1 ? 'e' : 'a'}${su}: ${j.create} nuov${j.create === 1 ? 'a' : 'e'}, ${j.aggiornate} aggiornat${j.aggiornate === 1 ? 'a' : 'e'}` })
+      setPrezzo(''); setSelCorr([]); setSelVett([]); setSelCli([]); setSelMaster([]); carica()
     } else setMsg({ t: 'err', x: j.error || 'Errore nel salvataggio' })
   }
 
@@ -238,8 +253,8 @@ export default function PrezziPodPage() {
   const elimina = async (ids: string[]) => {
     if (!ids.length) return
     if (!confirm(ids.length > 1
-      ? `Eliminare ${ids.length} regole? I clienti torneranno alla regola più generica (o gratuita).`
-      : 'Eliminare questa regola? I clienti torneranno alla regola più generica (o gratuita).')) return
+      ? `Eliminare ${ids.length} regole? Chi le pagava tornerà alla regola più generica (o gratuita).`
+      : 'Eliminare questa regola? Chi la pagava tornerà alla regola più generica (o gratuita).')) return
     const r = await fetch('/api/assistenza/pod-prezzi', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
     if (r.ok) carica(); else { const j = await r.json().catch(() => ({})); setMsg({ t: 'err', x: j.error || 'Errore' }) }
   }
@@ -252,10 +267,11 @@ export default function PrezziPodPage() {
       <div style={{ marginBottom: '18px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Prezzi POD</h1>
         <p style={{ color: '#666', fontSize: '13px', marginTop: '4px', maxWidth: '820px' }}>
-          Decidi quanto paga il cliente per ogni richiesta di prova di consegna. Vale la regola più specifica:
+          Decidi quanto paga chi ti chiede una prova di consegna: i tuoi clienti e, se ne hai, i master sotto di te
+          (due listini separati: un prezzo messo per i clienti non vale per i master). Vale la regola più specifica:
           <b> cliente + contratto</b> batte <b>cliente + vettore</b>, che batte <b>cliente</b>, che batte <b>contratto</b>,
-          che batte <b>vettore</b>, che batte il <b>predefinito</b>.
-          Senza nessuna regola la POD è gratuita. Il cliente vede il prezzo prima di aprire la richiesta, lo accetta e gli viene
+          che batte <b>vettore</b>, che batte il <b>predefinito</b> — e lo stesso per i master.
+          Senza nessuna regola la POD è gratuita. Chi la chiede vede il prezzo prima di aprire la richiesta, lo accetta e gli viene
           addebitato subito, all'apertura. La POD si può chiedere solo per spedizioni consegnate.
         </p>
       </div>
@@ -270,10 +286,25 @@ export default function PrezziPodPage() {
       {/* NUOVA / MODIFICA REGOLA */}
       <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '16px', marginBottom: '20px' }}>
         <div style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', marginBottom: '14px' }}>Aggiungi o aggiorna una regola</div>
+        {/* Chi paga: si vede solo a chi ha dei master sotto. Chi non ne ha scrive regole per i clienti, come sempre. */}
+        {master.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
+            <span style={{ ...lbl, marginBottom: 0 }}>Chi paga</span>
+            <div style={{ display: 'inline-flex', border: '1px solid #d1d5db', borderRadius: '6px', overflow: 'hidden' }}>
+              {([['cliente', 'I tuoi clienti'], ['master', `I master sotto di te (${master.length})`]] as const).map(([v, t]) => (
+                <button key={v} type="button" onClick={() => setChi(v)}
+                  style={{ padding: '7px 14px', fontSize: '12.5px', fontWeight: 700, border: 'none', cursor: 'pointer',
+                    background: chi === v ? '#f97316' : '#fff', color: chi === v ? '#fff' : '#1a1a1a' }}>{t}</button>
+              ))}
+            </div>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 140px auto', gap: '12px', alignItems: 'end' }}>
           <div>
-            <label style={lbl}>Clienti</label>
-            <SelettoreClienti clienti={clienti} sel={selCli} setSel={setSelCli} />
+            <label style={lbl}>{chi === 'master' ? 'Master' : 'Clienti'}</label>
+            {chi === 'master'
+              ? <SelettoreClienti clienti={master} sel={selMaster} setSel={setSelMaster} uno="master" molti="master" />
+              : <SelettoreClienti clienti={clienti} sel={selCli} setSel={setSelCli} />}
           </div>
           <div>
             <label style={lbl}>Corrieri</label>
@@ -292,6 +323,8 @@ export default function PrezziPodPage() {
           che prendono anche i contratti aggiunti in futuro. Esempio: dieci clienti + <b>Tutti i BRT</b> + 3 € = dieci regole in un colpo.
           Non spuntare nessun cliente significa <b>tutti</b> (una regola sola, vale anche per chi arriverà domani).
           Prezzo <b>0</b> = POD gratuita esplicita (per esentare un cliente pur avendo un predefinito a pagamento).
+          {master.length > 0 && <> Per i <b>master sotto di te</b> vale lo stesso: la POD che ti chiedono (dal pulsante della spedizione) la
+            pagano dal loro conto verso di te, e i contratti si riconoscono anche sulle loro copie.</>}
         </p>
       </div>
 
@@ -312,7 +345,7 @@ export default function PrezziPodPage() {
                 <input type="checkbox" checked={!!regoleOrd.length && selRighe.length === regoleOrd.length}
                   onChange={e => setSelRighe(e.target.checked ? regoleOrd.map(r => r.id) : [])} />
               </th>
-              {['Cliente', 'Corriere', 'Prezzo', 'Stato', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
+              {['Chi paga', 'Corriere', 'Prezzo', 'Stato', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
             </tr></thead>
             <tbody>
               {loading ? (
@@ -325,7 +358,10 @@ export default function PrezziPodPage() {
                     <input type="checkbox" checked={selRighe.includes(rg.id)}
                       onChange={() => setSelRighe(s => s.includes(rg.id) ? s.filter(x => x !== rg.id) : [...s, rg.id])} />
                   </td>
-                  <td style={td}>{rg.cliente_id ? nomeCliente(rg.cliente_id) : <span style={{ color: '#6b7280', fontStyle: 'italic' }}>Tutti i clienti</span>}</td>
+                  <td style={td}>
+                    {perMaster(rg) && <span style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 7px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, marginRight: '6px' }}>Master</span>}
+                    {(rg.cliente_id || rg.sottomaster_id) ? nomeChi(rg) : <span style={{ color: '#6b7280', fontStyle: 'italic' }}>{nomeChi(rg)}</span>}
+                  </td>
                   <td style={td}>
                     {rg.vettore
                       ? <span style={{ background: '#fff7ed', color: '#c2410c', padding: '2px 8px', borderRadius: '999px', fontSize: '12px', fontWeight: 700 }}>Tutti i {rg.vettore}</span>

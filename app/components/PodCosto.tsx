@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 
-// COSTO DI UNA RICHIESTA POD, PRIMA DI APRIRLA, E CONSENSO DEL CLIENTE.
+// COSTO DI UNA RICHIESTA POD, PRIMA DI APRIRLA, E CONSENSO DI CHI LA PAGA.
 // Decisione del committente (15/10/2026): il cliente vede quanto paga (dipende dal vettore della
 // spedizione, dal listino POD del suo master), accetta, e la cifra gli viene addebitata subito
 // all'apertura; la POD si chiede solo a pacco consegnato. Sta in un componente solo perche' le porte
@@ -9,12 +9,15 @@ import { useEffect, useRef, useState } from 'react'
 // e il testo del consenso dev'essere lo stesso. Il controllo vero lo rifa' il server
 // (app/api/assistenza/apri): qui si mostra la cifra e si raccoglie il si'.
 //
+// Dal 04/11/2026 la paga anche il MASTER che la chiede al suo master superiore (dal pulsante 🎧):
+// stesso riquadro, stesso consenso, prezzo dal listino del superiore per i master sotto di lui.
+//
 // onStato → { pronta, prezzo }: pronta = si puo' inviare; prezzo = la cifra accettata, da mandare
-// all'apertura. Chi non e' un cliente (il master che chiede la POD alla sua linea superiore) non paga:
-// l'anteprima non gli risponde e il componente non mostra niente.
+// all'apertura. Chi non ha nessuno a cui chiederla a pagamento (il master principale) non riceve
+// l'anteprima: il componente non mostra niente e l'apertura gli spiega perche'.
 export type StatoPodCosto = { pronta: boolean; prezzo: number | null }
 
-type Info = { ldv: string; cliente: boolean; tentativo?: number; errore?: boolean; trovata?: boolean; consegnata?: boolean; prezzo?: number }
+type Info = { ldv: string; disponibile: boolean; tentativo?: number; errore?: boolean; trovata?: boolean; consegnata?: boolean; nonVende?: boolean; prezzo?: number }
 const eur = (n: number) => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(n)
 
 export default function PodCosto({ ldv, onStato }: { ldv: string; onStato: (s: StatoPodCosto) => void }) {
@@ -38,11 +41,11 @@ export default function PodCosto({ ldv, onStato }: { ldv: string; onStato: (s: S
       try {
         const r = await fetch('/api/assistenza/pod-prezzo?ldv=' + encodeURIComponent(l), { signal: ctrl.signal })
         if (!vivo) return
-        if (r.status === 403) { setRisposta({ ldv: l, cliente: false }); return }
+        if (r.status === 403) { setRisposta({ ldv: l, disponibile: false }); return }
         const d = await r.json()
-        if (vivo) setRisposta(d && typeof d.trovata === 'boolean' ? { ...d, ldv: l, cliente: true, tentativo } : { ldv: l, cliente: true, errore: true, tentativo })
+        if (vivo) setRisposta(d && typeof d.trovata === 'boolean' ? { ...d, ldv: l, disponibile: true, tentativo } : { ldv: l, disponibile: true, errore: true, tentativo })
       } catch {
-        if (vivo) setRisposta({ ldv: l, cliente: true, errore: true, tentativo })
+        if (vivo) setRisposta({ ldv: l, disponibile: true, errore: true, tentativo })
       } finally {
         clearTimeout(limite)
       }
@@ -54,11 +57,11 @@ export default function PodCosto({ ldv, onStato }: { ldv: string; onStato: (s: S
   const prezzo = Number(info?.prezzo || 0)
   const chiave = `${l}|${prezzo}`
   const accetto = accettato === chiave
-  const pronta = !!info && (!info.cliente || (!!info.trovata && !!info.consegnata && (prezzo <= 0 || accetto)))
-  const prezzoOut = info?.cliente && info.consegnata ? prezzo : null
+  const pronta = !!info && (!info.disponibile || (!!info.trovata && !!info.consegnata && !info.nonVende && (prezzo <= 0 || accetto)))
+  const prezzoOut = info?.disponibile && info.consegnata ? prezzo : null
   useEffect(() => { onStatoRef.current({ pronta, prezzo: prezzoOut }) }, [pronta, prezzoOut])
 
-  if (l.length < 4 || (info && !info.cliente)) return null
+  if (l.length < 4 || (info && !info.disponibile)) return null
   const box = (bg: string, bordo: string, colore: string) => ({ marginBottom: '12px', padding: '10px 12px', borderRadius: '6px', fontSize: '12.5px', fontWeight: 600 as const, background: bg, border: `1px solid ${bordo}`, color: colore })
   if (!info) return <div style={{ marginBottom: '12px', fontSize: '12px', color: '#6b7280' }}>Verifico la spedizione…</div>
   if (info.errore) return (
@@ -69,6 +72,7 @@ export default function PodCosto({ ldv, onStato }: { ldv: string; onStato: (s: S
   )
   if (!info.trovata) return <div style={box('#fffbeb', '#fde68a', '#b45309')}>Non troviamo questa LDV tra le tue spedizioni: controlla il numero.</div>
   if (!info.consegnata) return <div style={box('#fef2f2', '#fecaca', '#b91c1c')}>Questa spedizione non risulta ancora consegnata: la POD (prova di consegna) si può chiedere solo dopo la consegna.</div>
+  if (info.nonVende) return <div style={box('#fef2f2', '#fecaca', '#b91c1c')}>Questa spedizione viaggia su un contratto che il tuo master superiore non vende: la POD non si può chiedere a lui. Chiedila a chi ti fornisce quel contratto.</div>
   if (prezzo <= 0) return <div style={box('#f0fdf4', '#bbf7d0', '#15803d')}>Questa richiesta POD è gratuita.</div>
   return (
     <div style={box('#fff7ed', '#fed7aa', '#c2410c')}>
