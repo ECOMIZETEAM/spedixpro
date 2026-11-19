@@ -39,6 +39,9 @@ const SCRITTURE_AUTISTA = [
 // master. Un sotto-master che ha pagato il suo canone non si ferma perche' si e' fermato il padre —
 // e se non lo ha pagato si congela per conto suo, non per colpa di chi sta sopra.
 
+// Le pagine che si possono provare con la grafica nuova (vedi x-grafica-prova più sotto)
+const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni'])
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -224,7 +227,14 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  let response = NextResponse.next({ request: { headers: req.headers } })
+  // Prova della grafica nuova (Lorenzo 19/11, «Scopri la nuova versione»): «?nuova=1» su Dashboard ed Elenco spedizioni
+  // la accende per QUELLA pagina, così il tasto indietro torna alla versione di oggi e chiudere la scheda chiude la
+  // prova. Il layout lo legge da x-grafica-prova; quella che arriva da fuori si toglie sempre, e comunque il layout
+  // decide chi può provarla (dà solo l'aspetto, nessun permesso).
+  const intestazioni = new Headers(req.headers)
+  intestazioni.delete('x-grafica-prova')
+  if (req.nextUrl.searchParams.get('nuova') === '1' && PAGINE_PROVA.has(pathname)) intestazioni.set('x-grafica-prova', '1')
+  let response = NextResponse.next({ request: { headers: intestazioni } })
   response.headers.set('x-pathname', pathname)
 
   const supabase = createServerClient(

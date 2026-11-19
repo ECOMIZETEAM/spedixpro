@@ -179,3 +179,61 @@
 @media (prefers-reduced-motion: reduce) {
   .gx-rami, .gx-lato, .gx-freccia { animation: none !important; transition: none !important; }
 }
+
+/* ── la prova per tutti (Lorenzo 19/11): striscia in alto, voci non ancora pronte spente, scheda del voto ───────── */
+.gx-prova { position: relative; z-index: 6; flex: none; display: flex; align-items: center; gap: 12px; margin: 12px 16px 0; padding: 8px 8px 8px 16px;
+  border-radius: 16px; background: color-mix(in srgb, var(--gx-accento) 10%, var(--gx-vetro)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gx-accento) 28%, transparent);
+  font-size: 13px; color: var(--gx-testo); }
+.gx-prova__punto { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--gx-accento); animation: gx-prova-polso 2.4s ease-out infinite; }
+@keyframes gx-prova-polso { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gx-accento) 50%, transparent); } 70%, 100% { box-shadow: 0 0 0 8px transparent; } }
+.gx-prova__testo { flex: 1; min-width: 0; line-height: 1.35; }
+.gx-prova__testo b { font-weight: 600; color: var(--gx-inchiostro); }
+.gx-prova button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; white-space: nowrap; }
+.gx-prova button:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+.gx-prova .gx-prova__voto { background: var(--gx-accento-pieno); color: #fff; box-shadow: 0 8px 18px -10px var(--gx-accento-pieno); }
+.gx-prova .gx-prova__esci { color: var(--gx-inchiostro); background: var(--gx-vetro); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx-prova__esci .gx-ico { width: 15px; height: 15px; }
+@media (prefers-reduced-motion: reduce) { .gx-prova__punto { animation: none; } }
+
+/* le voci che non sono ancora nella nuova versione: si vedono (anche i sottomenu) ma non si cliccano */
+.gx-voce--spenta, .gx-rami .gx-spenta { cursor: not-allowed; opacity: .42; }
+.gx-voce--spenta:hover { background: none; }
+.gx-rami .gx-spenta { display: flex; align-items: center; min-height: 27px; padding: 0 10px; font-size: 13px; color: var(--gx-attenuato); }
+
+/* la scheda del voto */
+.sv-velo { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(15, 20, 27, .28); animation: sv-velo .25s ease both; }
+[data-luce="notte"] .sv-velo { background: rgba(0, 0, 0, .45); }
+@keyframes sv-velo { from { background-color: transparent; } }
+.sv { width: min(520px, 100%); padding: 26px; border-radius: 26px; background: rgba(250, 251, 253, .95); color: var(--gx-testo);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5);
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .5); animation: sv-entra .3s cubic-bezier(.2, .9, .3, 1.15) both; }
+[data-luce="notte"] .sv { background: rgba(26, 33, 48, .96); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7); }
+@keyframes sv-entra { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+.sv h2 { margin: 0; font-size: 21px; font-weight: 600; letter-spacing: -.01em; color: var(--gx-inchiostro); text-wrap: balance; }
+.sv p { margin: 8px 0 20px; font-size: 13.5px; line-height: 1.5; color: var(--gx-attenuato); }
+.sv-voti { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.sv-voti button { all: unset; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 4px 10px; border-radius: 16px;
+  background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); transition: background .15s ease, box-shadow .15s ease, transform .15s ease; }
+.sv-voti button:hover { box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
+.sv-voti button:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+.sv-voti b { font-size: 22px; font-weight: 500; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.sv-voti span { font-size: 11px; color: var(--gx-attenuato); white-space: nowrap; }
+.sv-voti .sv-prima { background: color-mix(in srgb, var(--gx-accento) 9%, var(--gx-incavo)); }
+.sv-voti .sv-su { background: var(--gx-accento-pieno); box-shadow: 0 10px 22px -12px var(--gx-accento-pieno); transform: translateY(-1px); }
+.sv-voti .sv-su b, .sv-voti .sv-su span { color: #fff; }
+.sv-campo { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; font-size: 12.5px; font-weight: 500; color: var(--gx-testo); }
+.sv-campo em { font-style: normal; font-weight: 400; color: var(--gx-attenuato); }
+.sv-campo textarea { font: inherit; font-size: 13.5px; font-weight: 400; resize: vertical; min-height: 76px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--gx-filo);
+  background: var(--gx-incavo); color: var(--gx-testo); }
+.sv-campo textarea:focus { outline: none; border-color: var(--gx-accento); }
+.sv-errore { margin-top: 12px; padding: 10px 12px; border-radius: 12px; font-size: 13px; color: var(--gx-problema); background: color-mix(in srgb, var(--gx-problema) 9%, transparent); }
+.sv-piede { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.sv-piede button { all: unset; cursor: pointer; height: 42px; padding: 0 18px; border-radius: 999px; font-size: 13.5px; font-weight: 600; }
+.sv-piede button:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+.sv-piede .sv-secondario { color: var(--gx-inchiostro); background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.sv-piede .sv-primario { color: #fff; background: var(--gx-accento-pieno); box-shadow: 0 10px 22px -12px var(--gx-accento-pieno); }
+.sv-piede .sv-primario:disabled { cursor: not-allowed; opacity: .45; box-shadow: none; }
+.sv-grazie { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 0; text-align: center; }
+.sv-grazie b { font-size: 22px; font-weight: 600; color: var(--gx-inchiostro); }
+.sv-grazie span { font-size: 13.5px; color: var(--gx-attenuato); }

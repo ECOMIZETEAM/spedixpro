@@ -12,7 +12,7 @@ import { DialogProvider } from '../components/DialogProvider'
 import { contabilitaAttiva } from '@/lib/contabilita-banca'
 import { eTitolareOAdmin } from '@/lib/ruoli'
 import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { Outfit } from 'next/font/google'
 
 // Il carattere della grafica nuova (v11). preload: false: con la grafica di oggi la pagina non lo scarica nemmeno.
@@ -83,7 +83,13 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const prova = (process.env.GRAFICA_PROVA_MASTER_IDS || '').split(',').map(x => x.trim()).filter(Boolean)
   const puoGraficaNuova = superMaster || (!!utente?.master_id && prova.includes(utente.master_id))
   const biscotti = await cookies()
-  const graficaNuova = puoGraficaNuova && biscotti.get('mx_grafica')?.value === 'nuova'
+  const graficaPiena = puoGraficaNuova && biscotti.get('mx_grafica')?.value === 'nuova'
+  // PROVA PER TUTTI (Lorenzo 19/11): il pulsante «Scopri la nuova versione» c'è quando GRAFICA_PROVA_APERTA=1 (in
+  // produzione si accende solo col suo ok), e mai per l'agente, che ha la sua plancia confinata e non ancora disegnata.
+  // La prova vale per la pagina aperta con «?nuova=1»: il proxy lo dice con x-grafica-prova.
+  const provaAperta = (process.env.GRAFICA_PROVA_APERTA === '1' || puoGraficaNuova) && String(utente?.ruolo || '').toLowerCase() !== 'agente'
+  const provaQui = provaAperta && !graficaPiena && (await headers()).get('x-grafica-prova') === '1'
+  const graficaNuova = graficaPiena || provaQui
   const graficaScelta = ['auto', 'giorno', 'notte'].includes(biscotti.get('mx_tema')?.value || '') ? biscotti.get('mx_tema')!.value : 'auto'
   const pagina = (
     <DashboardLayout user={{
@@ -100,6 +106,10 @@ export default async function Layout({ children }: { children: React.ReactNode }
       vedeReteCompleta,
       graficaNuova,
       graficaScelta,
+      // in prova: la striscia in alto, il voto, le voci non ancora pronte spente
+      graficaProva: provaQui,
+      // il pulsante «Scopri la nuova versione» nella barra di oggi
+      provaNuova: provaAperta && !graficaNuova,
       // l'entrata animata della Plancia, una volta per sessione (biscotto di sessione mx_entrata, lo mette la Plancia)
       graficaEntrata: graficaNuova && !biscotti.get('mx_entrata'),
       graficaLuce: graficaNuova ? luceIniziale(graficaScelta) : undefined,

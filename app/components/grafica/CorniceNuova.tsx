@@ -13,6 +13,7 @@ import SupportoButton from '../SupportoButton'
 import ContiTendina from '../ContiTendina'
 import { FoglioIcone, Icona, ICONA_VOCE } from './icone'
 import { GraficaNuova } from './contesto'
+import Sondaggio from './Sondaggio'
 import './grafica.css'
 
 export type VoceMenu = { label: string; href?: string; external?: boolean; sub?: { label: string; href: string }[] }
@@ -34,10 +35,11 @@ const GRUPPO: Record<string, string> = {
 // Lorenzo 18/11: «Circuito interno va su Magazzino; Prezzi POD si chiama Listini POD e va sotto Listini Prezzi». Solo nel
 // menu nuovo: le voci arrivano dal menu di oggi (Layout, già filtrate coi permessi) e qui si spostano, così con la grafica
 // di oggi il menu resta identico.
-function riordina(nav: VoceMenu[], ruolo?: string): VoceMenu[] {
+function riordina(nav: VoceMenu[], ruolo?: string, prova?: boolean): VoceMenu[] {
   const voci = nav.map(v => v.sub ? { ...v, sub: [...v.sub] } : v)
   // la Live View (anteprima 18/11) subito sotto la Dashboard; non per l'agente, che ha la sua plancia confinata
-  if ((ruolo || '').toLowerCase() !== 'agente') voci.unshift({ label: 'Live View', href: '/dashboard/live' })
+  // (non nella prova per tutti: finché i numeri sono di prova, un master li prenderebbe per veri)
+  if ((ruolo || '').toLowerCase() !== 'agente' && !prova) voci.unshift({ label: 'Live View', href: '/dashboard/live' })
   // Listini POD sotto Listini Prezzi; chi non vede Listini Prezzi la trova dov'era, col nome nuovo
   const assist = voci.find(v => v.label === 'Assistenza Clienti'), listini = voci.find(v => v.label === 'Listini Prezzi')
   const pod = assist?.sub?.find(s => s.href === '/dashboard/assistenza/prezzi-pod')
@@ -58,6 +60,9 @@ function riordina(nav: VoceMenu[], ruolo?: string): VoceMenu[] {
   return voci
 }
 
+// le pagine già pronte nella grafica nuova (le stesse del proxy, middleware.ts)
+const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni'])
+
 const RUOLI: Record<string, string> = { master: 'master', admin: 'amministratore', operatore: 'operatore', agente: 'agente' }
 
 // Auto: la luce dell'ora, come nella prova (notte prima delle 7 e dopo le 18:12, mattina fino alle 10, giorno fino alle 17)
@@ -72,7 +77,7 @@ type Scelta = 'auto' | 'giorno' | 'notte'
 
 export default function CorniceNuova({ children, user, path, nav: navDiOggi, pallinoVoce, pallinoSotto, credito, mostraSms, isMobile, vociProfilo }: {
   children: React.ReactNode
-  user?: { nome?: string; ruolo?: string; brandLogo?: string | null; brandNome?: string | null; graficaScelta?: string; graficaLuce?: string; graficaEntrata?: boolean; graficaProposta?: string }
+  user?: { nome?: string; ruolo?: string; brandLogo?: string | null; brandNome?: string | null; graficaScelta?: string; graficaLuce?: string; graficaEntrata?: boolean; graficaProposta?: string; graficaProva?: boolean }
   path: string
   nav: VoceMenu[]
   pallinoVoce: (label: string, href?: string) => Pallino | null
@@ -82,7 +87,27 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
   isMobile: boolean
   vociProfilo: { label: string; href: string; icona: string }[]
 }) {
-  const nav = riordina(navDiOggi, user?.ruolo)
+  const nav = riordina(navDiOggi, user?.ruolo, !!user?.graficaProva)
+  // ── la prova per tutti (Lorenzo 19/11): si provano solo Dashboard ed Elenco spedizioni, con «?nuova=1» nell'indirizzo.
+  // Le altre voci si vedono (anche i sottomenu) ma non si cliccano: «arrivano presto».
+  const prova = !!user?.graficaProva
+  const inProva = (href?: string) => !!href && PAGINE_PROVA.has(href)
+  const vai = (href?: string) => (prova && inProva(href) ? href + '?nuova=1' : href)
+  const spenta = (href?: string) => prova && !inProva(href)
+  const [voto, setVoto] = useState<null | 'voto' | 'esci'>(null)
+  // i collegamenti dentro le pagine (es. dalla Dashboard all'Elenco) restano nella prova: al clic si aggiunge «?nuova=1»
+  useEffect(() => {
+    if (!prova) return
+    const clic = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
+      if (!a || a.target === '_blank') return
+      const u = new URL(a.href, window.location.href)
+      if (u.origin !== window.location.origin || !PAGINE_PROVA.has(u.pathname) || u.searchParams.get('nuova') === '1') return
+      u.searchParams.set('nuova', '1'); a.href = u.toString()
+    }
+    document.addEventListener('click', clic, true)
+    return () => document.removeEventListener('click', clic, true)
+  }, [prova])
   // ── Auto / Giorno / Notte: la scelta di chi guarda sta nel biscotto mx_tema, così il server disegna già la pagina
   // nella luce giusta (dashboard/layout.tsx) e qui si parte da quella: server e browser disegnano la stessa pagina ──
   const [scelta, setScelta] = useState<Scelta>(() => (['auto', 'giorno', 'notte'].includes(user?.graficaScelta || '') ? user!.graficaScelta : 'auto') as Scelta)
@@ -163,7 +188,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
 
       {isMobile && drawer && <div className="gx-velo-menu" onClick={() => setDrawer(false)} />}
       <nav className={'gx-lato gx-vetro' + (!isMobile && chiuso ? ' gx-lato--chiuso' : '') + (isMobile && drawer ? ' gx-lato--aperto' : '')} aria-label="Menu">
-        <a className={'gx-marca' + (user?.brandLogo ? ' gx-marca--logo' : '')} href="/dashboard">
+        <a className={'gx-marca' + (user?.brandLogo ? ' gx-marca--logo' : '')} href={vai('/dashboard')}>
           {user?.brandLogo ? <img className="gx-marca__logo" src={user.brandLogo} alt={user?.brandNome || 'Logo'} /> : (
             <>
               <span className="gx-marca__v">{(user?.brandNome || 'M').substring(0, 1).toUpperCase()}</span>
@@ -172,7 +197,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
           )}
         </a>
         <div className="gx-menu">
-          <a className={'gx-voce' + (plancia ? ' gx-voce--su' : '')} href="/dashboard" aria-current={plancia ? 'page' : undefined}><Icona id="i-plancia" />Dashboard</a>
+          <a className={'gx-voce' + (plancia ? ' gx-voce--su' : '')} href={vai('/dashboard')} aria-current={plancia ? 'page' : undefined}><Icona id="i-plancia" />Dashboard</a>
           {nav.map(v => {
             const gruppo = GRUPPO[v.label]
             const titolo = gruppo && gruppo !== gruppoPrima ? gruppo : null
@@ -195,7 +220,8 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
                     <div className="gx-rami">
                       {v.sub.map(s => {
                         const n = pallinoSotto(s.href)
-                        return <a key={s.href} href={s.href} className={path === s.href ? 'gx-su' : undefined} aria-current={path === s.href ? 'page' : undefined}>{s.label}{n > 0 && <span className="gx-conta">{n}</span>}</a>
+                        if (spenta(s.href)) return <span key={s.href} className="gx-spenta" aria-disabled="true" title="Arriva presto nella nuova versione">{s.label}</span>
+                        return <a key={s.href} href={vai(s.href)} className={path === s.href ? 'gx-su' : undefined} aria-current={path === s.href ? 'page' : undefined}>{s.label}{n > 0 && <span className="gx-conta">{n}</span>}</a>
                       })}
                     </div>
                   )}
@@ -205,10 +231,14 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
             return (
               <div key={v.label}>
                 {titolo && <div className="gx-gruppo">{titolo}</div>}
-                <a className={'gx-voce' + (su ? ' gx-voce--su' : '')} href={v.href} aria-current={su ? 'page' : undefined} {...(v.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
+                {spenta(v.href) ? (
+                  <span className="gx-voce gx-voce--spenta" aria-disabled="true" title="Arriva presto nella nuova versione"><Icona id={icona} />{v.label}</span>
+                ) : (
+                <a className={'gx-voce' + (su ? ' gx-voce--su' : '')} href={vai(v.href)} aria-current={su ? 'page' : undefined} {...(v.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
                   <Icona id={icona} />{v.label}
                   {p && p.n > 0 && <span className="gx-conta" title={p.title}>{p.n}</span>}
                 </a>
+                )}
               </div>
             )
           })}
@@ -219,6 +249,15 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
       </nav>
 
       <div className="gx-destra">
+        {prova && (
+          <div className="gx-prova" role="region" aria-label="Prova della nuova versione">
+            <span className="gx-prova__punto" aria-hidden="true" />
+            <span className="gx-prova__testo"><b>Stai provando la nuova MoovExpress.</b> Per ora sono pronte la Dashboard e l'Elenco spedizioni: le altre voci arrivano presto.</span>
+            <button type="button" className="gx-prova__voto" onClick={() => setVoto('voto')}>Lascia il tuo voto</button>
+            <button type="button" className="gx-prova__esci" onClick={() => setVoto('esci')}>Torna alla versione attuale<Icona id="i-chevron" /></button>
+          </div>
+        )}
+        {prova && voto && <Sondaggio pagina={path} uscita={voto === 'esci'} chiudi={() => setVoto(null)} />}
         <header className="gx-alto">
           <button type="button" className="gx-tasto" onClick={menu} aria-label={isMobile ? 'Menu' : (chiuso ? 'Apri il menu' : 'Chiudi il menu')} title={isMobile ? 'Menu' : (chiuso ? 'Apri il menu' : 'Chiudi il menu')}><Icona id="i-menu" /></button>
           <button type="button" className="gx-cerca gx-vetro gx-pillola" onClick={() => window.dispatchEvent(new CustomEvent('moovy:apri'))} title="Moovy, l'assistente">

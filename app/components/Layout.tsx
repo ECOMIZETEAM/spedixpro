@@ -153,7 +153,7 @@ const NAV: NavItem[] = [
   { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean, graficaNuova?: boolean, graficaScelta?: string, graficaLuce?: string, graficaEntrata?: boolean, graficaProposta?: string, contabilita?: boolean } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean, graficaNuova?: boolean, graficaScelta?: string, graficaLuce?: string, graficaEntrata?: boolean, graficaProposta?: string, contabilita?: boolean, graficaProva?: boolean, provaNuova?: boolean } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
@@ -446,6 +446,15 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
           <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
             <button onClick={()=>{ if (isMobile) setDrawerOpen(true); else toggleSidebar() }} aria-label="Menu" title={isMobile?'Menu':(sidebarChiusa?'Apri il menu':'Chiudi il menu')} style={{background:'none',border:'none',fontSize:'23px',cursor:'pointer',color:'#1a1a1a',padding:'2px 6px',lineHeight:1}}>☰</button>
             {isMobile && <span style={{fontSize:'14px',fontWeight:800,color:'#1a1a1a'}}>{user?.brandNome || 'MoovExpress'}</span>}
+            {/* Lorenzo 19/11: chi vuole prova la nuova versione (Dashboard ed Elenco spedizioni) e la vota. Solo da computer:
+                sul telefono la grafica nuova non è ancora pronta. Si apre con «?nuova=1», così il tasto indietro riporta qui. */}
+            {user?.provaNuova && !isMobile && (
+              <a href={(path === '/dashboard' || path === '/dashboard/spedizioni' ? path : '/dashboard') + '?nuova=1'} className="prova-scopri"
+                style={{display:'inline-flex',alignItems:'center',gap:'8px',marginLeft:'6px',padding:'6px 14px 6px 12px',borderRadius:'999px',background:'#111827',color:'#fff',fontSize:'12.5px',fontWeight:600,textDecoration:'none',whiteSpace:'nowrap' as const,boxShadow:'0 6px 16px -8px rgba(17,24,39,.6)'}}>
+                <span style={{width:'7px',height:'7px',borderRadius:'50%',background:'#f97316',boxShadow:'0 0 0 3px rgba(249,115,22,.25)'}} />
+                Scopri la nuova versione
+              </a>
+            )}
           </div>
           <div style={{display:'flex',alignItems:'center',gap:isMobile?'6px':'10px'}}>
             {creditoTop?.mostra && creditoTop.conti > 1 && <ContiTendina conti={creditoTop.conti} compatto={isMobile} />}
