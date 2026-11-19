@@ -6,7 +6,7 @@ import { vedeLaRete } from '@/lib/perimetro'
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { confineGiornoRoma } from '@/lib/date-roma'
 import { contrattiPossedutiNomi } from '@/lib/rete-masters'
-import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 import { spedizioniInCatena } from '@/lib/catena-report'
 
 export const maxDuration = 300
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
     // insieme vuoto il report della piattaforma (master senza contratti) usciva sempre vuoto.
     const nomiPosseduti = reteVisibile ? await contrattiPossedutiNomi(admin, mio) : []
     const posseduti = nomiPosseduti.length ? new Set(nomiPosseduti) : null
-    const nascosti = new Set(agente ? [] : await ledgerFornitoriDaNascondere(admin, mio))
+    const nascosti = new Set(agente ? [] : await ledgerGambeInterne(admin, mio))
     const idsAgente = agente ? new Set(await clientiAgente(supabase, utente)) : null
     const righeMasterSet = new Set(righeMaster), mieiMasterSet = new Set(mieiMaster)
 

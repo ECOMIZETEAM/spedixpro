@@ -99,7 +99,12 @@ export async function POST(req: Request) {
       const dal = periodoDal(args.periodo || 'oggi')
       let q = admin.from('spedizioni').select('id', { count: 'exact', head: true }).gte('created_at', dal)
       if (isCliente) q = q.eq('cliente_id', u!.cliente_id)
-      else { const { sottoAlberoMasterIds } = await import('@/lib/rete-masters'); const sub = await sottoAlberoMasterIds(admin, u!.master_id!); q = q.in('master_id', sub.length ? sub : [u!.master_id]) }
+      else {
+        const { sottoAlberoMasterIds } = await import('@/lib/rete-masters'); const sub = await sottoAlberoMasterIds(admin, u!.master_id!); q = q.in('master_id', sub.length ? sub : [u!.master_id])
+        // Un pacco passato da piu' master della rete si conta una volta, come nella home (lib/gambe-visibilita.ts).
+        const { ledgerGambeInterne } = await import('@/lib/gambe-visibilita'); const gambe = await ledgerGambeInterne(admin, u!.master_id!)
+        if (gambe.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${gambe.join(',')})`)
+      }
       const { count } = await q
       return json({ reply: await riformula(groq, messages, call, `Spedizioni ${args.periodo || 'oggi'}: ${count || 0}.`) })
     }

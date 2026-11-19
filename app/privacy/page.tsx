@@ -23,7 +23,7 @@ export default function PrivacyPage() {
     <div style={{ background: '#fff', minHeight: '100vh' }}>
       <div style={box}>
         <h1 style={h1}>Privacy Policy</h1>
-        <div style={small}>MoovExpress — Ultimo aggiornamento: 12 novembre 2026</div>
+        <div style={small}>MoovExpress — Ultimo aggiornamento: 19 novembre 2026</div>
 
         <h2 style={h2}>1. Titolare del trattamento</h2>
         <p style={p}>
@@ -156,7 +156,24 @@ export default function PrivacyPage() {
           dell'account e dei dati collegati è possibile scrivere a {mail}.
         </p>
 
-        <h2 style={h2}>13. Modifiche</h2>
+        {/* Pagina indicata a Google Play come «URL per eliminare i dati» (Sicurezza dei dati, 19/11/2026):
+            Google vuole qui il nome dell'app, i passaggi, cosa si cancella e cosa si conserva. Se cambia il
+            percorso del pulsante (app/components/ChiusuraAccount.tsx) va cambiato anche qui. */}
+        <h2 id="cancellazione-account" style={h2}>13. Chiusura dell&apos;account e cancellazione dei dati (app MoovExpress)</h2>
+        <p style={p}>
+          Chi usa MoovExpress, sul web o nell&apos;app per iOS e Android, può chiedere la chiusura del proprio account in due modi:
+        </p>
+        <ul>
+          <li style={li}><strong>Dall&apos;app o dal portale</strong>: menu <strong>Impostazioni</strong>, sezione <strong>«Chiusura dell&apos;account»</strong>, pulsante <strong>«Chiedi la chiusura dell&apos;account»</strong>. La richiesta arriva a chi gestisce l&apos;account (l&apos;azienda o il rivenditore che l&apos;ha attivato), che toglie l&apos;accesso.</li>
+          <li style={li}><strong>Per email</strong>, scrivendo a {mail} dall&apos;indirizzo dell&apos;account.</li>
+        </ul>
+        <p style={p}>
+          Con la chiusura si cancellano, entro 30 giorni dalla richiesta, i dati personali dell&apos;account: nome, email, telefono
+          e credenziali di accesso. Restano conservati, per il periodo previsto dagli obblighi fiscali e contabili, le
+          spedizioni (documenti di trasporto), le fatture e i movimenti del credito: per questi vale quanto scritto ai punti 7 e 8.
+        </p>
+
+        <h2 style={h2}>14. Modifiche</h2>
         <p style={p}>
           La presente informativa può essere aggiornata nel tempo. Le modifiche saranno pubblicate su questa
           pagina con la relativa data di aggiornamento.

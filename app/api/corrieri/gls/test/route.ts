@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { creaSpedizioneConEtichettaGls, annullaSpedizioneGls, provaPasswordWeblabelingGls, improntaPasswordWeblabeling, type CredenzialiGls } from '@/lib/gls'
+import { creaSpedizioneConEtichettaGls, annullaSpedizioneGls, provaPasswordWeblabelingGls, bloccoPasswordSvincoloGls, impostazioniRifiutoSvincoloGls, type CredenzialiGls } from '@/lib/gls'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TEST connessione GLS diretto — SOLO IL PROPRIETARIO del contratto.
@@ -61,17 +61,19 @@ export async function POST(req: Request) {
     // Password dell'area personale GLS (svincolo giacenze): si prova con una spedizione inesistente, nessun pacco
     // coinvolto. Così chi la inserisce sa subito se è giusta, senza aspettare la prima giacenza vera.
     // Una password che GLS ha già rifiutato non si rimanda (vedi lib/gls.improntaPasswordWeblabeling).
+    // Si ferma la password solo su un errore di password (lib/gls, rifiutoAccessoSvincoloGls), e a schermo va
+    // la risposta di GLS: su "Profilo GLS inesistente" la password di Quick era giusta, ed era stata fermata.
     let giacenze: { ok: boolean; esito: string } | null = null
     if (cred.password_weblabeling) {
-      const impronta = await improntaPasswordWeblabeling(cred)
       const settingsC = ((c as any).settings || {}) as Record<string, any>
-      if (settingsC.svincolo_gls_password_rifiutata === impronta) {
-        giacenze = { ok: false, esito: 'GLS ha già rifiutato questa password: inseriscine una nuova' }
+      const bloccata = await bloccoPasswordSvincoloGls(cred, settingsC)
+      if (bloccata) {
+        giacenze = { ok: false, esito: bloccata }
       } else {
-        giacenze = await provaPasswordWeblabelingGls(cred)
-        if (!giacenze.ok && /password|profilo/i.test(giacenze.esito)) {
-          await createAdminSupabase().from('corrieri').update({ settings: { ...settingsC, svincolo_gls_password_rifiutata: impronta } }).eq('id', corriereId)
-        }
+        const prova = await provaPasswordWeblabelingGls(cred)
+        giacenze = { ok: prova.ok, esito: prova.ok ? prova.esito : (prova.messaggio || prova.esito) }
+        const rifiuto = prova.ok ? null : await impostazioniRifiutoSvincoloGls(cred, prova.esito)
+        if (rifiuto) await createAdminSupabase().from('corrieri').update({ settings: { ...settingsC, ...rifiuto } }).eq('id', corriereId)
       }
     }
 

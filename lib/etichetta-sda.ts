@@ -281,7 +281,9 @@ async function disegnaPagina(out: any, srcPage: any, codici: Codici, dati: DatiE
     const c = dati.contrassegno
     page.drawRectangle({ x: 110.2, y: 69.5, width: 228.0, height: 12.6, color: rgb(0, 0, 0) })
     T(113.2, 73.2, 7.20, bold, 'SPEDIZIONE IN CONTRASSEGNO', rgb(1, 1, 1))
-    T(113.2, 53.5, 6.00, reg, 'Importo in Euro'); T(165.0, 51.5, 16.0, bold, c.importo)
+    // L'importo era a 16 punti, il testo piu' grande dell'etichetta dopo il CAP: i master l'hanno trovato
+    // troppo grande (19/11/2026). Ora e' grande quanto «SPEDIZIONE IN CONTRASSEGNO», sulla riga della sua voce.
+    T(113.2, 53.5, 6.00, reg, 'Importo in Euro'); T(165.0, 53.5, 7.20, bold, c.importo)
     fit(113.2, 42.0, 6.00, reg, `Importo in lettere: ${c.lettere}`, 140)
     T(258.0, 53.5, 6.00, reg, 'Pagamento'); fit(258.0, 44.0, 7.20, bold, c.pagamento, 78)
   }

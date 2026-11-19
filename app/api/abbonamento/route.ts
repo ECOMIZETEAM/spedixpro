@@ -71,10 +71,24 @@ export async function GET() {
   const reteIds = await sottoAlberoMasterIds(admin, utente.master_id)
   // Il numero si legge dal CONTATORE (una riga per master e mese, tenuta da un trigger), non
   // contando le spedizioni: contarle era la query piu' costosa del database (~500ms a chiamata)
-  // e a volume non reggerebbe. Il contatore da' lo stesso identico numero.
-  const { data: righeConta } = await admin.from('contatori_spedizioni')
-    .select('n').in('master_id', reteIds).eq('mese', meseCorrente())
-  const count = (righeConta || []).reduce((t: number, r: any) => t + Number(r.n || 0), 0)
+  // e a volume non reggerebbe.
+  //
+  // Lo legge fn_usato_rete, la stessa funzione del blocco (fn_limiti_catena): un pacco conta una
+  // volta sola anche quando passa da piu' master della stessa rete (scripts/limite-piano-gambe.sql).
+  // Prima qui si sommava il contatore a mano, e il 19/11/2026 questa pagina diceva a MULTIEXPRESS
+  // 233.000 spedizioni quando i pacchi erano 120.000: ogni gamba di Wave e LOGIXIA contava di nuovo.
+  // Se la funzione non risponde si ripiega sulla somma semplice: un numero alto e' meglio di una
+  // pagina che non si apre, e l'errore resta nei log.
+  let count = 0
+  const { data: usatoRete, error: errUsato } = await admin.rpc('fn_usato_rete', { p_master: utente.master_id, p_mese: meseCorrente() })
+  if (errUsato) {
+    console.error('[ABBONAMENTO] fn_usato_rete non letta, ripiego sulla somma del contatore:', errUsato.message)
+    const { data: righeConta } = await admin.from('contatori_spedizioni')
+      .select('n').in('master_id', reteIds).eq('mese', meseCorrente())
+    count = (righeConta || []).reduce((t: number, r: any) => t + Number(r.n || 0), 0)
+  } else {
+    count = Number(usatoRete || 0)
+  }
 
   // Se sono il ROOT (M1): LISTA DEI MASTER della rete (un master = una riga) + KPI mensili.
   // Ogni master paga il canone il 1° del mese (cron rinnovo-mensile); qui il root vede piano,

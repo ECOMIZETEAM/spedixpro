@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import LettoreCodici from '@/app/components/LettoreCodici'
+import ChiusuraAccount from '@/app/components/ChiusuraAccount'
 
 // LA SCHERMATA DELL'AUTISTA.
 //
@@ -159,6 +160,9 @@ export default function AutistaPage() {
           </button>
         ))}
       </div>
+
+      {/* in fondo, lontano dal lavoro: chiedere di chiudere il proprio account (Apple 5.1.1(v)) */}
+      <div style={{ padding: '18px 14px 0' }}><ChiusuraAccount compatto /></div>
 
       {/* la scheda del pacco: quello che serve mentre si suona al citofono */}
       {aperta && (

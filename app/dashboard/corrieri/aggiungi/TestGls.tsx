@@ -17,7 +17,10 @@ export default function TestGls({ corriereId }: { corriereId: string }) {
       })
       const d = await res.json().catch(() => ({}))
       const giacenze = d?.giacenze
-        ? `\nSvincolo giacenze: ${d.giacenze.ok ? d.giacenze.esito : '⚠️ ' + d.giacenze.esito + ' — controlla la password dell\'area personale del sito GLS (non quella del Weblabeling).'}`
+        // Il messaggio arriva gia' completo dal server, con la risposta di GLS dentro (lib/gls,
+        // messaggioAccessoSvincoloGls): la coda fissa "controlla la password" sviava quando a non andare
+        // era il profilo e la password era giusta (Quick, 19/11/2026).
+        ? `\nSvincolo giacenze: ${d.giacenze.ok ? d.giacenze.esito : '⚠️ ' + d.giacenze.esito}`
         : '\nSvincolo giacenze: password dell\'area personale del sito GLS non inserita (serve per svincolare dal gestionale).'
       if (d?.ok) {
         setStato(d?.giacenze && !d.giacenze.ok ? 'ko' : 'ok')

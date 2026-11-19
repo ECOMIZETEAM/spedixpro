@@ -371,6 +371,32 @@ export async function inviaInvitoStaff({
   }
 }
 
+// RICHIESTA DI CHIUSURA DELL'ACCOUNT di un collaboratore, agente o autista (app/api/account/chiusura).
+// Va al master perche' quell'accesso lo crea e lo toglie il titolare dalla pagina Staff: nei ticket
+// questi ruoli non hanno un posto. Non cancella niente, avvisa: decide il titolare.
+export async function inviaRichiestaChiusuraAccount(p: {
+  to: string; masterNome: string; persona: string; email: string; ruolo: string; motivo: string
+}): Promise<{ ok: boolean }> {
+  try {
+    const chi = esc(p.persona || p.email)
+    await invia({
+      from: FROM,
+      to: p.to,
+      subject: `MoovExpress — Richiesta di chiusura dell'account di ${p.persona || p.email}`,
+      html: wrap(`
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Richiesta di chiusura dell'account</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 14px"><strong>${chi}</strong>${p.persona ? ` (${esc(p.email)})` : ''}, ${esc(p.ruolo.toLowerCase())} di <strong>${esc(p.masterNome)}</strong>, ha chiesto di chiudere il proprio accesso a MoovExpress.</p>
+        ${p.motivo ? `<p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 14px">Motivo indicato: <em>${esc(p.motivo)}</em></p>` : ''}
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 14px">Non è stato cancellato nulla. Se sei d'accordo, togli l'accesso da <strong>Impostazioni → Staff</strong>: spedizioni, distinte e movimenti restano conservati.</p>
+      `)
+    })
+    return { ok: true }
+  } catch (err) {
+    console.error('Errore invio richiesta chiusura account:', err)
+    return { ok: false }
+  }
+}
+
 // RECUPERO PASSWORD: link per reimpostarla da soli. Serve perché le credenziali le crea il
 // master a mano: senza questa via, chi non le ha mai ricevute o le ha perse resta fuori e deve
 // per forza farsi risettare la password da qualcuno.

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useAppNativa } from '@/lib/app-nativa'
 
 const ACCENT = '#f97316'
 
@@ -16,11 +17,15 @@ const ACCENT = '#f97316'
 export default function AvvisoApi({ brandLogo, brandNome }: { brandLogo?: string | null; brandNome?: string | null }) {
   const [d, setD] = useState<any>(null)
   const [chiudendo, setChiudendo] = useState(false)
+  const app = useAppNativa()
 
   useEffect(() => {
     fetch('/api/cliente/avvisi').then(r => r.json()).then(x => { if (x?.avviso) setD(x) }).catch(() => { })
   }, [])
-  if (!d) return null
+  // Nell'app iOS/Android l'avviso non si apre: parla di pacchetti a pagamento e di attivare la carta,
+  // e per gli store sarebbe un invito a comprare fuori dal loro sistema (lib/app-nativa). Resta non
+  // letto e compare sul web, come AvvisoImportante del master.
+  if (!d || app) return null
 
   async function hoCapito() {
     setChiudendo(true)

@@ -126,22 +126,26 @@ export async function POST(req: NextRequest) {
       .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
       .eq('numero', ldv)
       .limit(1).maybeSingle()
-    if (!spedizione) {
-      // Ripiego: match parziale (numero che CONTIENE la LDV). È una scansione, ma gira SOLO sulle
-      // righe che l'esatto non ha risolto, non più su tutte.
-      const rLike = await adminDb.from('spedizioni')
-        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
-        .ilike('numero', `%${ldv}%`)
-        .limit(1).maybeSingle()
-      spedizione = rLike.data as any
-    }
     if (!spedizione && /^[A-Za-z0-9_-]+$/.test(ldv)) {
       // Export SpediamoPro: 'Shipment' e' il codice del provider (raw_response.code), non la LDV in elenco.
+      // PRIMA della ricerca parziale: tracking e codice hanno un indice, la ricerca parziale scorre tutta la
+      // tabella. Il 19/11/2026 il file SpediamoPro di MULTIEXPRESS (251 righe, tutte codici) passava prima dalla
+      // ricerca parziale riga per riga: il blocco da 200 e' andato oltre i 300 secondi della funzione ed
+      // e' entrato solo l'ultimo blocco, 2 contrassegni invece di 100.
       const r2 = await adminDb.from('spedizioni')
         .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
         .or(`tracking_number.eq.${ldv},raw_response->>code.eq.${ldv}`)
         .limit(1).maybeSingle()
       spedizione = r2.data as any
+    }
+    if (!spedizione) {
+      // Ultimo ripiego: match parziale (numero che CONTIENE la LDV). Scorre la tabella: gira solo sulle
+      // righe che nessuna ricerca con indice ha risolto.
+      const rLike = await adminDb.from('spedizioni')
+        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
+        .ilike('numero', `%${ldv}%`)
+        .limit(1).maybeSingle()
+      spedizione = rLike.data as any
     }
     if (!spedizione) { segnaErrore(ldv, 'non trovata a sistema'); continue }
     // Trovata per RIPIEGO (non per numero esatto): se è la gamba di un venditore di un pacco condiviso

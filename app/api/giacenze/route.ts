@@ -4,7 +4,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { vedeLaRete } from '@/lib/perimetro'
 import { gestisceLaRete, senzaCostoMaster } from '@/lib/ruoli'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
-import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { spedizioniInCatena } from '@/lib/catena-report'
 import { confineGiornoRoma } from '@/lib/date-roma'
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
   }
   const filtroContratti = !!ownedContractNames && ownedContractNames.length > 0
   // NASCONDI-FORNITORI (come lista spedizioni): niente giacenze delle gambe a monte (cliente = ledger d'acquisto).
-  const ledgerNascosti = isAgente(utente) ? [] : await ledgerFornitoriDaNascondere(adminDb, utente.master_id)
+  const ledgerNascosti = isAgente(utente) ? [] : await ledgerGambeInterne(adminDb, utente.master_id)
   // Agente: solo giacenze dei suoi clienti (copre anche l'eventuale ramo rete).
   const idsAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
 

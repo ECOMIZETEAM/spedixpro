@@ -126,6 +126,7 @@ const NAV: NavItem[] = [
     { label: 'Check Ricariche', href: '/dashboard/statistiche/check-ricariche' },
     // Solo titolare e admin dei master dove la contabilita' e' accesa (lib/contabilita-banca).
     { label: 'Estratto conto', href: '/dashboard/statistiche/estratto-conto', soloContabilita: true },
+    { label: 'Salute del conto', href: '/dashboard/statistiche/salute-conto', soloContabilita: true },
     { label: 'Rettifiche automatiche', href: '/dashboard/statistiche/rettifiche-auto', soloMultiexpress: true },
   ]},
   { label: 'Registro Attività', href: '/dashboard/audit', icon: '🛡', superMaster: true },
@@ -470,8 +471,9 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
                 </a>
               )
             })()}
+            {/* Nell'app il titolo non parla di acquisto: gli SMS lì non si comprano (lib/app-nativa). */}
             {['master', 'admin', 'operatore'].includes(ruolo) && (
-              <a href="/dashboard/reports/storico-sms" title="SMS — credito e acquisto"
+              <a href="/dashboard/reports/storico-sms" title={app ? 'SMS' : 'SMS — credito e acquisto'}
                 style={{ display: 'flex', alignItems: 'center', gap: '5px', textDecoration: 'none', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '8px', padding: '5px 10px' }}>
                 <span style={{ fontSize: '13px' }}>✉</span>
                 {!isMobile && <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.4px', color: '#9a3412' }}>SMS</span>}
