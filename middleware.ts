@@ -16,6 +16,7 @@ const SCRITTURE_AGENTE = [
   '/api/spedizioni/tracking',         // consultazione tracking
   '/api/moovy/',                      // assistente (ha i suoi limiti dentro)
   '/api/auth/',                       // uscita/sessione
+  '/api/account/chiusura',            // chiedere la chiusura del PROPRIO account (Apple 5.1.1(v)): non scrive dati della rete
 ]
 
 // SCRITTURE CONSENTITE ALL'AUTISTA: la sua schermata e la sessione, e basta.
@@ -26,6 +27,7 @@ const SCRITTURE_AGENTE = [
 const SCRITTURE_AUTISTA = [
   '/api/autista',
   '/api/auth/',
+  '/api/account/chiusura',   // chiedere la chiusura del proprio account: manda solo un'email al master
 ]
 
 // CHI NON PAGA PUO' FARE UNA COSA SOLA: PAGARE.

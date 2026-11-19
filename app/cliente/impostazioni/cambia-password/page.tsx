@@ -1,5 +1,6 @@
 import CambioPassword from '@/app/components/CambioPassword'
 import { SezioneVerifica } from '@/app/components/VerificaDuePassaggi'
+import ChiusuraAccount from '@/app/components/ChiusuraAccount'
 
 export default function CambiaPasswordClientePage() {
   return (
@@ -7,6 +8,7 @@ export default function CambiaPasswordClientePage() {
       <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 16px' }}>Cambia Password</h1>
       <CambioPassword />
       <SezioneVerifica />
+      <ChiusuraAccount />
     </div>
   )
 }

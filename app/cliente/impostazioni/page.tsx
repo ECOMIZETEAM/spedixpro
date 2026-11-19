@@ -1,3 +1,5 @@
+import ChiusuraAccount from '@/app/components/ChiusuraAccount'
+
 export default function ImpostazioniPage() {
   return (
     <div>
@@ -9,6 +11,7 @@ export default function ImpostazioniPage() {
         <div style={{fontSize:'40px',marginBottom:'12px'}}>⚙️</div>
         <div style={{fontSize:'14px',fontWeight:'500',color:'#999'}}>Nessun dato disponibile</div>
       </div>
+      <ChiusuraAccount />
     </div>
   )
 }

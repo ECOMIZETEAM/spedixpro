@@ -6,6 +6,7 @@ const inp = {padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 const lbl = {fontSize:'12px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
 import { useDialog } from '@/app/components/DialogProvider'
+import ChiusuraAccount from '@/app/components/ChiusuraAccount'
 export default function ImpostazioniPage() {
   const dialog = useDialog()
   const [tab, setTab] = useState<'azienda'|'fatturazione'|'pagamento'|'sede'>('azienda')
@@ -216,6 +217,7 @@ export default function ImpostazioniPage() {
           </button>
         </div>
       </div>
+      <ChiusuraAccount />
     </div>
   )
 }
