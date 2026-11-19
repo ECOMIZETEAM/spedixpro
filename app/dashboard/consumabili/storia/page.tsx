@@ -19,6 +19,7 @@ export default function StoriaPage() {
   const [errore, setErrore] = useState('')
   const [perPage, setPerPage] = useState(10)
   const [pagina, setPagina] = useState(1)
+  const [cerca, setCerca] = useState('')
 
   useEffect(() => {
     fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[]))
@@ -39,17 +40,27 @@ export default function StoriaPage() {
     setLoading(false)
   }
 
-  const totale = movimenti.reduce((acc, m) => acc + parseFloat(m.totale||0), 0)
+  // La ricerca filtra le righe gia' lette per cliente e periodo, e conteggio e totale seguono il filtro:
+  // cercando «buste» il totale in alto e' quello delle buste, non di tutto il mese. L'importo si trova
+  // scritto sia con la virgola sia col punto (36,60 / 36.60).
+  const testo = cerca.trim().toLowerCase()
+  const trovati = !testo ? movimenti : movimenti.filter((m: any) => {
+    const importo = Number(m.totale || 0).toFixed(2)
+    return [m.descrizione, m.clienti?.ragione_sociale, m.tipo, importo, importo.replace('.', ',')]
+      .some((v) => String(v ?? '').toLowerCase().includes(testo))
+  })
 
-  const totalePagine = Math.max(1, Math.ceil(movimenti.length / perPage))
+  const totale = trovati.reduce((acc, m) => acc + parseFloat(m.totale||0), 0)
+
+  const totalePagine = Math.max(1, Math.ceil(trovati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
-  const movimentiPaginati = movimenti.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
+  const movimentiPaginati = trovati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
 
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Storia Consumabili</h1>
-        <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>{movimenti.length} movimenti trovati</p>
+        <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>{trovati.length} movimenti trovati</p>
         <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
           Mostra{' '}
           <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
@@ -64,17 +75,22 @@ export default function StoriaPage() {
 
       {/* Filtri */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'16px'}}>
           <div>
             <label style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Cliente</label>
-            <SelectCercabile value={clienteId} onChange={e=>setClienteId(e.target.value)} style={sel}>
+            <SelectCercabile value={clienteId} onChange={e=>{setClienteId(e.target.value);setPagina(1)}} style={sel}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
           </div>
           <div>
             <label style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Periodo</label>
-            <DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2)}} />
+            <DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2);setPagina(1)}} />
+          </div>
+          <div>
+            <label style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>🔍 Cerca</label>
+            <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="Descrizione, cliente, importo..."
+              style={{...inp,width:'100%',boxSizing:'border-box' as const}} />
           </div>
         </div>
       </div>
@@ -83,13 +99,13 @@ export default function StoriaPage() {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Movimenti</span>
-          {movimenti.length > 0 && <span style={{fontSize:'13px',fontWeight:'700',color:'#f97316'}}>Totale: € {totale.toFixed(2)}</span>}
+          {trovati.length > 0 && <span style={{fontSize:'13px',fontWeight:'700',color:'#f97316'}}>Totale: € {totale.toFixed(2)}</span>}
         </div>
         {loading ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : errore ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#b91c1c'}}>{errore}</div>
-        ) : !movimenti.length ? (
+        ) : !trovati.length ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>
             <div style={{fontSize:'32px',marginBottom:'8px'}}>📋</div>
             Nessun movimento trovato
@@ -121,7 +137,7 @@ export default function StoriaPage() {
             {/* barra-paginazione */}
             {totalePagine > 0 && (
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
-                <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, movimenti.length)} di {movimenti.length}</span>
+                <span style={{fontSize:'12px',color:'#666'}}>{(paginaCorr - 1) * perPage + 1}-{Math.min(paginaCorr * perPage, trovati.length)} di {trovati.length}</span>
                 <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
                   <button onClick={()=>setPagina(p=>Math.max(1,p-1))} disabled={paginaCorr<=1} style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'5px',background:'#fff',fontSize:'12px',cursor:paginaCorr<=1?'default':'pointer',color:paginaCorr<=1?'#ccc':'#1a1a1a'}}>Precedente</button>
                   {Array.from({length: totalePagine}, (_,i)=>i+1).filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2).map((n,idx,arr)=>(
