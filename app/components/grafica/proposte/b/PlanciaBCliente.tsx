@@ -121,8 +121,9 @@ function Chiusa({ data }: { data: any }) {
         <ul className="pb-chiusa__voci">
           {senzaCredito && (
             <li className="pb-chiusa__voce pb-chiusa__voce--problema">
-              <b><Euro v={credito} /></b>
-              <div><span className="pb-chiusa__nome">credito finito</span><span className="pb-chiusa__frase">per spedire serve una ricarica</span></div>
+              {/* il segno e non la cifra: la cifra grande non ci sta accanto al tasto, e il saldo esatto è nella frase */}
+              <b>€</b>
+              <div><span className="pb-chiusa__nome">credito finito</span><span className="pb-chiusa__frase">saldo {credito.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €: per spedire serve una ricarica</span></div>
               <a className="pb-verbo" href="/cliente/ricarica">Ricarica<Icona id="i-chevron" /></a>
             </li>
           )}
@@ -141,12 +142,13 @@ function Chiusa({ data }: { data: any }) {
 
 // ── Oggi e questo mese, in cifre ──
 function Numeri({ data }: { data: any }) {
+  // Non ci sono «in lavorazione» e «in transito»: la rotta li conta in un altro modo rispetto al fiume qui sopra (stato
+  // di oggi delle spedizioni degli ultimi 30 giorni), e sulla stessa pagina due numeri diversi per la stessa parola
+  // sembrerebbero un errore. Qui solo quello che il fiume non dice.
   const cifre = [
     { n: data?.spediteOggi, nome: 'Spedite oggi', frase: 'affidate al corriere' },
-    { n: data?.inLavorazione, nome: 'In lavorazione', frase: 'aspettano il ritiro' },
-    { n: data?.inTransito, nome: 'In transito', frase: 'in viaggio adesso' },
-    { n: data?.consegnateMese, nome: 'Consegnate', frase: 'questo mese' },
     { n: data?.spedizioniMese, nome: 'Create', frase: 'questo mese' },
+    { n: data?.consegnateMese, nome: 'Consegnate', frase: 'questo mese' },
     { n: data?.spedizioniTotali, nome: 'Create', frase: 'da sempre' },
   ]
   return (

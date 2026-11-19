@@ -64,13 +64,15 @@ function riordina(nav: VoceMenu[], ruolo?: string, prova?: boolean): VoceMenu[] 
 const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni', '/cliente/dashboard', '/cliente/spedizioni'])
 
 // i gruppi del menu del portale cliente (le voci sono quelle di ClienteNav)
+// (nell'ordine in cui le voci arrivano: un gruppo spezzato in due farebbe comparire due volte lo stesso titoletto)
 const GRUPPO_CLIENTE: Record<string, string> = {
-  'Assistenza': 'Aiuto', 'Documentazione': 'Aiuto', 'Introduzione': 'Aiuto',
+  'SMS': 'Servizi', 'Assistenza': 'Servizi',
   'Reports': 'Analisi',
-  'SMS': 'Account', 'Mio Account': 'Account', 'Impostazioni': 'Account',
+  'Mio Account': 'Account', 'Impostazioni': 'Account',
+  'Documentazione': 'Aiuto', 'Introduzione': 'Aiuto',
 }
 
-const RUOLI: Record<string, string> = { master: 'master', admin: 'amministratore', operatore: 'operatore', agente: 'agente' }
+const RUOLI: Record<string, string> = { master: 'master', admin: 'amministratore', operatore: 'operatore', agente: 'agente', cliente: 'portale cliente' }
 
 // Auto: la luce dell'ora, come nella prova (notte prima delle 7 e dopo le 18:12, mattina fino alle 10, giorno fino alle 17)
 export function luceDellOra(d = new Date()) {
