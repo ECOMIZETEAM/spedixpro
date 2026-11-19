@@ -13,25 +13,7 @@ import { contabilitaAttiva } from '@/lib/contabilita-banca'
 import { eTitolareOAdmin } from '@/lib/ruoli'
 import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 import { cookies, headers } from 'next/headers'
-import { Outfit } from 'next/font/google'
-
-// Il carattere della grafica nuova (v11). preload: false: con la grafica di oggi la pagina non lo scarica nemmeno.
-const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit', display: 'swap', preload: false })
-function luceNotte(scelta: string): boolean {
-  if (scelta === 'notte') return true
-  if (scelta !== 'auto') return false
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map(x => [x.type, x.value]))
-  const m = Number(p.hour) * 60 + Number(p.minute)
-  return m < 7 * 60 || m >= 18 * 60 + 12
-}
-// La luce con cui la pagina nasce, decisa QUI sul server: la scelta di chi guarda (biscotto mx_tema: auto, giorno o
-// notte) e, in Auto, l'ora di Roma. Così la pagina arriva già col vetro giusto, senza uno script che la ritocchi prima
-// del disegno (React non lo accetta, e il server e il browser disegnerebbero due pagine diverse). Stesse soglie di
-// luceDellOra in components/grafica/CorniceNuova.tsx.
-function luceIniziale(scelta: string): string {
-  // 27/10: il giorno è il plastico bianco («argilla», dai riferimenti RoutaX di Lorenzo); la notte resta la notte
-  return luceNotte(scelta) ? 'notte' : 'argilla'
-}
+import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
 // SENZA utente -> sidebar assente al primo accesso (il portale cliente aveva gia' lo stesso
@@ -90,7 +72,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const provaAperta = (process.env.GRAFICA_PROVA_APERTA === '1' || puoGraficaNuova) && String(utente?.ruolo || '').toLowerCase() !== 'agente'
   const provaQui = provaAperta && !graficaPiena && (await headers()).get('x-grafica-prova') === '1'
   const graficaNuova = graficaPiena || provaQui
-  const graficaScelta = ['auto', 'giorno', 'notte'].includes(biscotti.get('mx_tema')?.value || '') ? biscotti.get('mx_tema')!.value : 'auto'
+  const graficaScelta = sceltaTema(biscotti.get('mx_tema')?.value)
   const pagina = (
     <DashboardLayout user={{
       nome: utente?.nome || 'Admin',

@@ -9,7 +9,8 @@ type SubItem = { label: string; href: string }
 type NavItem = { id: string; label: string; icon: string; href?: string; sub?: SubItem[] }
 
 // ── Voci del menu (modifica qui per aggiungere/rinominare) ──────────────────
-const NAV_BASE: NavItem[] = [
+// esportate anche per il menu della grafica nuova (CorniceNuova nel portale cliente, 19/11): le voci restano queste
+export const NAV_BASE: NavItem[] = [
   {
     id: 'spedizioni', label: 'Spedizioni', icon: '◫',
     sub: [
@@ -98,7 +99,7 @@ const NAV_BASE: NavItem[] = [
 // per loro la pagina non avrebbe niente da offrire (decisione di Lorenzo del 21/10/2026). Il rifiuto
 // vero sta in /api/sms/acquista: qui si toglie solo una porta che per loro non porta da nessuna parte.
 // "API Key" resta: le chiavi sono gratuite, ed e' PianoApi a non mostrare loro i pacchetti a pagamento.
-const VOCI_A_PAGAMENTO = ['sms']
+export const VOCI_A_PAGAMENTO = ['sms']
 
 export default function ClienteNav({ soloEtichette = false }: { soloEtichette?: boolean }) {
   const pathname = usePathname() || ''

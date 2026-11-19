@@ -40,7 +40,7 @@ const SCRITTURE_AUTISTA = [
 // e se non lo ha pagato si congela per conto suo, non per colpa di chi sta sopra.
 
 // Le pagine che si possono provare con la grafica nuova (vedi x-grafica-prova più sotto)
-const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni'])
+const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni', '/cliente/dashboard', '/cliente/spedizioni'])
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl

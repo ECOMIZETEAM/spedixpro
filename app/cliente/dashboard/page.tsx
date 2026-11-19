@@ -1,10 +1,20 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import PlanciaBCliente from '@/app/components/grafica/proposte/b/PlanciaBCliente'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
 import ResiClienteBlocco from '@/app/components/ResiClienteBlocco'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
+// Con la grafica nuova (la prova «Scopri la nuova versione», 19/11) la dashboard è la B del cliente; con quella di oggi
+// resta questa, identica.
 export default function ClienteDashboard() {
+  const g = useContext(GraficaNuova)
+  if (g.attiva) return <PlanciaBCliente />
+  return <ClienteDashboardDiOggi />
+}
+
+function ClienteDashboardDiOggi() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [notifiche, setNotifiche] = useState<any[]>([])

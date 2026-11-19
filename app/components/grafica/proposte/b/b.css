@@ -384,3 +384,21 @@ rect.pb-q--fuori { fill: var(--gx-accento); }
   .pb *, .pb *::before, .pb *::after { animation: none !important; transition: none !important; }
   .pb-fiume__svg { -webkit-mask-image: none; mask-image: none; }
 }
+
+/* ── la Dashboard B del cliente (19/11): le sue cifre e i suoi soldi ─────────────────────────────────────────── */
+.pbc-cifre { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 18px; padding: 6px 2px 4px; }
+.pbc-cifra { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pbc-cifra b { font-weight: 200; font-size: 36px; letter-spacing: -.03em; line-height: 1.05; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.pbc-cifra span { margin-top: 4px; font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--gx-inchiostro); }
+.pbc-cifra small { font-size: 12.5px; color: var(--gx-attenuato); }
+.pbc-credito { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 2px 12px; padding: 4px 2px 16px; border-bottom: 1px solid var(--gx-filo); }
+.pbc-credito > span { grid-column: 1 / -1; font-size: 12.5px; color: var(--gx-attenuato); }
+.pbc-credito > b { font-weight: 200; font-size: 44px; letter-spacing: -.03em; line-height: 1.05; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.pbc-credito > b.pbc-meno { color: var(--gx-problema); }
+.pbc-credito > a { display: inline-flex; align-items: center; gap: 2px; height: 36px; padding: 0 14px; border-radius: 999px; background: var(--gx-accento-pieno); color: #fff;
+  font-size: 13px; font-weight: 600; box-shadow: 0 8px 18px -10px var(--gx-accento-pieno); }
+.pbc-credito > a .gx-ico { width: 14px; height: 14px; }
+.pbc-voci { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin: 16px 0 0; }
+.pbc-voci dt { font-size: 12px; color: var(--gx-attenuato); }
+.pbc-voci dd { margin: 3px 0 0; font-size: 19px; font-weight: 400; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) { .pbc-cifre { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -11,6 +11,8 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { pagaSoloEtichette, masterDeiNegoziShopify } from '@/lib/conti-shopify'
 import { recapitoEmail } from '@/lib/indirizzi-interni'
 import { COLONNE_DATI_NEGOZIO, datiPerLaSchermata, servonoDatiNegozio, versioneDatiNegozio } from '@/lib/dati-negozio'
+import { cookies, headers } from 'next/headers'
+import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
 
 // Mai in cache: dipende dalla sessione (senza questo, Vercel può servire una
 // versione statica "senza utente" → sidebar assente).
@@ -92,10 +94,20 @@ export default async function ClienteLayout({ children }: { children: React.Reac
       || recapitoEmail(process.env.CONTATTI_A) || 'info@moovexpress.com'
   }
 
-  return (
+  // LA PROVA DELLA GRAFICA NUOVA anche per i clienti (Lorenzo 19/11): pulsante «Scopri la nuova versione» quando
+  // GRAFICA_PROVA_APERTA=1 (in locale anche per i clienti dei master in GRAFICA_PROVA_MASTER_IDS); la prova vale per
+  // Dashboard ed Elenco spedizioni aperte con «?nuova=1», che il proxy segnala con x-grafica-prova.
+  const provaIds = (process.env.GRAFICA_PROVA_MASTER_IDS || '').split(',').map(x => x.trim()).filter(Boolean)
+  const provaAperta = process.env.GRAFICA_PROVA_APERTA === '1' || (!!utente.master_id && provaIds.includes(utente.master_id))
+  const provaQui = provaAperta && (await headers()).get('x-grafica-prova') === '1'
+  const graficaScelta = sceltaTema((await cookies()).get('mx_tema')?.value)
+  const grafica = { prova: provaQui, offri: provaAperta && !provaQui, scelta: graficaScelta, luce: provaQui ? luceIniziale(graficaScelta) : undefined }
+
+  const shell = (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}
-      completaDati={completaDati} versioneDati={versioneDati} contattoAiuto={contattoAiuto} soloEtichette={soloEtichette}>
+      completaDati={completaDati} versioneDati={versioneDati} contattoAiuto={contattoAiuto} soloEtichette={soloEtichette} grafica={grafica}>
       <DialogProvider><AvvisoApi brandLogo={brandLogo} brandNome={brandNome} /><BannerPiano /><AvvisoVerifica />{!masterDemo && <BannerNovitaTiktok per="cliente" />}<EsitoCollegamento />{children}</DialogProvider>
     </ClienteShell>
   )
+  return provaQui ? <div className={outfit.variable} style={{ display: 'contents' }}>{shell}</div> : shell
 }

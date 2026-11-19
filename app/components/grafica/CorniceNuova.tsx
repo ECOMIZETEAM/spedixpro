@@ -61,7 +61,14 @@ function riordina(nav: VoceMenu[], ruolo?: string, prova?: boolean): VoceMenu[] 
 }
 
 // le pagine già pronte nella grafica nuova (le stesse del proxy, middleware.ts)
-const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni'])
+const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni', '/cliente/dashboard', '/cliente/spedizioni'])
+
+// i gruppi del menu del portale cliente (le voci sono quelle di ClienteNav)
+const GRUPPO_CLIENTE: Record<string, string> = {
+  'Assistenza': 'Aiuto', 'Documentazione': 'Aiuto', 'Introduzione': 'Aiuto',
+  'Reports': 'Analisi',
+  'SMS': 'Account', 'Mio Account': 'Account', 'Impostazioni': 'Account',
+}
 
 const RUOLI: Record<string, string> = { master: 'master', admin: 'amministratore', operatore: 'operatore', agente: 'agente' }
 
@@ -75,11 +82,13 @@ export function luceDellOra(d = new Date()) {
 }
 type Scelta = 'auto' | 'giorno' | 'notte'
 
-export default function CorniceNuova({ children, user, path, nav: navDiOggi, pallinoVoce, pallinoSotto, credito, mostraSms, isMobile, vociProfilo }: {
+export default function CorniceNuova({ children, user, path, nav: navDiOggi, portale = 'master', pallinoVoce, pallinoSotto, credito, mostraSms, isMobile, vociProfilo }: {
   children: React.ReactNode
   user?: { nome?: string; ruolo?: string; brandLogo?: string | null; brandNome?: string | null; graficaScelta?: string; graficaLuce?: string; graficaEntrata?: boolean; graficaProposta?: string; graficaProva?: boolean }
   path: string
   nav: VoceMenu[]
+  // il portale cliente (19/11) usa la stessa cornice: cambiano la pagina di partenza, i gruppi e dove porta il credito
+  portale?: 'master' | 'cliente'
   pallinoVoce: (label: string, href?: string) => Pallino | null
   pallinoSotto: (href: string) => number
   credito: { mostra: boolean; rete: number; reteLabel?: string | null; conti: number } | null
@@ -87,7 +96,10 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
   isMobile: boolean
   vociProfilo: { label: string; href: string; icona: string }[]
 }) {
-  const nav = riordina(navDiOggi, user?.ruolo, !!user?.graficaProva)
+  const cliente = portale === 'cliente'
+  const home = cliente ? '/cliente/dashboard' : '/dashboard'
+  const nav = cliente ? navDiOggi : riordina(navDiOggi, user?.ruolo, !!user?.graficaProva)
+  const GRUPPI = cliente ? GRUPPO_CLIENTE : GRUPPO
   // ── la prova per tutti (Lorenzo 19/11): si provano solo Dashboard ed Elenco spedizioni, con «?nuova=1» nell'indirizzo.
   // Le altre voci si vedono (anche i sottomenu) ma non si cliccano: «arrivano presto».
   const prova = !!user?.graficaProva
@@ -173,7 +185,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
   }, [])
 
-  const plancia = path === '/dashboard'
+  const plancia = path === home
   const iniziali = (user?.nome || 'Admin').split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase()
   let gruppoPrima: string | undefined
 
@@ -188,7 +200,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
 
       {isMobile && drawer && <div className="gx-velo-menu" onClick={() => setDrawer(false)} />}
       <nav className={'gx-lato gx-vetro' + (!isMobile && chiuso ? ' gx-lato--chiuso' : '') + (isMobile && drawer ? ' gx-lato--aperto' : '')} aria-label="Menu">
-        <a className={'gx-marca' + (user?.brandLogo ? ' gx-marca--logo' : '')} href={vai('/dashboard')}>
+        <a className={'gx-marca' + (user?.brandLogo ? ' gx-marca--logo' : '')} href={vai(home)}>
           {user?.brandLogo ? <img className="gx-marca__logo" src={user.brandLogo} alt={user?.brandNome || 'Logo'} /> : (
             <>
               <span className="gx-marca__v">{(user?.brandNome || 'M').substring(0, 1).toUpperCase()}</span>
@@ -197,9 +209,9 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
           )}
         </a>
         <div className="gx-menu">
-          <a className={'gx-voce' + (plancia ? ' gx-voce--su' : '')} href={vai('/dashboard')} aria-current={plancia ? 'page' : undefined}><Icona id="i-plancia" />Dashboard</a>
+          <a className={'gx-voce' + (plancia ? ' gx-voce--su' : '')} href={vai(home)} aria-current={plancia ? 'page' : undefined}><Icona id="i-plancia" />Dashboard</a>
           {nav.map(v => {
-            const gruppo = GRUPPO[v.label]
+            const gruppo = GRUPPI[v.label]
             const titolo = gruppo && gruppo !== gruppoPrima ? gruppo : null
             gruppoPrima = gruppo
             const su = dentro(v.href) && !plancia
@@ -268,7 +280,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, pal
           <span className="gx-spazio" />
           {credito?.mostra && credito.conti > 1 && <ContiTendina conti={credito.conti} compatto={isMobile} aspetto="nuova" />}
           {credito?.mostra && !(credito.conti > 1) && (
-            <a className={'gx-tasto gx-vetro gx-pillola gx-credito' + (Number(credito.rete) < 0 ? ' gx-credito--meno' : '')} href="/dashboard/movimenti" title="Il tuo credito — vai ai movimenti">
+            <a className={'gx-tasto gx-vetro gx-pillola gx-credito' + (Number(credito.rete) < 0 ? ' gx-credito--meno' : '')} href={cliente ? '/cliente/movimenti' : '/dashboard/movimenti'} title="Il tuo credito — vai ai movimenti">
               <Icona id="i-carta" />{!isMobile && <small>{credito.reteLabel || 'Credito'}</small>}
               <b>€ {Number(credito.rete || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
             </a>

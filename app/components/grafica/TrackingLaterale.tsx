@@ -12,9 +12,11 @@ import { Icona } from './icone'
 type Scheda = 'tracking' | 'colli' | 'ripesature'
 const euro = (n: any) => n == null || !isFinite(Number(n)) ? '—' : '€ ' + Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function TrackingLaterale({ s, st, dati, caricando, scheda, setScheda, chiudi, stampa, dettaglio }: {
+export default function TrackingLaterale({ s, st, dati, caricando, scheda, setScheda, chiudi, stampa, dettaglio, cliente = false }: {
   s: any; st?: { bg: string; color: string; label: string }; dati: any; caricando: boolean
   scheda: Scheda; setScheda: (x: Scheda) => void; chiudi: () => void; stampa: () => void; dettaglio: () => void
+  // nel portale cliente (19/11): dei soldi si mostra solo quanto ha pagato lui, mai costo e margine di chi rivende
+  cliente?: boolean
 }) {
   // l'uscita: prima scivola via, poi si smonta
   const [via, setVia] = useState(false)
@@ -100,6 +102,14 @@ export default function TrackingLaterale({ s, st, dati, caricando, scheda, setSc
               )}
             </section>
 
+            {cliente ? (
+            <section>
+              <h3>Costo</h3>
+              <div className="tl-soldi tl-soldi--uno">
+                <div><span>Totale della spedizione</span><b>{euro(s.costo_totale)}</b></div>
+              </div>
+            </section>
+            ) : (
             <section>
               <h3>Soldi <em>solo per te</em></h3>
               <div className="tl-soldi">
@@ -108,6 +118,7 @@ export default function TrackingLaterale({ s, st, dati, caricando, scheda, setSc
                 <div className={margine == null ? undefined : margine < 0 ? 'tl-meno' : 'tl-piu'}><span>Margine</span><b>{euro(margine)}</b></div>
               </div>
             </section>
+            )}
           </>}
 
           {scheda === 'colli' && (

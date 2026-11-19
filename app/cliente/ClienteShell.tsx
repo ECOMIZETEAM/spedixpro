@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import ClienteNav from './ClienteNav'
+import ClienteNav, { NAV_BASE, VOCI_A_PAGAMENTO } from './ClienteNav'
+import CorniceNuova from '../components/grafica/CorniceNuova'
 import Moovy from '../components/Moovy'
 import TutorialCliente from './TutorialCliente'
 import MenuProfilo from '../components/MenuProfilo'
@@ -10,11 +11,13 @@ import SupportoButton from '../components/SupportoButton'
 import CompletaDatiNegozio, { EVENTO_APRI_DATI_NEGOZIO } from './CompletaDatiNegozio'
 import type { DatiSchermataNegozio } from '@/lib/dati-negozio'
 
-export default function ClienteShell({ cliente, children, brandLogo, brandNome, completaDati = null, versioneDati = null, contattoAiuto = null, soloEtichette = false }: {
+export default function ClienteShell({ cliente, children, brandLogo, brandNome, completaDati = null, versioneDati = null, contattoAiuto = null, soloEtichette = false, grafica }: {
   cliente: { ragione_sociale?: string | null; credito?: number | null }; children: React.ReactNode; brandLogo?: string | null; brandNome?: string | null
   // Dal layout, calcolati sul server (lib/dati-negozio, lib/conti-shopify): null / false per tutti i
   // clienti che non sono un negozio Shopify appena installato.
   completaDati?: DatiSchermataNegozio | null; versioneDati?: string | null; contattoAiuto?: string | null; soloEtichette?: boolean
+  // la prova della grafica nuova (19/11): decisa dal layout sul server
+  grafica?: { prova: boolean; offri: boolean; scelta: string; luce?: string }
 }) {
   const path = usePathname() || ''
   const router = useRouter()
@@ -69,6 +72,41 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome, 
   const nome = cliente?.ragione_sociale || 'Cliente'
   const credito = Number(cliente?.credito || 0)
 
+  // Il tutorial e la schermata dei dati del negozio valgono con tutte e due le grafiche
+  const sopra = (
+    <>
+      <TutorialCliente brandNome={brandNome} sospeso={schermataAperta} />
+      {schermataAperta && completaDati && (
+        <CompletaDatiNegozio key={firmaDati} dati={completaDati} versione={versioneDati} contatto={contattoAiuto}
+          avviso={avvisoDati} brandLogo={brandLogo} brandNome={brandNome}
+          onCambiati={setAvvisoDati}
+          onFatto={() => { setAvvisoDati(''); setChiusaPer(firmaDati); router.refresh() }} />
+      )}
+    </>
+  )
+
+  // LA PROVA DELLA GRAFICA NUOVA (Lorenzo 19/11): la stessa cornice del portale master, col menu del cliente
+  if (grafica?.prova) {
+    const voci = NAV_BASE.filter(v => !(soloEtichette && VOCI_A_PAGAMENTO.includes(v.id)))
+      .map(v => ({ label: v.label, href: v.href, sub: v.sub, ...(v.href?.startsWith('http') ? { external: true } : {}) }))
+    return (
+      <>
+        <CorniceNuova portale="cliente" path={path} nav={voci} isMobile={isMobile}
+          user={{ nome, ruolo: 'cliente', brandLogo, brandNome, graficaScelta: grafica.scelta, graficaLuce: grafica.luce, graficaProva: true }}
+          pallinoVoce={() => null} pallinoSotto={() => 0}
+          credito={{ mostra: true, rete: credito, reteLabel: 'Credito', conti: 1 }} mostraSms={false}
+          vociProfilo={[
+            { label: 'Impostazioni', href: '/cliente/impostazioni', icona: '◉' },
+            { label: 'Ricarica credito', href: '/cliente/ricarica', icona: '★' },
+            { label: 'Cambia password', href: '/cliente/impostazioni/cambia-password', icona: '🔑' },
+          ]}>
+          {children}
+        </CorniceNuova>
+        {sopra}
+      </>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', ...(isMobile ? { minHeight: '100vh' } : { height: '100vh', overflow: 'hidden' }), background: '#f5f5f5', fontFamily: 'var(--font-geist-sans),system-ui,sans-serif' }}>
       {isMobile && drawerOpen && <div onClick={() => setDrawerOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 999 }} />}
@@ -110,6 +148,13 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome, 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
             <button onClick={() => { if (isMobile) setDrawerOpen(true); else toggleSidebar() }} aria-label="Menu" title={isMobile?'Menu':(sidebarChiusa?'Apri il menu':'Chiudi il menu')} style={{ background: 'none', border: 'none', fontSize: '23px', cursor: 'pointer', color: '#1a1a1a', padding: '2px 6px', lineHeight: 1 }}>☰</button>
             {!isMobile && <div style={{ fontSize: '13px', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>}
+            {grafica?.offri && !isMobile && (
+              <a href={(path === '/cliente/dashboard' || path === '/cliente/spedizioni' ? path : '/cliente/dashboard') + '?nuova=1'}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginLeft: '6px', padding: '6px 14px 6px 12px', borderRadius: '999px', background: '#111827', color: '#fff', fontSize: '12.5px', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', boxShadow: '0 6px 16px -8px rgba(17,24,39,.6)' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#f97316', boxShadow: '0 0 0 3px rgba(249,115,22,.25)' }} />
+                Scopri la nuova versione
+              </a>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '8px' }}>
             <span style={{ background: '#f5f5f5', border: '1px solid #e8e8e8', borderRadius: '20px', padding: '4px 12px', fontSize: '12px', fontWeight: '600', color: '#1a1a1a', whiteSpace: 'nowrap' }}>
@@ -130,13 +175,7 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome, 
       </div>
       <Moovy />
       {/* Il tutorial aspetta che i dati del negozio siano salvati: prima i dati, poi la visita guidata. */}
-      <TutorialCliente brandNome={brandNome} sospeso={schermataAperta} />
-      {schermataAperta && completaDati && (
-        <CompletaDatiNegozio key={firmaDati} dati={completaDati} versione={versioneDati} contatto={contattoAiuto}
-          avviso={avvisoDati} brandLogo={brandLogo} brandNome={brandNome}
-          onCambiati={setAvvisoDati}
-          onFatto={() => { setAvvisoDati(''); setChiusaPer(firmaDati); router.refresh() }} />
-      )}
+      {sopra}
     </div>
   )
 }

@@ -19,6 +19,7 @@ import { Icona } from '@/app/components/grafica/icone'
 import '@/app/components/grafica/elenco.css'
 import TrackingLaterale from '@/app/components/grafica/TrackingLaterale'
 import MenuAzioni from '@/app/components/grafica/MenuAzioni'
+import Percorso from '@/app/components/grafica/Percorso'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -83,23 +84,6 @@ const ORDINABILE: Record<string,string> = {
 }
 // Etichettina della SECONDA riga (corriere/guadagni sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
-
-// Il percorso sotto lo stato, con la grafica nuova (18/11, ripreso dalla v6 del 20/10): da dove parte a dove arriva e a
-// che punto è, in cinque tappe. Le annullate e gli annulli non hanno percorso: per loro parla la pillola.
-const TAPPE: Record<string, number> = { in_lavorazione: 0, spedita: 1, in_transito: 2, in_consegna: 3, consegnata: 4, in_giacenza: 3, non_consegnato: 3, reso_mittente: 4 }
-function Percorso({ s }: { s: any }) {
-  const k = TAPPE[s.stato]
-  if (k == null) return null
-  const tono = s.stato === 'consegnata' ? 'bene' : (s.stato === 'in_giacenza' || s.stato === 'non_consegnato') ? 'problema' : s.stato === 'reso_mittente' ? 'reso' : 'via'
-  const arrivo = s.dest_paese && s.dest_paese !== 'IT' ? s.dest_paese : s.dest_provincia
-  return (
-    <div className={'el-percorso el-percorso--' + tono} title={`${s.mitt_provincia || '—'} → ${arrivo || '—'}`}>
-      <span>{s.mitt_provincia || ''}</span>
-      <i>{[0, 1, 2, 3, 4].map(i => <b key={i} className={i < k ? 'fatto' : i === k ? 'qui' : undefined} />)}</i>
-      <span>{arrivo || ''}</span>
-    </div>
-  )
-}
 
 export default function SpedizioniPage() {
   // la grafica nuova (anteprima, Lorenzo 18/11 per i soci): stessa pagina, stessi dati e azioni, un altro vestito.

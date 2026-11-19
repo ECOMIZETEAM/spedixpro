@@ -77,4 +77,7 @@ export const ICONA_VOCE: Record<string, string> = {
   'Statistiche': 'i-torta', 'Registro Attività': 'i-scudo', 'Controllo Giacenze': 'i-radar', 'Centrale di Controllo': 'i-pannello',
   'Abbonamenti API': 'i-chiave', 'Account Demo': 'i-play', 'Impostazioni': 'i-regola', 'Centro Notifiche': 'i-campana',
   'Documentazione': 'i-libro',
+  // il portale cliente (19/11)
+  'Importa Ordini': 'i-scarica', 'Rubrica destinatari': 'i-clienti', 'SMS': 'i-messaggio', 'Assistenza': 'i-aiuto',
+  'Mio Account': 'i-carta', 'Introduzione': 'i-play',
 }

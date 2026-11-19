@@ -252,6 +252,7 @@
 .gx .tl-soldi { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--gx-filo); border-radius: 18px; overflow: hidden; }
 .gx .tl-soldi > div { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; }
 .gx .tl-soldi > div + div { border-left: 1px solid var(--gx-filo); }
+.gx .tl-soldi--uno { grid-template-columns: 1fr; }
 .gx .tl-soldi span { font-size: 11.5px; color: var(--gx-attenuato); }
 .gx .tl-soldi b { font-size: 19px; font-weight: 600; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
 .gx .tl-soldi .tl-piu b { color: var(--gx-bene); }

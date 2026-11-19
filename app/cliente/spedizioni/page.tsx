@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment, useContext } from 'react'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AssistenzaTicketButton from '@/app/components/AssistenzaTicketButton'
@@ -68,7 +68,18 @@ const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpac
 import { useDialog } from '@/app/components/DialogProvider'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
+import TrackingLaterale from '@/app/components/grafica/TrackingLaterale'
+import MenuAzioni from '@/app/components/grafica/MenuAzioni'
+import Percorso from '@/app/components/grafica/Percorso'
+import { vettoreFisico } from '@/lib/vettore'
+import '@/app/components/grafica/elenco.css'
 export default function SpedizioniPage() {
+  // la grafica nuova (la prova «Scopri la nuova versione», 19/11): la stessa pagina, gli stessi dati e le stesse azioni, il
+  // vestito dell'elenco dei master (grafica/elenco.css). Con la grafica di oggi `nuova` è falso e la pagina resta identica.
+  const nuova = useContext(GraficaNuova).attiva
+  const fe = (n: number) => nuova ? n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n.toFixed(2)
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
@@ -360,18 +371,18 @@ async function apriTracking(s: any) {
   const btnFiltri = {padding:'7px 18px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700' as const,cursor:'pointer',whiteSpace:'nowrap' as const}
 
   return (
-    <div>
+    <div className={nuova ? 'gx-elenco' : undefined}>
       {notifica && (
         <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {notifica}</div>
       )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px',flexWrap:'wrap',gap:'10px'}}>
-        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista Spedizioni</h1>
-        <a href="/cliente/spedizioni/nuova" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
+        <h1 className="el-titolo" style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>{nuova ? 'Elenco spedizioni' : 'Lista Spedizioni'}</h1>
+        <a href="/cliente/spedizioni/nuova" className="el-primario" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
       </div>
 
       {/* FILTRI */}
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
+      <div className="el-scheda el-filtri" style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
+        <div className="el-sezione" style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>{nuova ? <><Icona id="i-filtro" />Filtri</> : '▼ Filtri'}<BadgeFiltri n={filtriAttivi.size} /></div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
@@ -466,16 +477,16 @@ async function apriTracking(s: any) {
             </select>
           </div>
           <div>
-            <button onClick={()=>{azzeraFiltri(); setCerca('')}} style={btnFiltri}>Azzera filtri</button>
+            <button className="el-secondario" onClick={()=>{azzeraFiltri(); setCerca('')}} style={btnFiltri}>Azzera filtri</button>
           </div>
         </div>
       </div>
 
       {/* TABELLA */}
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
-        <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
+      <div className="el-scheda el-tabella" style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
+        <div className="el-testa" style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
           <div className="gruppo-titolo-selettore">
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({totale} risultati)</span></span>
+          <span className="el-conta" style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{nuova ? 'Spedizioni ' : '📋 Spedizioni '}<span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({totale} risultati)</span></span>
           <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
             Mostra{' '}
             <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
@@ -489,14 +500,18 @@ async function apriTracking(s: any) {
             </span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+            <div className={nuova ? 'el-blocco' + (selectedIds.length > 0 ? ' el-blocco--su' : '') : undefined} style={nuova ? undefined : {display:'contents'}}>
+            {nuova && <span className="el-blocco-n"><b>{selectedIds.length}</b> {selectedIds.length === 1 ? 'selezionata' : 'selezionate'}</span>}
             <button onClick={stampaZebraSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              🖨️ Stampa Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-stampa" /> : '🖨️ '}Stampa Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
             <button onClick={()=>setResoModal(true)} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#0d9488':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              ↩︎ Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-resi" /> : '↩︎ '}Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
+            {nuova && <button type="button" className="el-blocco-x" onClick={()=>setSelectedIds([])} title="Togli la scelta" aria-label="Togli la scelta">×</button>}
+            </div>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Ordina:</span>
               <select value={filtri.ordina} onChange={e=>setFiltri(f=>({...f,ordina:e.target.value}))}
@@ -533,7 +548,7 @@ async function apriTracking(s: any) {
           </div>
         ) : (
           <div style={{overflowX:'auto' as const}}>
-            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+            <table className="el-tab" style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#f9fafb'}}>
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
@@ -559,17 +574,17 @@ async function apriTracking(s: any) {
                   const isSelected = selectedIds.includes(s.id)
                   // Valori della SECONDA riga (corriere/peso/colli/contrassegno/ordine/totale), come array così
                   // i divisori verticali saltano i campi assenti (contrassegno/ordine) senza lasciare linee a vuoto.
-                  const secItems: { l: any; v: any }[] = [
-                    { l: '🚚', v: <b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b> },
+                  const secItems: { l: any; v: any; soldi?: boolean }[] = [
+                    { l: nuova ? <span className="el-vettore">{vettoreFisico(s.corrieri || {})}</span> : '🚚', v: <b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b> },
                     { l: 'Peso', v: fmtPeso(s) },
                     { l: 'Colli', v: s.colli },
-                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}</span> }] : []),
+                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{fe(Number(s.contrassegno))}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
-                    { l: 'Totale', v: <span><b style={{color:'#1a1a1a'}}>€ {Number(s.costo_totale||0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
+                    { soldi: true, l: 'Totale', v: <span><b style={{color:'#1a1a1a'}}>€ {fe(Number(s.costo_totale||0))}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
                   ]
                   return (
                     <Fragment key={s.id}>
-                    <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
+                    <tr className={'el-riga' + (isSelected ? ' el-scelta' : '')} style={{background:isSelected?'#fff7ed':'#fff'}}>
                       <td style={{padding:'9px 12px 3px'}}>
                         <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(s.id)}/>
                       </td>
@@ -591,13 +606,16 @@ async function apriTracking(s: any) {
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
-                        <div style={{color:'#1a1a1a',fontSize:'11px'}}>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</div>
+                        <div className="el-luogo" style={{color:'#1a1a1a',fontSize:'11px'}}>{nuova ? `${s.dest_citta || ''}${s.dest_provincia ? ` (${s.dest_provincia})` : ''} ${s.dest_cap || ''}${s.dest_paese && s.dest_paese !== 'IT' ? ` · ${s.dest_paese}` : ''}` : <>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</>}</div>
                       </td>
                       <td style={{padding:'9px 12px 3px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
-                        {new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}
+                        {nuova
+                          ? <span className="el-quando"><b>{new Date(s.created_at).toLocaleDateString('it-IT')}</b><span>{new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</span></span>
+                          : <>{new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</>}
                       </td>
                       <td style={{padding:'9px 12px'}}>
-                        <span style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
+                        <span className="el-stato" style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
+                        {nuova && <Percorso s={s} />}
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
                         {/* "Spedita" puo' voler dire solo "chiusa in distinta": il numero dice in quale (QUICK, 16/11). */}
                         {s.distinta_numero && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta {s.distinta_numero}</div>}
@@ -605,6 +623,28 @@ async function apriTracking(s: any) {
                         {s.annullamento_errore && s.stato!=='annullamento_pending' && s.stato!=='annullamento_manuale' && <div title={s.annullamento_errore} style={{fontSize:'10px',color:'#b91c1c',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const,cursor:'help'}}>⚠ Non annullabile</div>}
                       </td>
                       <td style={{padding:'9px 12px 3px'}}>
+                        {nuova ? (
+                          // grafica nuova: l'etichetta (o il ripristino) a un clic, il resto nei tre puntini. L'assistenza resta
+                          // montata col tasto nascosto: la voce del menu lo preme, così la sua finestra non sparisce con la tendina.
+                          <div className="el-azioni el-azioni--menu">
+                            {s.stato==='annullamento_pending'
+                              ? <button type="button" className="el-primaria" onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id} title="Ripristina spedizione"><Icona id="i-resi" />Ripristina</button>
+                              : <button type="button" className="el-primaria" onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}><Icona id={stampandoId===s.id ? 'i-attesa' : 'i-stampa'} />Etichetta</button>}
+                            <MenuAzioni voci={[
+                              ...(s.stato==='annullamento_pending' ? [{ k: 'etichetta', etichetta: 'Etichetta', icona: 'i-stampa', fai: () => stampaEtichetta(s.id) }] : []),
+                              { k: 'dettaglio', etichetta: 'Dettaglio', icona: 'i-occhio', fai: () => setDettaglio(s) },
+                              { k: 'assistenza', etichetta: 'Assistenza / POD', icona: 'i-cuffie', fai: () => (document.querySelector(`[data-assistenza="${s.id}"] > button`) as HTMLButtonElement | null)?.click() },
+                              ...(s.stato==='annullamento_pending' ? [] : [{ k: 'elimina', etichetta: 'Elimina', icona: 'i-cestino', pericolo: true,
+                                spenta: !!s.no_annullo_15gg || vietaCanc || eliminando===s.id,
+                                titolo: s.no_annullo_15gg ? 'Dopo i 15 giorni non è più possibile annullare: il corriere non lo consente.'
+                                  : vietaCanc ? 'Il tuo master ha disattivato la cancellazione: comunicagli quale spedizione annullare e la cancella lui.' : undefined,
+                                fai: () => elimina(s.id,s.numero) }]),
+                            ]} />
+                            <span className="el-assistenza" data-assistenza={s.id}>
+                              <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} />
+                            </span>
+                          </div>
+                        ) : (
                         <div style={{display:'flex',gap:'4px'}}>
                           <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id}
                             style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
@@ -627,13 +667,14 @@ async function apriTracking(s: any) {
                           )}
                           <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} />
                         </div>
+                        )}
                       </td>
                     </tr>
-                    <tr style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                    <tr className={'el-riga2' + (isSelected ? ' el-scelta' : '')} style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
                       <td colSpan={7} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
                         <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
                           {secItems.map((it,i)=>(
-                            <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                            <span key={i} className={it.soldi ? 'el-soldi' : undefined} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
                               <span style={secLbl}>{it.l}</span>{it.v}
                             </span>
                           ))}
@@ -647,7 +688,7 @@ async function apriTracking(s: any) {
             </table>
             {/* barra-paginazione */}
             {totalePagine > 0 && (
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
+              <div className="el-pagine" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
                 <span style={{fontSize:'12px',color:'#666'}}>
                   {totale === 0 ? '0' : `${(paginaCorr - 1) * perPage + 1}-${Math.min(paginaCorr * perPage, totale)}`} di {totale}
                 </span>
@@ -673,7 +714,12 @@ async function apriTracking(s: any) {
       </div>
 
       {/* MODAL TRACKING */}
-      {trackingModal && (
+      {trackingModal && nuova && (
+        <TrackingLaterale cliente s={trackingModal} st={STATI[trackingModal.stato]} dati={trackingData} caricando={trackingLoading}
+          scheda={trackingTab} setScheda={setTrackingTab} chiudi={()=>{setTrackingModal(null);setTrackingData(null)}}
+          stampa={()=>stampaEtichetta(trackingModal.id)} dettaglio={()=>{ const x = trackingModal; setTrackingModal(null); setTrackingData(null); setDettaglio(x) }} />
+      )}
+      {trackingModal && !nuova && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>{setTrackingModal(null);setTrackingData(null)}}>
           <div style={{background:'#fff',borderRadius:'10px',width:'750px',maxWidth:'95vw',maxHeight:'88vh',overflow:'hidden',display:'flex',flexDirection:'column' as const}} onClick={e=>e.stopPropagation()}>
             <div style={{padding:'14px 20px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
@@ -774,9 +820,9 @@ async function apriTracking(s: any) {
 
       {dettaglio && <DettaglioSpedizione s={dettaglio} onClose={()=>setDettaglio(null)} etichettaHref={`/api/spedizioni/etichetta?id=${dettaglio.id}`} />}
       {resoModal && (
-        <div onClick={()=>!resoBusy&&setResoModal(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',padding:'24px',maxWidth:'430px',width:'100%'}}>
-            <h2 style={{fontSize:'18px',fontWeight:700,color:'#1a1a1a',margin:'0 0 6px'}}>↩︎ Etichetta di reso</h2>
+        <div onClick={()=>!resoBusy&&setResoModal(false)} className={nuova ? 'gx-finestra-velo' : undefined} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} className="gx-finestra gx-finestra--imbottita" style={{background:'#fff',borderRadius:'12px',padding:'24px',maxWidth:'430px',width:'100%'}}>
+            <h2 style={{fontSize:'18px',fontWeight:700,color:'#1a1a1a',margin:'0 0 6px'}}>{nuova ? <Icona id="i-resi" /> : '↩︎ '}Etichetta di reso</h2>
             <p style={{fontSize:'13px',color:'#666',margin:'0 0 16px',lineHeight:1.5}}>
               Per {selectedIds.length} spedizion{selectedIds.length===1?'e':'i'} creo una <strong>nuova spedizione di ritorno</strong>: stesso corriere, mittente e destinatario invertiti, senza contrassegno.
             </p>
