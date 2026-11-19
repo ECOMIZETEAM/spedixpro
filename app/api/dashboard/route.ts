@@ -7,6 +7,51 @@ import { nonStaffMaster } from '@/lib/permessi'
 import { fetchAll } from '@/lib/fetch-all'
 import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 
+// I TRE CONTI PESANTI DELLA HOME (contatori, statistiche, KPI di rete), tenuti 60 secondi per master.
+//
+// Per la rete di MULTIEXPRESS ognuno legge centinaia di migliaia di righe (1,5-1,7 secondi), e la home
+// si ricarica da sola ogni 2 minuti e a ogni ritorno sulla scheda, per ogni operatore collegato: arrivano
+// 9-12 chiamate al minuto. Il 19/11/2026, appena aggiunto il filtro delle gambe interne (che rende questi
+// conti un po' piu' lenti), una di queste raffiche li ha mandati oltre gli 8 secondi del database, e la
+// home ha mostrato ZERO ovunque: le funzioni fallite tornavano vuote e la rotta le dava per buone.
+//
+// Quindi: entro 60 secondi si riusa l'ultimo calcolo, e le chiamate contemporanee dello stesso master
+// aspettano lo stesso calcolo invece di lanciarne altri. Se il calcolo fallisce si mostra l'ultimo buono
+// (fino a 15 minuti); se non ce n'e', errore — e la pagina tiene i numeri che aveva. Mai zeri inventati.
+type NumeriRete = { contatori: any; statistiche: any; kpi: any }
+const numeriInCache = new Map<string, { at: number; dati: NumeriRete }>()
+const numeriInCorso = new Map<string, Promise<NumeriRete>>()
+const FRESCHI_MS = 60_000
+const ULTIMI_BUONI_MS = 15 * 60_000
+
+async function numeriRete(admin: any, masterId: string): Promise<NumeriRete | null> {
+  const inCache = numeriInCache.get(masterId)
+  if (inCache && Date.now() - inCache.at < FRESCHI_MS) return inCache.dati
+  let calcolo = numeriInCorso.get(masterId)
+  if (!calcolo) {
+    calcolo = (async () => {
+      const [c, s, k] = await Promise.all([
+        admin.rpc('dashboard_contatori_master', { p_master: masterId }),
+        admin.rpc('dashboard_statistiche_master', { p_master: masterId }),
+        admin.rpc('dashboard_kpi_master', { p_master: masterId }),
+      ])
+      const err = c.error || s.error || k.error
+      if (err) throw new Error(err.message)
+      const dati = { contatori: c.data, statistiche: s.data, kpi: k.data }
+      numeriInCache.set(masterId, { at: Date.now(), dati })
+      return dati
+    })().finally(() => numeriInCorso.delete(masterId))
+    numeriInCorso.set(masterId, calcolo)
+  }
+  try {
+    return await calcolo
+  } catch (e: any) {
+    console.error('[DASHBOARD] conti di rete non riusciti', masterId, e?.message)
+    if (inCache && Date.now() - inCache.at < ULTIMI_BUONI_MS) return inCache.dati
+    return null
+  }
+}
+
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -105,9 +150,7 @@ export async function GET() {
     : admin.from('spedizioni').select('id', { count: 'exact', head: true }))
   if (senzaGambe) { qUltime = qUltime.or(senzaGambe); qDaDistinta = qDaDistinta.or(senzaGambe) }
   const [
-    { data: contatori },
-    { data: statistiche },
-    { data: kpi },
+    numeri,
     { data: ultimeSpedizioni },
     { count: daMettereInDistinta },
     { data: clientiNegativi },
@@ -116,9 +159,7 @@ export async function GET() {
     // Via ADMIN (bypassa RLS): le RPC aggregano SOLO il sotto-albero del proprio master (p_master),
     // quindi contano proprie + improprie della rete SOTTO. Con il client user-scoped l'RLS limitava
     // alle sole proprie del master (0 per chi spedisce solo tramite i sotto-master, es. E&A).
-    admin.rpc('dashboard_contatori_master', { p_master: masterId }),
-    admin.rpc('dashboard_statistiche_master', { p_master: masterId }),
-    admin.rpc('dashboard_kpi_master', { p_master: masterId }),
+    masterId ? numeriRete(admin, masterId) : Promise.resolve(null),
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
     qUltime.order('created_at',{ascending:false}).limit(10),
     // LDV di TUTTA la rete ancora da chiudere in distinta (era una query in coda: ora nel batch).
@@ -136,6 +177,13 @@ export async function GET() {
     // Puo' essere negativo — chi fattura va sotto zero ed e' normale (REGOLE.md).
     admin.from('masters').select('credito,credito_proprio,parent_master_id').eq('id', masterId).maybeSingle(),
   ])
+  // Senza i conti di rete non si risponde con degli zeri: la pagina tiene i numeri che aveva.
+  if (masterId && !numeri) {
+    return NextResponse.json({ error: 'I numeri della rete non sono disponibili in questo momento: riprova tra poco.' }, { status: 503 })
+  }
+  const contatori = numeri?.contatori
+  const statistiche = numeri?.statistiche
+  const kpi = numeri?.kpi
   // Nome del referente (il fornitore diretto), come la pill in topbar: il conto RETE ha un nome,
   // non è "Credito" generico. Se non ha un referente (radice piattaforma) resta null → etichetta neutra.
   let reteLabel: string | null = null
