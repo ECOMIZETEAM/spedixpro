@@ -14,6 +14,38 @@
 // Nota: per un master che NON compra via codice (nessun corrieri_condivisi come acquirente) torna [] → non
 // cambia niente, vede il suo albero come prima. Verità dei legami = corrieri_condivisi, non parent_master_id.
 
+// LE GAMBE INTERNE ALLA RETE — la regola per CONTARE e ELENCARE i pacchi della rete di un master.
+//
+// Una gamba e' un doppione per chi guarda la rete di un master quando il master che l'ha COMPRATA sta in
+// quella rete: il pacco e' gia' li', dove e' nato. Se il compratore sta fuori, e' traffico che la rete
+// rivende, e si vede. La regola vive nel database (fn_ledger_nascosti, scripts/gambe-interne-ovunque.sql)
+// ed e' la stessa del contatore del piano, della home e delle statistiche: qui la si chiede, non la si
+// ricalcola, cosi' elenco, report e home non possono piu' dire due numeri diversi.
+//
+// La catena dei fornitori qui sotto non bastava: lasciava doppi i pacchi venduti fra due master della
+// stessa rete (il 19/11/2026, per MULTIEXPRESS: GTS a spedizioni 2000, SEMPLICE SPEDIRE ad Atlantik,
+// Velox a SEMPLICE SPEDIRE), guardava solo le condivisioni attive (una revoca avrebbe fatto ricomparire
+// le gambe vecchie), e quando un fornitore e' anche il padre avrebbe nascosto a SPEDIZIONI EXPRESS le sue
+// stesse vendite a Velox.
+//
+// Se il database non risponde si torna []: i numeri escono gonfiati, ma la pagina si apre, e l'errore
+// resta nei log.
+export async function ledgerGambeInterne(
+  admin: { rpc: (fn: string, args: any) => any },
+  masterId: string | null | undefined,
+): Promise<string[]> {
+  if (!masterId) return []
+  const { data, error } = await admin.rpc('fn_ledger_nascosti', { p_master: masterId })
+  if (error) {
+    console.error('[GAMBE] fn_ledger_nascosti non letta', masterId, error.message)
+    return []
+  }
+  return (data || []) as string[]
+}
+
+// Resta per le DISTINTE (dettaglio e singola distinta): li' non si conta la rete, si mostra un documento —
+// il borderò consegnato al corriere — e deve contenere tutti i suoi colli. Per contare ed elencare le
+// spedizioni si usa ledgerGambeInterne.
 export async function ledgerFornitoriDaNascondere(
   admin: { from: (t: string) => any },
   viewerMasterId: string | null | undefined,

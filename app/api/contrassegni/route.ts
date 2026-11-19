@@ -5,7 +5,7 @@ import { fetchAll } from '@/lib/fetch-all'
 import { vedeLaRete } from '@/lib/perimetro'
 import { gestisceLaRete, senzaCostoMaster } from '@/lib/ruoli'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
-import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
   // ledger d'acquisto → fuori. Calcolato una volta (buildBase è sincrona). Serve il service-role per corrieri_condivisi.
   const { createAdminSupabase: _admCod } = await import('@/lib/supabase-admin')
   const ledgerNascosti = (utente?.master_id && !isAgente(utente) && utente.ruolo !== 'cliente')
-    ? await ledgerFornitoriDaNascondere(_admCod(), utente.master_id) : []
+    ? await ledgerGambeInterne(_admCod(), utente.master_id) : []
   const buildBase = () => {
     // Filtro su corrieri (vettore/contratto/visibilità-rete) → il join deve essere INNER.
     const filtroContratti = !!subtreeSel && !!ownedContractNames && ownedContractNames.length > 0

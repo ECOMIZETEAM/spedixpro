@@ -6,7 +6,7 @@ import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pr
 import { fetchAll } from '@/lib/fetch-all'
 import { confineGiornoRoma } from '@/lib/date-roma'
 import { vettoreFisico } from '@/lib/vettore'
-import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
 import { spedizioniInCatena } from '@/lib/catena-report'
 
@@ -208,7 +208,7 @@ async function report(req: NextRequest) {
   // master non vede le gambe di CHI GLI VENDE. Senza, il report di MULTIEXPRESS 1-14/10/2026 aveva
   // 94.521 righe per 59.755 pacchi: 17.399 gambe LOGIXIA col cliente "Wave ship (ingrosso)" e 17.367
   // gambe Wave col cliente "MULTIEXPRESS (ingrosso)", 175.954,75 € di "prezzo cliente" sommati come vendite.
-  const ledgerNascosti = isMaster ? await ledgerFornitoriDaNascondere(adminDb, mine) : []
+  const ledgerNascosti = isMaster ? await ledgerGambeInterne(adminDb, mine) : []
 
   const buildBase = () => {
     const filtroContratti = ownedContractNames.length > 0 && (!!subtreeSel || (!!reteIds && reteIds.length > 1))

@@ -6,6 +6,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { spedizioniConColliLeggeri } from '@/lib/colli-senza-etichette'
 import { vedeLaRete } from '@/lib/perimetro'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 
 // Guadagno del master = quanto incassa dai clienti diretti e dai sotto-master diretti
 // per le SPEDIZIONI, meno quanto il master paga al livello superiore/corriere.
@@ -135,13 +136,11 @@ export async function GET(req: NextRequest) {
   // riquadri. Il NUMERO spedizioni e' invece il volume di RETE non annullato (= barra abbonamento).
   // UN PACCO CONTA UNA VOLTA. Le gambe della condivisione — righe sul conto ingrosso di un master che
   // compra — sono lo stesso pacco gia' contato dove e' nato: se chi compra sta nella rete di M, M lo
-  // contava due o tre volte (MULTIEXPRESS, novembre 2026: 233.000 righe per 120.000 pacchi). E' la
-  // regola di fn_usato_rete (scripts/limite-piano-gambe.sql), qui su un periodo qualunque invece che
-  // sul mese. Le righe senza cliente (le spedizioni del master stesso) restano: un `not in` da solo
-  // le scarterebbe, perche' su un cliente nullo non da' vero.
-  const { data: contiInterni } = await admin.from('corrieri_condivisi')
-    .select('cliente_ledger_id').in('master_id', subIds).not('cliente_ledger_id', 'is', null)
-  const ledgerInterni = [...new Set((contiInterni || []).map((r: any) => r.cliente_ledger_id as string))]
+  // contava due o tre volte (MULTIEXPRESS, novembre 2026: 233.000 righe per 120.000 pacchi). Regola
+  // unica in lib/gambe-visibilita.ts, la stessa della home e del contatore del piano. Le righe senza
+  // cliente (le spedizioni del master stesso) restano: un `not in` da solo le scarterebbe, perche' su
+  // un cliente nullo non da' vero.
+  const ledgerInterni = await ledgerGambeInterne(admin, M)
   let qNumero = admin.from('spedizioni').select('id', { count: 'exact', head: true })
     .in('master_id', subIds).gte('created_at', dal).lte('created_at', alEnd).neq('stato', 'annullata')
   if (ledgerInterni.length) qNumero = qNumero.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerInterni.join(',')})`)

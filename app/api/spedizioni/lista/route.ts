@@ -5,7 +5,7 @@ import { SPED_COLS, SPED_COLS_LISTA } from '@/lib/spedizioni-cols'
 import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
-import { ledgerFornitoriDaNascondere } from '@/lib/gambe-visibilita'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 import { pacchiGiaInDistintaResi } from '@/lib/distinte-resi'
 
 // L'ordinamento per MARGINE (sotto) calcola sul MOVIMENTI di tutto il periodo filtrato: sul network
@@ -223,7 +223,7 @@ export async function GET(req: NextRequest) {
   // (a monte). Quelle hanno come cliente un ledger "(ingrosso)" d'acquisto del master o dei suoi fornitori
   // (risalendo corrieri_condivisi). Calcolato UNA volta qui (scope async); buildBase è sincrona e lo chiude.
   const ledgerNascosti = (utente?.master_id && utente.ruolo !== 'cliente' && utente.ruolo !== 'agente')
-    ? await ledgerFornitoriDaNascondere(admin, utente.master_id) : []
+    ? await ledgerGambeInterne(admin, utente.master_id) : []
 
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).

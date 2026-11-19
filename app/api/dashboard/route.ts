@@ -5,6 +5,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { senzaCostoMaster } from '@/lib/ruoli'
 import { nonStaffMaster } from '@/lib/permessi'
 import { fetchAll } from '@/lib/fetch-all'
+import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 
 export async function GET() {
   const supabase = await createServerSupabase()
@@ -88,8 +89,21 @@ export async function GET() {
   // servono all'abbonamento, non alla vista delle spedizioni.
   const ownNomi = masterId ? await contrattiPossedutiNomi(admin, masterId) : []
   const filtroContr = ownNomi.length > 0
+  // GAMBE INTERNE: un pacco passato da piu' master della rete ha una riga per ciascuno. Le RPC qui
+  // sotto le tolgono da sole (fn_ledger_nascosti); le due letture dirette le tolgono con la stessa
+  // regola, presa dallo stesso posto (lib/gambe-visibilita.ts). Senza, il 19/11/2026 MULTIEXPRESS
+  // vedeva fra le "ultime spedizioni" lo stesso pacco tre volte.
+  const gambeInterne = await ledgerGambeInterne(admin, masterId)
+  const senzaGambe = gambeInterne.length ? `cliente_id.is.null,cliente_id.not.in.(${gambeInterne.join(',')})` : null
   // Contatori + statistiche aggregati nel DB (una query ciascuno) invece di scaricare
   // le righe grezze: le liste PostgREST sono limitate a 1000 righe e falsavano i totali a volume.
+  let qUltime = (filtroContr
+    ? admin.from('spedizioni').select(`${SPED_COLS},corrieri!inner(nome_contratto)`).in('master_id', reteIds.length ? reteIds : [masterId]).in('corrieri.nome_contratto', ownNomi)
+    : admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId]))
+  let qDaDistinta = (filtroContr
+    ? admin.from('spedizioni').select('id,corrieri!inner(nome_contratto)', { count: 'exact', head: true }).in('corrieri.nome_contratto', ownNomi)
+    : admin.from('spedizioni').select('id', { count: 'exact', head: true }))
+  if (senzaGambe) { qUltime = qUltime.or(senzaGambe); qDaDistinta = qDaDistinta.or(senzaGambe) }
   const [
     { data: contatori },
     { data: statistiche },
@@ -106,15 +120,9 @@ export async function GET() {
     admin.rpc('dashboard_statistiche_master', { p_master: masterId }),
     admin.rpc('dashboard_kpi_master', { p_master: masterId }),
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
-    (filtroContr
-      ? admin.from('spedizioni').select(`${SPED_COLS},corrieri!inner(nome_contratto)`).in('master_id', reteIds.length ? reteIds : [masterId]).in('corrieri.nome_contratto', ownNomi)
-      : admin.from('spedizioni').select(SPED_COLS).in('master_id', reteIds.length ? reteIds : [masterId])
-    ).order('created_at',{ascending:false}).limit(10),
+    qUltime.order('created_at',{ascending:false}).limit(10),
     // LDV di TUTTA la rete ancora da chiudere in distinta (era una query in coda: ora nel batch).
-    (filtroContr
-      ? admin.from('spedizioni').select('id,corrieri!inner(nome_contratto)', { count: 'exact', head: true }).in('corrieri.nome_contratto', ownNomi)
-      : admin.from('spedizioni').select('id', { count: 'exact', head: true })
-    )
+    qDaDistinta
       .in('master_id', reteIds.length ? reteIds : [masterId])
       .is('distinta_id', null)
       .not('stato', 'in', '(annullata)'),
