@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { frasePesoPagato } from '@/lib/peso-pagato-frase'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
-import { sottoDi, sintesi } from '@/lib/network-sintesi'
+import { sottoDi, sintesi, pagata } from '@/lib/network-sintesi'
 
 const ACCENT = '#f97316'
 const card = {background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden' as const}
@@ -73,7 +73,7 @@ export default function NetworkRicevutiPage() {
       const giorno = r.invio_giorno || new Date(r.created_at).toLocaleDateString('it-IT')
       const da = r.masters?.nome || '—'
       const k = chiaveBlocco(r)
-      if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, primo: Infinity, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [], parziale: false, proprie: [], totaleProprie: 0 })
+      if (!m.has(k)) m.set(k, { k, da, giorno, ts: 0, primo: Infinity, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [], parziale: false, proprie: [], totaleProprie: 0, altri: [] })
       const b = m.get(k)
       const t = Number(r.addebitata_ts) || new Date(r.created_at).getTime()
       b.ts = Math.max(b.ts, t)          // ultimo addebito del blocco: serve all'ordinamento
@@ -95,6 +95,15 @@ export default function NetworkRicevutiPage() {
       const t = Number(r.addebitata_ts) || new Date(r.created_at).getTime()
       b.ts = Math.max(b.ts, t); b.primo = Math.min(b.primo, t)
       b.proprie.push(r); b.totaleProprie += (Number(r.differenza) || 0) - (Number(r.fuori_sagoma) || 0)
+    }
+    // GLI ALTRI ADDEBITI DEL GIORNO, che non sono ripesature (adeguamenti del contrassegno, correzioni): li manda la rotta
+    // (altriAddebiti) e stanno nello stesso blocco, perche' il blocco deve tornare col totale della Lista movimenti.
+    const nomeMittente = new Map<string, string>()
+    for (const r of [...(dati.rettifiche || [])]) if (r.master_id && r.masters?.nome) nomeMittente.set(r.master_id, r.masters.nome)
+    for (const a of (dati.altriAddebiti || [])) {
+      if (!m.has(a.blocco)) m.set(a.blocco, { k: a.blocco, da: nomeMittente.get(a.master_id) || '—', giorno: a.invio_giorno, ts: 0, primo: Infinity, righe: [], totale: 0, totaleDaDecidere: 0, daDecidere: [], parziale: false, proprie: [], totaleProprie: 0, altri: [] })
+      const b = m.get(a.blocco)
+      b.altri.push(a); b.ts = Math.max(b.ts, a.addebitata_ts); b.primo = Math.min(b.primo, a.addebitata_ts)
     }
     // ORDINE come i contrassegni: prima i blocchi con rettifiche ANCORA DA DECIDERE (le NUOVE), poi per
     // DATA vera decrescente. Prima si ordinava per la STRINGA "GG/MM/AAAA" → ordinava per giorno del mese
@@ -127,31 +136,32 @@ export default function NetworkRicevutiPage() {
     carica(); setPropagando('')
   }
 
-  // SCARICA: le righe del blocco in Excel, cosi' chi le riceve puo' controllarle (o girarle a chi
-  // misura) prima di decidere. Sono gia' addebitate: scaricarle non cambia niente.
+  // SCARICA: tutto l'addebito in Excel, una riga per movimento, con dove lo trovi in pagina e, per quelle girate, a chi
+  // e quanto (Lorenzo, 19/11/2026: «così controlla se veramente a quel cliente è stata addebitata la rettifica»). Il
+  // totale del file e' quello della Lista movimenti di quel giorno. Sono gia' addebitate: scaricarle non cambia niente.
   async function scaricaBlocco(b: any) {
     const { utils, writeFile } = await import('xlsx')
-    // Anche le tue spedizioni proprie dello stesso addebito: il file deve tornare col totale del mittente.
-    const righe = [...b.righe, ...(b.proprie || [])].map((r: any) => {
-      const vol = Number(r.peso_volume_reale) || 0, reale = Number(r.peso_reale) || 0
-      // Multicollo: il peso su cui si paga, collo per collo (peso_pagato dalla rotta), non i totali.
-      const pp = r.peso_pagato
-      return {
-        'LDV': r.numero_spedizione,
-        'Peso dichiarato (kg)': pp ? Math.round(Number(pp.prima) * 100) / 100 : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0),
-        'Peso rilevato (kg)': pp ? Math.round(Number(pp.dopo) * 100) / 100 : Math.max(reale, vol),
-        'Volumetrico': pp ? frasePesoPagato(pp) : vol > reale ? 'si' : '',
-        'Costo prima (€)': Number(r.costo_iniziale) || 0,
-        'Costo dopo (€)': Number(r.costo_finale) || 0,
-        'Addebito (€)': Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100,
-        'di cui supplementi (€)': Number(r.fuori_sagoma) || 0,
-        'Stato': r.propria && !r.propagazione ? 'Tua spedizione (già a tuo carico)' : r.propagazione === 'propagata' ? 'Caricata' : r.propagazione === 'assorbita' ? 'Assorbita' : r.propagazione === 'annullata' ? 'Annullata' : 'Da decidere',
-        'Si recupera sotto (€)': sottoDi(r).euro ?? '',
-        'Sotto': sottoDi(r).testo,
+    const righe: any[] = []
+    for (const v of vociDelBlocco(b)) {
+      for (const r of v.righe) {
+        if (v.k === 'altri') { righe.push({ 'Dove lo trovi': v.nome, 'LDV': r.numero_spedizione || '', 'Movimento': r.descrizione, 'Hai pagato (€)': r.euro }); continue }
+        const pp = r.peso_pagato
+        const vol = Number(r.peso_volume_reale) || 0, reale = Number(r.peso_reale) || 0
+        righe.push({
+          'Dove lo trovi': v.nome,
+          'LDV': r.numero_spedizione,
+          'Peso dichiarato (kg)': pp ? Math.round(Number(pp.prima) * 100) / 100 : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0),
+          'Peso su cui si paga (kg)': pp ? Math.round(Number(pp.dopo) * 100) / 100 : Math.max(reale, vol),
+          'Hai pagato (€)': Math.round(pagata(r) * 100) / 100,
+          'A chi': v.k === 'girate' ? (r.figlia?.a || '') : v.k === 'girare' ? (r.perche?.stima?.chi || '') : '',
+          'Chiesto al cliente (€)': v.k === 'girate' ? r.figlia?.euro ?? '' : v.k === 'girare' ? Number(r.perche?.stima?.chiede) || '' : '',
+          'Stato': v.k === 'girate' ? statoFiglia(r.figlia) : (daFare.righe[r.id] || sottoDi(r).testo || ''),
+        })
       }
-    })
-    const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Rettifiche')
-    writeFile(wb, `rettifiche-da-${String(b.da || 'network').replace(/[^\w-]+/g, '_')}-${String(b.giorno || '').replace(/\//g, '-')}.xlsx`)
+    }
+    righe.push({ 'Dove lo trovi': 'Totale', 'Hai pagato (€)': Math.round(righe.reduce((t, x) => t + (Number(x['Hai pagato (€)']) || 0), 0) * 100) / 100 })
+    const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Addebito')
+    writeFile(wb, `addebito-${String(b.da || 'network').replace(/[^\w-]+/g, '_')}-${String(b.giorno || '').replace(/\//g, '-')}.xlsx`)
   }
 
   // CARICARE (prima si chiamava "Accetta") NON E' ADDEBITARE.
@@ -273,14 +283,13 @@ export default function NetworkRicevutiPage() {
   // di merda»; bozza approvata lo stesso giorno). Prima ogni addebito era un riquadro con quattro numeri per riga («girate
   // sotto · chiedi € 205,17 · incassati € 96,67 · € 108,50 da confermare · le hai pagate € 166,08»), quelli da fare
   // mescolati a quelli gia' fatti, e parole del portale («Carica», «Assorbi»). Ora: in cima quanto c'e' da girare, da
-  // confermare, bloccato e a tuo carico; sotto due tabelle, «Da girare ai tuoi clienti» e «Già girate ai clienti». I
-  // conti sono gli stessi di prima (lib/network-sintesi), cambia solo come si leggono.
+  // confermare, bloccato e a tuo carico; sotto un riquadro per ogni addebito (vedi «OGNI ADDEBITO SI CONTROLLA DA SOLO»).
+  // I conti sono gli stessi di prima (lib/network-sintesi), cambia solo come si leggono.
   // Il punto delle migliaia a mano: in italiano toLocaleString lo mette solo da 10.000 in su («€ 2762,86»).
   const eurIt = (n: number) => '€ ' + Math.abs(n).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
   const nSped = (n: number) => `${n.toLocaleString('it-IT')} ${n === 1 ? 'spedizione' : 'spedizioni'}`
   const conSintesi = blocchi.map((b: any) => ({ b, s: sintesi(b.righe, b.proprie) }))
   const daGirare = conSintesi.filter(x => x.b.daDecidere.length > 0)
-  const giaGirate = conSintesi.filter(x => x.s.girate.n + x.s.uguale.n + x.s.assorbite.n + x.s.cancellate.n > 0)
   const tot = daGirare.reduce((t, { s }) => ({
     chiede: t.chiede + s.recupera.chiede, nRecupera: t.nRecupera + s.recupera.n, pagateRecupera: t.pagateRecupera + s.recupera.euro,
     nFerme: t.nFerme + s.ferme.n, ferme: t.ferme + s.ferme.euro, nUguale: t.nUguale + s.ugualeStima.n, uguale: t.uguale + s.ugualeStima.euro,
@@ -296,69 +305,109 @@ export default function NetworkRicevutiPage() {
   const btnPrimario = { background: '#ea580c', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 14px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }
   const btnSecondario = { background: '#fff', color: '#1a1a1a', border: '1px solid #d4d4d8', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }
 
-  // Il dettaglio di un addebito, riga per riga: come prima, si apre solo se uno lo vuole vedere.
-  const dettaglio = (b: any) => (
-    <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
-      <thead><tr style={{background:'#f9fafb'}}>
-        <th style={th}>LDV</th><th style={th}>Peso fatturato (vol.)</th><th style={th}>Costo → ricalcolo</th><th style={th}>Differenza</th><th style={th}>Ai tuoi clienti</th><th style={th}>Stato</th>
-      </tr></thead>
-      <tbody>
-        {b.righe.map((r:any)=>(
+  // ── OGNI ADDEBITO SI CONTROLLA DA SOLO (Lorenzo, 19/11/2026: «quando multi addebita 907,59 €, su dal mio network deve
+  // vedere questa tabellina in modo tale che capisce cosa è successo e può controllarla lui stesso»). Ecomize Solution
+  // aveva sommato dalla Lista movimenti le rettifiche del 17/11 e le confrontava col «da girare» di quel giorno (663,96):
+  // erano due cose diverse, e la pagina non diceva dove fosse il resto. Ora ogni addebito ha la sua tabellina: in testa
+  // il totale (lo stesso della Lista movimenti), sotto dove sta ogni parte, e ogni voce si apre spedizione per spedizione.
+  type Voce = 'girare' | 'bloccate' | 'calcolo' | 'girate' | 'uguale' | 'assorbite' | 'cancellate' | 'proprie' | 'annullate' | 'altri'
+  const VOCI: [Voce, string][] = [
+    ['girare', 'Da girare ai tuoi clienti'], ['bloccate', 'Bloccate: c\'è qualcosa da sistemare'], ['calcolo', 'In calcolo'],
+    ['girate', 'Già girate ai clienti'], ['uguale', 'Restano a te: il cliente paga uguale'], ['assorbite', 'Tenute a tuo carico'],
+    ['cancellate', 'Girate e poi cancellate'], ['proprie', 'Tue spedizioni senza cliente'], ['annullate', 'Annullate: importo restituito'],
+    ['altri', 'Altri addebiti, non sono ripesature'],
+  ]
+  function voceDi(r: any): Voce {
+    if (r.propria) return 'proprie'
+    if (!r.propagazione) { const st = r.perche?.stima; return !st ? 'calcolo' : st.esito === 'recupera' ? 'girare' : st.esito === 'uguale' ? 'uguale' : 'bloccate' }
+    if (r.propagazione === 'propagata') return r.figlia ? 'girate' : 'cancellate'
+    if (r.propagazione === 'assorbita') return r.perche?.tipo === 'paga_uguale' ? 'uguale' : 'assorbite'
+    return 'annullate'
+  }
+  function vociDelBlocco(b: any): { k: Voce; nome: string; righe: any[]; euro: number }[] {
+    const per = new Map<Voce, any[]>()
+    for (const r of [...b.righe, ...b.proprie]) { const k = voceDi(r); if (!per.has(k)) per.set(k, []); per.get(k)!.push(r) }
+    if ((b.altri || []).length) per.set('altri', b.altri)
+    return VOCI.filter(([k]) => per.has(k)).map(([k, nome]) => {
+      const rr = per.get(k)!
+      return { k, nome, righe: rr, euro: rr.reduce((t: number, x: any) => t + (k === 'altri' ? Number(x.euro) || 0 : pagata(x)), 0) }
+    })
+  }
+  function statoFiglia(f: any): string {
+    if (!f) return ''
+    if (f.stato === 'in_contestazione') return 'In contestazione col fornitore'
+    return f.confermata ? 'Confermata: addebitata' : 'Da confermare in Rettifica Costi'
+  }
+  // Una frase per voce, con i soldi che contano per quella voce.
+  function notaVoce(v: { k: Voce; righe: any[] }): string {
+    const somma = (f: (r: any) => number) => v.righe.reduce((t, r) => t + f(r), 0)
+    switch (v.k) {
+      case 'girare': return `chiedi ${eurIt(somma(r => Number(r.perche?.stima?.chiede) || 0))}, ognuno col suo listino`
+      case 'girate': {
+        const chiesto = somma(r => Number(r.figlia?.euro) || 0), incassato = somma(r => r.figlia?.confermata ? Number(r.figlia.euro) || 0 : 0)
+        return `chiesto ${eurIt(chiesto)} · confermate ${eurIt(incassato)}${chiesto - incassato > 0.005 ? ` · da confermare ${eurIt(chiesto - incassato)}` : ''}`
+      }
+      case 'bloccate': return 'apri «Vedi» o «Cosa devi fare» per cosa sistemare'
+      case 'calcolo': return 'fra qualche minuto si vede quanto chiedi'
+      case 'uguale': return 'col suo listino resta nella stessa fascia: niente da chiedere'
+      case 'assorbite': return 'hai scelto di non chiederle'
+      case 'cancellate': return 'girate e poi cancellate in Rettifica Costi'
+      case 'proprie': return 'spedite da te senza un cliente'
+      case 'annullate': return 'l\'addebito ti è stato restituito'
+      case 'altri': {
+        const tipi = new Map<string, number>()
+        for (const a of v.righe) { const t = String(a.descrizione || '').split(/\s+/).slice(0, 2).join(' '); tipi.set(t, (tipi.get(t) || 0) + 1) }
+        return Array.from(tipi.entries()).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t, n]) => `${t} (${n})`).join(' · ')
+      }
+    }
+  }
+  // Il peso su cui si paga, prima e dopo: collo per collo sulle multicollo (peso_pagato dalla rotta), altrimenti il
+  // maggiore fra reale e volume. Con un collo leggero ma ingombrante e' il volume a far salire il costo.
+  function pesoTesto(r: any) {
+    const vol = Number(r.peso_volume_reale) || 0, reale = Number(r.peso_reale) || 0
+    const pp = r.peso_pagato
+    const kg2 = (n: number) => (Math.round(n * 100) / 100).toLocaleString('it-IT')
+    const prima = pp ? Number(pp.prima) : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0)
+    const dopo = pp ? Number(pp.dopo) : Math.max(reale, vol)
+    return <>{kg2(prima)} → <strong>{kg2(dopo)}</strong> kg{pp ? <span title={frasePesoPagato(pp)} style={{display:'block',fontSize:'10px',color:'#1e40af'}}>collo per collo</span> : vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : null}</>
+  }
+  function tabellaVoce(k: Voce, rr: any[]) {
+    if (k === 'altri') return (
+      <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
+        <thead><tr style={{background:'#f9fafb'}}><th style={th}>LDV</th><th style={th}>Movimento</th><th style={thR}>Hai pagato</th></tr></thead>
+        <tbody>{rr.map((a: any) => (
+          <tr key={a.id}><td style={{...td,fontWeight:600}}>{a.numero_spedizione || '—'}</td><td style={td}>{a.descrizione}</td><td style={tdR}>{eurIt(a.euro)}</td></tr>
+        ))}</tbody>
+      </table>
+    )
+    return (
+      <table style={{width:'100%',borderCollapse:'collapse',background:'#fcfcfc'}}>
+        <thead><tr style={{background:'#f9fafb'}}>
+          <th style={th}>LDV</th><th style={th}>Peso su cui si paga</th><th style={thR}>Hai pagato</th>
+          {k === 'girate' ? <><th style={th}>A chi</th><th style={thR}>Chiesto</th><th style={th}>Stato</th></>
+            : k === 'girare' ? <><th style={th}>A chi</th><th style={thR}>Chiedi</th></>
+            : <th style={th}>Perché</th>}
+        </tr></thead>
+        <tbody>{rr.map((r: any) => (
           <tr key={r.id}>
             <td style={{...td,fontWeight:600}}>{r.numero_spedizione}</td>
-            {/* Si mostra il peso che FATTURA (max fra reale e volume): con un collo leggero ma ingombrante e' il volume a
-                far salire il costo, e va scritto — altrimenti "14 kg" sembra un peso sceso e la rettifica pare un furto. */}
-            {(() => {
-              const vol = Number(r.peso_volume_reale) || 0
-              const reale = Number(r.peso_reale) || 0
-              // MULTICOLLO: si paga collo per collo (peso_pagato, dalla rotta), e i totali ingannano: 3UW1WLJ093303 diceva
-              // «27,2 → 27,9 kg (vol.)», sotto i 30, con 6,28 € di addebito; si paga 28,88 → 30,60 kg, oltre i 30.
-              const pp = r.peso_pagato
-              const fatt = pp ? Number(pp.dopo) : Math.max(reale, vol)
-              // Il "prima" è il FATTURATO iniziale = max(reale, volume) dichiarati, coerente col "dopo".
-              const iniz = pp ? Number(pp.prima) : Math.max(Number(r.peso_iniziale) || 0, Number(r.peso_volume_iniziale) || 0)
-              const kg2 = (n: number) => (Math.round(n * 100) / 100).toLocaleString('it-IT')
-              return <td style={td}>{pp ? kg2(iniz) : iniz.toFixed(1)} → <strong>{pp ? kg2(fatt) : fatt.toFixed(1)}</strong> kg
-                {pp ? <span title={frasePesoPagato(pp)} style={{display:'block',fontSize:'10px',color:'#1e40af'}}>
-                    collo per collo{(pp.colli || []).length > 1 ? `: ${pp.colli.map(kg2).join(' + ')}` : ''}</span>
-                  : vol > reale ? <span style={{color:'#ea580c'}}> (vol.)</span> : ''}</td>
-            })()}
-            <td style={td}>€ {Number(r.costo_iniziale).toFixed(2)} → € {Number(r.costo_finale).toFixed(2)}</td>
-            {(() => {
-              // Addebito vero = ripesatura (differenza) + fuori sagoma (fisso, in aggiunta).
-              const add = Math.round((Number(r.differenza || 0) - Number(r.fuori_sagoma || 0)) * 100) / 100
-              return (
-                <td style={{...td,fontWeight:700,color:add<0?'#dc2626':'#16a34a'}}>
-                  € {add.toFixed(2)}
-                  {Number(r.fuori_sagoma || 0) > 0 && (
-                    <span style={{display:'block',fontSize:'10px',fontWeight:600,color:'#7c2d12'}}>di cui supplementi € {Number(r.fuori_sagoma).toFixed(2)}</span>
-                  )}
-                </td>
-              )
-            })()}
-            {(() => { const x = sottoDi(r)
-              return <td style={{...td,color:x.euro != null ? '#166534' : '#475569',fontWeight:x.euro != null ? 700 : 400,maxWidth:'260px'}}>{x.testo}</td> })()}
-            <td style={td}>
-              {r.propagazione === 'propagata' ? (
-                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#ffedd5',color:'#ea580c'}}>✓ Girata — è in Rettifica Costi</span>
-              ) : r.propagazione === 'assorbita' ? (
-                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#dcfce7',color:'#166534'}}>{r.perche?.tipo === 'paga_uguale' ? 'Niente da chiedere' : 'Tenuta a tuo carico'}</span>
-              ) : r.propagazione === 'annullata' ? (
-                // ANNULLATA non e' a carico: l'addebito e' stato restituito con uno storno (22/10/2026). Scriverla
-                // "assorbita" diceva che il costo era rimasto a lui.
-                <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#f3f4f6',color:'#4b5563'}}>✕ Annullata — addebito restituito</span>
-              ) : (
-                <>
-                  <span style={{fontSize:'11px',fontWeight:600,padding:'2px 8px',borderRadius:'999px',background:'#fef3c7',color:'#92400e'}}>Da girare</span>
-                  {daFare.righe[r.id] && <span style={{display:'block',fontSize:'11px',fontWeight:600,color:'#dc2626',marginTop:'3px'}}>⚠ {daFare.righe[r.id]}</span>}
-                </>
-              )}
-            </td>
+            <td style={td}>{pesoTesto(r)}</td>
+            <td style={tdR}>{eurIt(pagata(r))}</td>
+            {k === 'girate' ? <>
+                <td style={td}>{r.figlia?.a || '—'}</td>
+                <td style={tdR}>{eurIt(Number(r.figlia?.euro) || 0)}</td>
+                <td style={{...td,color:r.figlia?.confermata ? '#166534' : '#9a3412',fontWeight:600}}>{statoFiglia(r.figlia)}</td>
+              </>
+              : k === 'girare' ? <>
+                <td style={td}>{r.perche?.stima?.chi || '—'}</td>
+                <td style={{...tdR,color:'#166534',fontWeight:700}}>{eurIt(Number(r.perche?.stima?.chiede) || 0)}</td>
+              </>
+              : <td style={{...td,color:'#475569'}}>{daFare.righe[r.id] || sottoDi(r).testo || ''}</td>}
           </tr>
-        ))}
-      </tbody>
-    </table>
-  )
+        ))}</tbody>
+      </table>
+    )
+  }
 
   return (
     <div>
@@ -465,87 +514,6 @@ export default function NetworkRicevutiPage() {
             </div>
           )}
 
-          {/* DA GIRARE AI TUOI CLIENTI: una riga per addebito con qualcosa ancora da decidere. «Gira ai clienti» e' il vecchio
-              «Carica» (le righe vanno in Rettifica Costi, riprezzate col listino di ognuno: nessuno paga finche' non confermi);
-              «Tienile a carico tuo» e' il vecchio «Assorbi», dentro «Vedi» perche' e' la scelta rara. */}
-          {daGirare.length > 0 && (
-            <div style={card}>
-              <div style={{padding:'14px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px',flexWrap:'wrap',borderBottom:'1px solid #f0f0f0'}}>
-                <div>
-                  <div style={{fontSize:'16px',fontWeight:700,color:'#1a1a1a'}}>Da girare ai tuoi clienti</div>
-                  <div style={{fontSize:'12.5px',color:'#52525b',marginTop:'2px'}}>Una riga per ogni volta che {mittenti.length === 1 ? mittenti[0] : 'il livello sopra'} ti ha addebitato.</div>
-                </div>
-                {daGirare.length > 1 && (
-                  <button onClick={()=>decidiBlocco({ k: '__tutte__', daDecidere: tuttiDaDecidere }, 'propagata')} disabled={!!propagando}
-                    style={{...btnPrimario,fontSize:'14px',padding:'10px 18px',opacity:propagando?.6:1}}>
-                    {propagando==='__tutte__' ? (avanz&&avanz.k==='__tutte__'?`${avanz.fatti}/${avanz.totale}…`:'…') : 'Gira tutte ai clienti'}
-                  </button>
-                )}
-              </div>
-              {propagando==='__tutte__' && avanz && avanz.k==='__tutte__' && (
-                <div style={{padding:'12px 16px'}}>
-                  <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da} etichetta="Giro le rettifiche ai tuoi clienti" sottotitolo="Ogni spedizione viene riprezzata col listino del tuo cliente." />
-                </div>
-              )}
-              <div style={{overflowX:'auto'}}>
-                <table style={{width:'100%',borderCollapse:'collapse',minWidth:'860px'}}>
-                  <thead><tr style={{background:'#f9fafb'}}>
-                    <th style={th}>Addebitate il</th><th style={thR}>Spedizioni</th><th style={thR}>Hai pagato</th><th style={thR}>Chiedi ai clienti</th><th style={th}>Note</th><th style={th}></th>
-                  </tr></thead>
-                  <tbody>
-                    {daGirare.map(({ b, s }) => {
-                      const aperto = apertoBlocco === 'g:' + b.k
-                      const ferme = b.daDecidere.filter((id:string)=>daFare.righe[id]).length
-                      const gia = b.righe.length - b.daDecidere.length
-                      const note = [
-                        s.ugualeStima.n ? `${s.ugualeStima.n} restano a te: stessa fascia del cliente (${eurIt(s.ugualeStima.euro)})` : '',
-                        s.ferme.n ? `${s.ferme.n} ${s.ferme.n === 1 ? 'bloccata' : 'bloccate'}: ${ferme ? 'vedi «Cosa devi fare»' : 'apri «Vedi» per il motivo'}` : '',
-                        s.inCalcolo.n ? `${s.inCalcolo.n} in calcolo${stimando ? '…' : ': fra qualche minuto si vede quanto chiedi'}` : '',
-                        gia ? `le altre ${gia} di quel giorno sono già girate` : '',
-                        b.proprie.length ? `${b.proprie.length} ${b.proprie.length === 1 ? 'tua spedizione' : 'tue spedizioni'} senza cliente` : '',
-                        b.parziale ? 'qui c\'è solo una parte di quel giorno' : '',
-                      ].filter(Boolean).join(' · ')
-                      const soloFerme = !s.recupera.n && s.ferme.n > 0
-                      return [
-                        <tr key={b.k} style={{background:soloFerme?'#fffbeb':'#fff'}}>
-                          <td style={{...td,fontWeight:600,whiteSpace:'nowrap'}}>{b.giorno}{orarioBlocco(b)}{mittenti.length > 1 && <span style={{display:'block',fontSize:'11px',color:'#71717a',fontWeight:500}}>da {b.da}</span>}</td>
-                          <td style={tdR}>{b.daDecidere.length}</td>
-                          <td style={tdR}>{eurIt(b.totaleDaDecidere)}</td>
-                          <td style={{...tdR,fontWeight:700,color:s.recupera.n ? '#166534' : soloFerme ? '#92400e' : '#52525b'}}>
-                            {s.recupera.n ? eurIt(s.recupera.chiede) : soloFerme ? 'bloccata' : s.inCalcolo.n ? 'in calcolo' : 'niente da chiedere'}
-                          </td>
-                          <td style={{...td,color:soloFerme?'#92400e':'#52525b',maxWidth:'420px'}}>{note}</td>
-                          <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
-                            {/* Bloccata: «Riprova» dopo aver sistemato il listino, non l'azione principale. */}
-                            <button onClick={()=>decidiBlocco(b,'propagata')} disabled={!!propagando} style={{...(soloFerme ? btnSecondario : btnPrimario),opacity:propagando===b.k?.6:1}}>
-                              {propagando===b.k?(avanz&&avanz.k===b.k?`${avanz.fatti}/${avanz.totale}…`:'…'):soloFerme?'Riprova':'Gira ai clienti'}
-                            </button>{' '}
-                            <button onClick={()=>setApertoBlocco(aperto?'':'g:'+b.k)} style={btnSecondario}>{aperto?'Chiudi':'Vedi'}</button>
-                          </td>
-                        </tr>,
-                        propagando===b.k && avanz && avanz.k===b.k ? (
-                          <tr key={b.k + ':barra'}><td colSpan={6} style={{padding:'0 16px 12px'}}>
-                            <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da} etichetta="Giro le rettifiche ai tuoi clienti" sottotitolo="Ogni spedizione viene riprezzata col listino del tuo cliente." />
-                          </td></tr>
-                        ) : null,
-                        aperto ? (
-                          <tr key={b.k + ':dettaglio'}><td colSpan={6} style={{padding:0,borderTop:'1px solid #f0f0f0'}}>
-                            <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center',padding:'10px 16px',background:'#fafafa'}}>
-                              <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={!!propagando} style={btnSecondario}>Tienile a carico tuo ({b.daDecidere.length})</button>
-                              <button onClick={()=>scaricaBlocco(b)} style={btnSecondario}>⬇ Scarica in Excel</button>
-                              <span style={{fontSize:'12px',color:'#71717a'}}>«Tienile a carico tuo»: non le chiedi a nessuno, restano un tuo costo.</span>
-                            </div>
-                            {dettaglio(b)}
-                          </td></tr>
-                        ) : null,
-                      ]
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
           {/* LE TUE SPEDIZIONI PROPRIE: non è una scelta, sono tue. Riconosciute in automatico (senza cliente + spedite da te),
               un solo tasto per chiuderle: non muove un euro, le toglie solo da quelle da girare. */}
           {proprie.length>0 && (
@@ -585,56 +553,100 @@ export default function NetworkRicevutiPage() {
             </div>
           )}
 
-          {/* GIA' GIRATE AI CLIENTI: per ogni addebito quanto hai chiesto, quanto hai gia' incassato (confermate) e quanto
-              aspetta la tua conferma in Rettifica Costi; sotto la data, quelle rimaste a te. */}
-          {giaGirate.length > 0 && (
-            <div style={card}>
-              <div style={{padding:'14px 16px',borderBottom:'1px solid #f0f0f0'}}>
-                <div style={{fontSize:'16px',fontWeight:700,color:'#1a1a1a'}}>Già girate ai clienti</div>
-                <div style={{fontSize:'12.5px',color:'#52525b',marginTop:'2px'}}>Quello che hai chiesto, quanto hai già incassato e quanto aspetta la tua conferma.</div>
+          {/* GLI ADDEBITI: uno per volta che il livello sopra ti ha addebitato, col totale della Lista movimenti di quel giorno
+              e sotto dove sta ogni parte. «Gira ai clienti» e' il vecchio «Carica» (le righe vanno in Rettifica Costi,
+              riprezzate col listino di ognuno: nessuno paga finche' non confermi); «Tienile a carico tuo» e' il vecchio
+              «Assorbi», dentro la voce «Da girare» perche' e' la scelta rara. */}
+          {blocchi.length > 0 && (
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
+              <div>
+                <div style={{fontSize:'16px',fontWeight:700,color:'#1a1a1a'}}>I tuoi addebiti</div>
+                <div style={{fontSize:'12.5px',color:'#52525b',marginTop:'2px'}}>Uno per ogni volta che {mittenti.length === 1 ? mittenti[0] : 'il livello sopra'} ti ha addebitato: il totale è lo stesso della tua Lista movimenti di quel giorno.</div>
               </div>
-              <div style={{overflowX:'auto'}}>
-                <table style={{width:'100%',borderCollapse:'collapse',minWidth:'860px'}}>
-                  <thead><tr style={{background:'#f9fafb'}}>
-                    <th style={th}>Addebitate il</th><th style={thR}>Spedizioni</th><th style={thR}>Hai pagato</th><th style={thR}>Chiesto ai clienti</th><th style={thR}>Incassato</th><th style={thR}>Da confermare</th><th style={th}></th>
-                  </tr></thead>
-                  <tbody>
-                    {giaGirate.map(({ b, s }) => {
-                      const aperto = apertoBlocco === 'd:' + b.k
-                      const restaN = s.uguale.n + s.assorbite.n + s.cancellate.n
-                      const restaEuro = s.uguale.euro + s.assorbite.euro + s.cancellate.euro
-                      return [
-                        <tr key={b.k}>
-                          <td style={{...td,fontWeight:600,whiteSpace:'nowrap'}}>
-                            {b.giorno}{orarioBlocco(b)}
-                            {mittenti.length > 1 && <span style={{display:'block',fontSize:'11px',color:'#71717a',fontWeight:500}}>da {b.da}</span>}
-                            {restaN > 0 && <span style={{display:'block',fontSize:'11px',color:'#71717a',fontWeight:500}}>+ {restaN} {restaN === 1 ? 'rimasta' : 'rimaste'} a te ({eurIt(restaEuro)})</span>}
-                          </td>
-                          <td style={tdR}>{s.girate.n}</td>
-                          <td style={tdR}>{eurIt(s.girate.euro)}</td>
-                          <td style={tdR}>{eurIt(s.girate.chiede)}</td>
-                          <td style={{...tdR,color:'#166534',fontWeight:600}}>{eurIt(s.girate.incassato)}</td>
-                          <td style={{...tdR,color:s.girate.daConfermare > 0.005 ? '#9a3412' : '#a1a1aa',fontWeight:700}}>{s.girate.daConfermare > 0.005 ? eurIt(s.girate.daConfermare) : '—'}</td>
-                          <td style={{...td,textAlign:'right',whiteSpace:'nowrap'}}>
-                            {s.girate.daConfermare > 0.005 && <a href="/dashboard/spedizioni/rettifica" style={{color:'#c2410c',fontWeight:700,fontSize:'13px',marginRight:'10px'}}>Conferma</a>}
-                            <button onClick={()=>setApertoBlocco(aperto?'':'d:'+b.k)} style={btnSecondario}>{aperto?'Chiudi':'Vedi'}</button>
-                          </td>
-                        </tr>,
-                        aperto ? (
-                          <tr key={b.k + ':dettaglio'}><td colSpan={7} style={{padding:0,borderTop:'1px solid #f0f0f0'}}>
-                            <div style={{display:'flex',gap:'8px',alignItems:'center',padding:'10px 16px',background:'#fafafa'}}>
-                              <button onClick={()=>scaricaBlocco(b)} style={btnSecondario}>⬇ Scarica in Excel</button>
-                            </div>
-                            {dettaglio(b)}
-                          </td></tr>
-                        ) : null,
-                      ]
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              {daGirare.length > 1 && (
+                <button onClick={()=>decidiBlocco({ k: '__tutte__', daDecidere: tuttiDaDecidere }, 'propagata')} disabled={!!propagando}
+                  style={{...btnPrimario,fontSize:'14px',padding:'10px 18px',opacity:propagando?.6:1}}>
+                  {propagando==='__tutte__' ? (avanz&&avanz.k==='__tutte__'?`${avanz.fatti}/${avanz.totale}…`:'…') : 'Gira tutte ai clienti'}
+                </button>
+              )}
             </div>
           )}
+          {propagando==='__tutte__' && avanz && avanz.k==='__tutte__' && (
+            <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da} etichetta="Giro le rettifiche ai tuoi clienti" sottotitolo="Ogni spedizione viene riprezzata col listino del tuo cliente." />
+          )}
+          {blocchi.map((b: any) => {
+            const voci = vociDelBlocco(b)
+            const totN = voci.reduce((t, v) => t + v.righe.length, 0)
+            const totE = voci.reduce((t, v) => t + v.euro, 0)
+            return (
+              <div key={b.k} style={card}>
+                <div style={{padding:'14px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'12px',flexWrap:'wrap',borderBottom:'1px solid #f0f0f0'}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:'15px',fontWeight:700,color:'#1a1a1a'}}>{b.da} ti ha addebitato il {b.giorno}{orarioBlocco(b)}</div>
+                    <div style={{fontSize:'13px',color:'#3f3f46',marginTop:'3px'}}>
+                      {b.parziale
+                        ? 'Qui c\'è solo una parte di quel giorno: il resto è più indietro nello storico.'
+                        : <>{totN.toLocaleString('it-IT')} {totN === 1 ? 'movimento' : 'movimenti'} per <strong>{eurIt(totE)}</strong>: è il totale della tua Lista movimenti di quel giorno, tipo «rettifica».</>}
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                    {b.daDecidere.length > 0 && (
+                      <button onClick={()=>decidiBlocco(b,'propagata')} disabled={!!propagando} style={{...btnPrimario,opacity:propagando===b.k?.6:1}}>
+                        {propagando===b.k?(avanz&&avanz.k===b.k?`${avanz.fatti}/${avanz.totale}…`:'…'):`Gira ai clienti (${b.daDecidere.length})`}
+                      </button>
+                    )}
+                    <button onClick={()=>scaricaBlocco(b)} style={btnSecondario}>⬇ Excel</button>
+                  </div>
+                </div>
+                {propagando===b.k && avanz && avanz.k===b.k && (
+                  <div style={{padding:'12px 16px'}}>
+                    <BarraAvanzamento fatti={avanz.fatti} totale={avanz.totale} iniziatoIl={avanz.da} etichetta="Giro le rettifiche ai tuoi clienti" sottotitolo="Ogni spedizione viene riprezzata col listino del tuo cliente." />
+                  </div>
+                )}
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',minWidth:'720px'}}>
+                    <thead><tr style={{background:'#f9fafb'}}>
+                      <th style={th}>Dove sono</th><th style={thR}>Movimenti</th><th style={thR}>Hai pagato</th><th style={th}>Dettaglio</th><th style={th}></th>
+                    </tr></thead>
+                    <tbody>
+                      {voci.map(v => {
+                        const chiave = b.k + '|' + v.k
+                        const aperta = apertoBlocco === chiave
+                        return [
+                          <tr key={chiave} style={{background:v.k === 'bloccate' ? '#fffbeb' : v.k === 'girare' ? '#fff7ed' : '#fff'}}>
+                            <td style={{...td,fontWeight:700}}>{v.nome}</td>
+                            <td style={tdR}>{v.righe.length}</td>
+                            <td style={{...tdR,fontWeight:600}}>{eurIt(v.euro)}</td>
+                            <td style={{...td,color:'#52525b'}}>{notaVoce(v)}</td>
+                            <td style={{...td,textAlign:'right'}}>
+                              <button onClick={()=>setApertoBlocco(aperta ? '' : chiave)} style={{...btnSecondario,padding:'5px 10px',fontSize:'12px'}}>{aperta ? 'Chiudi' : 'Vedi'}</button>
+                            </td>
+                          </tr>,
+                          aperta ? (
+                            <tr key={chiave + ':aperta'}><td colSpan={5} style={{padding:0,borderTop:'1px solid #f0f0f0'}}>
+                              {v.k === 'girare' && (
+                                <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center',padding:'10px 16px',background:'#fafafa'}}>
+                                  <button onClick={()=>decidiBlocco(b,'assorbita')} disabled={!!propagando} style={btnSecondario}>Tienile a carico tuo ({b.daDecidere.length})</button>
+                                  <span style={{fontSize:'12px',color:'#71717a'}}>Non le chiedi a nessuno: restano un tuo costo.</span>
+                                </div>
+                              )}
+                              <div style={{maxHeight:'420px',overflowY:'auto'}}>{tabellaVoce(v.k, v.righe)}</div>
+                            </td></tr>
+                          ) : null,
+                        ]
+                      })}
+                      <tr style={{background:'#f4f4f5'}}>
+                        <td style={{...td,fontWeight:800}}>Totale</td>
+                        <td style={{...tdR,fontWeight:800}}>{totN}</td>
+                        <td style={{...tdR,fontWeight:800}}>{eurIt(totE)}</td>
+                        <td style={{...td,color:'#52525b'}} colSpan={2}>{b.parziale ? '' : 'uguale alla Lista movimenti di quel giorno'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
         </div>
       ) : (
       <div style={card}>
