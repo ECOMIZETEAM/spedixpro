@@ -133,10 +133,21 @@ export async function GET(req: NextRequest) {
   // ~0,1-1,5% (rimborsi a cavallo del mese). Ora card e Report Spedizioni coincidono al centesimo
   // (verificato: MULTI set. 39.217,49 = 39.217,49). I RESI/RETTIFICHE/GIACENZE/RIMBORSI restano nei loro
   // riquadri. Il NUMERO spedizioni e' invece il volume di RETE non annullato (= barra abbonamento).
+  // UN PACCO CONTA UNA VOLTA. Le gambe della condivisione — righe sul conto ingrosso di un master che
+  // compra — sono lo stesso pacco gia' contato dove e' nato: se chi compra sta nella rete di M, M lo
+  // contava due o tre volte (MULTIEXPRESS, novembre 2026: 233.000 righe per 120.000 pacchi). E' la
+  // regola di fn_usato_rete (scripts/limite-piano-gambe.sql), qui su un periodo qualunque invece che
+  // sul mese. Le righe senza cliente (le spedizioni del master stesso) restano: un `not in` da solo
+  // le scarterebbe, perche' su un cliente nullo non da' vero.
+  const { data: contiInterni } = await admin.from('corrieri_condivisi')
+    .select('cliente_ledger_id').in('master_id', subIds).not('cliente_ledger_id', 'is', null)
+  const ledgerInterni = [...new Set((contiInterni || []).map((r: any) => r.cliente_ledger_id as string))]
+  let qNumero = admin.from('spedizioni').select('id', { count: 'exact', head: true })
+    .in('master_id', subIds).gte('created_at', dal).lte('created_at', alEnd).neq('stato', 'annullata')
+  if (ledgerInterni.length) qNumero = qNumero.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerInterni.join(',')})`)
   const [{ data: serieRows, error: errSerie }, { count: numSpedizioniRaw }] = await Promise.all([
     admin.rpc('guadagno_spedizioni_serie_v1', { p_master: M, p_dal: dal, p_al: alEnd, p_per_mese: perMese }),
-    admin.from('spedizioni').select('id', { count: 'exact', head: true })
-      .in('master_id', subIds).gte('created_at', dal).lte('created_at', alEnd).neq('stato', 'annullata'),
+    qNumero,
   ])
   if (errSerie) return NextResponse.json({ error: errSerie.message }, { status: 500 })
   const numSpedizioni = Number(numSpedizioniRaw || 0)
