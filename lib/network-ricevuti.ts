@@ -163,16 +163,31 @@ export async function datiRicevuti(adminDb: any, mio: string) {
     }
     const CHIAVE = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' })
     const GIORNO = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' })
+    // I DUE CONTI. Il livello sopra puo' addebitare sul conto di rete (master_target_id = io) oppure, sui contratti in
+    // condivisione, sul conto che ho presso di lui come cliente «(ingrosso)» (corrieri_condivisi.cliente_ledger_id).
+    // Wave ship addebita MULTIEXPRESS cosi': il 17/11/2026 c'era anche uno «storno Accredito credito a scalare» da
+    // 10.000 €, e senza questo conto la pagina diceva 651,14 contro i 10.651,14 della Lista movimenti.
+    const { data: cc } = await adminDb.from('corrieri_condivisi').select('cliente_ledger_id').eq('master_id', mio)
+    const ledger = [...new Set(((cc || []) as any[]).map(x => x.cliente_ledger_id).filter(Boolean))] as string[]
+    const ledgerDi = new Map<string, string[]>()   // mittente -> i miei conti presso di lui
+    if (ledger.length) {
+      const { data: cl } = await adminDb.from('clienti').select('id,master_id').in('id', ledger)
+      for (const c of (cl || []) as any[]) ledgerDi.set(c.master_id, [...(ledgerDi.get(c.master_id) || []), c.id])
+    }
     for (const [mitt, giorno] of primoGiorno) {
       const mov: any[] = []
-      for (let da = 0; da < 20000; da += 1000) {
-        const { data, error } = await adminDb.from('movimenti')
-          .select('id,spedizione_id,importo,descrizione,created_at,spedizioni(numero)')
-          .eq('tipo', 'rettifica').eq('master_id', mitt).eq('master_target_id', mio).is('cliente_id', null)
-          .gte('created_at', inizioGiornoRomaISO(giorno)).order('created_at').order('id').range(da, da + 999)
-        if (error) { console.error('[NETWORK] altri addebiti:', error.message); break }
-        mov.push(...(data || []))
-        if (!data || data.length < 1000) break
+      const conti: ((q: any) => any)[] = [q => q.eq('master_target_id', mio).is('cliente_id', null)]
+      if ((ledgerDi.get(mitt) || []).length) conti.push(q => q.in('cliente_id', ledgerDi.get(mitt)!))
+      for (const conto of conti) {
+        for (let da = 0; da < 20000; da += 1000) {
+          const { data, error } = await conto(adminDb.from('movimenti')
+            .select('id,spedizione_id,importo,descrizione,created_at,spedizioni(numero)')
+            .eq('tipo', 'rettifica').eq('master_id', mitt))
+            .gte('created_at', inizioGiornoRomaISO(giorno)).order('created_at').order('id').range(da, da + 999)
+          if (error) { console.error('[NETWORK] altri addebiti:', error.message); break }
+          mov.push(...(data || []))
+          if (!data || data.length < 1000) break
+        }
       }
       const sped = [...new Set(mov.map(m => m.spedizione_id).filter(Boolean))] as string[]
       const importiRighe = new Map<string, number[]>()
