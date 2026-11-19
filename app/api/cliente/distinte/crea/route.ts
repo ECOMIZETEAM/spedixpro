@@ -53,27 +53,33 @@ export async function POST(req: NextRequest) {
   // Client ADMIN: la chiusura al corriere legge le credenziali del contratto, che con il token di
   // un utente non sono piu' leggibili (e non devono esserlo). Il perimetro l'ha gia' deciso questa
   // rotta: la distinta appena creata e' del cliente loggato.
-  const _adminChiusura = createAdminSupabase()
-  try { await chiudiBorderoSpedisci(_adminChiusura, distinta.id) } catch {}
-  try { await chiudiBordereauSpediamopro(_adminChiusura, distinta.id) } catch {}
-  // GLS: mancava qui (e in cliente/conferma e API v1) → un contratto GLS non chiudeva mai la giornata.
-  // I flussi master la chiamano su OGNI distinta e l'altro provider fa skip da solo. (audit #2)
-  try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(_adminChiusura, distinta.id) } catch {}
-  try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_adminChiusura, distinta.id) } catch {}
-  try { const { chiudiDistintaFedex } = await import('@/lib/fedex'); await chiudiDistintaFedex(_adminChiusura, distinta.id) } catch {}
-  // Ponti dei contratti condivisi e tipi senza borderò (easyparcel, interno, inpost, poste, dielle): niente
-  // da trasmettere, si attesta. Mancavano qui e nell'API v1: dal 04/10 al 21/10/2026 1.931 distinte nate da
-  // queste due porte sono rimaste "In attesa" per sempre (lib/distinte-chiusura).
-  try { const { chiudiDistintaMoovexpress } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMoovexpress(_adminChiusura, distinta.id) } catch {}
-  try { const { chiudiDistintaSenzaManifest } = await import('@/lib/distinte-chiusura'); await chiudiDistintaSenzaManifest(_adminChiusura, distinta.id) } catch {}
-  // Distinta chiusa: evasione degli ordini sui negozi collegati (best-effort). UNICA porta:
-  // fulfillMarketplace applica le guardie per TUTTE le piattaforme.
-  // DOPO la chiusura al corriere e a risposta data. Dal 10/11/2026 e' qui che parte l'evasione vera (prima
-  // gli ordini erano gia' evasi all'etichetta e questa chiamata li saltava), e una distinta con 164 ordini
-  // dei negozi (4/11/2026) chiede minuti di chiamate ai negozi. Messa prima, come era, se la funzione
-  // finiva il tempo la distinta non arrivava al corriere: niente ritiro. Quello che non finisce qui lo
-  // riprende il recupero ogni 20 minuti (app/api/integrazioni/fulfill-retry).
+  //
+  // A RISPOSTA DATA, PRIMA LA CHIUSURA AL CORRIERE E POI L'EVASIONE DEI NEGOZI, nello stesso lavoro e in
+  // quest'ordine. La risposta non dipende dalla chiusura (ogni errore e' ignorato qui, la distinta e' gia'
+  // nata e agganciata), e il cliente vede solo "Distinta N creata": aspettarla prima di rispondere gli costava
+  // ~0,8 s a ogni distinta, perche' le sette funzioni qui sotto fanno ognuna le sue letture per decidere se il
+  // contratto e' il loro (p75 del primo byte 1,17 s su ~500 distinte al giorno, 17-18/11/2026).
   after(async () => {
+    const _adminChiusura = createAdminSupabase()
+    try { await chiudiBorderoSpedisci(_adminChiusura, distinta.id) } catch {}
+    try { await chiudiBordereauSpediamopro(_adminChiusura, distinta.id) } catch {}
+    // GLS: mancava qui (e in cliente/conferma e API v1) → un contratto GLS non chiudeva mai la giornata.
+    // I flussi master la chiamano su OGNI distinta e l'altro provider fa skip da solo. (audit #2)
+    try { const { chiudiGiornataGls } = await import('@/lib/gls'); await chiudiGiornataGls(_adminChiusura, distinta.id) } catch {}
+    try { const { chiudiDistintaBrt } = await import('@/lib/brt'); await chiudiDistintaBrt(_adminChiusura, distinta.id) } catch {}
+    try { const { chiudiDistintaFedex } = await import('@/lib/fedex'); await chiudiDistintaFedex(_adminChiusura, distinta.id) } catch {}
+    // Ponti dei contratti condivisi e tipi senza borderò (easyparcel, interno, inpost, poste, dielle): niente
+    // da trasmettere, si attesta. Mancavano qui e nell'API v1: dal 04/10 al 21/10/2026 1.931 distinte nate da
+    // queste due porte sono rimaste "In attesa" per sempre (lib/distinte-chiusura).
+    try { const { chiudiDistintaMoovexpress } = await import('@/lib/distinte-chiusura'); await chiudiDistintaMoovexpress(_adminChiusura, distinta.id) } catch {}
+    try { const { chiudiDistintaSenzaManifest } = await import('@/lib/distinte-chiusura'); await chiudiDistintaSenzaManifest(_adminChiusura, distinta.id) } catch {}
+    // Distinta chiusa: evasione degli ordini sui negozi collegati (best-effort). UNICA porta:
+    // fulfillMarketplace applica le guardie per TUTTE le piattaforme.
+    // DOPO la chiusura al corriere. Dal 10/11/2026 e' qui che parte l'evasione vera (prima gli ordini erano
+    // gia' evasi all'etichetta e questa chiamata li saltava), e una distinta con 164 ordini dei negozi
+    // (4/11/2026) chiede minuti di chiamate ai negozi. Messa prima della chiusura, come era, se la funzione
+    // finiva il tempo la distinta non arrivava al corriere: niente ritiro. Quello che non finisce qui lo
+    // riprende il recupero ogni 20 minuti (app/api/integrazioni/fulfill-retry).
     try { await fulfillMarketplace(createAdminSupabase(), validIds) }
     catch (e: any) { console.error('[DISTINTE][EVASIONE NEGOZI] cliente', distinta.id, e?.message) }
   })
