@@ -135,7 +135,7 @@ export default function NotificheSmsPage() {
       <div style={{ marginBottom: '18px' }}>
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Notifiche SMS</h1>
         <span style={{ display: 'block', marginTop: '4px', fontSize: '13px', color: '#666' }}>
-          {app ? 'Gli SMS' : 'Compra i tuoi SMS con carta:'} sono per te e per i tuoi <b>clienti diretti</b> (mai i sotto-master). Ogni SMS di notifica costa {eur(costoSms)}.
+          {app ? 'Gli SMS' : 'Compra i tuoi SMS con carta:'} sono per te e per i tuoi <b>clienti diretti</b> (mai i sotto-master).{dati && !app ? ` Ogni SMS di notifica costa ${eur(costoSms)}.` : ''}
         </span>
       </div>
 
@@ -143,7 +143,8 @@ export default function NotificheSmsPage() {
       <div style={{ ...card, borderColor: '#fdba74', background: '#fff7ed', marginBottom: '16px', maxWidth: '360px' }}>
         <span style={lbl}>SMS disponibili</span>
         <div style={{ fontSize: '30px', fontWeight: 800, color: '#ea580c' }}>{smsDisponibili.toLocaleString('it-IT')}</div>
-        <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {dati ? eur(dati.creditoSms) : '—'} di credito · {eur(costoSms)}/SMS</div>
+        {/* Nell'app niente prezzo per SMS, come nella pagina SMS del cliente (lib/app-nativa). */}
+        <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {dati ? eur(dati.creditoSms) : '—'} di credito{dati && !app ? ` · ${eur(costoSms)}/SMS` : ''}</div>
       </div>
 
       {/* SMS di prova — radice o master abilitato (il gateway è unico e globale) */}

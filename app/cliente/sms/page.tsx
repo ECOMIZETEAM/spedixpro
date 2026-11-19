@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import { useAppNativa } from '@/lib/app-nativa'
 
 // Pagina SMS del CLIENTE — SOLA LETTURA. Il cliente NON compra gli SMS da solo: glieli gira il suo
 // master (filiale). Qui vede quanti ne restano, quelli inviati, e le ricariche ricevute.
@@ -34,6 +35,11 @@ export default function ClienteSmsPage() {
   }, [])
   const vendibile = acquisto?.disponibile === true
   const nonVendibile = acquisto?.disponibile === false
+  // Nell'app iOS/Android niente prezzo per SMS né "chiedi di ricaricarti": per gli store sarebbe un
+  // invito a comprare un servizio digitale fuori dal loro sistema (lib/app-nativa). Restano il
+  // conteggio e lo storico. `vendibile` arriva dopo la risposta, quindi niente lampi all'idratazione.
+  const app = useAppNativa()
+  const conPrezzi = vendibile && !app
 
   const costoSms = d?.costoSms || 0.10
 
@@ -48,7 +54,7 @@ export default function ClienteSmsPage() {
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>SMS</h1>
         {vendibile && (
           <span style={{ display: 'block', marginTop: '4px', fontSize: '13px', color: '#666' }}>
-            Avvisa i tuoi destinatari via SMS con il link al tracking. Ogni SMS costa {eur(costoSms)}. Se sei a 0, l'SMS non parte.
+            Avvisa i tuoi destinatari via SMS con il link al tracking.{conPrezzi ? ` Ogni SMS costa ${eur(costoSms)}.` : ''} Se sei a 0, l'SMS non parte.
           </span>
         )}
       </div>
@@ -67,12 +73,12 @@ export default function ClienteSmsPage() {
         <div style={{ ...card, borderColor: '#fdba74', background: '#fff7ed', marginBottom: '16px', maxWidth: '360px' }}>
           <span style={lbl}>SMS disponibili</span>
           <div style={{ fontSize: '30px', fontWeight: 800, color: '#ea580c' }}>{(d?.smsDisponibili || 0).toLocaleString('it-IT')}</div>
-          {vendibile && <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {eur(d?.creditoSms || 0)} di credito · {eur(costoSms)}/SMS</div>}
+          {conPrezzi && <div style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '2px' }}>≈ {eur(d?.creditoSms || 0)} di credito · {eur(costoSms)}/SMS</div>}
         </div>
       )}
 
       {/* Come ricaricare (il cliente non compra da solo) */}
-      {vendibile && (
+      {conPrezzi && (
         <div style={{ ...card, marginBottom: '16px', maxWidth: '520px', background: '#f8fafc' }}>
           <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a', marginBottom: '4px' }}>Ti servono più SMS?</div>
           <div style={{ fontSize: '12.5px', color: '#6b7280' }}>Chiedi al tuo referente (la tua filiale) di ricaricarti il credito SMS: te lo aggiunge lui.</div>

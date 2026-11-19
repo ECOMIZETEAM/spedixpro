@@ -1,9 +1,15 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useAppNativa } from '@/lib/app-nativa'
 
 // Banner SMS nella home del master: mostra quanti SMS restano (o invita ad attivarli) e porta alla
 // pagina SMS. Best-effort: se l'utente non è staff master (l'endpoint risponde 403), non si mostra.
+// Nell'app iOS/Android niente prezzo né "Attiva SMS": gli SMS sono un servizio digitale, e per gli
+// store un invito a comprarli fuori dal loro sistema è motivo di rifiuto (lib/app-nativa). Con SMS
+// ancora disponibili resta il conteggio; a zero la scheda non compare. Si disegna solo dopo i dati,
+// quindi nell'app non lampeggia nemmeno prima dell'idratazione.
 export default function BannerSms() {
+  const app = useAppNativa()
   const [d, setD] = useState<{ creditoSms: number; costoSms: number; gatewayPronto?: boolean } | null>(null)
   useEffect(() => {
     fetch('/api/sms/stato').then(r => r.ok ? r.json() : null).then(j => { if (j && typeof j.creditoSms === 'number') setD(j) }).catch(() => {})
@@ -12,6 +18,7 @@ export default function BannerSms() {
 
   const costo = d.costoSms || 0.10
   const rimasti = Math.floor(Number(d.creditoSms || 0) / costo)
+  if (app && rimasti <= 0) return null
   const eur = (n: number) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 
   return (
