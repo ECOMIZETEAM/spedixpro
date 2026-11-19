@@ -42,6 +42,10 @@ async function salvaCorriere(formData: FormData) {
     credenziali.codice_contratto = formData.get('codice_contratto') as string || ''
     // Facoltativa: serve solo allo svincolo delle giacenze (servizio GLS a parte, lib/gls.svincolaGiacenzaGls).
     credenziali.password_weblabeling = formData.get('password_weblabeling') as string || ''
+    // Facoltativi: sede e codice con cui si entra nell'area personale, se diversi da Sigla Sede e User
+    // Webservice (lib/gls.profiloAreaGls). Quick, 19/11/2026: password giusta, profilo diverso.
+    credenziali.sede_area_gls = ((formData.get('sede_area_gls') as string) || '').trim().toUpperCase()
+    credenziali.codice_area_gls = ((formData.get('codice_area_gls') as string) || '').trim()
     settings.tipo_collo = formData.get('tipo_collo') as string || 'Normale'
     // Nazionale (Italia) o Parcel (Europa): e' un altro servizio GLS con le stesse credenziali, e
     // decide dove il contratto puo' spedire (lib/gls.ts, servizioGls).
@@ -213,6 +217,11 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
       // il 16/11/2026 M.C. LOGISTICA, seguendo la scritta "Weblabeling", ne ha messe due che GLS ha rifiutato,
       // con 12 giacenze ferme dal 12/11.
       ['password_weblabeling','Password area personale sito GLS (svincolo giacenze)','quella con cui entri su gls-italy.com, non il Weblabeling','password',true],
+      // Lo svincolo si chiede col profilo dell'area personale: di solito Sigla Sede + User Webservice, ma non
+      // sempre. Quick (sede CK) entra nell'area personale con un altro codice, e GLS rispondeva "Profilo GLS
+      // inesistente" alla password giusta (19/11/2026). Vuoti = come prima.
+      ['sede_area_gls','Sede area personale sito GLS','solo se diversa dalla Sigla Sede','text',true],
+      ['codice_area_gls','Codice cliente area personale sito GLS','solo se diverso dallo User Webservice','text',true],
     ],
   },
   sda: {

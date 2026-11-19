@@ -214,17 +214,15 @@ export async function eseguiSvincolo(
       // PASSWORD GIA' RIFIUTATA: non la si rimanda (lib/gls.improntaPasswordWeblabeling). Ogni conferma e
       // ogni richiesta del cliente ripeterebbero lo stesso tentativo sbagliato. Cambiata la password nel
       // contratto (passa anche alle copie), l'impronta non torna e si riprova.
-      const { svincolaGiacenzaGls, dataSvincoloGls, numeroNudoGls, improntaPasswordWeblabeling } = await import('@/lib/gls')
-      const impronta = await improntaPasswordWeblabeling(cred as any)
+      const { svincolaGiacenzaGls, dataSvincoloGls, numeroNudoGls, bloccoPasswordSvincoloGls, messaggioAccessoSvincoloGls, impostazioniRifiutoSvincoloGls, rifiutoAccessoSvincoloGls } = await import('@/lib/gls')
       let settingsG: any = (sped.corrieri as any)?.settings
       if (settingsG === undefined) {
         const { data: cs } = await admin.from('corrieri').select('settings').eq('id', sped.corriere_id).maybeSingle()
         settingsG = (cs as any)?.settings
       }
       settingsG = settingsG || {}
-      if (settingsG.svincolo_gls_password_rifiutata === impronta) {
-        throw new Error(`GLS ha già rifiutato la password per lo svincolo di ${nomeContratto}: nel contratto (Corrieri → Modifica) va la password dell'area personale del sito GLS, non quella del Weblabeling. Finché è la stessa non la rimandiamo, per non far bloccare il profilo da GLS.`)
-      }
+      const bloccata = await bloccoPasswordSvincoloGls(cred as any, settingsG)
+      if (bloccata) throw new Error(`${nomeContratto} (Corrieri → Modifica): ${bloccata}`)
       const tipoSv = rich.operazione === 'reso' ? 3 : rich.operazione === 'riconsegna_nuovo' ? 2 : 1
       const sigla = String(sped.raw_response?.siglaMittente || cred.sigla_sede || '').trim()
       const ndG = rich.nuovo_destinatario || {}
@@ -244,12 +242,17 @@ export async function eseguiSvincolo(
         throw new Error(erroreSvincoloPulito(e))
       }
       if (!esitoG.ok) {
-        // Password o profilo sbagliati sono un problema del contratto, non della giacenza: si dice dove si sistema.
-        if (/password|profilo/i.test(esitoG.esito)) {
-          try {
-            await admin.from('corrieri').update({ settings: { ...settingsG, svincolo_gls_password_rifiutata: impronta } }).eq('id', sped.corriere_id)
-          } catch (e) { console.error('[SVINCOLO][GLS] impronta password non salvata:', e) }
-          throw new Error(`GLS ha rifiutato l'accesso allo svincolo (${esitoG.esito}): nel contratto (Corrieri → Modifica) va la password dell'area personale del sito GLS, non quella del Weblabeling.`)
+        // Password o profilo sbagliati sono un problema del contratto, non della giacenza: si dice dove si
+        // sistema, con la risposta di GLS. La password si ferma SOLO su un errore di password: su "Profilo GLS
+        // inesistente" GLS non l'ha nemmeno guardata (Quick, 19/11/2026: password giusta, fermata).
+        if (rifiutoAccessoSvincoloGls(esitoG.esito)) {
+          const rifiuto = await impostazioniRifiutoSvincoloGls(cred as any, esitoG.esito)
+          if (rifiuto) {
+            try {
+              await admin.from('corrieri').update({ settings: { ...settingsG, ...rifiuto } }).eq('id', sped.corriere_id)
+            } catch (e) { console.error('[SVINCOLO][GLS] impronta password non salvata:', e) }
+          }
+          throw new Error(`${nomeContratto} (Corrieri → Modifica): ${messaggioAccessoSvincoloGls(cred as any, esitoG.esito)}`)
         }
         throw new Error(erroreSvincoloPulito(new Error(esitoG.esito)))
       }

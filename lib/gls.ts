@@ -146,6 +146,10 @@ export type CredenzialiGls = {
   // accetta quella del webservice etichette (svincolaGiacenzaGls) né quella del Weblabeling. Il nome
   // del campo è rimasto quello vecchio per non perdere le password già salvate.
   password_weblabeling?: string
+  // Sede e codice cliente dell'AREA PERSONALE, solo se diversi da sigla sede e user del webservice
+  // (vuoti = quelli). Vedi profiloAreaGls.
+  sede_area_gls?: string
+  codice_area_gls?: string
 }
 
 export type ParcelGls = {
@@ -692,9 +696,10 @@ export async function svincolaGiacenzaGls(
       `<NuovaProvincia>${cdataGls(String(s.nuovo.provincia || '').toUpperCase().substring(0, 3))}</NuovaProvincia>`,
     ] : []),
   ].filter(Boolean).join('')
+  const profilo = profiloAreaGls(cred)
   const xml = `<?xml version="1.0" encoding="UTF-8"?><Info>`
-    + `<SedeProfiloGls>${cdataGls(cred.sigla_sede)}</SedeProfiloGls>`
-    + `<CodiceProfiloGls>${cdataGls(cred.user_webservice)}</CodiceProfiloGls>`
+    + `<SedeProfiloGls>${cdataGls(profilo.sede)}</SedeProfiloGls>`
+    + `<CodiceProfiloGls>${cdataGls(profilo.codice)}</CodiceProfiloGls>`
     + `<PasswordClienteGls>${cdataGls(cred.password_weblabeling)}</PasswordClienteGls>`
     + `<Redelivery>${campi}</Redelivery></Info>`
   const ctrl = new AbortController()
@@ -716,21 +721,79 @@ export async function svincolaGiacenzaGls(
   return { ok: /^ok$/i.test(esito), esito }
 }
 
+// IL PROFILO DELL'AREA PERSONALE (sede + codice cliente) con cui si chiede lo svincolo. Di solito coincide con
+// sigla sede e user del webservice etichette, ed e' cosi' che funziona per Wave e M.C. Per Quick (Q GLS CK
+// LIGHT) no: il 19/11/2026 GLS ha risposto "Profilo GLS inesistente" alla password giusta, con cui Quick entra
+// nell'area personale e vede le giacenze CK, perche' li' entra con un altro codice. I due campi del contratto
+// servono a quel caso; vuoti, si usa quello che si usava prima.
+export function profiloAreaGls(cred: CredenzialiGls): { sede: string; codice: string } {
+  return {
+    sede: String(cred.sede_area_gls || '').trim() || String(cred.sigla_sede || '').trim(),
+    codice: String(cred.codice_area_gls || '').trim() || String(cred.user_webservice || '').trim(),
+  }
+}
+
 // Impronta non reversibile della password per lo svincolo. Quando GLS la rifiuta, si salva nelle impostazioni
 // del contratto (svincolo_gls_password_rifiutata) e non la si rimanda: GLS blocca i profili dopo accessi
 // errati (è successo al conto RITIRO di MULTI a ottobre). Cambiata la password, l'impronta non torna più.
+// Con un profilo dell'area personale scritto a parte, l'impronta comprende anche quello: corretti sede o
+// codice, la stessa password si riprova. Senza, resta quella di prima (solo la password), cosi' le password
+// gia' rifiutate restano ferme.
 export async function improntaPasswordWeblabeling(cred: CredenzialiGls): Promise<string> {
   const { createHash } = await import('crypto')
-  return createHash('sha256').update(String(cred.password_weblabeling || '')).digest('hex').slice(0, 16)
+  const p = profiloAreaGls(cred)
+  const dati = String(cred.sede_area_gls || '').trim() || String(cred.codice_area_gls || '').trim()
+    ? `${p.sede}|${p.codice}|${cred.password_weblabeling || ''}`
+    : String(cred.password_weblabeling || '')
+  return createHash('sha256').update(dati).digest('hex').slice(0, 16)
+}
+
+// COSA HA RIFIUTATO GLS. Solo un errore di PASSWORD e' un tentativo sbagliato sul profilo (GLS lo blocca dopo
+// troppi errori) e ferma la password. "Profilo GLS inesistente" vuol dire che GLS la password non l'ha nemmeno
+// guardata: bloccarla, come si faceva fino al 19/11/2026, fermava una password giusta (Quick, Q GLS CK LIGHT).
+export function rifiutoAccessoSvincoloGls(esito: string): 'password' | 'profilo' | null {
+  if (/profilo/i.test(esito)) return 'profilo'
+  if (/password/i.test(esito)) return 'password'
+  return null
+}
+
+// Il messaggio per chi gestisce il contratto, con la risposta di GLS dentro: prima diceva solo "password
+// rifiutata", e la risposta vera ("Profilo GLS inesistente") non la vedeva nessuno.
+export function messaggioAccessoSvincoloGls(cred: CredenzialiGls, esito: string): string {
+  const tipo = rifiutoAccessoSvincoloGls(esito)
+  if (tipo === 'profilo') {
+    const p = profiloAreaGls(cred)
+    const codice = String(cred.codice_area_gls || '').trim() ? 'il codice cliente inserito' : 'il codice dello User Webservice'
+    return `GLS ha risposto "${esito}" per il profilo dell'area personale (sede ${p.sede}, ${codice}). Se sul sito gls-italy.com entri con una sede o un codice cliente diversi, inseriscili nel contratto (Sede e Codice cliente area personale); se sono gli stessi, chiedi a GLS di abilitare la gestione giacenze sul profilo.`
+  }
+  if (tipo === 'password') {
+    return `GLS ha risposto "${esito}": nel contratto va la password dell'area personale del sito gls-italy.com, non quella del Weblabeling. Finché resta questa non la rimandiamo, per non far bloccare il profilo da GLS.`
+  }
+  return esito
+}
+
+// La password gia' rifiutata da GLS: il messaggio da dare invece di rimandarla (null = si puo' provare).
+export async function bloccoPasswordSvincoloGls(cred: CredenzialiGls, settings: any): Promise<string | null> {
+  if (settings?.svincolo_gls_password_rifiutata !== await improntaPasswordWeblabeling(cred)) return null
+  const esito = String(settings?.svincolo_gls_password_rifiutata_esito || '').trim()
+  return `GLS ha già rifiutato questa password${esito ? ` ("${esito}")` : ''}: inserisci quella dell'area personale del sito gls-italy.com, non quella del Weblabeling. Se con questa entri nell'area personale, controlla nel contratto Sede e Codice cliente area personale. Finché resta così non la rimandiamo, per non far bloccare il profilo da GLS.`
+}
+
+// Cosa salvare nelle impostazioni del contratto dopo un rifiuto (null = niente): l'impronta e la risposta di
+// GLS, SOLO per un errore di password.
+export async function impostazioniRifiutoSvincoloGls(cred: CredenzialiGls, esito: string): Promise<Record<string, string> | null> {
+  if (rifiutoAccessoSvincoloGls(esito) !== 'password') return null
+  return { svincolo_gls_password_rifiutata: await improntaPasswordWeblabeling(cred), svincolo_gls_password_rifiutata_esito: esito.substring(0, 120) }
 }
 
 // Prova della password per lo svincolo SENZA toccare nessun pacco: si chiede lo svincolo di una spedizione
 // che non esiste. Se GLS risponde "Spedizione non trovata" vuol dire che profilo e password li ha
 // accettati; altrimenti torna il motivo ("Password Errata", "Profilo GLS inesistente"…).
-export async function provaPasswordWeblabelingGls(cred: CredenzialiGls): Promise<{ ok: boolean; esito: string }> {
+export async function provaPasswordWeblabelingGls(cred: CredenzialiGls): Promise<{ ok: boolean; esito: string; messaggio?: string }> {
   const r = await svincolaGiacenzaGls(cred, { numero: `${(cred.sigla_sede || '').trim()}000000001`, tipo: 1, dataRiconsegna: dataSvincoloGls() })
   if (/non\s+trovata/i.test(r.esito)) return { ok: true, esito: 'Password dell\'area personale accettata da GLS.' }
-  return { ok: false, esito: r.esito }
+  // `esito` resta la risposta di GLS (serve a chi decide se bloccare la password); `messaggio` e' per lo schermo.
+  return { ok: false, esito: r.esito, messaggio: messaggioAccessoSvincoloGls(cred, r.esito) }
 }
 
 // Chiusura GLS di una DISTINTA (stessa forma di chiudiBorderoSpedisci/chiudiBordereauSpediamopro).
