@@ -38,6 +38,15 @@ export default function CreaDistintaPage() {
     const d = await res.json()
     const arr = Array.isArray(d) ? d : []
     setContratti(arr)
+    // Aperta dalla Plancia nuova con ?vettore=SDA (la baia del corriere): quel vettore, unendo i suoi contratti se
+    // sono più d'uno (come la scelta «Unisci per vettore»), altrimenti il suo contratto. Una volta sola.
+    const vPagina = new URLSearchParams(window.location.search).get('vettore')
+    if (vPagina) {
+      window.history.replaceState(null, '', window.location.pathname)
+      const suoi = arr.filter((c: any) => vettoreFisico({ tipo: c.tipo, nome_contratto: c.nome_contratto }) === vPagina.toUpperCase())
+      if (suoi.length > 1) { setCorriereId('v:' + vPagina.toUpperCase()); return }
+      if (suoi.length === 1) { setCorriereId(suoi[0].id); return }
+    }
     // seleziono di default il primo contratto con LDV da chiudere
     const primo = arr.find((c: any) => c.da_chiudere > 0)
     if (primo) setCorriereId(primo.id)

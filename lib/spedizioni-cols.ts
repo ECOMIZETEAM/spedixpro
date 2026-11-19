@@ -34,7 +34,8 @@ export const SPED_COLS_CLIENTE = SPED_COLS
 export const SPED_COLS_LISTA = [
   'id', 'master_id', 'cliente_id', 'corriere_id',
   'numero', 'tracking_number', 'stato', 'created_at',
-  'mitt_nome', 'dest_nome', 'dest_citta', 'dest_provincia', 'dest_cap', 'dest_paese',
+  // mitt_provincia: il percorso «da → a» sotto lo stato, nella grafica nuova (18/11)
+  'mitt_nome', 'mitt_provincia', 'dest_nome', 'dest_citta', 'dest_provincia', 'dest_cap', 'dest_paese',
   'id_ordine_esterno', 'rif_ordine',
   'colli', 'peso_fatturato', 'peso_reale', 'peso_volume', 'lunghezza', 'larghezza', 'altezza',
   'contrassegno', 'stato_contrassegno', 'assicurazione',

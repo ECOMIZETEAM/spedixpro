@@ -12,7 +12,7 @@ const RUOLI: Record<string, string> = {
 
 type Voce = { label: string; href: string; icona: string }
 
-export default function MenuProfilo({ nome, ruolo, voci, compatto = false }: { nome?: string; ruolo?: string; voci: Voce[]; compatto?: boolean }) {
+export default function MenuProfilo({ nome, ruolo, voci, compatto = false, aspetto, iniziali: inizialiDate }: { nome?: string; ruolo?: string; voci: Voce[]; compatto?: boolean; aspetto?: 'nuova'; iniziali?: string }) {
   const [aperto, setAperto] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   const pannello = useRef<HTMLDivElement>(null)
@@ -67,6 +67,13 @@ export default function MenuProfilo({ nome, ruolo, voci, compatto = false }: { n
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
+      {aspetto === 'nuova' ? (
+      // grafica nuova (components/grafica): avatar tondo e nome, dentro la pillola di vetro della barra
+      <button onClick={() => setAperto(a => !a)} aria-haspopup="menu" aria-expanded={aperto} className="gx-tasto" style={{ padding: '0 10px 0 4px' }}>
+        <span className="gx-avatar">{inizialiDate || iniziali}</span>
+        {!compatto && <span style={{ color: 'var(--gx-inchiostro)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nome || 'Admin'}</span>}
+      </button>
+      ) : (
       <button
         onClick={() => setAperto(a => !a)}
         aria-haspopup="menu" aria-expanded={aperto}
@@ -81,6 +88,7 @@ export default function MenuProfilo({ nome, ruolo, voci, compatto = false }: { n
         {!compatto && <span style={{ fontSize: '13px', fontWeight: 500, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>{nome || 'Admin'}</span>}
         <span style={{ fontSize: '10px', color: '#bbb', transition: 'transform .15s', transform: aperto ? 'rotate(180deg)' : 'none' }}>▾</span>
       </button>
+      )}
 
       {aperto && montato && pos && createPortal(
         <div ref={pannello} role="menu" style={{

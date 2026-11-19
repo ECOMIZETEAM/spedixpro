@@ -8,6 +8,7 @@ import CampanellaNotifiche from './CampanellaNotifiche'
 import SupportoButton from './SupportoButton'
 import ContiTendina from './ContiTendina'
 import { useAppNativa } from '@/lib/app-nativa'
+import CorniceNuova from './grafica/CorniceNuova'
 
 // perm: chiave permesso richiesta (da Impostazioni Permessi). Assente = solo admin/master.
 // always: sempre visibile a chiunque abbia accesso al portale.
@@ -142,7 +143,7 @@ const NAV: NavItem[] = [
   { label: 'Documentazione', href: 'https://docs.moovexpress.com', icon: '📖', always: true, external: true },
 ]
 
-export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean } }) {
+export default function Layout({ children, user }: { children: React.ReactNode, user?: { nome: string, ruolo: string, brandLogo?: string | null, brandNome?: string | null, isFull?: boolean, gestioneRete?: boolean, permessi?: Record<string, boolean>, superMaster?: boolean, isMultiexpress?: boolean, ottimizzaMargini?: boolean, vedeReteCompleta?: boolean, graficaNuova?: boolean, graficaScelta?: string, graficaLuce?: string, graficaEntrata?: boolean, graficaProposta?: string } }) {
   const path = usePathname()
   const isFull = user?.isFull ?? true
   const gestioneRete = user?.gestioneRete ?? false
@@ -260,6 +261,32 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
   const asideStyle: React.CSSProperties = isMobile
     ? { ...asideBase, position: 'fixed', top: 0, left: 0, transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.25s ease', boxShadow: drawerOpen ? '2px 0 20px rgba(0,0,0,0.35)' : 'none' }
     : { ...asideBase, flexShrink: 0, position: 'sticky', top: 0, width: sidebarChiusa ? '0px' : '220px', transition: 'width 0.2s ease' }
+
+  // GRAFICA NUOVA (v11, components/grafica): stesse voci già filtrate coi permessi (navVisibile), stessi pallini,
+  // stessi pezzi della barra. Tutto quello che c'è sopra resta comune alle due grafiche, così una voce o un conteggio
+  // non può comparire in una e mancare nell'altra.
+  if (user?.graficaNuova) {
+    const pallinoVoce = (label: string, href?: string) => {
+      if (label === 'Assistenza Clienti') return { n: ticketBadge.count }
+      if (label === 'Logistica') return { n: preparaBadge }
+      if (label === 'Statistiche') return { n: ricariAlert }
+      if (label === 'Spedizioni') return { n: reteBadge.daConfermare, title: `${reteBadge.daConfermare} rettifiche da confermare · ${eur(reteBadge.daConfermareImporto)}` }
+      if (href === '/dashboard/network') return { n: reteBadge.daAccettare, title: `${reteBadge.daAccettare} da accettare${reteBadge.daAccettareImporto > 0 ? ' · ' + eur(reteBadge.daAccettareImporto) : ''}` }
+      return null
+    }
+    const pallinoSotto = (href: string) => href === '/dashboard/assistenza' ? ticketBadge.ticket : href === '/dashboard/assistenza/pod' ? ticketBadge.pod : href === '/dashboard/logistica/da-preparare' ? preparaBadge : href === '/dashboard/statistiche/check-ricariche' ? ricariAlert : href === '/dashboard/spedizioni/rettifica' ? reteBadge.daConfermare : 0
+    return (
+      <CorniceNuova user={user} path={path} nav={navVisibile} pallinoVoce={pallinoVoce} pallinoSotto={pallinoSotto}
+        credito={creditoTop} mostraSms={['master', 'admin', 'operatore'].includes(ruolo)} isMobile={isMobile}
+        vociProfilo={[
+          { label: 'Impostazioni', href: '/dashboard/impostazioni', icona: '◉' },
+          ...((ruolo === 'master' || ruolo === 'admin') && !app ? [{ label: 'Abbonamento', href: '/dashboard/abbonamento', icona: '★' }] : []),
+          { label: 'Cambia password', href: '/dashboard/impostazioni/password', icona: '🔑' },
+        ]}>
+        {children}
+      </CorniceNuova>
+    )
+  }
 
   function toggleMenu(href: string, el?: HTMLElement) {
     const staAprendo = !openMenus[href]

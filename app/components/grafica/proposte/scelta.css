@@ -1,0 +1,7 @@
+/* il selettore delle proposte: piccolo, fisso in basso al centro, sopra a tutto */
+.px-scelta { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 2px; height: 46px; padding: 4px 4px 4px 16px; }
+.px-scelta > span { margin-right: 8px; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--gx-attenuato); }
+.px-scelta button { all: unset; cursor: pointer; min-width: 38px; height: 38px; padding: 0 12px; box-sizing: border-box; border-radius: 999px; text-align: center; font-size: 13.5px; font-weight: 500; color: var(--gx-testo); }
+.px-scelta button:hover { color: var(--gx-inchiostro); background: var(--gx-incavo); }
+.px-scelta button[aria-pressed="true"] { color: #fff; background: var(--gx-accento-pieno); }
+.px-scelta button:focus-visible { outline: 2px solid var(--gx-accento); }

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment, useContext } from 'react'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
@@ -14,6 +14,11 @@ import { dataEventoIt } from '@/lib/tracking-eventi'
 import { useDialog } from '@/app/components/DialogProvider'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
+import '@/app/components/grafica/elenco.css'
+import TrackingLaterale from '@/app/components/grafica/TrackingLaterale'
+import MenuAzioni from '@/app/components/grafica/MenuAzioni'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -79,7 +84,29 @@ const ORDINABILE: Record<string,string> = {
 // Etichettina della SECONDA riga (corriere/guadagni sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
+// Il percorso sotto lo stato, con la grafica nuova (18/11, ripreso dalla v6 del 20/10): da dove parte a dove arriva e a
+// che punto è, in cinque tappe. Le annullate e gli annulli non hanno percorso: per loro parla la pillola.
+const TAPPE: Record<string, number> = { in_lavorazione: 0, spedita: 1, in_transito: 2, in_consegna: 3, consegnata: 4, in_giacenza: 3, non_consegnato: 3, reso_mittente: 4 }
+function Percorso({ s }: { s: any }) {
+  const k = TAPPE[s.stato]
+  if (k == null) return null
+  const tono = s.stato === 'consegnata' ? 'bene' : (s.stato === 'in_giacenza' || s.stato === 'non_consegnato') ? 'problema' : s.stato === 'reso_mittente' ? 'reso' : 'via'
+  const arrivo = s.dest_paese && s.dest_paese !== 'IT' ? s.dest_paese : s.dest_provincia
+  return (
+    <div className={'el-percorso el-percorso--' + tono} title={`${s.mitt_provincia || '—'} → ${arrivo || '—'}`}>
+      <span>{s.mitt_provincia || ''}</span>
+      <i>{[0, 1, 2, 3, 4].map(i => <b key={i} className={i < k ? 'fatto' : i === k ? 'qui' : undefined} />)}</i>
+      <span>{arrivo || ''}</span>
+    </div>
+  )
+}
+
 export default function SpedizioniPage() {
+  // la grafica nuova (anteprima, Lorenzo 18/11 per i soci): stessa pagina, stessi dati e azioni, un altro vestito.
+  // Con la grafica di oggi `nuova` è falso e la pagina resta identica.
+  const nuova = useContext(GraficaNuova).attiva
+  // gli importi: con la grafica nuova alla italiana («5,34»), con quella di oggi come sempre («5.34»)
+  const fe = (n: number) => nuova ? n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n.toFixed(2)
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [spedizioniFiltrate, setSpedizioniFiltrate] = useState<any[]>([])
@@ -105,6 +132,16 @@ export default function SpedizioniPage() {
   // I filtri che ho toccato (diversi dal default): il contatore e le caselle accese partono da qui.
   const filtriAttivi = filtriToccati(filtri, FILTRI_DEFAULT)
   const attivo = (k: string) => filtriAttivi.has(k)
+  // Aperta da un collegamento con ?numero= o ?stato= (la Plancia nuova: la riga del tabellone, «In transito», la
+  // ricerca nella barra di Moovy): si parte da quel filtro, sugli altri di default. Dopo il caricamento dei filtri
+  // salvati (l'effetto sopra viene prima), e il parametro si toglie dall'indirizzo perché non torni a ogni ricarica.
+  useEffect(() => {
+    const u = new URLSearchParams(window.location.search), numero = u.get('numero'), stato = u.get('stato')
+    if (!numero && !stato) return
+    setFiltri({ ...FILTRI_DEFAULT, ...(numero ? { numero } : {}), ...(stato ? { stato } : {}) })
+    window.history.replaceState(null, '', window.location.pathname)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [resoModal, setResoModal] = useState(false)
   const [resoBusy, setResoBusy] = useState(false)
   const [resoOpts, setResoOpts] = useState({ assicura: false, ritiro: false, dataRitiro: '', orarioRitiro: 'mattina' })
@@ -465,18 +502,18 @@ async function apriTracking(s: any) {
   const btnFiltri = {padding:'7px 18px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700' as const,cursor:'pointer',whiteSpace:'nowrap' as const}
 
   return (
-    <div>
+    <div className={nuova ? 'gx-elenco' : undefined}>
       {notifica && (
         <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {notifica}</div>
       )}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px',flexWrap:'wrap',gap:'10px'}}>
-        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Lista Spedizioni</h1>
-        <a href="/dashboard/spedizioni/nuova" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
+        <h1 className="el-titolo" style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>{nuova ? 'Elenco spedizioni' : 'Lista Spedizioni'}</h1>
+        <a href="/dashboard/spedizioni/nuova" className="el-primario" style={{background:'#f97316',color:'#fff',padding:'8px 18px',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>+ Nuova Spedizione</a>
       </div>
 
       {/* FILTRI */}
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></div>
+      <div className="el-scheda el-filtri" style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
+        <div className="el-sezione" style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>{nuova ? <><Icona id="i-filtro" />Filtri</> : '▼ Filtri'}<BadgeFiltri n={filtriAttivi.size} /></div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
@@ -572,16 +609,16 @@ async function apriTracking(s: any) {
             </select>
           </div>
           <div>
-            <button onClick={()=>{ azzeraFiltri(); setCerca('') }} style={btnFiltri}>Azzera filtri</button>
+            <button className="el-secondario" onClick={()=>{ azzeraFiltri(); setCerca('') }} style={btnFiltri}>Azzera filtri</button>
           </div>
         </div>
       </div>
 
       {/* TABELLA */}
-      <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
-        <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
+      <div className="el-scheda el-tabella" style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
+        <div className="el-testa" style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
           <div className="gruppo-titolo-selettore">
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({totale} risultati)</span></span>
+          <span className="el-conta" style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{nuova ? 'Spedizioni ' : '📋 Spedizioni '}<span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({totale} risultati)</span></span>
           <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
             Mostra{' '}
             <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
@@ -595,22 +632,26 @@ async function apriTracking(s: any) {
             </span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+            <div className={nuova ? 'el-blocco' + (selectedIds.length > 0 ? ' el-blocco--su' : '') : undefined} style={nuova ? undefined : {display:'contents'}}>
+            {nuova && <span className="el-blocco-n"><b>{selectedIds.length}</b> {selectedIds.length === 1 ? 'selezionata' : 'selezionate'}</span>}
             <button onClick={stampaSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              ⬇ Scarica Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-scarica" /> : '⬇ '}Scarica Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
             {zplOn && <button onClick={stampaZebraSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#111827':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              🖨️ Stampa Zebra{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-stampa" /> : '🖨️ '}Stampa Zebra{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>}
             <button onClick={eliminaSelezionate} disabled={selectedIds.length===0||eliminandoBulk}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#dc2626':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0&&!eliminandoBulk?'pointer':'not-allowed',opacity:eliminandoBulk?0.6:1}}>
-              {eliminandoBulk?'Eliminazione…':`🗑️ Elimina Selezionate${selectedIds.length>0?` (${selectedIds.length})`:''}`}
+              {eliminandoBulk?'Eliminazione…':`${nuova ? '' : '🗑️ '}Elimina Selezionate${selectedIds.length>0?` (${selectedIds.length})`:''}`}
             </button>
             <button onClick={()=>setResoModal(true)} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#0d9488':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              ↩︎ Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-resi" /> : '↩︎ '}Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
             </button>
+            {nuova && <button type="button" className="el-blocco-x" onClick={()=>setSelectedIds([])} title="Togli la scelta" aria-label="Togli la scelta">×</button>}
+            </div>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Ordina:</span>
               <select value={filtri.ordina} onChange={e=>setFiltri(f=>({...f,ordina:e.target.value}))}
@@ -648,7 +689,7 @@ async function apriTracking(s: any) {
           </div>
         ) : (
           <div style={{overflowX:'auto' as const}}>
-            <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
+            <table className="el-tab" style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
               <thead>
                 <tr style={{background:'#f9fafb'}}>
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
@@ -674,26 +715,26 @@ async function apriTracking(s: any) {
                   const isSelected = selectedIds.includes(s.id)
                   // Valori della SECONDA riga (corriere/guadagni), come array così i divisori verticali
                   // saltano i campi assenti (contrassegno/ordine) senza lasciare linee a vuoto.
-                  const secItems: { l: any; v: any }[] = [
-                    { l: '🚚', v: <b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b> },
+                  const secItems: { l: any; v: any; soldi?: boolean }[] = [
+                    { l: nuova ? <span className="el-vettore">{vettoreFisico(s.corrieri || {})}</span> : '🚚', v: <b style={{color:'#1a1a1a'}}>{s.corrieri?.nome_contratto||'—'}</b> },
                     { l: 'Peso', v: fmtPeso(s) },
                     { l: 'Colli', v: s.colli },
-                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span title={s.cod_parziale?`COD parziale: il corriere ha incassato € ${Number(s.cod_incassato).toFixed(2)} sui € ${Number(s.contrassegno).toFixed(2)} dichiarati. Al cliente scende solo l'incassato.`:undefined} style={{...codBadgeStyle(s.stato_contrassegno,s.cod_parziale),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{Number(s.contrassegno).toFixed(2)}{s.cod_parziale&&<span style={{marginLeft:'3px',fontSize:'9px',fontWeight:'700'}}>PARZIALE</span>}</span> }] : []),
+                    ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span title={s.cod_parziale?`COD parziale: il corriere ha incassato € ${fe(Number(s.cod_incassato))} sui € ${fe(Number(s.contrassegno))} dichiarati. Al cliente scende solo l'incassato.`:undefined} style={{...codBadgeStyle(s.stato_contrassegno,s.cod_parziale),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{fe(Number(s.contrassegno))}{s.cod_parziale&&<span style={{marginLeft:'3px',fontSize:'9px',fontWeight:'700'}}>PARZIALE</span>}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
-                    { l: 'Cliente', v: <span><b style={{color:'#1a1a1a'}}>€ {Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0).toFixed(2)}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
-                    { l: 'Costo', v: s.prezzo_corriere!=null?`€ ${Number(s.prezzo_corriere).toFixed(2)}`:'—' },
-                    { l: 'Margine', v: <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${Number(s.margine).toFixed(2)}`:'—'}</b> },
+                    { soldi: true, l: 'Cliente', v: <span><b style={{color:'#1a1a1a'}}>€ {fe(Number(s.prezzo_cliente ?? s.costo_mostrato ?? s.costo_totale ?? 0))}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
+                    { soldi: true, l: 'Costo', v: s.prezzo_corriere!=null?`€ ${fe(Number(s.prezzo_corriere))}`:'—' },
+                    { soldi: true, l: 'Margine', v: <b style={{color:s.margine==null?'#9ca3af':(Number(s.margine)<0?'#dc2626':'#16a34a')}}>{s.margine!=null?`€ ${fe(Number(s.margine))}`:'—'}</b> },
                     // Rettifica A PARTE: prezzo, costo e margine qui sopra sono solo della spedizione.
-                    ...(s.rettifica ? [{ l: 'Rettifica', v: (
-                      <span title={`Addebitata al cliente € ${Number(s.rettifica.cliente).toFixed(2)} · pagata € ${Number(s.rettifica.costo).toFixed(2)}`}>
-                        <b style={{color:'#1a1a1a'}}>€ {Number(s.rettifica.cliente).toFixed(2)}</b>
-                        <span style={{fontSize:'11px',marginLeft:'4px',color:Number(s.rettifica.margine)<0?'#dc2626':'#16a34a'}}>(margine € {Number(s.rettifica.margine).toFixed(2)})</span>
+                    ...(s.rettifica ? [{ soldi: true, l: 'Rettifica', v: (
+                      <span title={`Addebitata al cliente € ${fe(Number(s.rettifica.cliente))} · pagata € ${fe(Number(s.rettifica.costo))}`}>
+                        <b style={{color:'#1a1a1a'}}>€ {fe(Number(s.rettifica.cliente))}</b>
+                        <span style={{fontSize:'11px',marginLeft:'4px',color:Number(s.rettifica.margine)<0?'#dc2626':'#16a34a'}}>(margine € {fe(Number(s.rettifica.margine))})</span>
                       </span>
                     ) }] : []),
                   ]
                   return (
                     <Fragment key={s.id}>
-                    <tr style={{background:isSelected?'#fff7ed':'#fff'}}>
+                    <tr className={'el-riga' + (isSelected ? ' el-scelta' : '')} style={{background:isSelected?'#fff7ed':'#fff'}}>
                       <td style={{padding:'9px 12px 3px'}}>
                         <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(s.id)}/>
                       </td>
@@ -711,46 +752,73 @@ async function apriTracking(s: any) {
                       <td style={{padding:'9px 12px',fontSize:'12px'}}>
                         <div style={{fontWeight:'500',color:'#1a1a1a'}}>{s.mitt_nome}</div>
                         {s.clienti?.ragione_sociale&&<div style={{fontSize:'11px',color:'#1a1a1a'}}>{nomeClientePulito(s.clienti.ragione_sociale)}</div>}
-                        {s.master_rete&&<div style={{fontSize:'10px',fontWeight:'700',color:'#f97316',marginTop:'2px'}}>▸ {s.master_rete}</div>}
+                        {s.master_rete&&<div className="el-rete" style={{fontSize:'10px',fontWeight:'700',color:'#f97316',marginTop:'2px'}}>{nuova ? s.master_rete : `▸ ${s.master_rete}`}</div>}
                       </td>
                       <td style={{padding:'9px 12px'}}>
                         <div style={{color:'#1a1a1a',fontWeight:'500'}}>{s.dest_nome}</div>
-                        <div style={{color:'#1a1a1a',fontSize:'11px'}}>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</div>
+                        <div className="el-luogo" style={{color:'#1a1a1a',fontSize:'11px'}}>{nuova ? `${s.dest_citta || ''}${s.dest_provincia ? ` (${s.dest_provincia})` : ''} ${s.dest_cap || ''}${s.dest_paese && s.dest_paese !== 'IT' ? ` · ${s.dest_paese}` : ''}` : <>{s.dest_citta}, {s.dest_provincia}({s.dest_cap}), {s.dest_paese}</>}</div>
                       </td>
                       <td style={{padding:'9px 12px 3px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
-                        {new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}
+                        {nuova
+                          ? <span className="el-quando"><b>{new Date(s.created_at).toLocaleDateString('it-IT')}</b><span>{new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</span></span>
+                          : <>{new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</>}
                       </td>
                       <td style={{padding:'9px 12px'}}>
-                        <span style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
+                        <span className="el-stato" style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
+                        {nuova && <Percorso s={s} />}
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
                         {s.stato==='reso_mittente' && s.distinta_reso && <div style={{fontSize:'10px',color:'#374151',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const}}>Distinta {s.distinta_reso}</div>}
                         {s.annullamento_errore && s.stato!=='annullamento_pending' && s.stato!=='annullamento_manuale' && <div title={s.annullamento_errore} style={{fontSize:'10px',color:'#b91c1c',marginTop:'3px',fontWeight:'600',whiteSpace:'nowrap' as const,cursor:'help'}}>⚠ Non annullabile</div>}
                       </td>
                       <td style={{padding:'9px 12px 3px'}}>
-                        <div style={{display:'flex',gap:'4px'}}>
-                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?'⏳':'🖨️'}</button>
-                          <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>👁</button>
-                          {s.cliente_id && s.stato!=='annullata' && <button onClick={()=>{ setCorreggiOpen(true); setDettaglio(s) }} title="Correggi peso/misure (ricalcola il costo, l'etichetta non cambia)" style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}}>✏️</button>}
+                        {nuova ? (
+                          // grafica nuova: l'etichetta (o il ripristino, per chi è in annullamento) a un clic; il resto nei tre
+                          // puntini. L'assistenza resta montata con il suo tasto nascosto: la voce del menu lo preme, così la
+                          // sua finestra non sparisce quando la tendina si chiude.
+                          <div className="el-azioni el-azioni--menu">
+                            {s.stato==='annullamento_pending'
+                              ? <button type="button" className="el-primaria" onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id} title="Ripristina spedizione"><Icona id="i-resi" />Ripristina</button>
+                              : <button type="button" className="el-primaria" onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}><Icona id={stampandoId===s.id ? 'i-attesa' : 'i-stampa'} />Etichetta</button>}
+                            <MenuAzioni voci={[
+                              ...(s.stato==='annullamento_pending' ? [{ k: 'etichetta', etichetta: 'Etichetta', icona: 'i-stampa', fai: () => stampaEtichetta(s.id) }] : []),
+                              { k: 'dettaglio', etichetta: 'Dettaglio', icona: 'i-occhio', fai: () => setDettaglio(s) },
+                              ...(s.cliente_id && s.stato!=='annullata' ? [{ k: 'correggi', etichetta: 'Correggi peso e misure', icona: 'i-matita', titolo: "Ricalcola il costo, l'etichetta non cambia", fai: () => { setCorreggiOpen(true); setDettaglio(s) } }] : []),
+                              { k: 'assistenza', etichetta: 'Assistenza / POD', icona: 'i-cuffie', fai: () => (document.querySelector(`[data-assistenza="${s.id}"] > button`) as HTMLButtonElement | null)?.click() },
+                              ...(s.stato==='annullamento_pending' ? [] : [{ k: 'elimina', etichetta: 'Elimina', icona: 'i-cestino', pericolo: true,
+                                spenta: !!s.no_annullo_15gg || eliminando===s.id,
+                                titolo: s.no_annullo_15gg ? 'Dopo i 15 giorni non è più possibile annullare: il corriere non lo consente.' : undefined,
+                                fai: () => elimina(s.id,s.numero) }]),
+                            ]} />
+                            <span className="el-assistenza" data-assistenza={s.id}>
+                              <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} clienteDiretto={!s.master_rete_id && s.clienti?.ragione_sociale ? nomeClientePulito(s.clienti.ragione_sociale) : undefined} />
+                            </span>
+                          </div>
+                        ) : (
+                        <div className="el-azioni" style={{display:'flex',gap:'4px'}}>
+                          <button onClick={()=>stampaEtichetta(s.id)} disabled={stampandoId===s.id} style={{padding:'4px 8px',background:'#fff7ed',color:'#f97316',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}} title={zplOn?'Stampa etichetta su Zebra (ZPL)':'Scarica etichetta PDF'}>{stampandoId===s.id?(nuova ? <Icona id="i-attesa" /> : '⏳'):(nuova ? <Icona id="i-stampa" /> : '🖨️')}</button>
+                          <button onClick={()=>setDettaglio(s)} title="Vedi dettagli spedizione" style={{padding:'4px 8px',background:'#eff6ff',color:'#2563eb',borderRadius:'4px',fontSize:'14px',border:'1px solid #bfdbfe',cursor:'pointer'}}>{nuova ? <Icona id="i-occhio" /> : '👁'}</button>
+                          {s.cliente_id && s.stato!=='annullata' && <button onClick={()=>{ setCorreggiOpen(true); setDettaglio(s) }} title="Correggi peso/misure (ricalcola il costo, l'etichetta non cambia)" style={{padding:'4px 8px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'14px',border:'1px solid #fed7aa',cursor:'pointer'}}>{nuova ? <Icona id="i-matita" /> : '✏️'}</button>}
 
                           {s.stato==='annullamento_pending' ? (
                             <button onClick={()=>ripristina(s.id,s.numero)} disabled={eliminando===s.id}
                               style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',borderRadius:'4px',fontSize:'12px',fontWeight:'700',border:'1px solid #fed7aa',cursor:'pointer',whiteSpace:'nowrap',opacity:eliminando===s.id?0.5:1}} title="Ripristina spedizione">↩︎ Ripristina</button>
                           ) : s.no_annullo_15gg ? (
                             <span title="Dopo i 15 giorni non è più possibile annullare: il corriere non lo consente."
-                              style={{padding:'4px 8px',background:'#f5f5f5',color:'#c4c4c4',borderRadius:'4px',fontSize:'14px',border:'1px solid #eee',cursor:'not-allowed'}}>🗑️</span>
+                              style={{padding:'4px 8px',background:'#f5f5f5',color:'#c4c4c4',borderRadius:'4px',fontSize:'14px',border:'1px solid #eee',cursor:'not-allowed'}}>{nuova ? <Icona id="i-cestino" /> : '🗑️'}</span>
                           ) : (
                             <button onClick={()=>elimina(s.id,s.numero)} disabled={eliminando===s.id}
-                              style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">🗑️</button>
+                              style={{padding:'4px 8px',background:'#fef2f2',color:'#dc2626',borderRadius:'4px',fontSize:'14px',border:'1px solid #fecaca',cursor:'pointer',opacity:eliminando===s.id?0.5:1}} title="Elimina">{nuova ? <Icona id="i-cestino" /> : '🗑️'}</button>
                           )}
                           <AssistenzaTicketButton ldv={s.numero} spedizioneId={s.id} clienteDiretto={!s.master_rete_id && s.clienti?.ragione_sociale ? nomeClientePulito(s.clienti.ragione_sociale) : undefined} />
                         </div>
+                        )}
                       </td>
                     </tr>
-                    <tr style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
+                    <tr className={'el-riga2' + (isSelected ? ' el-scelta' : '')} style={{background:isSelected?'#fff7ed':'#fff',borderBottom:'2px solid #cbd5e1'}}>
                       <td colSpan={7} style={{padding:'4px 12px 10px 44px',borderTop:'1px solid #f1f2f4'}}>
                         <div style={{display:'flex',flexWrap:'wrap' as const,alignItems:'center',rowGap:'4px',fontSize:'12px',color:'#374151'}}>
                           {secItems.map((it,i)=>(
-                            <span key={i} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
+                            <span key={i} className={it.soldi ? 'el-soldi' : undefined} style={{display:'inline-flex',alignItems:'baseline',gap:'4px',padding:'0 14px',borderLeft:i>0?'1px solid #e5e7eb':'none'}}>
                               <span style={secLbl}>{it.l}</span>{it.v}
                             </span>
                           ))}
@@ -764,7 +832,7 @@ async function apriTracking(s: any) {
             </table>
             {/* barra-paginazione */}
             {totalePagine > 0 && (
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
+              <div className="el-pagine" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
                 <span style={{fontSize:'12px',color:'#666'}}>
                   {totale === 0 ? '0' : `${(paginaCorr - 1) * perPage + 1}-${Math.min(paginaCorr * perPage, totale)}`} di {totale}
                 </span>
@@ -790,7 +858,12 @@ async function apriTracking(s: any) {
       </div>
 
       {/* MODAL TRACKING */}
-      {trackingModal && (
+      {trackingModal && nuova && (
+        <TrackingLaterale s={trackingModal} st={STATI[trackingModal.stato]} dati={trackingData} caricando={trackingLoading}
+          scheda={trackingTab} setScheda={setTrackingTab} chiudi={()=>{setTrackingModal(null);setTrackingData(null)}}
+          stampa={()=>stampaEtichetta(trackingModal.id)} dettaglio={()=>{ const x = trackingModal; setTrackingModal(null); setTrackingData(null); setDettaglio(x) }} />
+      )}
+      {trackingModal && !nuova && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>{setTrackingModal(null);setTrackingData(null)}}>
           <div style={{background:'#fff',borderRadius:'10px',width:'750px',maxWidth:'95vw',maxHeight:'88vh',overflow:'hidden',display:'flex',flexDirection:'column' as const}} onClick={e=>e.stopPropagation()}>
             <div style={{padding:'14px 20px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
@@ -891,9 +964,9 @@ async function apriTracking(s: any) {
 
       {dettaglio && <DettaglioSpedizione s={dettaglio} apriCorrezione={correggiOpen} onClose={()=>{setDettaglio(null); setCorreggiOpen(false)}} etichettaHref={`/dashboard/spedizioni/${dettaglio.id}/etichetta`} onModificata={()=>carica(pagina)} />}
       {resoModal && (
-        <div onClick={()=>!resoBusy&&setResoModal(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'12px',padding:'24px',maxWidth:'430px',width:'100%'}}>
-            <h2 style={{fontSize:'18px',fontWeight:700,color:'#1a1a1a',margin:'0 0 6px'}}>↩︎ Etichetta di reso</h2>
+        <div onClick={()=>!resoBusy&&setResoModal(false)} className={nuova ? 'gx-finestra-velo' : undefined} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}}>
+          <div onClick={e=>e.stopPropagation()} className="gx-finestra gx-finestra--imbottita" style={{background:'#fff',borderRadius:'12px',padding:'24px',maxWidth:'430px',width:'100%'}}>
+            <h2 style={{fontSize:'18px',fontWeight:700,color:'#1a1a1a',margin:'0 0 6px'}}>{nuova ? <Icona id="i-resi" /> : '↩︎ '}Etichetta di reso</h2>
             <p style={{fontSize:'13px',color:'#666',margin:'0 0 16px',lineHeight:1.5}}>
               Per {selectedIds.length} spedizion{selectedIds.length===1?'e':'i'} creo una <strong>nuova spedizione di ritorno</strong>: stesso corriere, mittente e destinatario invertiti, senza contrassegno.
             </p>

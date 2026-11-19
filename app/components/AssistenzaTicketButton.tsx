@@ -1,5 +1,7 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useContext, useRef, useState } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import PodCosto, { type StatoPodCosto } from '@/app/components/PodCosto'
 
 // Icona assistenza (accanto al cestino della LDV): apre un popup dove si sceglie
@@ -12,6 +14,8 @@ function fileToObj(file: File): Promise<any> {
 // clienteDiretto: nel portale master, il nome del cliente quando la spedizione e' di un cliente
 // diretto. Il ticket aperto da qui e' suo (api/assistenza/apri): lo vede e legge la descrizione.
 export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiretto }: { ldv: string; spedizioneId?: string; clienteDiretto?: string }) {
+  // con la grafica nuova l'icona è a linea, come le altre azioni della riga; con quella di oggi resta la cuffia
+  const nuova = useContext(GraficaNuova).attiva
   const [open, setOpen] = useState(false)
   const [modo, setModo] = useState<'' | 'ticket' | 'pod'>('')   // '' = scelta iniziale
   const [desc, setDesc] = useState('')
@@ -65,19 +69,19 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
   return (
     <>
       <button onClick={(e) => { e.stopPropagation(); setOpen(true); setModo(''); setDesc(''); setMsg(null) }} title="Assistenza / POD"
-        style={{ padding: '4px 8px', background: '#eff6ff', color: '#2563eb', borderRadius: '4px', fontSize: '14px', border: '1px solid #bfdbfe', cursor: 'pointer' }}>🎧</button>
+        style={{ padding: '4px 8px', background: '#eff6ff', color: '#2563eb', borderRadius: '4px', fontSize: '14px', border: '1px solid #bfdbfe', cursor: 'pointer' }}>{nuova ? <Icona id="i-cuffie" /> : '🎧'}</button>
 
       {open && (
-        <div onClick={chiudi} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '20px' }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '10px', width: '460px', maxWidth: '100%' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', fontSize: '15px', fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>🎧 Assistenza — LDV {ldv}</div>
+        <div onClick={chiudi} className={nuova ? 'gx-finestra-velo' : undefined} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '20px' }}>
+          <div onClick={e => e.stopPropagation()} className="gx-finestra" style={{ background: '#fff', borderRadius: '10px', width: '460px', maxWidth: '100%' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', fontSize: '15px', fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>{nuova ? null : '🎧 '}Assistenza — LDV {ldv}</div>
 
             {/* Scelta iniziale */}
             {modo === '' ? (
               <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ fontSize: '13px', color: '#555' }}>Cosa vuoi fare per questa spedizione?</div>
-                <button onClick={() => setModo('ticket')} style={{ ...btn, background: '#f97316', color: '#fff', padding: '13px', textAlign: 'left' }}>📩 Apertura ticket<div style={{ fontSize: '11px', fontWeight: 400, opacity: .9, marginTop: '2px' }}>Segnala un problema su questa spedizione</div></button>
-                <button onClick={() => setModo('pod')} style={{ ...btn, background: '#2563eb', color: '#fff', padding: '13px', textAlign: 'left' }}>📄 Richiesta POD<div style={{ fontSize: '11px', fontWeight: 400, opacity: .9, marginTop: '2px' }}>Richiedi la prova di consegna</div></button>
+                <button onClick={() => setModo('ticket')} style={{ ...btn, background: '#f97316', color: '#fff', padding: '13px', textAlign: 'left' }}>{nuova ? null : '📩 '}Apertura ticket<div style={{ fontSize: '11px', fontWeight: 400, opacity: .9, marginTop: '2px' }}>Segnala un problema su questa spedizione</div></button>
+                <button onClick={() => setModo('pod')} style={{ ...btn, background: '#2563eb', color: '#fff', padding: '13px', textAlign: 'left' }}>{nuova ? null : '📄 '}Richiesta POD<div style={{ fontSize: '11px', fontWeight: 400, opacity: .9, marginTop: '2px' }}>Richiedi la prova di consegna</div></button>
               </div>
             ) : (
               <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -94,7 +98,7 @@ export default function AssistenzaTicketButton({ ldv, spedizioneId, clienteDiret
                     onDragLeave={() => setDrag(false)}
                     onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files?.length) aggiungiFile(e.dataTransfer.files) }}
                     style={{ display: 'block', border: drag ? '2px dashed #2563eb' : '2px dashed #d1d5db', background: drag ? '#eff6ff' : '#fafafa', borderRadius: '8px', padding: '14px', textAlign: 'center', cursor: 'pointer', color: '#666', fontSize: '12px' }}>
-                    📎 Trascina qui foto o PDF, oppure clicca per scegliere
+                    {nuova ? null : '📎 '}Trascina qui foto o PDF, oppure clicca per scegliere
                     <input type="file" accept="image/*,application/pdf" multiple onChange={e => { if (e.target.files?.length) aggiungiFile(e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
                   </label>
                   {files.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginTop: '8px' }}>

@@ -1,6 +1,8 @@
 'use client'
 import React from 'react'
 import { ldvProvvisoria, LDV_IN_ELABORAZIONE, numeroMostrato } from '@/lib/numero-spedizione'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 const card: React.CSSProperties = { background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', overflow: 'hidden' }
 const cardH: React.CSSProperties = { padding: '11px 15px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a', background: '#fafafa' }
@@ -10,14 +12,16 @@ const valS: React.CSSProperties = { fontSize: '13px', color: '#1a1a1a', fontWeig
 
 function F({ label, value, full }: { label: string; value: any; full?: boolean }) {
   return (
-    <div style={full ? { gridColumn: '1 / -1' } : undefined}>
-      <div style={lblS}>{label}</div>
-      <div style={valS}>{value != null && value !== '' ? value : '—'}</div>
+    <div className="ds-campo" style={full ? { gridColumn: '1 / -1' } : undefined}>
+      <div className="ds-etichetta" style={lblS}>{label}</div>
+      <div className="ds-valore" style={valS}>{value != null && value !== '' ? value : '—'}</div>
     </div>
   )
 }
 
 export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, onModificata, apriCorrezione }: { s: any; onClose: () => void; etichettaHref?: string; onModificata?: () => void; apriCorrezione?: boolean }) {
+  // con la grafica nuova (18/11) il dettaglio è una tendina da destra, come il tracking; con quella di oggi resta com'è
+  const nuova = React.useContext(GraficaNuova).attiva
   // Correzione peso/misure (solo master creatore, spedizione con cliente). L'etichetta NON cambia: si
   // ricalcola solo il costo e la differenza va in rettifica su tutta la catena (addebito o rimborso).
   // MULTICOLLO: si corregge ogni collo. colli_dettaglio non e' in SPED_COLS -> lo prendo da /[id].
@@ -111,20 +115,20 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
   const puoCorreggere = !!onModificata && !!s.cliente_id && s.stato !== 'annullata'
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '30px 16px', overflowY: 'auto' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#f6f7f8', borderRadius: '12px', width: '100%', maxWidth: '760px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
-        <div style={{ padding: '15px 20px', borderBottom: '1px solid #e8e8e8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', borderRadius: '12px 12px 0 0' }}>
+    <div onClick={onClose} className={nuova ? 'ds-velo' : undefined} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '30px 16px', overflowY: 'auto' }}>
+      <div onClick={e => e.stopPropagation()} className="ds" style={{ background: '#f6f7f8', borderRadius: '12px', width: '100%', maxWidth: '760px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+        <div className="ds-testa" style={{ padding: '15px 20px', borderBottom: '1px solid #e8e8e8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', borderRadius: '12px 12px 0 0' }}>
           <div>
-            <div style={{ fontSize: '16px', fontWeight: 800, color: '#1a1a1a' }}>Dettaglio spedizione</div>
-            <div style={{ fontSize: '12px', color: '#f97316', fontWeight: 700, marginTop: '2px' }}>{ldvProvvisoria(s.numero) ? `⏳ ${LDV_IN_ELABORAZIONE}` : numeroMostrato(s.numero, s.tracking_number)}{s.tracking_number && numeroMostrato(s.numero, s.tracking_number) !== s.tracking_number ? ` · ${s.tracking_number}` : ''}</div>
+            <div className="ds-titolo" style={{ fontSize: '16px', fontWeight: 800, color: '#1a1a1a' }}>Dettaglio spedizione</div>
+            <div className="ds-numero" style={{ fontSize: '12px', color: '#f97316', fontWeight: 700, marginTop: '2px' }}>{ldvProvvisoria(s.numero) ? `⏳ ${LDV_IN_ELABORAZIONE}` : numeroMostrato(s.numero, s.tracking_number)}{s.tracking_number && numeroMostrato(s.numero, s.tracking_number) !== s.tracking_number ? ` · ${s.tracking_number}` : ''}</div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', color: '#999', cursor: 'pointer', lineHeight: 1 }}>×</button>
+          <button onClick={onClose} className="ds-x" aria-label="Chiudi" style={{ background: 'none', border: 'none', fontSize: '22px', color: '#999', cursor: 'pointer', lineHeight: 1 }}>×</button>
         </div>
 
-        <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div className="ds-corpo" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-            <div style={card}>
-              <div style={cardH}>Mittente</div>
+            <div className="ds-scheda" style={card}>
+              <div className="ds-sezione" style={cardH}>Mittente</div>
               <div style={cardB}>
                 <F label="Nome" value={s.mitt_nome} full />
                 <F label="Indirizzo" value={s.mitt_indirizzo} full />
@@ -135,8 +139,8 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
                 <F label="Email" value={s.mitt_email} full />
               </div>
             </div>
-            <div style={card}>
-              <div style={cardH}>Destinatario</div>
+            <div className="ds-scheda" style={card}>
+              <div className="ds-sezione" style={cardH}>Destinatario</div>
               <div style={cardB}>
                 <F label="Nome" value={s.dest_nome} full />
                 <F label="Indirizzo" value={s.dest_indirizzo} full />
@@ -149,8 +153,8 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
             </div>
           </div>
 
-          <div style={card}>
-            <div style={cardH}>Spedizione</div>
+          <div className="ds-scheda" style={card}>
+            <div className="ds-sezione" style={cardH}>Spedizione</div>
             <div style={{ ...cardB, gridTemplateColumns: '1fr 1fr 1fr' }}>
               <F label="Corriere" value={s.corrieri?.nome_contratto} />
               <F label="Stato" value={String(s.stato || '').replace(/_/g, ' ')} />
@@ -168,8 +172,8 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
           </div>
 
           {multicollo && colliDett.length > 0 && (
-            <div style={card}>
-              <div style={cardH}>Colli ({colliDett.length})</div>
+            <div className="ds-scheda" style={card}>
+              <div className="ds-sezione" style={cardH}>Colli ({colliDett.length})</div>
               <div style={{ padding: '8px 15px 12px' }}>
                 {colliDett.map((c: any, i: number) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < colliDett.length - 1 ? '1px solid #f0f0f0' : 'none', fontSize: '13px' }}>
@@ -181,8 +185,8 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
             </div>
           )}
 
-          <div style={card}>
-            <div style={cardH}>Costo</div>
+          <div className="ds-scheda" style={card}>
+            <div className="ds-sezione" style={cardH}>Costo</div>
             <div style={cardB}>
               <F label="Prezzo" value={<span style={{ fontWeight: 800, color: '#16a34a', fontSize: '15px' }}>{eur(s.costo_totale)}</span>} />
               {s.richiedi_ritiro ? <F label="Ritiro richiesto" value={`${s.data_ritiro || ''} ${s.intervallo_ritiro || ''}`.trim() || 'Sì'} /> : <div />}
@@ -190,24 +194,24 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
           </div>
 
           {puoCorreggere && (
-            <div style={card}>
-              <div style={cardH}>Appunti del master</div>
+            <div className="ds-scheda" style={card}>
+              <div className="ds-sezione" style={cardH}>Appunti del master</div>
               <div style={{ padding: '14px 15px' }}>
                 <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>Solo per te: non vanno al corriere, non finiscono sull'etichetta e il cliente non li vede. Contenuto e note dichiarati dal cliente restano quelli qui sopra.</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div>
-                    <div style={lblS}>Contenuto</div>
+                    <div className="ds-etichetta" style={lblS}>Contenuto</div>
                     <input value={interne.contenuto} maxLength={2000} onChange={e => setInterne(v => ({ ...v, contenuto: e.target.value }))}
                       placeholder="cosa c'era davvero nel pacco" style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }} />
                   </div>
                   <div>
-                    <div style={lblS}>Note</div>
+                    <div className="ds-etichetta" style={lblS}>Note</div>
                     <textarea value={interne.note} maxLength={2000} rows={2} onChange={e => setInterne(v => ({ ...v, note: e.target.value }))}
                       placeholder="promemoria, accordi col cliente, cos'è successo…" style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical' }} />
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
-                  <button onClick={salvaInterne} disabled={salvando || (interne.contenuto === interneIniz.contenuto && interne.note === interneIniz.note)}
+                  <button className="ds-btn ds-btn-primario" onClick={salvaInterne} disabled={salvando || (interne.contenuto === interneIniz.contenuto && interne.note === interneIniz.note)}
                     style={{ padding: '8px 14px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: salvando ? 'default' : 'pointer', opacity: (interne.contenuto === interneIniz.contenuto && interne.note === interneIniz.note) ? 0.5 : 1 }}>
                     {salvando ? '…' : 'Salva appunti'}
                   </button>
@@ -218,17 +222,17 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
           )}
 
           {mod && (
-            <div ref={modRef} style={{ ...card, border: '1px solid #fed7aa' }}>
-              <div style={{ ...cardH, background: '#fff7ed', color: '#ea580c' }}>Correggi peso / misure</div>
+            <div ref={modRef} className="ds-scheda ds-correggi" style={{ ...card, border: '1px solid #fed7aa' }}>
+              <div className="ds-sezione" style={{ ...cardH, background: '#fff7ed', color: '#ea580c' }}>Correggi peso / misure</div>
               <div style={{ padding: '14px 15px' }}>
                 <div style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>L'etichetta <b>non</b> cambia. Si ricalcola il costo: la differenza va in rettifica sul cliente (addebito se sale, rimborso se scende).</div>
                 {colliForm.map((c, i) => (
                   <div key={i} style={{ marginBottom: '10px' }}>
-                    {colliForm.length > 1 && <div style={{ ...lblS, marginBottom: '4px', color: '#ea580c' }}>Collo {i + 1}</div>}
+                    {colliForm.length > 1 && <div className="ds-etichetta" style={{ ...lblS, marginBottom: '4px', color: '#ea580c' }}>Collo {i + 1}</div>}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                       {([['Peso kg', 'peso'], ['Lungh. cm', 'lunghezza'], ['Largh. cm', 'larghezza'], ['Alt. cm', 'altezza']] as [string, string][]).map(([lab, k]) => (
                         <div key={k}>
-                          <div style={lblS}>{lab}</div>
+                          <div className="ds-etichetta" style={lblS}>{lab}</div>
                           <input type="number" value={(c as any)[k]} onChange={e => setCollo(i, k, e.target.value)} style={{ width: '100%', padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }} />
                         </div>
                       ))}
@@ -236,7 +240,7 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
                   </div>
                 ))}
                 {ant && (
-                  <div style={{ marginTop: '12px', padding: '10px 12px', background: ant.tipo === 'addebito' ? '#fef2f2' : ant.tipo === 'rimborso' ? '#f0fdf4' : '#f8fafc', borderRadius: '7px', fontSize: '13px' }}>
+                  <div className="ds-anteprima" data-tipo={ant.tipo} style={{ marginTop: '12px', padding: '10px 12px', background: ant.tipo === 'addebito' ? '#fef2f2' : ant.tipo === 'rimborso' ? '#f0fdf4' : '#f8fafc', borderRadius: '7px', fontSize: '13px' }}>
                     <div>Peso: <b>{ant.pesoPrima} kg → {ant.pesoDopo} kg</b></div>
                     <div>Nuovo costo cliente: <b>{eur(ant.nuovoCostoCliente)}</b> (era {eur(s.costo_totale)})</div>
                     <div style={{ marginTop: '4px', fontWeight: 700, color: ant.tipo === 'addebito' ? '#dc2626' : ant.tipo === 'rimborso' ? '#16a34a' : '#666' }}>
@@ -246,19 +250,19 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
                 )}
                 {msg && <div style={{ color: '#dc2626', fontSize: '12px', marginTop: '8px' }}>{msg}</div>}
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                  <button onClick={() => invia(true)} disabled={busy} style={{ padding: '8px 14px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? '…' : 'Calcola'}</button>
-                  {ant && ant.tipo !== 'nessuna variazione' && <button onClick={() => invia(false)} disabled={busy} style={{ padding: '8px 14px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? '…' : 'Conferma correzione'}</button>}
-                  <button onClick={() => { setMod(false); setAnt(null); setMsg('') }} style={{ padding: '8px 14px', background: 'none', color: '#666', border: 'none', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
+                  <button className="ds-btn ds-btn-secondario" onClick={() => invia(true)} disabled={busy} style={{ padding: '8px 14px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? '…' : 'Calcola'}</button>
+                  {ant && ant.tipo !== 'nessuna variazione' && <button className="ds-btn ds-btn-primario" onClick={() => invia(false)} disabled={busy} style={{ padding: '8px 14px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: busy ? 'default' : 'pointer' }}>{busy ? '…' : 'Conferma correzione'}</button>}
+                  <button className="ds-btn ds-btn-testo" onClick={() => { setMod(false); setAnt(null); setMsg('') }} style={{ padding: '8px 14px', background: 'none', color: '#666', border: 'none', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        <div style={{ padding: '14px 20px', borderTop: '1px solid #e8e8e8', display: 'flex', justifyContent: 'flex-end', gap: '10px', background: '#fff', borderRadius: '0 0 12px 12px' }}>
-          {puoCorreggere && !mod && <button onClick={() => setMod(true)} style={{ marginRight: 'auto', padding: '9px 16px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>✏️ Correggi peso/misure</button>}
-          {etichettaHref && <a href={etichettaHref} download style={{ padding: '9px 16px', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, textDecoration: 'none' }}>🖨️ Etichetta</a>}
-          <button onClick={onClose} style={{ padding: '9px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Chiudi</button>
+        <div className="ds-piede" style={{ padding: '14px 20px', borderTop: '1px solid #e8e8e8', display: 'flex', justifyContent: 'flex-end', gap: '10px', background: '#fff', borderRadius: '0 0 12px 12px' }}>
+          {puoCorreggere && !mod && <button className="ds-btn ds-btn-secondario ds-sinistra" onClick={() => setMod(true)} style={{ marginRight: 'auto', padding: '9px 16px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{nuova ? <Icona id="i-matita" /> : '✏️ '}Correggi peso e misure</button>}
+          {etichettaHref && <a className="ds-btn ds-btn-secondario" href={etichettaHref} download style={{ padding: '9px 16px', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, textDecoration: 'none' }}>{nuova ? <Icona id="i-stampa" /> : '🖨️ '}Etichetta</a>}
+          <button className="ds-btn ds-btn-primario" onClick={onClose} style={{ padding: '9px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Chiudi</button>
         </div>
       </div>
     </div>

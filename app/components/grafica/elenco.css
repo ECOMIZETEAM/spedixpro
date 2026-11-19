@@ -1,0 +1,381 @@
+/* L'Elenco spedizioni con la grafica nuova (18/11, Lorenzo: «da presentare ai soci»). La pagina è quella di oggi, con
+   gli stili scritti sugli elementi: qui li si veste SOLO dentro .gx (grafica nuova accesa), per questo ogni regola ha
+   !important. Con la grafica di oggi .gx-elenco non c'è e nulla di questo vale.
+   Le tendine di cliente e date si aprono in finestre fisse con fondo bianco: restano come sono (:not(...fixed *)),
+   altrimenti di notte il testo diventerebbe chiaro su bianco. */
+
+.gx .gx-elenco { --el-r: 20px; font-variant-numeric: tabular-nums; }
+.gx[data-luce="notte"] .gx-elenco { color-scheme: dark; }
+.gx .gx-elenco input[type="checkbox"] { accent-color: var(--gx-accento-pieno); width: 15px; height: 15px; }
+
+/* i colori scritti a mano (#1a1a1a, grigi, bordi, arancio) presi dai colori del tema */
+.gx .gx-elenco [style*="color: rgb(26, 26, 26)"]:not([style*="position: fixed"] *):not([style*="position: fixed"]) { color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco [style*="color: rgb(55, 65, 81)"]:not([style*="position: fixed"] *),
+.gx .gx-elenco [style*="color: rgb(102, 102, 102)"]:not([style*="position: fixed"] *),
+.gx .gx-elenco [style*="color: rgb(156, 163, 175)"]:not([style*="position: fixed"] *) { color: var(--gx-attenuato) !important; }
+.gx .gx-elenco [style*="rgb(209, 213, 219)"]:not([style*="position: fixed"] *),
+.gx .gx-elenco [style*="rgb(229, 231, 235)"]:not([style*="position: fixed"] *),
+.gx .gx-elenco [style*="rgb(203, 213, 225)"]:not([style*="position: fixed"] *),
+.gx .gx-elenco [style*="rgb(241, 242, 244)"]:not([style*="position: fixed"] *) { border-color: var(--gx-filo) !important; }
+.gx .gx-elenco [style*="background: rgb(249, 115, 22)"] { background: var(--gx-accento-pieno) !important; }
+
+/* titolo e pulsante principale */
+.gx .gx-elenco .el-titolo { font-size: 30px !important; font-weight: 500 !important; letter-spacing: -.02em; color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco .el-primario { display: inline-flex; align-items: center; height: 42px; padding: 0 22px !important; border-radius: 999px !important;
+  background: var(--gx-accento-pieno) !important; font-size: 14px !important; font-weight: 600 !important; letter-spacing: .01em;
+  box-shadow: 0 10px 24px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); transition: transform .2s ease, box-shadow .2s ease; }
+.gx .gx-elenco .el-primario:hover { transform: translateY(-1px); box-shadow: 0 14px 28px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); }
+
+/* le due schede: vetro senza sfocatura (una sfocatura chiuderebbe dentro la scheda le finestre fisse delle righe) */
+.gx .gx-elenco .el-scheda { background: var(--gx-vetro) !important; border: 0 !important; border-radius: var(--el-r) !important;
+  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(30, 42, 66, .04), 0 22px 48px -30px rgba(30, 42, 66, .28); }
+.gx[data-luce="notte"] .gx-elenco .el-scheda { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -30px rgba(0, 0, 0, .6); }
+.gx .gx-elenco .el-filtri { padding: 20px 22px 22px !important; margin-bottom: 18px !important; }
+.gx .gx-elenco .el-sezione { display: flex; align-items: center; gap: 8px; margin-bottom: 14px !important; font-size: 13px !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco .el-sezione .gx-ico { width: 16px; height: 16px; color: var(--gx-accento); }
+
+/* filtri: etichette piccole maiuscole, campi incavati e tondi */
+.gx .gx-elenco .el-filtri label { color: var(--gx-attenuato) !important; font-size: 10.5px !important; font-weight: 600 !important; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px !important; }
+.gx .gx-elenco .el-filtri input:not([type="checkbox"]),
+.gx .gx-elenco .el-filtri select,
+.gx .gx-elenco .el-filtri button:not(.el-secondario):not([style*="position: fixed"] *),
+.gx .gx-elenco .el-testa input,
+.gx .gx-elenco .el-testa select { height: 38px; background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important; border-radius: 12px !important;
+  color: var(--gx-testo) !important; font-size: 13px !important; box-shadow: none !important; transition: border-color .15s ease, background .15s ease; }
+.gx .gx-elenco .el-testa input, .gx .gx-elenco .el-testa select { height: 34px; }
+.gx .gx-elenco .el-filtri input:focus, .gx .gx-elenco .el-filtri select:focus, .gx .gx-elenco .el-testa input:focus {
+  outline: none; border-color: var(--gx-accento) !important; background: var(--gx-vetro) !important; }
+.gx .gx-elenco .el-secondario { height: 38px; padding: 0 20px !important; border-radius: 999px !important; background: transparent !important;
+  border: 1px solid var(--gx-filo) !important; color: var(--gx-testo) !important; font-weight: 600 !important; font-size: 13px !important; }
+.gx .gx-elenco .el-secondario:hover { border-color: var(--gx-accento) !important; color: var(--gx-accento-testo) !important; }
+
+/* testata della tabella: conteggio, azioni in blocco, ordina, cerca */
+.gx .gx-elenco .el-testa { padding: 16px 20px !important; border-bottom: 1px solid var(--gx-filo) !important; }
+.gx .gx-elenco .el-conta { font-size: 15px !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco .el-testa button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 15px !important; border-radius: 999px !important;
+  font-size: 12.5px !important; font-weight: 600 !important; }
+.gx .gx-elenco .el-testa button .gx-ico { width: 15px; height: 15px; }
+.gx .gx-elenco .el-testa button[style*="not-allowed"] { background: var(--gx-incavo) !important; color: var(--gx-attenuato) !important; }
+
+/* la tabella: righe senza riquadri, divise da un filo, numeri allineati */
+.gx .gx-elenco .el-tab thead tr { background: transparent !important; }
+.gx .gx-elenco .el-tab th { padding: 12px 14px !important; background: transparent !important; border-bottom: 1px solid var(--gx-filo) !important;
+  font-size: 10.5px !important; font-weight: 600 !important; letter-spacing: .09em !important; color: var(--gx-attenuato) !important; }
+.gx .gx-elenco .el-riga, .gx .gx-elenco .el-riga2 { background: transparent !important; transition: background .15s ease; }
+.gx .gx-elenco .el-riga td { padding-top: 14px !important; }
+.gx .gx-elenco .el-riga2 { border-bottom: 1px solid var(--gx-filo) !important; }
+.gx .gx-elenco .el-riga2 td { border-top: 0 !important; padding-bottom: 14px !important; }
+.gx .gx-elenco .el-riga:hover, .gx .gx-elenco .el-riga:hover + .el-riga2 { background: var(--gx-incavo) !important; }
+.gx .gx-elenco .el-scelta { background: color-mix(in srgb, var(--gx-accento) 8%, transparent) !important; }
+.gx .gx-elenco .el-riga td > button[style*="underline"] { color: var(--gx-accento-testo) !important; text-decoration: none !important; font-weight: 600 !important; letter-spacing: .01em; }
+.gx .gx-elenco .el-riga td > button[style*="underline"]:hover { text-decoration: underline !important; }
+.gx .gx-elenco .el-riga2 .gx-ico { width: 15px; height: 15px; color: var(--gx-attenuato); vertical-align: -3px; }
+.gx .gx-elenco .el-riga2 [style*="border-left"] { border-left-color: var(--gx-filo) !important; }
+
+/* lo stato: pillola tonda */
+.gx .gx-elenco .el-stato { display: inline-flex; padding: 4px 11px !important; border-radius: 999px !important; font-size: 11.5px !important; font-weight: 600 !important; }
+.gx[data-luce="notte"] .gx-elenco .el-stato { filter: saturate(.9) brightness(.92); }
+
+/* le azioni della riga: icone a linea in tasti tondi uguali */
+.gx .gx-elenco .el-azioni { gap: 6px !important; }
+.gx .gx-elenco .el-azioni > button, .gx .gx-elenco .el-azioni > span { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
+  padding: 0 !important; border-radius: 11px !important; background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important;
+  color: var(--gx-testo) !important; transition: background .15s ease, color .15s ease, border-color .15s ease; }
+.gx .gx-elenco .el-azioni > button:hover { background: var(--gx-vetro) !important; border-color: var(--gx-accento) !important; color: var(--gx-accento-testo) !important; }
+.gx .gx-elenco .el-azioni > button[title="Elimina"]:hover { border-color: var(--gx-problema) !important; color: var(--gx-problema) !important; }
+.gx .gx-elenco .el-azioni > span { opacity: .45; }
+.gx .gx-elenco .el-azioni > button[title="Ripristina spedizione"] { width: auto; padding: 0 12px !important; font-size: 12px !important; }
+.gx .gx-elenco .el-azioni .gx-ico { width: 17px; height: 17px; }
+
+/* paginazione */
+.gx .gx-elenco .el-pagine { padding: 16px 20px !important; border-top: 1px solid var(--gx-filo) !important; }
+.gx .gx-elenco .el-pagine button { min-width: 34px; height: 34px; border-radius: 11px !important; background: var(--gx-incavo) !important;
+  border: 1px solid var(--gx-filo) !important; color: var(--gx-testo) !important; font-size: 12.5px !important; }
+.gx .gx-elenco .el-pagine button[style*="font-weight: 700"] { background: var(--gx-accento-pieno) !important; border-color: var(--gx-accento-pieno) !important; color: #fff !important; }
+.gx .gx-elenco .el-pagine button:disabled { opacity: .45; }
+
+/* le scritte della testata («Mostra», «Ordina:», «Cerca:», i risultati) e i campi rimasti bianchi di notte (date, ↓) */
+.gx .gx-elenco .el-testa span:not(.el-conta), .gx .gx-elenco .el-conta span { color: var(--gx-attenuato) !important; }
+.gx .gx-elenco .el-testa button[style*="background: rgb(255, 255, 255)"],
+.gx .gx-elenco .el-filtri [style*="background: rgb(255, 255, 255)"]:not([style*="position: fixed"]):not([style*="position: fixed"] *) {
+  background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important; color: var(--gx-testo) !important; }
+.gx .gx-elenco .el-filtri [style*="background: rgb(255, 255, 255)"]:not([style*="position: fixed"]):not([style*="position: fixed"] *) { border-radius: 12px !important; min-height: 38px; }
+.gx .gx-elenco .el-testa button[style*="background: rgb(255, 255, 255)"] { width: 34px; justify-content: center; padding: 0 !important; }
+
+/* gli elementi disegnati dal server portano i colori come scritti nel codice («color:#1a1a1a», «background:#fff»),
+   quelli ridisegnati nel browser in rgb(): servono tutte e due le forme */
+.gx .gx-elenco [style*="color:#1a1a1a"]:not([style*="position:fixed"] *):not([style*="position: fixed"] *):not([style*="position:fixed"]) { color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco [style*="color:#666"]:not([style*="position:fixed"] *),
+.gx .gx-elenco [style*="color:#9ca3af"]:not([style*="position:fixed"] *),
+.gx .gx-elenco [style*="color:#374151"]:not([style*="position:fixed"] *) { color: var(--gx-attenuato) !important; }
+.gx .gx-elenco [style*="#d1d5db"]:not([style*="position:fixed"] *) { border-color: var(--gx-filo) !important; }
+.gx .gx-elenco .el-testa button[style*="background:#fff"],
+.gx .gx-elenco .el-filtri [style*="background:#fff"]:not([style*="position:fixed"]):not([style*="position:fixed"] *):not([style*="position: fixed"] *) {
+  background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important; color: var(--gx-testo) !important; }
+.gx .gx-elenco .el-filtri [style*="background:#fff"]:not([style*="position:fixed"]):not([style*="position:fixed"] *):not([style*="position: fixed"] *) { border-radius: 12px !important; min-height: 38px; }
+.gx .gx-elenco .el-testa button[style*="background:#fff"] { width: 34px; justify-content: center; padding: 0 !important; }
+
+/* ── 18/11, secondo giro: le novità riprese (non copiate) dalla v6 del 20/10 ─────────────────────────────── */
+
+/* il percorso sotto lo stato: provincia di partenza · cinque tappe · provincia (o paese) di arrivo */
+.gx .gx-elenco .el-percorso { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 10px; font-weight: 600;
+  letter-spacing: .06em; color: var(--gx-attenuato); --el-p: var(--gx-accento); }
+.gx .gx-elenco .el-percorso--bene { --el-p: var(--gx-bene); }
+.gx .gx-elenco .el-percorso--problema { --el-p: var(--gx-problema); }
+.gx .gx-elenco .el-percorso--reso { --el-p: var(--gx-attenuato); }
+.gx .gx-elenco .el-percorso span { min-width: 16px; }
+.gx .gx-elenco .el-percorso i { position: relative; display: flex; align-items: center; justify-content: space-between; width: 72px; height: 10px; }
+.gx .gx-elenco .el-percorso i::before { content: ''; position: absolute; left: 3px; right: 3px; top: 50%; border-top: 1.5px dashed var(--gx-filo); }
+.gx .gx-elenco .el-percorso b { position: relative; width: 6px; height: 6px; border-radius: 50%; background: var(--gx-fondo); box-shadow: 0 0 0 1.5px var(--gx-filo); }
+.gx .gx-elenco .el-percorso b.fatto { background: var(--el-p); box-shadow: none; }
+.gx .gx-elenco .el-percorso b.fatto::after { content: ''; position: absolute; left: 6px; top: 2.25px; width: 12px; height: 1.5px; background: var(--el-p); }
+.gx .gx-elenco .el-percorso b.qui { width: 10px; height: 10px; background: var(--el-p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--el-p) 22%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .gx .gx-elenco .el-percorso--via b.qui { animation: el-polso 2.4s ease-in-out infinite; }
+}
+@keyframes el-polso { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--el-p) 0%, transparent); } }
+
+/* il corriere: il suo nome in un cartellino, al posto del furgoncino */
+.gx .gx-elenco .el-vettore { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--gx-filo);
+  background: var(--gx-incavo); color: var(--gx-inchiostro); font-size: 9.5px; font-weight: 700; letter-spacing: .08em; }
+
+/* le azioni sulle spedizioni scelte: una barra di vetro che sale dal fondo solo quando se ne sceglie almeno una */
+.gx .gx-elenco .el-blocco { position: fixed; left: calc(50% + 120px); bottom: 26px; z-index: 30; display: flex; align-items: center; gap: 4px;
+  padding: 6px 6px 6px 18px; border-radius: 999px; background: var(--gx-vetro); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
+  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -18px rgba(20, 30, 50, .45);
+  transform: translate(-50%, 140%); opacity: 0; pointer-events: none; transition: transform .45s cubic-bezier(.2, .9, .25, 1.15), opacity .3s ease; }
+.gx .gx-elenco .el-blocco--su { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.gx .gx-elenco .el-blocco-n { margin-right: 10px; padding-right: 14px; border-right: 1px solid var(--gx-filo); font-size: 13px; color: var(--gx-testo) !important; white-space: nowrap; }
+.gx .gx-elenco .el-blocco-n b { color: var(--gx-accento); font-weight: 700; }
+.gx .gx-elenco .el-blocco > button { height: 38px !important; padding: 0 15px !important; background: transparent !important; color: var(--gx-inchiostro) !important; font-size: 13px !important; }
+.gx .gx-elenco .el-blocco > button:hover { background: var(--gx-incavo) !important; }
+.gx .gx-elenco .el-blocco > button[style*="220, 38, 38"], .gx .gx-elenco .el-blocco > button[style*="#dc2626"] { color: var(--gx-problema) !important; }
+.gx .gx-elenco .el-blocco > .el-blocco-x { width: 38px; justify-content: center; padding: 0 !important; margin-left: 4px; border-radius: 50% !important;
+  font-size: 20px !important; font-weight: 400 !important; color: var(--gx-attenuato) !important; }
+@media (max-width: 1100px) { .gx .gx-elenco .el-blocco { left: 50%; } }
+
+/* le righe entrano una dopo l'altra, la prima volta e a ogni pagina */
+@media (prefers-reduced-motion: no-preference) {
+  .gx .gx-elenco .el-riga, .gx .gx-elenco .el-riga2 { animation: el-entra .55s cubic-bezier(.2, .8, .2, 1) backwards; /* «backwards»: finita l'entrata la riga non tiene uno spostamento, che chiuderebbe dentro la riga la finestra fissa dell'assistenza */ }
+  .gx .gx-elenco tbody tr:nth-child(1), .gx .gx-elenco tbody tr:nth-child(2) { animation-delay: .02s; }
+  .gx .gx-elenco tbody tr:nth-child(3), .gx .gx-elenco tbody tr:nth-child(4) { animation-delay: .07s; }
+  .gx .gx-elenco tbody tr:nth-child(5), .gx .gx-elenco tbody tr:nth-child(6) { animation-delay: .12s; }
+  .gx .gx-elenco tbody tr:nth-child(7), .gx .gx-elenco tbody tr:nth-child(8) { animation-delay: .17s; }
+  .gx .gx-elenco tbody tr:nth-child(9), .gx .gx-elenco tbody tr:nth-child(10) { animation-delay: .22s; }
+  .gx .gx-elenco tbody tr:nth-child(n+11) { animation-delay: .27s; }
+}
+@keyframes el-entra { from { opacity: 0; transform: translateY(10px); } }
+
+/* la barra delle scelte: ogni voce su una riga sola, la barra larga quanto serve */
+.gx .gx-elenco .el-blocco { width: max-content; max-width: calc(100vw - 300px); }
+.gx .gx-elenco .el-blocco > button { white-space: nowrap; }
+
+/* ── 18/11, terzo giro: la riga più composta (stessi dati) ───────────────────────────────────────────────── */
+.gx .gx-elenco .el-riga td > button[style*="underline"] { font-size: 14px !important; }
+.gx .gx-elenco .el-riga td:nth-child(3) > div:nth-child(2) { color: var(--gx-attenuato) !important; }
+.gx .gx-elenco .el-rete { display: inline-flex; align-items: center; height: 18px; margin-top: 5px !important; padding: 0 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--gx-accento) 11%, transparent); color: var(--gx-accento-testo) !important; font-size: 10px !important; letter-spacing: .04em; }
+.gx .gx-elenco .el-luogo { margin-top: 2px; color: var(--gx-attenuato) !important; font-size: 12px !important; }
+.gx .gx-elenco .el-quando { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
+.gx .gx-elenco .el-quando b { font-weight: 500; font-size: 13px; color: var(--gx-inchiostro); }
+.gx .gx-elenco .el-quando span { font-size: 12px; color: var(--gx-attenuato); }
+/* seconda riga: corriere, peso, colli, contrassegno e ordine a sinistra; i soldi raccolti a destra */
+.gx .gx-elenco .el-riga2 td > div { row-gap: 6px !important; }
+.gx .gx-elenco .el-riga2 span:not(.el-soldi) + .el-soldi { margin-left: auto; border-left: 0 !important; }
+.gx .gx-elenco .el-riga2 .el-soldi { padding: 0 12px !important; }
+.gx .gx-elenco .el-riga2 .el-soldi:last-child { padding-right: 4px !important; }
+.gx .gx-elenco .el-riga2 .el-soldi b { font-size: 13px; }
+
+/* ── la tendina del tracking, da destra ─────────────────────────────────────────────────────────────────── */
+/* il velo entra col colore e non con l'opacità: un antenato con l'opacità animata spegne la sfocatura della tendina */
+.gx .tl-velo { position: fixed; inset: 0; z-index: 1000; background: rgba(15, 20, 27, .18); animation: tl-velo .3s ease both; }
+.gx[data-luce="notte"] .tl-velo { background: rgba(0, 0, 0, .35); }
+.gx .tl { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(470px, calc(100vw - 24px)); display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 28px; background: rgba(255, 255, 255, .9); -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5);
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .45); color: var(--gx-testo);
+  animation: tl-entra .5s cubic-bezier(.2, .9, .25, 1) both; }
+.gx[data-luce="notte"] .tl { background: rgba(26, 33, 48, .93); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7); }
+.gx .tl-via { animation: tl-velo .26s ease reverse both; }
+.gx .tl-via .tl { animation: tl-esce .26s ease-in both; }
+@keyframes tl-velo { from { background-color: transparent; } }
+@keyframes tl-entra { from { transform: translateX(105%); } }
+@keyframes tl-esce { to { transform: translateX(105%); } }
+@media (prefers-reduced-motion: reduce) { .gx .tl, .gx .tl-velo, .gx .tl-eventi li { animation: none !important; } }
+
+.gx .tl-testa { padding: 20px 22px 0; }
+.gx .tl-riga1 { display: flex; align-items: center; gap: 12px; }
+.gx .tl-vettore { display: inline-flex; align-items: center; justify-content: center; min-width: 46px; height: 32px; padding: 0 8px; border-radius: 10px;
+  border: 1px solid var(--gx-filo); background: var(--gx-incavo); color: var(--gx-inchiostro); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.gx .tl-chi { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.gx .tl-chi b { font-size: 15px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .tl-chi span { font-size: 12.5px; color: var(--gx-attenuato); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gx .tl-x { all: unset; cursor: pointer; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; line-height: 1;
+  color: var(--gx-attenuato); background: var(--gx-incavo); }
+.gx .tl-x:hover { color: var(--gx-inchiostro); }
+.gx .tl-numero { margin-top: 16px; font-size: 23px; font-weight: 600; letter-spacing: .02em; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; word-break: break-all; }
+.gx .tl-stato { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.gx .tl-pillola { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.gx .tl-dove { font-size: 14px; color: var(--gx-testo); }
+.gx .tl-schede { display: flex; gap: 2px; margin-top: 18px; padding: 4px; border-radius: 999px; background: var(--gx-incavo); width: max-content; }
+.gx .tl-schede button { all: unset; cursor: pointer; padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--gx-attenuato); }
+.gx .tl-schede button[aria-pressed="true"] { background: var(--gx-vetro-luce); color: var(--gx-inchiostro); box-shadow: 0 1px 2px rgba(20, 30, 50, .08), 0 4px 12px -6px rgba(20, 30, 50, .25); }
+.gx[data-luce="notte"] .tl-schede button[aria-pressed="true"] { background: rgba(255, 255, 255, .12); }
+
+.gx .tl-corpo { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 22px 22px; display: flex; flex-direction: column; gap: 22px; overscroll-behavior: contain; }
+.gx .tl-corpo section { display: flex; flex-direction: column; }
+.gx .tl-corpo h3 { display: flex; justify-content: space-between; margin: 14px 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--gx-attenuato); }
+.gx .tl-corpo h3 em { font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.gx .tl-vuoto { padding: 16px; border-radius: 16px; background: var(--gx-incavo); font-size: 13px; line-height: 1.5; color: var(--gx-attenuato); }
+.gx .tl-piccolo { display: block; margin-top: 6px; font-size: 12px; color: var(--gx-attenuato); }
+
+/* la cronologia: ora · punto sul filo · cosa e dove; l'ultimo evento in evidenza */
+.gx .tl-eventi { list-style: none; margin: 0; padding: 0; }
+.gx .tl-eventi li { position: relative; display: grid; grid-template-columns: 112px 14px 1fr; column-gap: 12px; padding-bottom: 16px;
+  animation: tl-evento .45s cubic-bezier(.2, .8, .2, 1) backwards; }
+.gx .tl-eventi li::before { content: ''; position: absolute; left: calc(112px + 12px + 6.25px); top: 13px; bottom: -3px; width: 1.5px; background: var(--gx-filo); }
+.gx .tl-eventi li:last-child::before { display: none; }
+.gx .tl-eventi time { font-size: 12px; line-height: 18px; color: var(--gx-attenuato); font-variant-numeric: tabular-nums; }
+.gx .tl-eventi i { position: relative; z-index: 1; width: 9px; height: 9px; margin: 4.5px auto 0; border-radius: 50%; background: var(--gx-fondo); box-shadow: 0 0 0 1.5px var(--gx-attenuato); }
+.gx .tl-eventi div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gx .tl-eventi b { font-size: 13.5px; line-height: 18px; font-weight: 500; color: var(--gx-testo); }
+.gx .tl-eventi span { font-size: 12px; color: var(--gx-attenuato); }
+.gx .tl-eventi .tl-ultimo time { color: var(--gx-inchiostro); font-weight: 600; }
+.gx .tl-eventi .tl-ultimo b { color: var(--gx-inchiostro); font-weight: 600; }
+.gx .tl-eventi .tl-ultimo i { width: 11px; height: 11px; margin-top: 3.5px; background: var(--gx-accento); box-shadow: 0 0 0 4px color-mix(in srgb, var(--gx-accento) 22%, transparent); }
+@keyframes tl-evento { from { opacity: 0; transform: translateY(6px); } }
+
+.gx .tl-dest { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--gx-testo); }
+.gx .tl-dest b { font-size: 15px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .tl-voci { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0 0; font-size: 13px; }
+.gx .tl-voci dt { color: var(--gx-attenuato); }
+.gx .tl-voci dd { margin: 0; color: var(--gx-testo); }
+.gx .tl-soldi { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--gx-filo); border-radius: 18px; overflow: hidden; }
+.gx .tl-soldi > div { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; }
+.gx .tl-soldi > div + div { border-left: 1px solid var(--gx-filo); }
+.gx .tl-soldi span { font-size: 11.5px; color: var(--gx-attenuato); }
+.gx .tl-soldi b { font-size: 19px; font-weight: 600; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.gx .tl-soldi .tl-piu b { color: var(--gx-bene); }
+.gx .tl-soldi .tl-meno b { color: var(--gx-problema); }
+.gx .tl-colli { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.gx .tl-colli > div { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: 16px; background: var(--gx-incavo); font-size: 13px; }
+.gx .tl-colli b { color: var(--gx-inchiostro); font-weight: 600; }
+.gx .tl-ripesature { padding-top: 14px; }
+
+.gx .tl-piede { display: flex; align-items: center; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--gx-filo); }
+.gx .tl-piede button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 600; color: var(--gx-inchiostro); background: var(--gx-incavo); }
+.gx .tl-piede button:hover { background: color-mix(in srgb, var(--gx-accento) 12%, transparent); }
+.gx .tl-piede .tl-avanti { margin-left: auto; background: transparent; color: var(--gx-accento-testo); }
+.gx .tl-piede .gx-ico { width: 16px; height: 16px; }
+
+/* ── 18/11, quarto giro: le azioni della riga dietro i tre puntini ─────────────────────────────────────────── */
+.gx .gx-elenco .el-azioni--menu { justify-content: flex-end; align-items: center; }
+.gx .gx-elenco .el-azioni.el-azioni--menu > .el-primaria { width: auto; gap: 7px; padding: 0 14px 0 12px !important; border-radius: 999px !important;
+  font-size: 13px !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; white-space: nowrap; }
+.gx .gx-elenco .el-azioni.el-azioni--menu > .el-primaria .gx-ico { width: 16px; height: 16px; }
+.gx .gx-elenco .el-azioni.el-azioni--menu > .am-tasto { border-radius: 50% !important; }
+.gx .gx-elenco .el-azioni.el-azioni--menu > .am-tasto.am-aperto { background: var(--gx-vetro) !important; border-color: var(--gx-accento) !important; color: var(--gx-accento-testo) !important; }
+.gx .gx-elenco .el-azioni.el-azioni--menu > .am-tasto .gx-ico { width: 18px; height: 18px; stroke-width: 2.4; }
+/* l'assistenza: il suo tasto non si vede (lo preme la voce del menu), la sua finestra sì. Il contenitore non deve avere
+   opacità né riquadro, altrimenti la finestra fissa che ci sta dentro diventerebbe trasparente */
+.gx .gx-elenco .el-azioni.el-azioni--menu > .el-assistenza { display: contents !important; opacity: 1 !important; }
+.gx .gx-elenco .el-assistenza > button { display: none !important; }
+
+.gx .gx-elenco .am-menu { position: fixed; z-index: 60; min-width: 236px; padding: 6px; border-radius: 18px; display: flex; flex-direction: column;
+  background: rgba(255, 255, 255, .95); -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 1px 2px rgba(20, 30, 50, .06), 0 22px 50px -18px rgba(20, 30, 50, .4);
+  transform-origin: top right; animation: am-apre .18s cubic-bezier(.2, .9, .3, 1.2) both; }
+.gx .gx-elenco .am-menu.am-su { transform-origin: bottom right; animation-name: am-apre-su; }
+.gx[data-luce="notte"] .gx-elenco .am-menu { background: rgba(30, 38, 54, .96); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 22px 50px -18px rgba(0, 0, 0, .7); }
+@keyframes am-apre { from { opacity: 0; transform: scale(.95) translateY(-4px); } }
+@keyframes am-apre-su { from { opacity: 0; transform: scale(.95) translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .gx .gx-elenco .am-menu { animation: none; } }
+.gx .gx-elenco .am-voce { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 11px; width: 100%; height: 40px; padding: 0 12px;
+  border-radius: 12px; font-size: 13.5px; font-weight: 500; color: var(--gx-inchiostro); cursor: pointer; white-space: nowrap; }
+.gx .gx-elenco .am-voce .gx-ico { width: 17px; height: 17px; color: var(--gx-attenuato); }
+.gx .gx-elenco .am-voce:hover, .gx .gx-elenco .am-voce:focus-visible { background: var(--gx-incavo); }
+.gx .gx-elenco .am-voce:hover .gx-ico { color: var(--gx-accento); }
+.gx .gx-elenco .am-voce.am-pericolo, .gx .gx-elenco .am-voce.am-pericolo .gx-ico { color: var(--gx-problema); }
+.gx .gx-elenco .am-voce.am-pericolo:hover { background: color-mix(in srgb, var(--gx-problema) 9%, transparent); }
+.gx .gx-elenco .am-voce:disabled { opacity: .42; cursor: not-allowed; }
+.gx .gx-elenco .am-voce:disabled:hover { background: transparent; }
+.gx .gx-elenco .am-filo { display: block; height: 1px; margin: 6px 10px; background: var(--gx-filo); }
+
+/* la seconda riga parte esattamente sotto il numero */
+.gx .gx-elenco .el-riga2 td { padding-left: 40px !important; }
+
+/* ── 18/11, quinto giro: il Dettaglio come tendina da destra (come il tracking) ─────────────────────────────── */
+.gx .ds-velo { background: rgba(15, 20, 27, .18) !important; padding: 12px !important; justify-content: flex-end !important; align-items: stretch !important;
+  overflow: hidden !important; animation: tl-velo .3s ease both; }
+.gx[data-luce="notte"] .ds-velo { background: rgba(0, 0, 0, .35) !important; }
+.gx .ds-velo > .ds { display: flex; flex-direction: column; max-width: 640px !important; height: 100%; overflow: hidden; border-radius: 28px !important;
+  background: rgba(244, 246, 249, .9) !important; -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5);
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .45) !important; color: var(--gx-testo);
+  animation: tl-entra .5s cubic-bezier(.2, .9, .25, 1) both; }
+.gx[data-luce="notte"] .ds-velo > .ds { background: rgba(26, 33, 48, .93) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7) !important; }
+.gx .ds-velo .ds-testa { padding: 22px 22px 14px !important; background: transparent !important; border: 0 !important; border-radius: 0 !important; }
+.gx .ds-velo .ds-titolo { font-size: 13px !important; font-weight: 600 !important; letter-spacing: .09em; text-transform: uppercase; color: var(--gx-attenuato) !important; }
+.gx .ds-velo .ds-numero { margin-top: 6px !important; font-size: 23px !important; font-weight: 600 !important; letter-spacing: .02em; color: var(--gx-inchiostro) !important; }
+.gx .ds-velo .ds-x { width: 36px; height: 36px; border-radius: 50% !important; background: var(--gx-incavo) !important; color: var(--gx-attenuato) !important; }
+.gx .ds-velo .ds-corpo { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 22px 22px !important; }
+/* le schede non si schiacciano per stare nell'altezza: è il corpo che scorre */
+.gx .ds-velo .ds-corpo > * { flex-shrink: 0; }
+.gx .ds-velo .ds-btn { gap: 8px; }
+.gx .ds-velo .ds-btn .gx-ico { width: 16px; height: 16px; }
+.gx .ds-velo .ds-scheda { background: rgba(255, 255, 255, .78) !important; border: 0 !important; border-radius: 18px !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .95), 0 1px 2px rgba(20, 30, 50, .04), 0 12px 28px -20px rgba(20, 30, 50, .3); }
+.gx[data-luce="notte"] .ds-velo .ds-scheda { background: rgba(255, 255, 255, .05) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.gx .ds-velo .ds-correggi { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--gx-accento) 55%, transparent) !important; }
+.gx .ds-velo .ds-sezione { padding: 14px 16px 0 !important; background: transparent !important; border: 0 !important; font-size: 11px !important; font-weight: 600 !important;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--gx-attenuato) !important; }
+.gx .ds-velo .ds-correggi .ds-sezione { color: var(--gx-accento-testo) !important; }
+.gx .ds-velo .ds-etichetta { color: var(--gx-attenuato) !important; font-size: 10.5px !important; letter-spacing: .07em !important; }
+.gx .ds-velo .ds-valore { color: var(--gx-inchiostro) !important; font-size: 13.5px !important; }
+/* i colori scritti a mano dentro la tendina (testi, grigi, filetti) presi dal tema */
+.gx .ds-velo [style*="color: rgb(26, 26, 26)"] { color: var(--gx-inchiostro) !important; }
+.gx .ds-velo [style*="color: rgb(102, 102, 102)"], .gx .ds-velo [style*="color: rgb(153, 153, 153)"], .gx .ds-velo [style*="color: rgb(85, 85, 85)"] { color: var(--gx-attenuato) !important; }
+.gx .ds-velo [style*="rgb(240, 240, 240)"], .gx .ds-velo [style*="rgb(232, 232, 232)"] { border-color: var(--gx-filo) !important; }
+.gx .ds-velo input, .gx .ds-velo textarea { background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important; border-radius: 12px !important;
+  color: var(--gx-testo) !important; padding: 9px 12px !important; box-sizing: border-box; }
+.gx .ds-velo input:focus, .gx .ds-velo textarea:focus { outline: none; border-color: var(--gx-accento) !important; }
+.gx .ds-velo .ds-anteprima { border-radius: 14px !important; background: var(--gx-incavo) !important; color: var(--gx-testo); }
+.gx .ds-velo .ds-anteprima[data-tipo="addebito"] { background: color-mix(in srgb, var(--gx-problema) 10%, transparent) !important; }
+.gx .ds-velo .ds-anteprima[data-tipo="rimborso"] { background: color-mix(in srgb, var(--gx-bene) 10%, transparent) !important; }
+.gx .ds-velo .ds-piede { padding: 14px 22px 18px !important; background: transparent !important; border-top: 1px solid var(--gx-filo) !important; border-radius: 0 !important; align-items: center; }
+.gx .ds-velo .ds-btn { display: inline-flex; align-items: center; height: 40px; padding: 0 18px !important; border-radius: 999px !important; font-size: 13.5px !important;
+  font-weight: 600 !important; box-sizing: border-box; }
+.gx .ds-velo .ds-btn-primario { background: var(--gx-accento-pieno) !important; color: #fff !important; border: 0 !important; box-shadow: 0 10px 22px -12px var(--gx-accento-pieno); }
+.gx .ds-velo .ds-btn-secondario { background: var(--gx-incavo) !important; color: var(--gx-inchiostro) !important; border: 1px solid var(--gx-filo) !important; }
+.gx .ds-velo .ds-btn-secondario:hover { border-color: var(--gx-accento) !important; color: var(--gx-accento-testo) !important; }
+.gx .ds-velo .ds-btn-testo { background: transparent !important; color: var(--gx-attenuato) !important; }
+.gx .ds-velo .ds-sinistra { margin-right: auto !important; }
+
+/* ── le altre finestre dell'elenco (Assistenza, Etichetta di reso): vetro al centro, colori del tema ───────────── */
+.gx .gx-finestra-velo { background: rgba(15, 20, 27, .22) !important; animation: tl-velo .25s ease both; }
+.gx[data-luce="notte"] .gx-finestra-velo { background: rgba(0, 0, 0, .4) !important; }
+.gx .gx-finestra-velo > .gx-finestra { overflow: hidden; border-radius: 26px !important; background: rgba(250, 251, 253, .94) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5); color: var(--gx-testo);
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .5) !important;
+  animation: am-apre .25s cubic-bezier(.2, .9, .3, 1.15) both; }
+.gx[data-luce="notte"] .gx-finestra-velo > .gx-finestra { background: rgba(26, 33, 48, .95) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7) !important; }
+.gx .gx-finestra--imbottita { padding: 26px !important; }
+.gx .gx-finestra h2 { display: flex; align-items: center; gap: 10px; font-weight: 600 !important; }
+.gx .gx-finestra h2 .gx-ico { width: 20px; height: 20px; color: var(--gx-accento); }
+.gx .gx-finestra [style*="color: rgb(26, 26, 26)"] { color: var(--gx-inchiostro) !important; }
+.gx .gx-finestra [style*="color: rgb(85, 85, 85)"], .gx .gx-finestra [style*="color: rgb(102, 102, 102)"],
+.gx .gx-finestra [style*="color: rgb(107, 114, 128)"], .gx .gx-finestra [style*="color: rgb(156, 163, 175)"] { color: var(--gx-attenuato) !important; }
+.gx .gx-finestra [style*="rgb(238, 238, 238)"], .gx .gx-finestra [style*="rgb(240, 240, 240)"], .gx .gx-finestra [style*="rgb(209, 213, 219)"] { border-color: var(--gx-filo) !important; }
+.gx .gx-finestra [style*="background: rgb(250, 250, 250)"], .gx .gx-finestra [style*="background: rgb(243, 244, 246)"],
+.gx .gx-finestra [style*="background: rgb(245, 245, 245)"] { background: var(--gx-incavo) !important; }
+.gx .gx-finestra input:not([type="checkbox"]), .gx .gx-finestra textarea, .gx .gx-finestra select { background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important;
+  border-radius: 12px !important; color: var(--gx-testo) !important; }
+.gx .gx-finestra input[type="checkbox"] { accent-color: var(--gx-accento-pieno); width: 16px; height: 16px; }
+.gx .gx-finestra button { border-radius: 14px !important; }
+.gx .gx-finestra button[style*="background: rgb(255, 255, 255)"] { background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important; color: var(--gx-inchiostro) !important; }
+.gx .gx-finestra button[style*="background: rgb(249, 115, 22)"] { background: var(--gx-accento-pieno) !important; }
+.gx .gx-finestra button[style*="background: rgb(13, 148, 136)"] { background: var(--gx-accento-pieno) !important; }
+/* la POD: invece del blu acceso, il pieno scuro del tema (chiaro di notte) */
+.gx .gx-finestra button[style*="background: rgb(37, 99, 235)"] { background: var(--gx-inchiostro) !important; color: var(--gx-fondo) !important; }
+.gx .gx-finestra button[style*="background: rgb(37, 99, 235)"] div { color: inherit !important; opacity: .75; }

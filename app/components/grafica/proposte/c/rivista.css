@@ -1,0 +1,324 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   PROPOSTA C «RIVISTA» (27/10): la Plancia come le pagine di una rivista di architettura. Di giorno la pagina stampata
+   (perla, inchiostro quasi nero, l'arancio solo come accento), di notte l'edizione serale. I colori sono SOLO i gettoni
+   della cornice (--gx-…): il cerchio giorno/notte li cambia e qui cambia tutto da solo.
+   Regola di casa: nessun «.x span» (prenderebbe anche gli span dei numeri che contano): solo selettori di figlio o
+   classi proprie.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+.rv {
+  --rv-display: var(--font-rivista), var(--font-geist-sans), system-ui, sans-serif;
+  --rv-testo-f: var(--font-geist-sans), var(--font-outfit), system-ui, sans-serif;
+  --rv-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --rv-facile: cubic-bezier(.16, 1, .3, 1);
+  --rv-dolce: cubic-bezier(.22, 1, .36, 1);
+  /* l'altezza della finestra di lettura: lo schermo meno la barra in alto e i margini della pagina */
+  --rv-alto: calc(100vh - 66px - 50px);
+  --rv-mappa-vuota: #DCE1E8;
+  --rv-mappa-linea: #F3F5F8;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); column-gap: clamp(32px, 4.4vw, 76px);
+  max-width: 1760px; margin: 0 auto; padding: 0 clamp(4px, 1vw, 16px) 0 clamp(8px, 2.6vw, 44px);
+  font-family: var(--rv-testo-f); color: var(--gx-testo); -webkit-font-smoothing: antialiased;
+}
+[data-tema="notte"] .rv { --rv-mappa-vuota: #273046; --rv-mappa-linea: #1A2233; }
+
+/* ── la colonna del testo: misura i numeri (le unità cqi sono la sua larghezza) ── */
+.rv-testo { min-width: 0; container-type: inline-size; }
+.rv-sez { position: relative; min-height: var(--rv-alto); display: flex; flex-direction: column; justify-content: center; padding: 10vh 0; border-top: 1px solid var(--gx-filo); }
+.rv-sez--copertina { border-top: 0; padding: 0 0 72px; justify-content: flex-start; }
+.rv-sez--lunga { justify-content: flex-start; padding-top: 12vh; }
+
+/* la testata e le righe di folio, come in cima a una rivista */
+.rv-folio { display: flex; justify-content: space-between; gap: 16px; padding: 2px 0 10px; border-bottom: 1px solid var(--gx-inchiostro);
+  font: 500 11.5px/1.2 var(--rv-display); letter-spacing: .16em; text-transform: uppercase; color: var(--gx-inchiostro); }
+.rv-folio--sotto { border-bottom: 0; border-top: 1px solid var(--gx-filo); padding: 10px 0 0; color: var(--gx-attenuato); }
+.rv-testata { margin: clamp(10px, 2.4vh, 26px) 0 clamp(8px, 1.6vh, 18px) -.04em; font-family: var(--rv-display); font-weight: 200; font-variation-settings: 'wdth' 125;
+  font-size: clamp(44px, min(calc(100cqi / (var(--n) * .74)), 15vh), 150px); line-height: .9; letter-spacing: -.035em; color: var(--gx-inchiostro); }
+.rv-apertura { margin: auto 0; padding: 3vh 0 2vh; }
+
+/* ── la tipografia dei capitoli ── */
+.rv-occhiello { display: flex; align-items: center; gap: 12px; margin: 0 0 clamp(18px, 3.4vh, 34px); font: 500 12px/1 var(--rv-display); letter-spacing: .2em; text-transform: uppercase; color: var(--gx-attenuato); }
+.rv-occhiello > b { font-weight: 600; color: var(--gx-accento-testo); }
+.rv-occhiello > i { width: 40px; height: 1px; background: currentColor; opacity: .55; }
+.rv-frase { margin: 0; font-family: var(--rv-display); font-weight: 300; font-size: clamp(22px, 2.5cqi + 6px, 40px); line-height: 1.14; letter-spacing: -.014em; color: var(--gx-inchiostro); text-wrap: balance; }
+.rv-titolo { margin: 0; font-family: var(--rv-display); font-weight: 250; font-size: clamp(34px, 6.4cqi, 76px); line-height: 1.02; letter-spacing: -.03em; color: var(--gx-inchiostro); text-wrap: balance; }
+.rv-eroe { margin: .02em 0 -.04em -.06em; font-family: var(--rv-display); font-weight: 100; font-variation-settings: 'wdth' 125;
+  font-size: clamp(64px, min(calc(100cqi / (var(--c) * .72)), 25vh), 232px); line-height: .84; letter-spacing: -.045em;
+  color: var(--gx-inchiostro); font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
+.rv-nota { margin: clamp(14px, 2.4vh, 22px) 0 0; max-width: 50ch; font-size: 16.5px; line-height: 1.55; color: var(--gx-testo); text-wrap: pretty; }
+.rv-euro { white-space: nowrap; }
+.rv-euro__s { font-size: .4em; margin-right: .14em; vertical-align: 1.02em; letter-spacing: 0; }
+.rv-euro__c { font-size: .4em; margin-left: .06em; vertical-align: 1.02em; letter-spacing: 0; }
+
+/* le parole salgono da una maschera */
+.rv-m { display: inline-block; overflow: hidden; vertical-align: top; padding: .12em .02em .08em; margin: -.12em -.02em -.08em; }
+.rv-m > span { display: inline-block; transition: transform 1.15s var(--rv-facile); transition-delay: calc(var(--i, 0) * 55ms + 60ms); }
+.rv-sale { transition: opacity .9s var(--rv-dolce), transform 1.1s var(--rv-facile), filter .9s var(--rv-dolce); transition-delay: calc(var(--d, 0) * 1ms + 140ms); }
+@media (prefers-reduced-motion: no-preference) {
+  .rv-sez:not(.rv-visto) .rv-m > span { transform: translate3d(0, 115%, 0); }
+  .rv-sez:not(.rv-visto) .rv-sale { opacity: 0; transform: translate3d(0, 26px, 0); filter: blur(6px); }
+}
+
+/* ── il sommario della copertina ── */
+.rv-sommario { margin-top: clamp(14px, 2.6vh, 30px); }
+.rv-sommario__t { margin: 0 0 4px; padding-bottom: 8px; border-bottom: 1px solid var(--gx-inchiostro); font: 500 11px/1 var(--rv-display); letter-spacing: .2em; text-transform: uppercase; color: var(--gx-inchiostro); }
+.rv-sommario > ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 32px; }
+.rv-sommario button { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: baseline; gap: 14px; width: 100%; padding: clamp(7px, 1.2vh, 11px) 0; border-bottom: 1px solid var(--gx-filo); font-size: 15px; line-height: 1.3; color: var(--gx-inchiostro); }
+.rv-sommario button > b { flex: none; font: 600 11.5px/1 var(--rv-display); letter-spacing: .08em; color: var(--gx-accento-testo); }
+.rv-sommario button > span { transition: transform .5s var(--rv-facile); }
+.rv-sommario button:hover > span { transform: translateX(4px); }
+.rv-sommario button:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+
+/* ── 02 · da fare: un numero per riga, grande come un titolo, col suo verbo (i numeri in colonna, a destra) ── */
+.rv-fare { list-style: none; margin: clamp(20px, 4vh, 40px) 0 0; padding: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; column-gap: clamp(18px, 2.6cqi, 40px); }
+.rv-fare > li { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: clamp(10px, 1.8vh, 18px) 0; border-top: 1px solid var(--gx-filo); }
+.rv-fare > li:last-child { border-bottom: 1px solid var(--gx-filo); }
+.rv-fare__n { text-align: right; font-family: var(--rv-display); font-weight: 150; font-variation-settings: 'wdth' 125; font-size: clamp(46px, min(9.5cqi, 10.5vh), 112px); line-height: .95; letter-spacing: -.04em; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.rv-fare__t { font-size: clamp(16px, 1.25vw, 19px); line-height: 1.3; color: var(--gx-inchiostro); }
+.rv-fare__t > em { display: block; margin-top: 3px; font-style: normal; font-size: 13.5px; color: var(--gx-attenuato); }
+
+/* i bottoni: contorno d'inchiostro; pieno arancio solo il primo verbo della pagina */
+.rv .rv-bottone { display: inline-flex; align-items: center; gap: 6px; height: 42px; padding: 0 13px 0 18px; border-radius: 999px; font: 500 14px/1 var(--rv-testo-f); color: var(--gx-inchiostro); white-space: nowrap;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gx-inchiostro) 24%, transparent); transition: background-color .3s, color .3s, box-shadow .3s, transform .2s; }
+.rv .rv-bottone:hover { background: var(--gx-inchiostro); color: var(--gx-fondo); box-shadow: none; }
+.rv .rv-bottone--pieno { background: var(--gx-accento-pieno); color: #fff; box-shadow: none; }
+.rv .rv-bottone--pieno:hover { background: var(--gx-accento-pieno); color: #fff; box-shadow: 0 14px 32px -12px color-mix(in srgb, var(--gx-accento) 85%, transparent); }
+.rv .rv-bottone--piccolo { height: 34px; padding: 0 15px; font-size: 13px; }
+.rv-bottone > .gx-ico { width: 15px; height: 15px; }
+.rv .rv-bottone:active { transform: scale(.97); }
+.rv .rv-bottone:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+
+/* ── le cifre piccole sotto la frase ── */
+.rv-cifre { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px clamp(18px, 3cqi, 36px); margin-top: clamp(22px, 4.4vh, 44px); max-width: 760px; }
+.rv-cifre--tre { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rv .rv-cifra { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding-top: 13px; border-top: 1px solid var(--gx-inchiostro); color: inherit; }
+.rv-cifra__n { font-family: var(--rv-display); font-weight: 200; font-variation-settings: 'wdth' 118; font-size: clamp(26px, 4.4cqi, 44px); line-height: 1.05; letter-spacing: -.03em; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rv-cifra__l { font-size: 13.5px; line-height: 1.35; color: var(--gx-testo); }
+.rv-cifra__nota { font-style: normal; font-size: 12.5px; line-height: 1.35; color: var(--gx-attenuato); }
+a.rv-cifra:hover .rv-cifra__l { color: var(--gx-accento-testo); }
+
+/* ── 04 · il piano del mese: una linea sottile, l'arancio dove si è arrivati ── */
+.rv-piano { max-width: 560px; }
+.rv-piano__linea { position: relative; display: block; height: 2px; margin-top: clamp(16px, 2.6vh, 24px); background: var(--gx-filo); }
+.rv-piano__linea > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--gx-inchiostro); min-width: 2px; transition: width 1.4s var(--rv-facile) .6s; }
+.rv-piano__linea > i::after { content: ''; position: absolute; right: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--gx-accento); box-shadow: 0 0 0 4px color-mix(in srgb, var(--gx-accento) 20%, transparent); }
+.rv-piano > .rv-nota { margin-top: 12px; }
+
+/* ── 05 · i soldi ── */
+.rv-periodo { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: -6px 0 clamp(20px, 4vh, 38px); }
+.rv-periodo__scelte { display: inline-flex; gap: 2px; padding: 4px; }
+.rv-periodo__scelte > button { all: unset; box-sizing: border-box; cursor: pointer; height: 38px; padding: 0 16px; border-radius: 999px; font-size: 13.5px; font-weight: 500; color: var(--gx-testo); transition: background-color .3s, color .3s; }
+.rv-periodo__scelte > button:hover { color: var(--gx-inchiostro); background: var(--gx-incavo); }
+.rv-periodo__scelte > button[aria-pressed="true"] { background: var(--gx-inchiostro); color: var(--gx-fondo); }
+.rv-periodo__scelte > button:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 1px; }
+.rv-periodo__nota { font-size: 12.5px; color: var(--gx-attenuato); }
+.rv-sez[data-carica] .rv-eroe, .rv-sez[data-carica] .rv-conti, .rv-sez[data-carica] .rv-nota { opacity: .45; transition: opacity .25s; }
+
+.rv-conti { width: 100%; max-width: 760px; margin-top: clamp(26px, 5vh, 48px); border-collapse: collapse; font-size: 14.5px; font-variant-numeric: tabular-nums; }
+.rv-conti > caption { caption-side: top; text-align: left; padding-bottom: 10px; font: 500 11px/1 var(--rv-display); letter-spacing: .2em; text-transform: uppercase; color: var(--gx-inchiostro); }
+.rv-conti th, .rv-conti td { padding: 10px 0; border-bottom: 1px solid var(--gx-filo); text-align: right; font-weight: 400; white-space: nowrap; color: var(--gx-testo); vertical-align: top; }
+.rv-conti th + td, .rv-conti td + td { padding-left: 18px; }
+.rv-conti thead th { padding-top: 0; padding-bottom: 8px; border-bottom: 1px solid var(--gx-inchiostro); font-size: 11.5px; letter-spacing: .06em; color: var(--gx-attenuato); }
+.rv-conti thead th:first-child, .rv-conti th[scope="row"] { text-align: left; white-space: normal; }
+.rv-conti th[scope="row"] { color: var(--gx-inchiostro); }
+.rv-conti small { display: block; margin-top: 3px; font-size: 12px; color: var(--gx-attenuato); }
+.rv-conti small > .gx-ico { width: 12px; height: 12px; margin-right: 5px; vertical-align: -1px; }
+.rv .rv-conti a:hover { color: var(--gx-accento-testo); }
+.rv-conti td:last-child { color: var(--gx-inchiostro); font-weight: 500; }
+.rv-conti__totale > * { border-top: 1px solid var(--gx-inchiostro); border-bottom-color: var(--gx-inchiostro) !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; }
+.rv-conti__utile > td:last-child { font-family: var(--rv-display); font-weight: 300; font-variation-settings: 'wdth' 115; font-size: 26px; letter-spacing: -.02em; }
+.rv-saldi { margin-top: clamp(34px, 6vh, 56px); max-width: 760px; }
+.rv-sottotitolo { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 0; font-size: 13px; color: var(--gx-attenuato); }
+.rv-sottotitolo > b { font-family: var(--rv-display); font-weight: 400; font-size: 20px; letter-spacing: -.01em; color: var(--gx-inchiostro); }
+.rv .rv-sottotitolo > a { margin-left: auto; font-size: 13px; color: var(--gx-accento-testo); }
+.rv .rv-sottotitolo > a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.rv-saldi > .rv-cifre { margin-top: 18px; }
+
+/* ── 06 · l'indice dell'atlante: puntini di guida fra il nome e il numero ── */
+.rv-indice-atlante { list-style: none; margin: clamp(22px, 4vh, 40px) 0 0; padding: 0; max-width: 580px; font-variant-numeric: tabular-nums; }
+.rv-indice-atlante > li { display: flex; align-items: baseline; gap: 10px; padding: clamp(5px, .9vh, 8px) 0; font-size: 15.5px; color: var(--gx-inchiostro); cursor: default; outline: none; transition: color .25s; }
+.rv-indice-atlante > li:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+.rv-indice-atlante > li[data-acceso] { color: var(--gx-accento-testo); }
+.rv-indice-atlante__k { flex: none; width: 24px; font: 500 11.5px/1 var(--rv-display); letter-spacing: .06em; color: var(--gx-attenuato); }
+.rv-indice-atlante__nome > small { margin-left: 7px; font-size: 11px; letter-spacing: .1em; color: var(--gx-attenuato); }
+.rv-indice-atlante__punti { flex: 1; min-width: 20px; border-bottom: 1px dotted color-mix(in srgb, var(--gx-inchiostro) 40%, transparent); transform: translateY(-4px); }
+.rv-indice-atlante > li > b { font-weight: 500; }
+.rv-indice-atlante > li > em { flex: none; width: 54px; text-align: right; font-style: normal; font-size: 13px; color: var(--gx-attenuato); }
+
+/* ── 07 · la rete: gli elenchi dei resi e delle giacenze ── */
+.rv-due { display: grid; grid-template-columns: minmax(0, 1fr); gap: clamp(30px, 5vh, 48px); margin-top: clamp(30px, 6vh, 56px); max-width: 760px; }
+.rv-elenco > .rv-sottotitolo { padding-bottom: 10px; border-bottom: 1px solid var(--gx-inchiostro); }
+.rv-resi, .rv-giacenze { list-style: none; margin: 0; padding: 0; }
+.rv-resi > li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(60px, 130px) 86px; align-items: center; gap: 18px; padding: 11px 0; border-bottom: 1px solid var(--gx-filo); }
+.rv-resi__nome, .rv-giacenze__chi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; color: var(--gx-inchiostro); }
+.rv-resi__nome > small, .rv-giacenze__chi > small { display: block; margin-top: 2px; font-size: 12px; color: var(--gx-attenuato); overflow: hidden; text-overflow: ellipsis; }
+.rv-resi__barra { position: relative; height: 6px; border-radius: 3px; background: var(--gx-incavo); overflow: hidden; }
+.rv-resi__barra > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--gx-inchiostro); transform-origin: left; transition: transform 1.1s var(--rv-facile) .5s; }
+.rv-resi__barra > i.rv-rosso { background: var(--gx-problema); }
+.rv-resi > li > b { text-align: right; font-family: var(--rv-display); font-weight: 300; font-variation-settings: 'wdth' 112; font-size: 20px; letter-spacing: -.02em; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.rv-giacenze > li { display: flex; align-items: center; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--gx-filo); }
+.rv-giacenze__chi { flex: 1; }
+.rv-vuoto { margin: 14px 0 0; font-size: 14px; color: var(--gx-attenuato); }
+@media (prefers-reduced-motion: no-preference) {
+  .rv-sez:not(.rv-visto) .rv-resi__barra > i { transform: scaleX(0); }
+  .rv-sez:not(.rv-visto) .rv-piano__linea > i { width: 0 !important; }
+}
+.rv-colophon { margin: 0; padding: 22px 0 96px; border-top: 1px solid var(--gx-inchiostro); font-size: 12.5px; color: var(--gx-attenuato); }
+
+.rv .rv-meno, .rv td.rv-meno { color: var(--gx-problema); }
+
+/* ═══════════════ IL PANNELLO FERMO: la tavola del capitolo che si sta leggendo, e l'indice sotto ═══════════════ */
+.rv-lato { position: relative; min-width: 0; }
+.rv-lato__fermo { position: sticky; top: 0; height: var(--rv-alto); display: flex; flex-direction: column; gap: 10px; }
+.rv-tavola.gx-vetro { flex: 1; min-height: 0; border-radius: 30px; overflow: hidden; }
+/* l'entrata: la tavola si scopre dal basso insieme alla copertina (una volta, all'apertura) */
+@media (prefers-reduced-motion: no-preference) {
+  .rv-lato__fermo:not(.rv-lato__fermo--pronto) > .rv-tavola { clip-path: inset(100% 0 0 0 round 30px); }
+  .rv-lato__fermo:not(.rv-lato__fermo--pronto) > .rv-tavola .rv-foto > img { transform: scale(1.12); }
+  .rv-lato__fermo:not(.rv-lato__fermo--pronto) > .rv-indice { opacity: 0; transform: translate3d(0, 10px, 0); }
+}
+.rv-lato__fermo > .rv-tavola { transition: clip-path 1.5s var(--rv-facile) .15s; }
+.rv-lato__fermo > .rv-tavola .rv-foto > img { transition: transform 2.2s var(--rv-facile) .15s; }
+.rv-lato__fermo > .rv-indice { transition: opacity .8s ease 1s, transform 1s var(--rv-facile) 1s; }
+.rv-strato { position: absolute; inset: 0; margin: 0; opacity: 0; visibility: hidden; transform: translate3d(0, 5%, 0) scale(1.025);
+  transition: opacity .75s ease, transform 1.2s var(--rv-facile), visibility 0s linear .8s; }
+.rv-strato--prima { transform: translate3d(0, -4%, 0) scale(.985); }
+.rv-strato--su { z-index: 1; opacity: 1; visibility: visible; transform: none; transition: opacity .9s ease .1s, transform 1.3s var(--rv-facile), visibility 0s; }
+/* la foto entra scoprendosi dal basso, come una pagina che si gira sotto la precedente */
+.rv-strato--foto { clip-path: inset(0 0 0 0 round 30px); transition: opacity .75s ease, transform 1.2s var(--rv-facile), clip-path 1.2s var(--rv-facile), visibility 0s linear .8s; }
+.rv-strato--foto:not(.rv-strato--su):not(.rv-strato--prima) { clip-path: inset(18% 0 0 0 round 30px); }
+.rv-strato--foto.rv-strato--su { transition: opacity .9s ease .1s, transform 1.3s var(--rv-facile), clip-path 1.3s var(--rv-facile), visibility 0s; }
+
+.rv-foto { position: absolute; inset: 0; overflow: hidden; transform: translate3d(0, calc((var(--p, .5) - .5) * -44px), 0) scale(1.09); }
+.rv-foto > img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; user-select: none; }
+.rv-insegna { position: absolute; left: 0; top: 0; transform-origin: 0 0; white-space: nowrap; pointer-events: none; font-family: var(--rv-display); font-weight: 700; font-variation-settings: 'wdth' 108; letter-spacing: .02em; }
+.rv-insegna--lettera { display: grid; place-items: center; color: #fff; }
+.rv-insegna--nome { color: #2C3446; }
+.rv-insegna--notte { color: #FFE6CC; text-shadow: 0 0 6px rgba(255, 138, 61, .9), 0 0 18px rgba(255, 138, 61, .55); }
+.rv-didascalia { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; align-items: baseline; gap: 12px; padding: 54px 24px 20px; font-size: 12.5px; line-height: 1.45; color: var(--gx-inchiostro);
+  background: linear-gradient(to top, color-mix(in srgb, var(--gx-fondo) 88%, transparent) 0%, color-mix(in srgb, var(--gx-fondo) 55%, transparent) 55%, transparent 100%); }
+.rv-didascalia > b { flex: none; font: 600 10.5px/1 var(--rv-display); letter-spacing: .16em; text-transform: uppercase; color: var(--gx-accento-testo); }
+
+/* l'indice dei capitoli: discreto, numeri in fila; quello che si legge si apre col suo nome e una linea che avanza */
+.rv-indice { flex: none; display: flex; align-items: center; gap: 0; height: 38px; padding: 0 6px; overflow: hidden; }
+.rv-indice > button { all: unset; box-sizing: border-box; cursor: pointer; position: relative; display: inline-flex; align-items: center; gap: 0; height: 34px; padding: 0 9px; border-radius: 999px;
+  font: 500 11.5px/1 var(--rv-display); letter-spacing: .1em; color: var(--gx-attenuato); transition: color .3s, gap .5s var(--rv-facile); }
+.rv-indice > button > b { font-weight: 600; }
+.rv-indice > button > span { max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0; text-transform: uppercase; letter-spacing: .16em; transition: max-width .7s var(--rv-facile), opacity .45s; }
+.rv-indice > button > i { position: absolute; left: 9px; right: 9px; bottom: 5px; height: 1px; background: var(--gx-accento); transform: scaleX(0); transform-origin: left; }
+.rv-indice > button[aria-current="true"] { gap: 10px; color: var(--gx-inchiostro); }
+.rv-indice > button[aria-current="true"] > span { max-width: 220px; opacity: 1; }
+.rv-indice > button[aria-current="true"] > i { transform: scaleX(var(--p, 0)); }
+.rv-indice > button:hover { color: var(--gx-inchiostro); }
+.rv-indice > button:focus-visible { outline: 2px solid var(--gx-accento); }
+
+/* ── le tavole (i grafici): inchiostro su vetro latte, testata con filo nero come le tavole di un atlante ── */
+.rv-tav { position: absolute; inset: 0; display: flex; flex-direction: column; padding: clamp(20px, 2.2vw, 32px); color: var(--gx-testo); }
+.rv-tav__testa { flex: none; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--gx-inchiostro); }
+.rv-tav__occhiello { display: block; margin-bottom: 8px; font: 500 11px/1 var(--rv-display); letter-spacing: .2em; text-transform: uppercase; color: var(--gx-attenuato); }
+.rv-tav__titolo { display: block; font-family: var(--rv-display); font-weight: 300; font-size: clamp(20px, 1.75vw, 30px); line-height: 1.12; letter-spacing: -.015em; color: var(--gx-inchiostro); }
+.rv-tav__destra { flex: none; text-align: right; }
+.rv-tav__destra > b { display: block; font-family: var(--rv-display); font-weight: 200; font-variation-settings: 'wdth' 120; font-size: clamp(24px, 2.2vw, 36px); line-height: 1; letter-spacing: -.03em; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.rv-tav__destra > span { display: block; margin-top: 4px; font-size: 12px; color: var(--gx-attenuato); }
+.rv-tav__sotto { flex: none; margin: 12px 0 0; font-size: 13px; color: var(--gx-attenuato); }
+.rv-tav__sotto > b { font-weight: 500; color: var(--gx-inchiostro); }
+.rv-tav__vuoto { margin: auto 0; padding: 0 12%; text-align: center; font-size: 14.5px; line-height: 1.5; color: var(--gx-attenuato); }
+.rv-tav__grafico { flex: 1; min-height: 0; width: 100%; margin-top: 14px; overflow: visible; }
+.rv-tav__area { position: relative; flex: 1; min-height: 0; margin-top: 14px; }
+.rv-tav__area > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.rv-tav__piede { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gx-filo); font-size: 12px; color: var(--gx-attenuato); }
+.rv-tav__piede > span { display: inline-flex; align-items: center; gap: 7px; }
+.rv-tav__piede > span > i { display: inline-block; width: 16px; height: 10px; border-radius: 2px; }
+.rv-tav__et { font: 10.5px var(--rv-mono); fill: var(--gx-attenuato); }
+.rv-filo { stroke: var(--gx-filo); }
+.rv-asse { stroke: color-mix(in srgb, var(--gx-inchiostro) 55%, transparent); }
+
+/* le texture del metodo di sogaso: puntini (mezzetinte), righe oblique arancio, pieno arancio */
+.rv-trama-punti { background-image: radial-gradient(circle, var(--gx-inchiostro) 1.1px, transparent 1.45px); background-size: 4px 4px; background-position: 0 0; }
+.rv-trama-righe { background-image: repeating-linear-gradient(135deg, var(--gx-accento) 0 1.6px, transparent 1.6px 4.2px); box-shadow: inset 0 0 0 1px var(--gx-accento); }
+.rv-trama-piena { background: var(--gx-accento); }
+
+/* l'orario della giornata */
+.rv-orario { flex: 1; min-height: 0; list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; }
+.rv-orario > li { flex: 1 1 0; min-height: 0; max-height: 44px; display: grid; grid-template-columns: 24px minmax(0, 1fr) 40px 54px; align-items: center; gap: 12px; }
+.rv-orario__h { font: 11px/1 var(--rv-mono); color: var(--gx-attenuato); }
+.rv-orario__binario { position: relative; height: 100%; display: flex; align-items: center; }
+.rv-orario__binario::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--gx-filo); }
+.rv-orario__barra { position: relative; display: flex; gap: 2px; height: 58%; min-height: 5px; max-height: 20px; border-radius: 3px; overflow: hidden; transform-origin: left center;
+  transition: transform 1s var(--rv-facile); transition-delay: calc(var(--k, 0) * 40ms + 250ms); }
+.rv-orario__barra > i { display: block; height: 100%; min-width: 3px; border-radius: 2px; }
+.rv-orario__n { text-align: right; font: 400 13px/1 var(--rv-testo-f); color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+.rv-orario--dopo { opacity: .4; }
+.rv-orario--ora > .rv-orario__h { color: var(--gx-accento-testo); font-weight: 600; }
+.rv-orario__adesso { justify-self: start; padding: 4px 8px; border-radius: 999px; font: 600 10px/1 var(--rv-display); letter-spacing: .12em; text-transform: uppercase; font-style: normal; color: #fff; background: var(--gx-accento-pieno); }
+
+/* i mesi */
+.rv-mesi { flex: 1; min-height: 0; display: flex; align-items: stretch; gap: clamp(10px, 1.5vw, 24px); margin-top: 16px; }
+.rv-mesi__col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; }
+.rv-mesi__n { margin-bottom: 8px; text-align: center; white-space: nowrap; font-family: var(--rv-display); font-weight: 200; font-variation-settings: 'wdth' 110; font-size: clamp(14px, 1.3vw, 22px); letter-spacing: -.02em; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums;
+  transition: opacity .6s ease; transition-delay: calc(var(--k, 0) * 90ms + 800ms); }
+.rv-mesi__barra { position: relative; display: block; height: calc(var(--h, 0) * (100% - 76px)); min-height: 2px; border-radius: 6px 6px 0 0; overflow: hidden; transform-origin: bottom center;
+  transition: transform 1.2s var(--rv-facile); transition-delay: calc(var(--k, 0) * 90ms + 200ms); }
+.rv-mesi__barra > i { position: absolute; inset: 0; display: block; }
+.rv-mesi__nome { padding-top: 9px; border-top: 1px solid var(--gx-inchiostro); text-align: center; font: 500 11.5px/1 var(--rv-display); letter-spacing: .14em; text-transform: uppercase; color: var(--gx-testo); }
+.rv-mesi__euro { margin-top: 5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-style: normal; font-size: 11px; color: var(--gx-attenuato); font-variant-numeric: tabular-nums; }
+.rv-mesi__col--ora > .rv-mesi__n, .rv-mesi__col--ora > .rv-mesi__nome { color: var(--gx-accento-testo); }
+
+/* il margine */
+.rv-cresce { transform-box: fill-box; transform-origin: center bottom; transition: transform 1s var(--rv-facile); transition-delay: calc(var(--k, 0) * 22ms + 250ms); }
+
+/* l'atlante */
+.rv-atlante__reticolo { fill: none; stroke: var(--gx-filo); stroke-width: .8; }
+.rv-atlante__grado { font: 9.5px var(--rv-mono); fill: var(--gx-attenuato); }
+.rv-atlante__province > path { stroke: var(--rv-mappa-linea); stroke-width: .5; transition: fill .5s ease, opacity .8s ease; transition-delay: 0s, calc(var(--y, 0) * .7s + .15s); }
+.rv-atlante__nota > circle { fill: var(--gx-inchiostro); }
+.rv-atlante__nota > line { stroke: var(--gx-inchiostro); stroke-width: 1; }
+.rv-atlante__nota { animation: rv-compari .5s var(--rv-dolce) both; }
+.rv-atlante__nome { font: 600 13px var(--rv-display); fill: var(--gx-inchiostro); }
+.rv-atlante__val { font: 11.5px var(--rv-testo-f); fill: var(--gx-attenuato); }
+.rv-atlante__scala > rect { fill: var(--gx-inchiostro); }
+.rv-atlante__scala > rect.rv-vuoto { fill: none; stroke: var(--gx-inchiostro); stroke-width: .8; }
+.rv-atlante__scala > text { font: 9.5px var(--rv-mono); fill: var(--gx-attenuato); }
+.rv-atlante__nord > path { fill: var(--gx-inchiostro); }
+.rv-atlante__nord > text { font: 600 10px var(--rv-display); fill: var(--gx-inchiostro); }
+.rv-atlante__sfumatura { display: inline-block; flex: 0 0 110px; width: 110px; height: 8px; border-radius: 4px; }
+.rv-tav__piede--scala { gap: 6px 10px; }
+.rv-atlante__acceso { margin-left: auto; }
+.rv-atlante__acceso > i { width: 9px !important; height: 9px !important; border-radius: 50% !important; background: var(--gx-accento); }
+@keyframes rv-compari { from { opacity: 0; } }
+
+/* le tavole si disegnano quando arrivano in primo piano: le barre crescono, le colonne salgono, l'Italia si colora da nord */
+@media (prefers-reduced-motion: no-preference) {
+  .rv-strato:not(.rv-strato--su) .rv-orario__barra { transform: scaleX(0); }
+  .rv-strato:not(.rv-strato--su) .rv-mesi__barra, .rv-strato:not(.rv-strato--su) .rv-cresce { transform: scaleY(0); }
+  .rv-strato:not(.rv-strato--su) .rv-mesi__n { opacity: 0; }
+  .rv-strato:not(.rv-strato--su) .rv-atlante__province > path { opacity: 0; }
+}
+
+/* ═══════════════ il telefono: una colonna, la tavola dentro il capitolo ═══════════════ */
+@media (max-width: 899px) {
+  .rv { grid-template-columns: minmax(0, 1fr); padding: 0 4px; }
+  .rv-sez { min-height: 0; padding: 56px 0 40px; }
+  .rv-sez--copertina { padding-top: 0; }
+  .rv-cifre--tre { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rv-sommario > ul { grid-template-columns: minmax(0, 1fr); }
+  .rv-fare { grid-template-columns: max-content minmax(0, 1fr); }
+  .rv-fare > li > .rv-bottone { grid-column: 2; justify-self: start; margin-top: 10px; }
+  .rv-figura { position: relative; height: 460px; margin: 30px 0 0; border-radius: 24px; overflow: hidden; background: var(--gx-vetro); box-shadow: inset 0 0 0 1px var(--gx-vetro-orlo); }
+  .rv-figura--foto { height: auto; aspect-ratio: 4 / 5; }
+  .rv-figura .rv-foto { transform: none; }
+  .rv-resi > li { grid-template-columns: minmax(0, 1fr) 60px; }
+  .rv-resi__barra { display: none; }
+  .rv-conti { font-size: 13.5px; }
+  /* sul telefono il conto tiene solo il guadagno: incassato e costo restano nei report */
+  .rv-conti tr > :nth-child(2), .rv-conti tr > :nth-child(3) { display: none; }
+  .rv-periodo__scelte { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .rv-periodo__scelte > button { flex: none; white-space: nowrap; padding: 0 12px; }
+  .rv-folio { font-size: 10.5px; letter-spacing: .1em; }
+  .rv-folio--sotto > :last-child { display: none; }
+  .rv-conti th + td, .rv-conti td + td { padding-left: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rv *, .rv *::before, .rv *::after { transition: none !important; animation: none !important; }
+  .rv-foto { transform: none; }
+}

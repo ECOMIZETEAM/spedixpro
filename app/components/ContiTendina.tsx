@@ -1,4 +1,5 @@
 'use client'
+import { Icona } from './grafica/icone'
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -16,7 +17,7 @@ type Sezione = {
 
 const eur = (n: number) => '€ ' + Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function ContiTendina({ conti, compatto = false }: { conti: number; compatto?: boolean }) {
+export default function ContiTendina({ conti, compatto = false, aspetto }: { conti: number; compatto?: boolean; aspetto?: 'nuova' }) {
   const [aperto, setAperto] = useState(false)
   const [sezioni, setSezioni] = useState<Sezione[] | null>(null)
   const [errore, setErrore] = useState(false)
@@ -73,6 +74,11 @@ export default function ContiTendina({ conti, compatto = false }: { conti: numbe
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
+      {aspetto === 'nuova' ? (
+      <button onClick={() => setAperto(a => !a)} aria-haspopup="menu" aria-expanded={aperto} title="I tuoi conti: saldi e movimenti" className="gx-tasto gx-vetro gx-pillola gx-credito">
+        <Icona id="i-carta" />{!compatto && <small>I tuoi conti</small>}<b>{conti}</b>
+      </button>
+      ) : (
       <button onClick={() => setAperto(a => !a)} aria-haspopup="menu" aria-expanded={aperto}
         title="I tuoi conti: saldi e movimenti"
         style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', background: aperto ? '#faf7f4' : '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '5px 10px' }}>
@@ -81,6 +87,7 @@ export default function ContiTendina({ conti, compatto = false }: { conti: numbe
         <span style={{ fontSize: '12px', fontWeight: 800, color: '#1a1a1a' }}>{conti}</span>
         <span style={{ fontSize: '10px', color: '#bbb', transition: 'transform .15s', transform: aperto ? 'rotate(180deg)' : 'none' }}>▾</span>
       </button>
+      )}
 
       {aperto && montato && pos && createPortal(
         <div ref={pannello} role="menu" style={{

@@ -27,7 +27,7 @@ function renderTesto(t: string) {
   )
 }
 
-export default function Moovy() {
+export default function Moovy({ senzaPulsante = false }: { senzaPulsante?: boolean } = {}) {
   const [open, setOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [input, setInput] = useState('')
@@ -35,6 +35,12 @@ export default function Moovy() {
   const [messages, setMessages] = useState<Msg[]>([
     { role: 'assistant', content: 'Ciao! Sono **MOOVY**, il tuo assistente. Chiedimi come funziona qualsiasi cosa dell\'app e ti guido passo passo. 🚚' },
   ])
+  // grafica nuova: la barra «Chiedi a Moovy» in alto (e ⌘K) apre il pannello con un evento
+  useEffect(() => {
+    if (!senzaPulsante) return
+    const apri = () => setOpen(true)
+    window.addEventListener('moovy:apri', apri); return () => window.removeEventListener('moovy:apri', apri)
+  }, [senzaPulsante])
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -179,7 +185,7 @@ export default function Moovy() {
   return (
     <>
       {/* Pulsante fluttuante */}
-      {!open && (
+      {!open && !senzaPulsante && (
         <button onClick={() => setOpen(true)} aria-label="Apri MOOVY" title="Moovy — l'assistente MoovExpress"
           style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 1250, width: '58px', height: '58px', borderRadius: '50%', border: 'none', background: ARANCIO, color: '#fff', cursor: 'pointer', boxShadow: '0 8px 24px rgba(249,115,22,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, transition: 'transform .15s' }}
           onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.94)')}

@@ -1,4 +1,5 @@
 'use client'
+import { Icona } from './grafica/icone'
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
@@ -24,7 +25,7 @@ function quando(iso: string) {
     d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
 }
 
-export default function CampanellaNotifiche() {
+export default function CampanellaNotifiche({ aspetto }: { aspetto?: 'nuova' } = {}) {
   const [aperto, setAperto] = useState(false)
   const [lista, setLista] = useState<Notifica[]>([])
   const [vistoAl, setVistoAl] = useState<string>('')   // created_at dell'ultima vista
@@ -105,6 +106,13 @@ export default function CampanellaNotifiche() {
 
   return (
     <div ref={box} style={{ position: 'relative' }}>
+      {aspetto === 'nuova' ? (
+      // grafica nuova (components/grafica): la campana a linea nella pillola di vetro, il numero nel pallino
+      <button onClick={apri} aria-label="Notifiche" aria-expanded={aperto} title="Notifiche" className="gx-tasto gx-segno">
+        <Icona id="i-campana" />
+        {nonLette > 0 && <span className="gx-segno__pallino gx-segno__pallino--n">{nonLette > 9 ? '9+' : nonLette}</span>}
+      </button>
+      ) : (
       <button onClick={apri} aria-label="Notifiche" aria-expanded={aperto} title="Notifiche"
         style={{ position: 'relative', background: aperto ? '#faf7f4' : 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', borderRadius: '8px', lineHeight: 1 }}>
         <span style={{ fontSize: '18px' }}>🔔</span>
@@ -116,6 +124,7 @@ export default function CampanellaNotifiche() {
           }}>{nonLette > 9 ? '9+' : nonLette}</span>
         )}
       </button>
+      )}
 
       {aperto && montato && pos && createPortal(
         <div ref={pannello} style={{

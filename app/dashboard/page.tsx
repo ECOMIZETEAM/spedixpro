@@ -8,8 +8,21 @@ import BannerSms from '@/app/components/BannerSms'
 import GuadagnoAgente from '@/app/components/GuadagnoAgente'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
 import ResiReteWidget from '@/app/components/ResiReteWidget'
+import { useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import PlanciaB from '@/app/components/grafica/proposte/b/PlanciaB'
 
+// Con la grafica nuova (v11) la Plancia è un'altra pagina, coi numeri delle stesse rotte; con quella di oggi resta
+// questa, identica. L'agente ha la sua plancia confinata ai suoi clienti: finché non è disegnata, resta quella di oggi.
 export default function Dashboard() {
+  const g = useContext(GraficaNuova)
+  if (!g.attiva || g.ruolo === 'agente') return <DashboardDiOggi />
+  // Lorenzo 18/11: «ho deciso la B» (Il flusso). Le altre proposte del 27/10 e il selettore in basso non si mostrano più;
+  // il loro codice resta nelle cartelle proposte/a, c, d finché Lorenzo non dice di toglierlo.
+  return <PlanciaB />
+}
+
+function DashboardDiOggi() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 

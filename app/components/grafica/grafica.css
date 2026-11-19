@@ -1,0 +1,181 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   LA GRAFICA NUOVA (v11, approvata da Lorenzo il 27/10): vetro liquido sul magazzino 3D, giorno e notte, icone a linea.
+   Vale SOLO sotto [data-grafica="nuova"]: con la grafica di oggi nessuna di queste regole tocca niente (le pagine
+   devono restare identiche al pixel, è la prova che si fa prima e dopo).
+   Il menu e la barra in alto sono quelli di oggi (stesse voci, stessi permessi, stessi pallini): cambia il vestito.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+[data-grafica="nuova"] {
+  /* notte */
+  --gx-fondo: #171E2B;
+  --gx-inchiostro: #FFFFFF;
+  --gx-testo: rgba(236, 241, 248, .88);
+  --gx-attenuato: rgba(214, 224, 238, .68);
+  --gx-filo: rgba(255, 255, 255, .12);
+  --gx-accento: #FF8A3D;
+  --gx-accento-pieno: #FF7A2E;
+  --gx-accento-testo: #FFA766;
+  --gx-bene: #5BE0B5;
+  --gx-problema: #FF8A94;
+  --gx-vetro: rgba(18, 24, 40, .46);
+  --gx-vetro-orlo: rgba(255, 255, 255, .16);
+  --gx-vetro-luce: rgba(255, 255, 255, .18);
+  --gx-incavo: rgba(255, 255, 255, .07);
+  --gx-velo: rgba(16, 22, 36, .62);
+  --gx-pallino: #E0434F;
+}
+[data-grafica="nuova"][data-tema="giorno"] {
+  --gx-fondo: #E8DAC4;
+  --gx-inchiostro: #17140F;
+  --gx-testo: rgba(40, 33, 24, .88);
+  --gx-attenuato: rgba(66, 56, 42, .72);
+  --gx-filo: rgba(40, 30, 16, .11);
+  --gx-accento: #E2600F;
+  --gx-accento-pieno: #EE6A18;
+  --gx-accento-testo: #A9440A;
+  --gx-bene: #0E7A55;
+  --gx-problema: #C42638;
+  --gx-vetro: rgba(255, 251, 244, .56);
+  --gx-vetro-orlo: rgba(255, 255, 255, .85);
+  --gx-vetro-luce: rgba(255, 255, 255, .9);
+  --gx-incavo: rgba(40, 30, 16, .06);
+  --gx-velo: rgba(240, 232, 216, .58);
+}
+/* «argilla» (27/10, dai riferimenti RoutaX che Lorenzo ha mandato): il giorno è il plastico bianco su grigio perla
+   freddo; vetro bianco latte, inchiostro quasi nero, ombre morbide e azzurrine, l'arancio MoovExpress come unico colore */
+[data-grafica="nuova"][data-luce="argilla"] {
+  --gx-fondo: #E9ECF1;
+  --gx-inchiostro: #0F141B;
+  --gx-testo: rgba(18, 24, 34, .86);
+  --gx-attenuato: rgba(52, 62, 78, .62);
+  --gx-filo: rgba(16, 24, 40, .08);
+  --gx-accento: #F26B1D;
+  --gx-accento-pieno: #F26B1D;
+  --gx-accento-testo: #C2470C;
+  --gx-bene: #12805A;
+  --gx-problema: #D23446;
+  --gx-vetro: rgba(255, 255, 255, .7);
+  --gx-vetro-orlo: rgba(255, 255, 255, 1);
+  --gx-vetro-luce: rgba(255, 255, 255, 1);
+  --gx-incavo: rgba(16, 24, 40, .045);
+  --gx-velo: rgba(233, 236, 241, .66);
+}
+[data-luce="argilla"] .gx-vetro { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(30, 42, 66, .04), 0 22px 48px -26px rgba(30, 42, 66, .26); }
+[data-luce="argilla"] .gx-marca--logo { background: #141A24; }
+/* scuro solo per la cornice: le pagine dentro hanno ancora i riquadri bianchi di oggi, e un color-scheme scuro su tutta
+   la pagina faceva neri le caselle e i menu a tendina dentro quei riquadri (finché anche loro non avranno il vestito nuovo) */
+[data-grafica="nuova"][data-tema="notte"] .gx-lato, [data-grafica="nuova"][data-tema="notte"] .gx-alto { color-scheme: dark; }
+[data-grafica="nuova"], [data-grafica="nuova"] body { background: var(--gx-fondo); }
+
+/* GLI STRATI. La cornice è un contesto suo (z-index 0): dentro, il fondo e la base 3D stanno SOTTO a tutto (−1), la
+   pagina e la barra in alto sopra, il menu a 20. Prima la colonna di destra aveva z-index 1 e la base della Plancia
+   (fixed) copriva la barra in alto; e le finestre delle pagine non coprivano il menu. Le tendine in fondo alla pagina
+   (campanella, profilo, conti, supporto) stanno fuori dalla cornice, sopra a tutto. */
+.gx { z-index: 0; position: relative; display: flex; height: 100vh; overflow: hidden; font-family: var(--font-outfit), system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--gx-testo); -webkit-font-smoothing: antialiased; }
+.gx a { color: inherit; text-decoration: none; }
+.gx-ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* il fondo: il magazzino della luce dell'ora, sfocato e velato (sulle pagine di lavoro si legge il dato, non la scena) */
+.gx-fondo { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--gx-fondo); pointer-events: none; }
+.gx-fondo img { position: absolute; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); object-fit: cover; filter: blur(22px) saturate(120%); user-select: none; }
+.gx-fondo::after { content: ''; position: absolute; inset: 0; background: var(--gx-velo); }
+
+/* il vetro */
+.gx-vetro { position: relative; isolation: isolate; border-radius: 24px; background: var(--gx-vetro);
+  -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 60px -32px rgba(0, 0, 0, .5); }
+.gx-pillola { border-radius: 999px; }
+
+/* ── il menu a sinistra ── */
+.gx-lato { position: relative; z-index: 20; flex: none; width: 216px; margin: 16px 0 16px 16px; display: flex; flex-direction: column; padding: 16px 10px 10px; transition: width .2s, margin .2s, opacity .2s; }
+.gx-lato--chiuso { width: 0; margin-right: -16px; padding: 0; opacity: 0; overflow: hidden; }
+/* 18/11, Lorenzo: «il menu attaccato alle pareti, sopra, sotto e sinistra». Niente margini né angoli tondi; a destra
+   un filo e un'ombra lunga e leggera lo staccano dalla pagina. Sul telefono resta la tendina staccata (vedi @media) */
+.gx-lato { width: 232px; margin: 0; padding: 18px 12px 12px; }
+.gx-lato--chiuso { width: 0; margin-right: 0; padding: 0; }
+.gx .gx-lato.gx-vetro, [data-luce] .gx-lato.gx-vetro { border-radius: 0; box-shadow: inset -1px 0 0 var(--gx-filo), 18px 0 50px -40px rgba(20, 30, 50, .35); }
+[data-luce="notte"] .gx-lato.gx-vetro { box-shadow: inset -1px 0 0 var(--gx-filo), 18px 0 50px -40px rgba(0, 0, 0, .7); }
+.gx-marca { display: flex; align-items: center; gap: 10px; padding: 0 8px 16px; min-width: 0; }
+.gx-marca__v { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--gx-accento-pieno); font-weight: 600; font-size: 17px; line-height: 1; color: #fff; }
+.gx-marca__logo { width: 100%; max-height: 52px; object-fit: contain; object-position: left center; }
+/* i loghi dei master sono fatti per la barra nera di oggi (spesso bianchi): di giorno, sul vetro chiaro, stanno su una
+   lastrina d'ardesia, se no il logo bianco di Ecomize sparisce */
+.gx-marca--logo { margin: 0 2px 12px; padding: 10px 12px; border-radius: 14px; }
+[data-grafica="nuova"][data-tema="giorno"] .gx-marca--logo { background: #1D2433; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
+.gx-marca b { display: block; font-weight: 500; font-size: 15px; color: var(--gx-inchiostro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-marca small { display: block; font-size: 12px; color: var(--gx-attenuato); }
+.gx-menu { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.gx-menu::-webkit-scrollbar { display: none; }
+.gx-gruppo { padding: 12px 10px 4px; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--gx-attenuato); }
+.gx-voce { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 10px; border: 0; border-radius: 10px; background: none; font: inherit; font-size: 14px; color: var(--gx-testo); white-space: nowrap; cursor: pointer; text-align: left; }
+.gx-voce .gx-ico { width: 17px; height: 17px; opacity: .75; }
+.gx-voce:hover { background: var(--gx-incavo); }
+.gx-voce--su { background: var(--gx-incavo); color: var(--gx-inchiostro); font-weight: 500; box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx-voce--su .gx-ico { color: var(--gx-accento); opacity: 1; }
+.gx-voce--aperta { color: var(--gx-inchiostro); }
+.gx-voce:focus-visible, .gx-rami a:focus-visible, .gx-tasto:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 1px; }
+.gx-conta { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 500; display: grid; place-items: center; color: #fff; background: var(--gx-pallino); }
+.gx-freccia { margin-left: auto; width: 14px !important; height: 14px !important; opacity: .45 !important; transition: transform .25s cubic-bezier(.22,1,.36,1); }
+.gx-conta + .gx-freccia { margin-left: 6px; }
+.gx-voce--aperta .gx-freccia { transform: rotate(90deg); }
+.gx-rami { display: grid; padding: 2px 0 6px 27px; animation: gx-rami .3s cubic-bezier(.22,1,.36,1) both; }
+.gx-rami a { display: flex; align-items: center; gap: 8px; min-height: 27px; padding: 0 10px; font-size: 13px; color: var(--gx-attenuato); border-radius: 8px; }
+.gx-rami a:hover { color: var(--gx-inchiostro); background: var(--gx-incavo); }
+.gx-rami a.gx-su { color: var(--gx-accento-testo); font-weight: 500; }
+.gx-rami .gx-conta { margin-left: auto; }
+@keyframes gx-rami { from { opacity: 0; transform: translateY(-4px); } }
+.gx-piede { border-top: 1px solid var(--gx-filo); padding: 8px 0 0; }
+
+/* ── la colonna a destra: la barra in alto e la pagina ── */
+.gx-destra { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.gx-alto { position: relative; z-index: 5; flex: none; display: flex; align-items: center; gap: 10px; padding: 16px 16px 0 16px; height: 66px; }
+.gx-tasto { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 44px; min-width: 44px; padding: 0 12px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: 13.5px; color: var(--gx-testo); cursor: pointer; white-space: nowrap; }
+.gx-tasto:hover { color: var(--gx-inchiostro); background: var(--gx-incavo); }
+.gx-cerca { display: flex; align-items: center; gap: 10px; flex: 0 1 440px; min-width: 0; height: 50px; padding: 0 8px 0 7px; border: 0; font: inherit; font-size: 14.5px; color: var(--gx-attenuato); cursor: pointer; text-align: left; transition: box-shadow .25s; }
+.gx-cerca:hover { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px color-mix(in srgb, var(--gx-accento) 55%, transparent), 0 24px 60px -32px rgba(0, 0, 0, .5); }
+.gx-cerca__moovy { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--gx-accento-pieno); color: #fff; }
+.gx-cerca__testo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-cerca kbd { margin-left: auto; font: 500 11.5px var(--font-outfit), system-ui; color: var(--gx-attenuato); padding: 4px 8px; border-radius: 8px; background: var(--gx-incavo); }
+.gx-spazio { flex: 1; }
+.gx-gruppo-tasti { display: flex; align-items: center; height: 50px; padding: 3px; }
+.gx-aspetto button { all: unset; cursor: pointer; display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 999px; color: var(--gx-attenuato); }
+.gx-aspetto button:hover { color: var(--gx-inchiostro); }
+.gx-aspetto button[aria-pressed="true"] { color: var(--gx-inchiostro); background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx-aspetto button:focus-visible { outline: 2px solid var(--gx-accento); }
+.gx-credito b { font-weight: 500; color: var(--gx-inchiostro); }
+.gx-credito--meno b { color: var(--gx-problema); }
+.gx-credito small { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--gx-attenuato); }
+.gx-avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 13px; font-weight: 500; color: #fff; background: linear-gradient(150deg, #5B7CFA, #2B3FA8); }
+.gx-segno { position: relative; }
+.gx-segno__pallino { position: absolute; top: 7px; right: 8px; min-width: 8px; height: 8px; border-radius: 999px; background: var(--gx-pallino); }
+.gx-segno__pallino--n { top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; font-weight: 600; line-height: 16px; color: #fff; text-align: center; }
+.gx-pagina { flex: 1; min-height: 0; overflow-y: auto; padding: 26px 16px 24px 16px; }
+
+/* ── le transizioni fra le pagine e fra giorno e notte (View Transitions) ── */
+.gx-lato { view-transition-name: gx-menu; }
+.gx-alto { view-transition-name: gx-barra; }
+::view-transition-group(gx-menu), ::view-transition-group(gx-barra) { animation-duration: 0s; }
+::view-transition-old(root) { animation: gx-pagina-esce .28s cubic-bezier(.4, 0, 1, 1) both; }
+::view-transition-new(root) { animation: gx-pagina-entra .6s cubic-bezier(.16, 1, .3, 1) .06s both; }
+@keyframes gx-pagina-esce { to { opacity: 0; transform: translate3d(0, -10px, 0); filter: blur(6px); } }
+@keyframes gx-pagina-entra { from { opacity: 0; transform: translate3d(0, 22px, 0); filter: blur(8px); } }
+/* giorno ↔ notte: la luce nuova si allarga in un cerchio (lo disegna CorniceNuova), niente dissolvenza sotto */
+.vt-tema::view-transition-old(root), .vt-tema::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+.vt-tema::view-transition-group(gx-menu), .vt-tema::view-transition-group(gx-barra) { animation: none; }
+.vt-tema .gx-lato, .vt-tema .gx-alto { view-transition-name: none; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}
+
+/* il menu a scomparsa sul telefono */
+.gx-velo-menu { position: fixed; inset: 0; z-index: 999; background: rgba(0, 0, 0, .45); }
+@media (max-width: 899px) {
+  .gx-lato { position: fixed; left: 0; top: 0; bottom: 0; margin: 10px; z-index: 1000; transform: translateX(calc(-100% - 20px)); transition: transform .25s ease; }
+  .gx-lato--aperto { transform: none; }
+  .gx-alto { padding: 10px 10px 0; height: 60px; gap: 6px; }
+  .gx-cerca { flex: 1; }
+  .gx-cerca kbd, .gx-solo-largo { display: none; }
+  .gx-pagina { padding: 14px 10px 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-rami, .gx-lato, .gx-freccia { animation: none !important; transition: none !important; }
+}

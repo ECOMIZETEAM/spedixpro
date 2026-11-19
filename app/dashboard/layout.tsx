@@ -8,6 +8,26 @@ import AvvisoImportante from './AvvisoImportante'
 import CongelatoGate from './CongelatoGate'
 import BannerDemo from '../components/BannerDemo'
 import { DialogProvider } from '../components/DialogProvider'
+import { cookies } from 'next/headers'
+import { Outfit } from 'next/font/google'
+
+// Il carattere della grafica nuova (v11). preload: false: con la grafica di oggi la pagina non lo scarica nemmeno.
+const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit', display: 'swap', preload: false })
+function luceNotte(scelta: string): boolean {
+  if (scelta === 'notte') return true
+  if (scelta !== 'auto') return false
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map(x => [x.type, x.value]))
+  const m = Number(p.hour) * 60 + Number(p.minute)
+  return m < 7 * 60 || m >= 18 * 60 + 12
+}
+// La luce con cui la pagina nasce, decisa QUI sul server: la scelta di chi guarda (biscotto mx_tema: auto, giorno o
+// notte) e, in Auto, l'ora di Roma. Così la pagina arriva già col vetro giusto, senza uno script che la ritocchi prima
+// del disegno (React non lo accetta, e il server e il browser disegnerebbero due pagine diverse). Stesse soglie di
+// luceDellOra in components/grafica/CorniceNuova.tsx.
+function luceIniziale(scelta: string): string {
+  // 27/10: il giorno è il plastico bianco («argilla», dai riferimenti RoutaX di Lorenzo); la notte resta la notte
+  return luceNotte(scelta) ? 'notte' : 'argilla'
+}
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
 // SENZA utente -> sidebar assente al primo accesso (il portale cliente aveva gia' lo stesso
@@ -52,7 +72,16 @@ export default async function Layout({ children }: { children: React.ReactNode }
   }
   // Prova demo terminata: fuori dal gestionale, verso la pagina che spiega com'è andata.
   if (demo && demoScadenza && new Date(demoScadenza).getTime() < Date.now()) redirect('/demo-scaduta')
-  return (
+  // GRAFICA NUOVA: per ora solo il super master che l'ha accesa (/api/grafica). Lorenzo 27/10: niente in produzione
+  // finché tutte le pagine non sono fatte e controllate; poi il pulsante a tutti, col voto.
+  // GRAFICA_PROVA_MASTER_IDS: i master con cui si guarda l'anteprima in locale (Lorenzo: «entra con ecomize LL»);
+  // in produzione la variabile non c'è.
+  const prova = (process.env.GRAFICA_PROVA_MASTER_IDS || '').split(',').map(x => x.trim()).filter(Boolean)
+  const puoGraficaNuova = superMaster || (!!utente?.master_id && prova.includes(utente.master_id))
+  const biscotti = await cookies()
+  const graficaNuova = puoGraficaNuova && biscotti.get('mx_grafica')?.value === 'nuova'
+  const graficaScelta = ['auto', 'giorno', 'notte'].includes(biscotti.get('mx_tema')?.value || '') ? biscotti.get('mx_tema')!.value : 'auto'
+  const pagina = (
     <DashboardLayout user={{
       nome: utente?.nome || 'Admin',
       ruolo: utente?.ruolo || 'master',
@@ -65,6 +94,12 @@ export default async function Layout({ children }: { children: React.ReactNode }
       isMultiexpress: utente?.master_id === 'a8d42a25-3711-4343-a6df-ee2ba9bbf08b',
       ottimizzaMargini,
       vedeReteCompleta,
+      graficaNuova,
+      graficaScelta,
+      // l'entrata animata della Plancia, una volta per sessione (biscotto di sessione mx_entrata, lo mette la Plancia)
+      graficaEntrata: graficaNuova && !biscotti.get('mx_entrata'),
+      graficaLuce: graficaNuova ? luceIniziale(graficaScelta) : undefined,
+      graficaProposta: graficaNuova && ['a', 'b', 'c', 'd'].includes(biscotti.get('mx_plancia')?.value || '') ? biscotti.get('mx_plancia')!.value : '',
     }}>
       <DialogProvider>
         {demo && demoScadenza && <BannerDemo scadenza={demoScadenza} />}
@@ -76,4 +111,6 @@ export default async function Layout({ children }: { children: React.ReactNode }
       </DialogProvider>
     </DashboardLayout>
   )
+  if (!graficaNuova) return pagina
+  return <div className={outfit.variable} style={{ display: 'contents' }}>{pagina}</div>
 }

@@ -1,0 +1,117 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   IL MOVIMENTO della Plancia nuova (27/10). Lorenzo: «i riferimenti hanno grafiche molto più premium e transizioni,
+   animazioni migliori, anche nello scroll». Dai riferimenti RoutaX di sogaso: il plastico entra e si posa, i pannelli
+   arrivano dai bordi, i numeri contano, i percorsi scorrono a terra, l'oggetto scelto ha il riquadro che respira.
+   Niente segue il mouse. Tutto si spegne con prefers-reduced-motion.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+.pn { --facile: cubic-bezier(.16, 1, .3, 1); --dolce: cubic-bezier(.22, 1, .36, 1); }
+
+/* Il numero che conta sta in uno span dentro il <b> grande: le regole «.x span» pensate per le etichette accanto
+   (piccole e grigie) lo prendevano e lo facevano minuscolo (la rete, il 27/10). Il numero prende tutto dal suo <b>. */
+.pn .pn-conta { display: inline !important; margin: 0 !important; padding: 0 !important; font: inherit !important; color: inherit !important; letter-spacing: inherit !important; text-transform: none !important; }
+
+/* ── la prima schermata scorrendo: il saluto sale e sfuma (--u da 0 a 1 nei primi 70% di schermo) ── */
+.pn-titolo { opacity: clamp(0, calc(1 - var(--u, 0) * 1.25), 1); transform: translate3d(0, calc(var(--u, 0) * -42px), 0); }
+.pn-maschera { display: block; overflow: hidden; padding-bottom: .06em; margin-bottom: -.06em; }
+.pn-maschera > span { display: inline-block; }
+
+/* ── i percorsi a terra e il riquadro della pedana ── */
+.pn-percorsi { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.pn-percorso-fondo { fill: none; stroke: color-mix(in srgb, var(--gx-accento) 16%, transparent); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.pn-percorso { fill: none; stroke: var(--gx-accento); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1 9; animation: pn-flusso 1.2s linear infinite; vector-effect: non-scaling-stroke; }
+@keyframes pn-flusso { to { stroke-dashoffset: -20; } }
+.pn-selezione path { fill: none; stroke: var(--gx-accento); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.pn-selezione { transform-box: fill-box; transform-origin: center; animation: pn-respira 2.6s ease-in-out infinite; }
+@keyframes pn-respira { 50% { transform: scale(1.1); opacity: .65; } }
+.pn-punto { animation: pn-polso 2.6s ease-out infinite; }
+@keyframes pn-polso { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gx-accento) 55%, transparent), 0 0 18px color-mix(in srgb, var(--gx-accento) 70%, transparent); } 70%, 100% { box-shadow: 0 0 0 16px transparent, 0 0 18px color-mix(in srgb, var(--gx-accento) 70%, transparent); } }
+.pn-punto--rosso { animation-name: pn-polso-rosso; }
+@keyframes pn-polso-rosso { 0% { box-shadow: 0 0 0 0 rgba(224, 67, 79, .55), 0 0 18px rgba(224, 67, 79, .7); } 70%, 100% { box-shadow: 0 0 0 16px transparent, 0 0 18px rgba(224, 67, 79, .7); } }
+
+/* ── L'ENTRATA (una volta per sessione): il plastico arriva da lontano e si posa, poi il saluto sale dalla sua
+   maschera, la colonna arriva da destra, le quattro schede salgono una dopo l'altra, infine i segni sul plastico ── */
+@keyframes pn-posa { from { opacity: 0; transform: scale(1.1); } to { opacity: 1; transform: none; } }
+@keyframes pn-sali { from { opacity: 0; transform: translate3d(0, 26px, 0); filter: blur(8px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes pn-maschera { from { transform: translate3d(0, 108%, 0); } to { transform: none; } }
+@keyframes pn-da-destra { from { opacity: 0; transform: translate3d(36px, 0, 0); filter: blur(10px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes pn-compari { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pn-scatta { 0% { opacity: 0; transform: translate3d(0, 10px, 0) scale(.92); } 100% { opacity: 1; transform: none; } }
+.pn-entra .pn-camera-in { animation: pn-posa 2s var(--facile) both; }
+.pn-entra .pn-titolo > small { animation: pn-sali .9s var(--dolce) .35s both; }
+.pn-entra .pn-titolo h1 .pn-maschera > span { animation: pn-maschera 1.1s var(--facile) .45s both; }
+.pn-entra .pn-titolo h1 .pn-maschera + .pn-maschera > span { animation-delay: .55s; }
+.pn-entra .pn-eroe { animation: pn-sali 1s var(--dolce) .75s both; }
+.pn-entra .pn-colonna > :nth-child(1) { animation: pn-da-destra 1.1s var(--facile) .6s both; }
+.pn-entra .pn-colonna > :nth-child(2) { animation: pn-da-destra 1.1s var(--facile) .75s both; }
+.pn-entra .pn-fila > * { animation: pn-sali 1s var(--facile) both; }
+.pn-entra .pn-fila > :nth-child(1) { animation-delay: .9s; }
+.pn-entra .pn-fila > :nth-child(2) { animation-delay: 1s; }
+.pn-entra .pn-fila > :nth-child(3) { animation-delay: 1.1s; }
+.pn-entra .pn-fila > :nth-child(4) { animation-delay: 1.2s; }
+.pn-entra .pn-percorsi { animation: pn-compari 1s ease 1.3s both; }
+.pn-entra .pn-cartellini > * { animation: pn-scatta .7s var(--facile) both; }
+.pn-entra .pn-cartellini > :nth-child(1), .pn-entra .pn-cartellini > :nth-child(2) { animation-delay: 1.5s; }
+.pn-entra .pn-cartellini > :nth-child(3), .pn-entra .pn-cartellini > :nth-child(4) { animation-delay: 1.7s; }
+/* il punto ha la sua animazione che pulsa: l'entrata gli si mette davanti, poi riparte il polso */
+.pn-entra .pn-cartellini > .pn-punto { animation: pn-scatta .7s var(--facile) 1.5s both, pn-polso 2.6s ease-out 2.2s infinite; }
+.pn-entra .pn-cartellini > .pn-punto--rosso { animation: pn-scatta .7s var(--facile) 1.7s both, pn-polso-rosso 2.6s ease-out 2.4s infinite; }
+
+/* ── LE SEZIONI ENTRANO quando arrivano (pn-anima: c'è il JavaScript; pn-visto: la sezione è arrivata) ── */
+.pn-dati > section .pn-sez__testa small, .pn-dati > section .pn-sez__testa p, .pn-dati > section .pn-sez__numeri,
+.pn-dati > section .pn-segno, .pn-dati > section .pn-maschera > span,
+.pn-dati > section :is(.pn-griglia, .pn-dove) > *, .pn-dati > section > :is(.pn-scheda, .pn-recupero, .pn-periodo, .pn-adesso),
+.pn-dati > section :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li) {
+  transition: opacity .9s var(--dolce), transform 1s var(--facile), filter .9s var(--dolce); }
+.pn-anima .pn-dati > section:not(.pn-visto) :is(.pn-sez__testa small, .pn-sez__testa p, .pn-sez__numeri) { opacity: 0; transform: translate3d(0, 18px, 0); }
+.pn-anima .pn-dati > section:not(.pn-visto) .pn-segno { opacity: 0; transform: translate3d(0, 24px, 0) scale(.85); }
+.pn-anima .pn-dati > section:not(.pn-visto) .pn-maschera > span { transform: translate3d(0, 108%, 0); }
+.pn-anima .pn-dati > section:not(.pn-visto) :is(.pn-griglia, .pn-dove) > *,
+.pn-anima .pn-dati > section:not(.pn-visto) > :is(.pn-scheda, .pn-recupero, .pn-periodo, .pn-adesso) { opacity: 0; transform: translate3d(0, 44px, 0); filter: blur(10px); }
+.pn-anima .pn-dati > section:not(.pn-visto) :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li) { opacity: 0; transform: translate3d(-16px, 0, 0); }
+/* in sequenza: il titolo, poi i numeri, poi le schede una dopo l'altra, poi le righe dentro */
+.pn-dati > section.pn-visto .pn-sez__testa small { transition-delay: 0s; }
+.pn-dati > section.pn-visto .pn-maschera > span { transition-delay: .06s; }
+.pn-dati > section.pn-visto .pn-sez__testa p { transition-delay: .2s; }
+.pn-dati > section.pn-visto .pn-sez__numeri { transition-delay: .26s; }
+.pn-dati > section.pn-visto :is(.pn-griglia, .pn-dove) > :nth-child(1), .pn-dati > section.pn-visto > .pn-periodo { transition-delay: .2s; }
+.pn-dati > section.pn-visto :is(.pn-griglia, .pn-dove) > :nth-child(2) { transition-delay: .3s; }
+.pn-dati > section.pn-visto :is(.pn-griglia, .pn-dove) > :nth-child(3) { transition-delay: .4s; }
+.pn-dati > section.pn-visto :is(.pn-griglia, .pn-dove) > :nth-child(4) { transition-delay: .5s; }
+.pn-dati > section.pn-visto :is(.pn-griglia, .pn-dove) > :nth-child(5) { transition-delay: .6s; }
+.pn-dati > section.pn-visto :is(.pn-griglia, .pn-dove) > :nth-child(6) { transition-delay: .7s; }
+.pn-dati > section.pn-visto > :is(.pn-scheda, .pn-recupero, .pn-adesso) { transition-delay: .5s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(1) { transition-delay: .45s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(2) { transition-delay: .5s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(3) { transition-delay: .55s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(4) { transition-delay: .6s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(5) { transition-delay: .65s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(6) { transition-delay: .7s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(7) { transition-delay: .75s; }
+.pn-dati > section.pn-visto :is(.pn-tab tr, .pn-giac li, .pn-province li, .pn-resi li, .pn-legenda li):nth-child(n+8) { transition-delay: .8s; }
+/* i grafici aspettano la sezione: le barre crescono, le colonne salgono dalla lastra, l'Italia si colora da nord */
+.pn-anima .pn-dati > section:not(.pn-visto) .pn-cresce { animation-play-state: paused; }
+.pn-dati > section .pn-cresce { animation-delay: .5s; }
+.pn-anima .pn-dati > section:not(.pn-visto) .pn-col3d__colonna { height: 0 !important; }
+.pn-anima .pn-dati > section:not(.pn-visto) .pn-col3d__valore { opacity: 0; }
+.pn-col3d__valore { transition: opacity .6s ease .9s; }
+.pn-anima .pn-dati > section:not(.pn-visto) .pn-mappa path { fill: var(--pn-mappa-vuota) !important; }
+.pn-anima .pn-dati > section:not(.pn-visto) .pn-barra-p i, .pn-anima .pn-dati > section:not(.pn-visto) .pn-comp__barra i { transform: scaleX(0); }
+.pn-barra-p i, .pn-comp__barra i { transform-origin: left center; transition: transform 1.1s var(--facile) .55s, opacity .2s; }
+
+/* ── il vetro sotto le dita: una luce passa sulla lastra una volta (non segue il mouse), le schede si alzano ── */
+:is(.pn-numero, .pn-lastra, .pn-scheda, .pn-voce, .pn-rete-n)::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none; opacity: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, .32) 50%, transparent 62%) no-repeat; background-size: 260% 100%; background-position: 140% 0; }
+[data-tema="notte"] :is(.pn-numero, .pn-lastra, .pn-scheda, .pn-voce, .pn-rete-n)::after { background-image: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, .1) 50%, transparent 62%); }
+:is(.pn-numero, .pn-lastra, .pn-scheda, .pn-voce, .pn-rete-n):hover::after { animation: pn-luce 1.2s var(--dolce); }
+@keyframes pn-luce { 0% { opacity: 1; background-position: 140% 0; } 100% { opacity: 1; background-position: -40% 0; } }
+:is(.pn-voce, .pn-rete-n) { transition: transform .5s var(--facile), box-shadow .5s var(--dolce); }
+:is(.pn-voce, .pn-rete-n):hover { transform: translate3d(0, -3px, 0); }
+.pn-btn { transition: transform .2s, box-shadow .3s, background-color .3s; }
+.pn-btn:active { transform: scale(.97); }
+.pn-btn--pieno:hover { box-shadow: 0 12px 30px -10px rgba(255, 110, 30, .95); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pn *, .pn *::after { animation: none !important; transition: none !important; }
+  .pn-titolo { opacity: 1; transform: none; }
+}
