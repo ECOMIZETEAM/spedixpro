@@ -65,8 +65,8 @@ export async function distinteClientiNonChiuse(db: any, ora = new Date()): Promi
     master: nome(mm, d.master_id, 'nome'), cliente: nome(cc, d.cliente_id, 'ragione_sociale'),
     contratto: d.corriere_id ? nome(co, d.corriere_id, 'nome_contratto') : 'più contratti',
     creata_il: d.created_at,
-    // Il testo del corriere come l'ha salvato la chiusura. "ERRORE: OK" vuol dire che GLS ha risposto OK alla
-    // chiamata ma non ha confermato nessuna spedizione (lib/gls, chiudiSpedizioniGls).
+    // Il testo del corriere come l'ha salvato la chiusura. Per GLS dice quante spedizioni sono state chiuse e
+    // l'esito di quelle rifiutate (lib/gls, chiudiSpedizioniGls); prima del rilascio GLS c'era solo "ERRORE: OK".
     errore: d.bordero_id && String(d.bordero_id).startsWith('ERRORE') ? String(d.bordero_id) : null,
     ferme: ferme.get(d.id) || 0, totale: totali.get(d.id) || 0,
   }))
