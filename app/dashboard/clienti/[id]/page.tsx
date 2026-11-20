@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
@@ -253,7 +253,12 @@ export default function ClienteProfiloPage() {
     }).catch(() => setErrMov('Errore di rete nel caricamento dei movimenti'))
   }
 
+  // All'apertura la prima pagina dei movimenti la chiede gia' l'effetto su [id] qui sotto, con gli
+  // stessi identici parametri (nessuna ricerca, pagina 1): questo effetto la richiedeva una seconda
+  // volta 400 ms dopo. Parte solo quando la ricerca cambia davvero.
+  const primaRicercaMov = useRef(true)
   useEffect(() => {
+    if (primaRicercaMov.current) { primaRicercaMov.current = false; return }
     const t = setTimeout(() => { setPaginaMov(1); caricaMovimenti(cercaMov.trim() || undefined, 1) }, 400)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps

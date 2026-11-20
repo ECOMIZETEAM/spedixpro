@@ -1,6 +1,10 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useAppNativa } from '@/lib/app-nativa'
+import { prendiAnticipata } from '@/lib/richieste-anticipate'
+
+// Esportato perche' la home lo anticipa insieme a /api/dashboard (vedi lib/richieste-anticipate).
+export const URL_STATO_SMS = '/api/sms/stato'
 
 // Banner SMS nella home del master: mostra quanti SMS restano (o invita ad attivarli) e porta alla
 // pagina SMS. Best-effort: se l'utente non è staff master (l'endpoint risponde 403), non si mostra.
@@ -12,7 +16,8 @@ export default function BannerSms() {
   const app = useAppNativa()
   const [d, setD] = useState<{ creditoSms: number; costoSms: number; gatewayPronto?: boolean } | null>(null)
   useEffect(() => {
-    fetch('/api/sms/stato').then(r => r.ok ? r.json() : null).then(j => { if (j && typeof j.creditoSms === 'number') setD(j) }).catch(() => {})
+    const risposta = prendiAnticipata(URL_STATO_SMS) ?? fetch(URL_STATO_SMS)
+    risposta.then(r => r.ok ? r.json() : null).then(j => { if (j && typeof j.creditoSms === 'number') setD(j) }).catch(() => {})
   }, [])
   if (!d) return null
 

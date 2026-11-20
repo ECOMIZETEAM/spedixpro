@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { geoMercator, geoOrthographic, geoPath } from 'd3-geo'
 import { feature } from 'topojson-client'
 import { PAESE_ISO_NUM, PAESE_NOME_IT } from '@/lib/paesi-iso'
+import { prendiAnticipata } from '@/lib/richieste-anticipate'
 
 // DESTINAZIONI PRINCIPALI — widget home (master/agente/cliente). Due viste con switch:
 //  - ITALIA: choropleth delle province colorate per volume (ultimi 30gg) nel nostro arancione + tooltip;
@@ -25,6 +26,11 @@ function coloreVolume(n: number, max: number): string {
 // numerico ISO -> alpha2 (per il nome italiano nel tooltip del globo)
 const NUM_ALPHA2: Record<number, string> = Object.entries(PAESE_ISO_NUM).reduce((m, [a2, num]) => { if (!m[num]) m[num] = a2; return m }, {} as Record<number, string>)
 
+// Esportati perche' la home del master li anticipa insieme a /api/dashboard (vedi
+// lib/richieste-anticipate). Nella home del cliente non si anticipa niente e si chiama come sempre.
+export const URL_DESTINAZIONI = '/api/dashboard/destinazioni'
+export const URL_MAPPA_ITALIA = '/geo/italia-province.json'
+
 export default function DestinazioniWidget() {
   const [dati, setDati] = useState<Dati>(null)
   const [italiaTopo, setItaliaTopo] = useState<any>(null)
@@ -38,8 +44,10 @@ export default function DestinazioniWidget() {
 
   useEffect(() => {
     let vivo = true
-    fetch('/api/dashboard/destinazioni').then(r => r.json()).then(d => { if (vivo) setDati(d?.error ? { province: [], paesi: [], totale: 0, totalePaesi: 0, nProvince: 0 } : d) }).catch(() => vivo && setErrore(true))
-    fetch('/geo/italia-province.json').then(r => r.json()).then(d => { if (vivo) setItaliaTopo(d) }).catch(() => vivo && setErrore(true))
+    const destinazioni = prendiAnticipata(URL_DESTINAZIONI) ?? fetch(URL_DESTINAZIONI)
+    const mappa = prendiAnticipata(URL_MAPPA_ITALIA) ?? fetch(URL_MAPPA_ITALIA)
+    destinazioni.then(r => r.json()).then(d => { if (vivo) setDati(d?.error ? { province: [], paesi: [], totale: 0, totalePaesi: 0, nProvince: 0 } : d) }).catch(() => vivo && setErrore(true))
+    mappa.then(r => r.json()).then(d => { if (vivo) setItaliaTopo(d) }).catch(() => vivo && setErrore(true))
     return () => { vivo = false }
   }, [])
   // il mondo si carica solo quando si apre la vista globo (108KB in meno all'ingresso)

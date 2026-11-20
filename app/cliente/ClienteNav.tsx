@@ -106,6 +106,8 @@ export default function ClienteNav({ soloEtichette = false }: { soloEtichette?: 
   const pathname = usePathname() || ''
   // Sottovoci dinamiche "Ordini {Piattaforma}" per ogni integrazione attiva del cliente
   const [integrazioni, setIntegrazioni] = useState<any[]>([])
+  // Condivisa con la pagina ordini, che all'apertura chiede la stessa lista nello stesso istante:
+  // una chiamata invece di due (vedi lib/richieste-anticipate).
   useEffect(() => {
     // La pagina degli ordini di un negozio chiede la stessa rotta nello stesso istante: una richiesta
     // sola (lib/richiesta-condivisa). Il risultato si filtra, non si modifica.

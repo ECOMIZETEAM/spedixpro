@@ -13,6 +13,7 @@ import InpostLockerPicker, { type InpostPuntoScelto } from '@/app/components/Inp
 const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
+import { useRicercaSuggerimenti } from '@/lib/use-ricerca-suggerimenti'
 
 function iconaCorriere(nome:string): string | null {
   const n = (nome||'').toUpperCase()
@@ -144,6 +145,17 @@ export default function NuovaSpedizionePage() {
   }, [dest.telefono])
   const [suggMitt, setSuggMitt] = useState<any[]>([])   // rubrica mittenti
   const [showSuggMitt, setShowSuggMitt] = useState(false)
+  // Rubrica mentre si scrive: una ricerca dopo la pausa, non una a tasto (vedi lib/use-ricerca-suggerimenti).
+  const ricercaMitt = useRicercaSuggerimenti({
+    mostra: l => { setSuggMitt(l); setShowSuggMitt(true) },
+    errore: () => setSuggMitt([]),
+    svuota: () => { setSuggMitt([]); setShowSuggMitt(false) },
+  })
+  const ricercaDest = useRicercaSuggerimenti({
+    mostra: l => { setSuggDest(l); setShowSuggDest(true) },
+    errore: () => setSuggDest([]),
+    svuota: () => { setSuggDest([]); setShowSuggDest(false) },
+  })
   // Riferimenti ai campi che aprono un autocomplete: servono a posizionare il pannello portato in
   // fondo alla pagina (getBoundingClientRect), cosi' l'overflow:hidden delle card non lo taglia piu'.
   const rifMittRef = useRef<HTMLInputElement>(null)     // Rif. Mittente (rubrica mittenti)
@@ -402,6 +414,9 @@ export default function NuovaSpedizionePage() {
     setArticoliScelti([])
     setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
     setSuggComuni([]); setShowSugg(false); setSuggDest([]); setShowSuggDest(false)
+    // La spedizione appena creata puo' aver salvato mittente e destinatario in rubrica: la prossima
+    // ricerca, anche con lo stesso testo, va richiesta e non ripresa da quella di prima.
+    ricercaMitt.dimentica(); ricercaDest.dimentica()
     setErrore(''); setVista('dati')
   }
 
@@ -560,12 +575,11 @@ export default function NuovaSpedizionePage() {
               <div style={{marginBottom:'12px',position:'relative'}}>
                 <label style={lbl}>Rif. Mittente</label>
                 <input ref={rifMittRef} value={mitt.nome} autoComplete="off"
-                  onChange={async e=>{
+                  onChange={e=>{
                     const v=e.target.value
                     setMitt(m=>({...m,nome:v}))
-                    if(v.trim().length>=2){
-                      try{ const r=await fetch('/api/mittenti/cerca?q='+encodeURIComponent(v)+(clienteId?'&clienteId='+encodeURIComponent(clienteId):'')); const j=await r.json(); setSuggMitt(Array.isArray(j)?j:[]); setShowSuggMitt(true) }catch{ setSuggMitt([]) }
-                    } else { setSuggMitt([]); setShowSuggMitt(false) }
+                    if(v.trim().length>=2) ricercaMitt.cerca('/api/mittenti/cerca?q='+encodeURIComponent(v)+(clienteId?'&clienteId='+encodeURIComponent(clienteId):''))
+                    else ricercaMitt.svuota()
                   }}
                   onFocus={()=>{ if(suggMitt.length) setShowSuggMitt(true) }}
                   onBlur={()=>setTimeout(()=>setShowSuggMitt(false),200)}
@@ -661,12 +675,11 @@ export default function NuovaSpedizionePage() {
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Nominativo *</label>
                   <input ref={nomeDestRef} value={dest.nome} autoComplete="off"
-                    onChange={async e=>{
+                    onChange={e=>{
                       const v=e.target.value
                       setDest(d=>({...d,nome:v}))
-                      if(v.trim().length>=2){
-                        try{ const r=await fetch('/api/destinatari/cerca?q='+encodeURIComponent(v)+(clienteId?'&clienteId='+encodeURIComponent(clienteId):'')); const j=await r.json(); setSuggDest(Array.isArray(j)?j:[]); setShowSuggDest(true) }catch{ setSuggDest([]) }
-                      } else { setSuggDest([]); setShowSuggDest(false) }
+                      if(v.trim().length>=2) ricercaDest.cerca('/api/destinatari/cerca?q='+encodeURIComponent(v)+(clienteId?'&clienteId='+encodeURIComponent(clienteId):''))
+                      else ricercaDest.svuota()
                     }}
                     onFocus={()=>{ if(suggDest.length) setShowSuggDest(true) }}
                     onBlur={()=>setTimeout(()=>setShowSuggDest(false),200)}

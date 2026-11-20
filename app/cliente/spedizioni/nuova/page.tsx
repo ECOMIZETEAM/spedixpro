@@ -13,6 +13,7 @@ const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem(
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
+import { useRicercaSuggerimenti } from '@/lib/use-ricerca-suggerimenti'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
@@ -99,6 +100,17 @@ export default function NuovaSpedizioneCliente() {
   const [showSuggMitt, setShowSuggMitt] = useState(false)
   const [suggDest, setSuggDest] = useState<any[]>([])   // rubrica destinatari
   const [showSuggDest, setShowSuggDest] = useState(false)
+  // Rubrica mentre si scrive: una ricerca dopo la pausa, non una a tasto (vedi lib/use-ricerca-suggerimenti).
+  const ricercaMitt = useRicercaSuggerimenti({
+    mostra: l => { setSuggMitt(l); setShowSuggMitt(true) },
+    errore: () => setSuggMitt([]),
+    svuota: () => { setSuggMitt([]); setShowSuggMitt(false) },
+  })
+  const ricercaDest = useRicercaSuggerimenti({
+    mostra: l => { setSuggDest(l); setShowSuggDest(true) },
+    errore: () => setSuggDest([]),
+    svuota: () => { setSuggDest([]); setShowSuggDest(false) },
+  })
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
   // Avvertenza (non blocca): destinatario che rifiuta i contrassegni, storico rete per telefono.
   const [codAlert, setCodAlert] = useState<{totCod:number;resi:number;nonConsegnato:number;giacenza:number;rifiutati:number}|null>(null)
@@ -366,6 +378,9 @@ export default function NuovaSpedizioneCliente() {
     setArticoliScelti([])
     setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
     setSuggComuni([]); setShowSugg(false); setDaOrdine('')
+    // La spedizione appena creata puo' aver salvato mittente e destinatario in rubrica: la prossima
+    // ricerca, anche con lo stesso testo, va richiesta e non ripresa da quella di prima.
+    ricercaMitt.dimentica(); ricercaDest.dimentica()
     setErrore(''); setVista('dati')
   }
 
@@ -533,12 +548,11 @@ export default function NuovaSpedizioneCliente() {
               <div style={{marginBottom:'12px',position:'relative'}}>
                 <label style={lbl}>Rif. Mittente</label>
                 <input ref={refMittNome} value={mitt.nome} autoComplete="off"
-                  onChange={async e=>{
+                  onChange={e=>{
                     const v=e.target.value
                     setMitt(m=>({...m,nome:v}))
-                    if(v.trim().length>=2){
-                      try{ const r=await fetch('/api/mittenti/cerca?q='+encodeURIComponent(v)); const j=await r.json(); setSuggMitt(Array.isArray(j)?j:[]); setShowSuggMitt(true) }catch{ setSuggMitt([]) }
-                    } else { setSuggMitt([]); setShowSuggMitt(false) }
+                    if(v.trim().length>=2) ricercaMitt.cerca('/api/mittenti/cerca?q='+encodeURIComponent(v))
+                    else ricercaMitt.svuota()
                   }}
                   onFocus={()=>{ if(suggMitt.length) setShowSuggMitt(true) }}
                   onBlur={()=>setTimeout(()=>setShowSuggMitt(false),200)}
@@ -633,12 +647,11 @@ export default function NuovaSpedizioneCliente() {
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Nominativo *</label>
                   <input ref={refDestNome} value={dest.nome} autoComplete="off" placeholder="Mario Rossi"
-                    onChange={async e=>{
+                    onChange={e=>{
                       const v=e.target.value
                       setDest(d=>({...d,nome:v}))
-                      if(v.trim().length>=2){
-                        try{ const r=await fetch('/api/destinatari/cerca?q='+encodeURIComponent(v)); const j=await r.json(); setSuggDest(Array.isArray(j)?j:[]); setShowSuggDest(true) }catch{ setSuggDest([]) }
-                      } else { setSuggDest([]); setShowSuggDest(false) }
+                      if(v.trim().length>=2) ricercaDest.cerca('/api/destinatari/cerca?q='+encodeURIComponent(v))
+                      else ricercaDest.svuota()
                     }}
                     onFocus={()=>{ if(suggDest.length) setShowSuggDest(true) }}
                     onBlur={()=>setTimeout(()=>setShowSuggDest(false),200)}
