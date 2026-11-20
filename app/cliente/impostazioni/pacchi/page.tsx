@@ -14,6 +14,8 @@ export default function PacchiCliente() {
   const [alt, setAlt] = useState('')
   const [sku, setSku] = useState('')
   const [pred, setPred] = useState(false)
+  // «Un collo per ogni pezzo»: ogni pezzo degli SKU di questo pacco parte nella sua scatola (lib/colli-negozio).
+  const [perPezzo, setPerPezzo] = useState(false)
   const [saving, setSaving] = useState(false)
   useEffect(() => { carica() }, [])
   function carica() {
@@ -21,14 +23,14 @@ export default function PacchiCliente() {
     fetch('/api/cliente/pacchi').then(r=>r.json()).then(d=>{setPacchi(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
   }
   function apri(p:any) {
-    if (p) { setEdit(p); setNome(p.nome); setPeso(String(p.peso)); setLung(String(p.lunghezza)); setLarg(String(p.larghezza)); setAlt(String(p.altezza)); setSku(p.sku||''); setPred(p.predefinito) }
-    else { setEdit(null); setNome(''); setPeso(''); setLung(''); setLarg(''); setAlt(''); setSku(''); setPred(false) }
+    if (p) { setEdit(p); setNome(p.nome); setPeso(String(p.peso)); setLung(String(p.lunghezza)); setLarg(String(p.larghezza)); setAlt(String(p.altezza)); setSku(p.sku||''); setPred(p.predefinito); setPerPezzo(!!p.un_collo_per_pezzo) }
+    else { setEdit(null); setNome(''); setPeso(''); setLung(''); setLarg(''); setAlt(''); setSku(''); setPred(false); setPerPezzo(false) }
     setModal(true)
   }
   async function salva() {
     if (!nome) { await dialog.alert({ title: 'Nome mancante', message: 'Inserisci un nome.' }); return }
     setSaving(true)
-    const body:any = { nome, peso, lunghezza:lung, larghezza:larg, altezza:alt, sku, predefinito:pred }
+    const body:any = { nome, peso, lunghezza:lung, larghezza:larg, altezza:alt, sku, predefinito:pred, un_collo_per_pezzo:perPezzo && !!sku.trim() }
     if (edit) body.id = edit.id
     const res = await fetch('/api/cliente/pacchi', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
     const d = await res.json()
@@ -72,7 +74,10 @@ export default function PacchiCliente() {
                   <td style={{...td,color:'#f97316'}}>{p.nome}</td>
                   <td style={{...td,color:'#f97316'}}>{Number(p.peso).toFixed(2)}</td>
                   <td style={{...td,color:'#f97316'}}>{p.lunghezza} X {p.larghezza} X {p.altezza}</td>
-                  <td style={{...td,fontSize:'12px',color:p.sku?'#1a1a1a':'#cbd5e1'}}>{p.sku || '—'}</td>
+                  <td style={{...td,fontSize:'12px',color:p.sku?'#1a1a1a':'#cbd5e1'}}>
+                    {p.sku || '—'}
+                    {p.sku && p.un_collo_per_pezzo ? <div style={{fontSize:'11px',color:'#6b7280',marginTop:'2px'}}>Un collo per ogni pezzo</div> : null}
+                  </td>
                   <td style={td}><span onClick={()=>setPredefinito(p)} title={p.predefinito?'Predefinito':'Imposta come predefinito'} style={{cursor:'pointer',fontSize:'18px',color:p.predefinito?'#f59e0b':'#cbd5e1'}}>{p.predefinito ? '★' : '☆'}</span></td>
                   <td style={td}>
                     <button onClick={()=>elimina(p.id)} style={{background:'#dc2626',color:'#fff',border:'none',padding:'6px 10px',borderRadius:'6px',cursor:'pointer',marginRight:'8px'}}>🗑</button>
@@ -100,6 +105,17 @@ export default function PacchiCliente() {
                 <textarea value={sku} onChange={e=>setSku(e.target.value)} rows={2} placeholder="es. ABC-123, XYZ-9" style={{width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',boxSizing:'border-box',resize:'vertical',fontFamily:'inherit'}}/>
                 <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>Quando importi ordini (Amazon/Shopify) con uno di questi SKU, misure e peso di questo pacco vengono applicati in automatico.</div>
               </div>
+              <label style={{display:'flex',alignItems:'flex-start',gap:'8px',fontSize:'13px',color:sku.trim()?'#1a1a1a':'#9ca3af',cursor:sku.trim()?'pointer':'default'}}>
+                <input type="checkbox" checked={perPezzo && !!sku.trim()} disabled={!sku.trim()} onChange={e=>setPerPezzo(e.target.checked)} style={{marginTop:'2px'}}/>
+                <span>
+                  Un collo per ogni pezzo
+                  <span style={{display:'block',fontSize:'11px',color:'#999',marginTop:'2px'}}>
+                    {sku.trim()
+                      ? 'Ogni pezzo di questi SKU parte nella sua scatola: negli ordini dei negozi online 3 pezzi diventano 3 colli, ognuno con le misure di questo pacco e il peso dell\'articolo.'
+                      : 'Scrivi prima gli SKU: la casella vale per i pezzi di questi articoli.'}
+                  </span>
+                </span>
+              </label>
               <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>
                 <input type="checkbox" checked={pred} onChange={e=>setPred(e.target.checked)}/> Imposta come predefinito
               </label>

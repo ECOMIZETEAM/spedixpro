@@ -10,6 +10,7 @@ import { numeriOrdine, numeroOrdineCorrisponde } from '@/lib/numero-ordine-negoz
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo } from '@/app/cliente/anteprima-prezzi'
 import { descriviColli } from '@/lib/colli-ordine'
+import { colliOrdineNegozio, mappaCatalogo, mappaPacchi } from '@/lib/colli-negozio'
 import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
@@ -197,34 +198,12 @@ export default function OrdiniPage() {
   // (SKU) se ha un peso, altrimenti quello letto dal negozio (grammi), per la quantita'. Prima contava
   // solo il PRIMO articolo, una volta sola: un ordine da 7 righe e 9 pezzi pesava quanto il primo
   // pezzo (Raccolto e Mangiato, 19/10/2026: 122 ordini su 252 con piu' di un pezzo).
-  // Il pacco dello SKU da' le misure; il suo peso conta solo se nessun articolo ne ha uno, al posto
-  // del chilo di ripiego. Nessuna fonte: si spedisce su 1 kg, e la riga lo dice.
-  const skuToArt = useMemo(()=>{ const m=new Map<string,any>(); for(const a of articoliCat){ const k=String(a.sku||'').trim().toLowerCase(); if(k) m.set(k,a) } return m }, [articoliCat])
-  const skuToPacco = useMemo(()=>{ const m=new Map<string,any>(); for(const p of pacchi) for(const s of String(p.sku||'').split(/[\s,;]+/)){ const k=s.trim().toLowerCase(); if(k) m.set(k,p) } return m }, [pacchi])
+  // I COLLI: uno solo, salvo gli articoli il cui pacco ha «Un collo per ogni pezzo» — ogni pezzo e'
+  // una scatola sua (Purita' Gaetano, cassette di arance, 20/11/2026). La regola e' in lib/colli-negozio.
+  const skuToArt = useMemo(()=>mappaCatalogo(articoliCat), [articoliCat])
+  const skuToPacco = useMemo(()=>mappaPacchi(pacchi), [pacchi])
   function risolviPeso(o:any){
-    const arts = Array.isArray(o.articoli)?o.articoli:[]
-    const sku0 = String(arts[0]?.sku||'').trim().toLowerCase()
-    const art = sku0 ? skuToArt.get(sku0) : null
-    const pacco = sku0 ? skuToPacco.get(sku0) : null
-    let peso = 0, senzaPeso = 0
-    for (const a of arts) {
-      const k = String(a?.sku||'').trim().toLowerCase()
-      const cat = k ? skuToArt.get(k) : null
-      const unitario = (cat && Number(cat.peso)>0) ? Number(cat.peso) : (Number(a?.grammi)>0 ? Number(a.grammi)/1000 : 0)
-      if (unitario>0) peso += unitario*(Number(a?.quantita)||1); else senzaPeso++
-    }
-    peso = Math.round(peso*1000)/1000
-    if (!(peso>0) && pacco && Number(pacco.peso)>0) { peso = Number(pacco.peso); senzaPeso = 0 }
-    // Somma INCOMPLETA: mai sotto il chilo di ripiego. 150 g noti piu' un articolo senza peso non sono
-    // un pacco da 150 g, e senza questa soglia l'ordine scenderebbe sotto cio' che si dichiarava prima.
-    if (senzaPeso>0 && peso>0 && peso<1) peso = 1
-    const pesoStimato = !(peso>0)
-    if (pesoStimato) peso = 1
-    const box = pacco ? {l:pacco.lunghezza,w:pacco.larghezza,h:pacco.altezza}
-      : (art && (Number(art.lunghezza)||Number(art.larghezza)||Number(art.altezza))) ? {l:art.lunghezza,w:art.larghezza,h:art.altezza}
-      : {l:20,w:15,h:10}
-    // senzaPeso: articoli rimasti fuori dalla somma (ne' catalogo ne' negozio): il peso e' per difetto.
-    return { peso: Math.max(0.01, peso), l:Number(box.l)||20, w:Number(box.w)||15, h:Number(box.h)||10, pesoStimato, senzaPeso: pesoStimato ? 0 : senzaPeso }
+    return colliOrdineNegozio(o.articoli, skuToArt, skuToPacco)
   }
   useEffect(()=>{ fetch('/api/cliente/corrieri').then(r=>r.json()).then(d=>setCorrieri(Array.isArray(d?.corrieri)?d.corrieri:[])).catch(()=>{}) }, [])
 
@@ -295,6 +274,13 @@ export default function OrdiniPage() {
       // La nota dell'ordine sono le istruzioni per il corriere: si portano dietro.
       note: String(o.nota || ''),
     })
+    // PIU' COLLI (pacchi con «Un collo per ogni pezzo»): il modulo li riceve tutti, ognuno con le sue
+    // misure e il suo peso. Con il solo `colli` il modulo metterebbe le misure al primo e 20×15×10 agli
+    // altri; il peso di ogni collo il modulo lo usa per l'estero, in Italia divide il totale.
+    if (rp.colli.length > 1) {
+      qs.set('colli', String(rp.colli.length))
+      qs.set('colli_dett', JSON.stringify(rp.colli.map(c => ({ l: c.length, w: c.width, h: c.height, p: Math.round(c.weight * 1000) / 1000 }))))
+    }
     if (spedisciCon && spedisciCon !== 'auto') qs.set('corriere', spedisciCon)
     const cod = codDaOrdine(o)
     if (cod > 0) qs.set('contrassegno', String(cod))
@@ -443,8 +429,9 @@ export default function OrdiniPage() {
     return {
       id: o.id,
       cap: d.cap, citta: d.citta, provincia: d.provincia||'', paese: d.paese||'IT',
-      // Un collo: gli ordini dei negozi non dicono quanti pacchi sono (ordini_ecommerce non ha i colli).
-      colli: [{ length:rp.l, width:rp.w, height:rp.h, weight:rp.peso }],
+      // Gli ordini dei negozi non dicono quanti pacchi sono (ordini_ecommerce non ha i colli): uno
+      // solo, salvo i pezzi dei pacchi con «Un collo per ogni pezzo» (lib/colli-negozio).
+      colli: rp.colli,
       contrassegno: codDaOrdine(o),
       haContenuto: !!arts.map((a:any)=>a.nome).join(', ').slice(0,100).trim(),
     }
@@ -510,8 +497,10 @@ export default function OrdiniPage() {
           // Il peso si vede accanto al prezzo: e' la prima cosa che il cliente controlla ("il peso non
           // l'ha preso"), e prima stava solo nel suggerimento al passaggio del mouse.
           const p = risolviPeso(o)
-          if (p.pesoStimato) return <span style={{color:'#b45309',marginLeft:'6px'}}>· su 1 kg: peso non indicato</span>
-          const kg = <span style={{color:'#6b7280',marginLeft:'6px'}}>· {String(p.peso).replace('.',',')} kg</span>
+          const n = p.colli.length
+          if (p.pesoStimato) return <span style={{color:'#b45309',marginLeft:'6px'}}>· {n>1 ? n+' colli su 1 kg l\'uno' : 'su 1 kg'}: peso non indicato</span>
+          // Piu' colli (pacchi con «Un collo per ogni pezzo»): si dice quanti, il cliente lo controlla qui.
+          const kg = <span style={{color:'#6b7280',marginLeft:'6px'}}>· {n>1 ? n+' colli, ' : ''}{String(p.peso).replace('.',',')} kg</span>
           if (!p.senzaPeso) return kg
           return <>{kg}<span style={{color:'#b45309',marginLeft:'6px'}}>senza il peso di {p.senzaPeso===1?'1 articolo':p.senzaPeso+' articoli'}</span></>
         })()}
@@ -628,12 +617,11 @@ export default function OrdiniPage() {
           cambiati.push(x.num+': da '+euro(tVista.prezzo)+' a '+euro(t.prezzo)+(tVista.corriere_id !== t.corriere_id ? ' con '+t.nome : ''))
         }
 
-        // Destinazione e collo vengono dallo STESSO oggetto usato per l'anteprima (rigaPrezzoDi): cio'
+        // Destinazione e colli vengono dallo STESSO oggetto usato per l'anteprima (rigaPrezzoDi): cio'
         // che e' stato prezzato e' cio' che si spedisce.
         const d = x.o.destinatario || {}
-        const c = x.rp.colli[0]
         const shipTo = { name:d.nome, company:'', street1:d.indirizzo, street2:'', city:x.rp.citta, state:x.rp.provincia, postalCode:x.rp.cap, country:x.rp.paese, phone:d.telefono||'', email:d.email||'' }
-        preparati.push({ id:x.id, o:x.o, num:x.num, arts:x.arts, rp:{ peso:c.weight, l:c.length, w:c.width, h:c.height }, packages:x.rp.colli, shipTo, t })
+        preparati.push({ id:x.id, o:x.o, num:x.num, arts:x.arts, packages:x.rp.colli, shipTo, t })
       }
       // I prezzi appena ricalcolati tornano a schermo (il confronto qui sopra e' gia' fatto, su
       // quelli che il cliente vedeva): se da qui si esce senza spedire — Annulla, credito
@@ -686,7 +674,7 @@ export default function OrdiniPage() {
     setSpedendo(true)
     let okCount = 0
     for (let i=0;i<preparati.length;i++){
-      const { id, o, num, arts, rp, packages, shipTo, t } = preparati[i]
+      const { id, o, num, arts, packages, shipTo, t } = preparati[i]
       setMsg('Spedizione '+num+'… ('+(i+1)+'/'+preparati.length+')')
       // Dogana (estero): il codice HS viene dal CATALOGO tramite lo SKU dell'ordine — lo stesso da cui
       // arrivano peso e misure. Prima merce che ce l'ha; se nessuna, il backend prova l'auto-ricerca TARIC.
@@ -704,7 +692,10 @@ export default function OrdiniPage() {
             // creazione non li legge, usa solo l'id del contratto.)
             clienteId:cliId, totalPrice:Number(t.prezzo).toFixed(2),
             _corriere_id: t.corriere_id,
-            packages, colliDettaglio:[{lunghezza:String(rp.l),larghezza:String(rp.w),altezza:String(rp.h)}],
+            // Niente colliDettaglio: il server lo ricava dai packages, collo per collo, come per
+            // l'import da file. Qui se ne mandava uno col solo primo collo, e con piu' colli la
+            // spedizione avrebbe salvato le misure di uno solo.
+            packages,
             // La nota dell'ordine e il numero COM'E' SCRITTO SUL NEGOZIO (cancelletto compreso):
             // stessi valori del percorso "Crea spedizione", che e' la stessa azione fatta su una riga
             // sola. Finora questo ramo mandava sempre notes:'' e toglieva il cancelletto.

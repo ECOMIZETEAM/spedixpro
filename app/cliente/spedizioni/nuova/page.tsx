@@ -220,6 +220,15 @@ export default function NuovaSpedizioneCliente() {
         n[0] = { lunghezza: q.get('l') || n[0].lunghezza, larghezza: q.get('w') || n[0].larghezza, altezza: q.get('h') || n[0].altezza }
         return n })
     }
+    // OGNI COLLO CON LE SUE MISURE E IL SUO PESO, quando l'ordine di un negozio ne ha piu' d'uno (pacchi
+    // con «Un collo per ogni pezzo», lib/colli-negozio). Sta DOPO il blocco qui sopra, che riscrive il
+    // primo collo senza peso. Il peso del collo conta per l'estero; in Italia il modulo divide il totale.
+    const dett = (() => { try { const v = JSON.parse(q.get('colli_dett') || 'null'); return Array.isArray(v) ? v : null } catch { return null } })()
+    if (dett && dett.length > 1) {
+      const testo = (x: unknown) => (Number(x) > 0 ? String(x) : '')
+      aggiornaNumColli(dett.length)
+      setColli(dett.map((c: any) => ({ lunghezza: testo(c?.l), larghezza: testo(c?.w), altezza: testo(c?.h), peso: testo(c?.p) })))
+    }
     if (q.get('contenuto')) setContenuto(q.get('contenuto') as string)
     if (q.get('rif')) setRifOrdine(q.get('rif') as string)
     if (q.get('valore')) setValoreMerce(q.get('valore') as string)
