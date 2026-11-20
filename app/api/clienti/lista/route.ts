@@ -18,28 +18,101 @@ export async function GET(req: NextRequest) {
     .eq('ledger', false)   // i clienti-ledger (contabilità delle condivisioni) non compaiono nella lista
   // Agente: solo i clienti a lui assegnati.
   if (isAgente(utente)) qCli = qCli.eq('agente', nomeAgente(utente))
-  const { data } = await qCli.order('ragione_sociale')
-  const clienti = data || []
-  const listinoIds = Array.from(new Set(clienti.map((c:any)=>c.listino_cliente_id).filter(Boolean)))
-  const clienteIds = clienti.map((c:any)=>c.id)
-  let agganci: any[] = []
-  let stati: any[] = []
-  let integrazioni: any[] = []
-  if (listinoIds.length) {
-    const r1 = await supabase.from('listini_clienti_corrieri').select('listino_id, corriere_id, corrieri(id,nome_contratto,tipo)').in('listino_id', listinoIds)
-    agganci = r1.data || []
-  }
-  if (clienteIds.length) {
-    const r2 = await supabase.from('clienti_corrieri_abilitati').select('cliente_id, corriere_id, abilitato').in('cliente_id', clienteIds)
-    stati = r2.data || []
+  // LE LETTURE PARTONO INSIEME DOVE NON DIPENDONO L'UNA DALL'ALTRA (20/11/2026). Erano una decina in
+  // fila — clienti, contratti dei listini, abilitazioni, negozi, poi i conti dei master collegati, poi i
+  // sotto-master con i loro listini e contratti — e la rotta la chiede anche l'elenco spedizioni per il
+  // filtro cliente: 1,06 s di p75 il 17-18/11. Stesse domande, stessa risposta, stesso ordine delle righe.
+  // I tre blocchi (clienti, master collegati, sotto-master) non si usano a vicenda: partono insieme qui
+  // sotto; dentro ogni blocco restano in fila solo le letture che hanno bisogno della precedente.
+  const caricaClienti = async () => {
+    const { data } = await qCli.order('ragione_sociale')
+    const clienti = data || []
+    const listinoIds = Array.from(new Set(clienti.map((c:any)=>c.listino_cliente_id).filter(Boolean)))
+    const clienteIds = clienti.map((c:any)=>c.id)
     // Il campo `credenziali` serve solo a ricavare l'URL del negozio (cred.shop / cred.site_url), e
     // lo legge il SERVICE_ROLE: la chiave che il negoziante ha dato al suo negozio non deve essere
     // leggibile dalla sessione di chi sta a monte nella rete. Il perimetro non cambia — `clienteIds`
     // arriva dalla lista gia' filtrata dalla RLS qui sopra.
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const r3 = await createAdminSupabase().from('integrazioni').select('cliente_id,piattaforma,nome_negozio,identificativo,stato,credenziali').in('cliente_id', clienteIds)
-    integrazioni = r3.data || []
+    const [r1, r2, r3] = await Promise.all([
+      listinoIds.length
+        ? supabase.from('listini_clienti_corrieri').select('listino_id, corriere_id, corrieri(id,nome_contratto,tipo)').in('listino_id', listinoIds)
+        : Promise.resolve({ data: [] }),
+      clienteIds.length
+        ? supabase.from('clienti_corrieri_abilitati').select('cliente_id, corriere_id, abilitato').in('cliente_id', clienteIds)
+        : Promise.resolve({ data: [] }),
+      clienteIds.length
+        ? createAdminSupabase().from('integrazioni').select('cliente_id,piattaforma,nome_negozio,identificativo,stato,credenziali').in('cliente_id', clienteIds)
+        : Promise.resolve({ data: [] }),
+    ])
+    return { clienti, agganci: (r1 as any).data || [], stati: (r2 as any).data || [], integrazioni: (r3 as any).data || [] }
   }
+  // MASTER COLLEGATI (condivisione contratti): il "ledger" è il compratore visto come cliente di QUESTO
+  // master. Prima lo nascondevo (vedi .eq('ledger',false) sopra); va invece mostrato come un cliente con
+  // badge "Master collegato", così il venditore vede movimenti/credito e gli aggancia il suo listino —
+  // come ha chiesto il flusso nuovo (niente pagina condivisioni a parte). Isolato: è un clienti del
+  // venditore (RLS per master_id); l'agente non lo vede. corrieri_condivisi è solo service-role.
+  // Solo chi governa la rete. Prima la condizione era "non agente e con un master_id", e il master_id
+  // ce l'hanno anche i clienti: i 546 utenti cliente di Velox, GTS e Wave ricevevano i conti
+  // "(ingrosso)" del loro master, con credito, email, P.IVA e telefono (letti con la chiave di servizio).
+  const caricaCollegati = async (): Promise<any[]> => {
+    if (!vedeLaRete(utente)) return []
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: ledgers } = await admin.from('clienti')
+      .select('id,ragione_sociale,so_indirizzo,so_citta,so_provincia,so_cap,sl_citta,email,telefono,piva,codice_cliente,attivo,listino_cliente_id,tipo_contratto,credito,listini_clienti(nome)')
+      .eq('master_id', utente.master_id).eq('ledger', true).order('ragione_sociale')
+    if (ledgers?.length) {
+      const lids = ledgers.map((l:any)=>l.id)
+      const { data: links } = await admin.from('corrieri_condivisi')
+        .select('cliente_ledger_id,master_id,stato').in('cliente_ledger_id', lids).neq('stato','revocata')
+      const buyerIds = Array.from(new Set((links||[]).map((l:any)=>l.master_id).filter(Boolean)))
+      const nomi = new Map<string,string>()
+      if (buyerIds.length) {
+        const { data: ms } = await admin.from('masters').select('id,nome').in('id', buyerIds)
+        for (const m of (ms||[])) nomi.set(m.id, m.nome)
+      }
+      const linkPerLedger = new Map<string,any>()
+      for (const l of (links||[])) if (!linkPerLedger.has(l.cliente_ledger_id)) linkPerLedger.set(l.cliente_ledger_id, l)
+      return ledgers.map((l:any)=>{
+        const lk = linkPerLedger.get(l.id)
+        return { ...l, is_ledger: true, master_collegato: lk ? (nomi.get(lk.master_id) || '—') : '—', contratti_attivi: [], negozi: [] }
+      })
+    }
+    return []
+  }
+
+  // Sotto-master agganciati (solo per ?conMaster=1 e solo per chi governa la rete).
+  const caricaFigli = async () => {
+    if (!(conMaster && vedeLaRete(utente))) return null
+    // I sotto-master agganciati compaiono come pseudo-clienti (id = "m:<masterId>")
+    // (mai per l'agente: non deve vedere la rete/sotto-master)
+    const { createAdminSupabase } = await import('@/lib/supabase-admin')
+    const admin = createAdminSupabase()
+    const { data: figli } = await admin.from('masters')
+      .select('id,nome,email,telefono,credito,attivo,tipo_contratto,parent_listino_id,indirizzo,citta,provincia,cap,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo')
+      .eq('parent_master_id', utente.master_id).order('nome', { ascending: true })
+    // Contratti attivi del sotto-master = i suoi corrieri (come per i clienti col loro listino)
+    const figliIds = (figli || []).map((m: any) => m.id)
+    // Listino agganciato al sotto-master (parent_listino_id -> listini_clienti): nome per la colonna Listino
+    const subListinoIds = Array.from(new Set((figli || []).map((m: any) => m.parent_listino_id).filter(Boolean)))
+    // Nomi dei listini e contratti dei sotto-master: due letture indipendenti, insieme.
+    const [{ data: ls }, { data: corrFigli }] = await Promise.all([
+      subListinoIds.length ? admin.from('listini_clienti').select('id,nome').in('id', subListinoIds) : Promise.resolve({ data: [] as any[] }),
+      figliIds.length ? admin.from('corrieri').select('master_id,nome_contratto,tipo').in('master_id', figliIds) : Promise.resolve({ data: [] as any[] }),
+    ])
+    const subListinoNomi = new Map<string, string>()
+    for (const l of (ls || [])) subListinoNomi.set((l as any).id, (l as any).nome)
+    const corrPerSub = new Map<string, any[]>()
+    for (const c of (corrFigli || []) as any[]) {
+      if (!corrPerSub.has(c.master_id)) corrPerSub.set(c.master_id, [])
+      corrPerSub.get(c.master_id)!.push({ nome_contratto: c.nome_contratto, tipo: isProviderTecnico(c.tipo) ? null : c.tipo })
+    }
+    return { figli, subListinoNomi, corrPerSub }
+  }
+
+  const [{ clienti, agganci, stati, integrazioni }, ledgerOut, sub] = await Promise.all([caricaClienti(), caricaCollegati(), caricaFigli()])
+
   // Negozi collegati per cliente (URL sicuro calcolato server-side, mai le credenziali)
   const negoziMap = new Map<string, any[]>()
   for (const it of integrazioni) {
@@ -67,64 +140,8 @@ export async function GET(req: NextRequest) {
     return { ...c, contratti_attivi: attivi, negozi: negoziMap.get(c.id) || [] }
   })
 
-  // MASTER COLLEGATI (condivisione contratti): il "ledger" è il compratore visto come cliente di QUESTO
-  // master. Prima lo nascondevo (vedi .eq('ledger',false) sopra); va invece mostrato come un cliente con
-  // badge "Master collegato", così il venditore vede movimenti/credito e gli aggancia il suo listino —
-  // come ha chiesto il flusso nuovo (niente pagina condivisioni a parte). Isolato: è un clienti del
-  // venditore (RLS per master_id); l'agente non lo vede. corrieri_condivisi è solo service-role.
-  let ledgerOut: any[] = []
-  // Solo chi governa la rete. Prima la condizione era "non agente e con un master_id", e il master_id
-  // ce l'hanno anche i clienti: i 546 utenti cliente di Velox, GTS e Wave ricevevano i conti
-  // "(ingrosso)" del loro master, con credito, email, P.IVA e telefono (letti con la chiave di servizio).
-  if (vedeLaRete(utente)) {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const admin = createAdminSupabase()
-    const { data: ledgers } = await admin.from('clienti')
-      .select('id,ragione_sociale,so_indirizzo,so_citta,so_provincia,so_cap,sl_citta,email,telefono,piva,codice_cliente,attivo,listino_cliente_id,tipo_contratto,credito,listini_clienti(nome)')
-      .eq('master_id', utente.master_id).eq('ledger', true).order('ragione_sociale')
-    if (ledgers?.length) {
-      const lids = ledgers.map((l:any)=>l.id)
-      const { data: links } = await admin.from('corrieri_condivisi')
-        .select('cliente_ledger_id,master_id,stato').in('cliente_ledger_id', lids).neq('stato','revocata')
-      const buyerIds = Array.from(new Set((links||[]).map((l:any)=>l.master_id).filter(Boolean)))
-      const nomi = new Map<string,string>()
-      if (buyerIds.length) {
-        const { data: ms } = await admin.from('masters').select('id,nome').in('id', buyerIds)
-        for (const m of (ms||[])) nomi.set(m.id, m.nome)
-      }
-      const linkPerLedger = new Map<string,any>()
-      for (const l of (links||[])) if (!linkPerLedger.has(l.cliente_ledger_id)) linkPerLedger.set(l.cliente_ledger_id, l)
-      ledgerOut = ledgers.map((l:any)=>{
-        const lk = linkPerLedger.get(l.id)
-        return { ...l, is_ledger: true, master_collegato: lk ? (nomi.get(lk.master_id) || '—') : '—', contratti_attivi: [], negozi: [] }
-      })
-    }
-  }
-  if (conMaster && vedeLaRete(utente)) {
-    // I sotto-master agganciati compaiono come pseudo-clienti (id = "m:<masterId>")
-    // (mai per l'agente: non deve vedere la rete/sotto-master)
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const admin = createAdminSupabase()
-    const { data: figli } = await admin.from('masters')
-      .select('id,nome,email,telefono,credito,attivo,tipo_contratto,parent_listino_id,indirizzo,citta,provincia,cap,indirizzo_operativo,citta_operativo,provincia_operativo,cap_operativo')
-      .eq('parent_master_id', utente.master_id).order('nome', { ascending: true })
-    // Contratti attivi del sotto-master = i suoi corrieri (come per i clienti col loro listino)
-    const figliIds = (figli || []).map((m: any) => m.id)
-    // Listino agganciato al sotto-master (parent_listino_id -> listini_clienti): nome per la colonna Listino
-    const subListinoIds = Array.from(new Set((figli || []).map((m: any) => m.parent_listino_id).filter(Boolean)))
-    const subListinoNomi = new Map<string, string>()
-    if (subListinoIds.length) {
-      const { data: ls } = await admin.from('listini_clienti').select('id,nome').in('id', subListinoIds)
-      for (const l of (ls || [])) subListinoNomi.set(l.id, l.nome)
-    }
-    const corrPerSub = new Map<string, any[]>()
-    if (figliIds.length) {
-      const { data: corrFigli } = await admin.from('corrieri').select('master_id,nome_contratto,tipo').in('master_id', figliIds)
-      for (const c of (corrFigli || [])) {
-        if (!corrPerSub.has(c.master_id)) corrPerSub.set(c.master_id, [])
-        corrPerSub.get(c.master_id)!.push({ nome_contratto: c.nome_contratto, tipo: isProviderTecnico(c.tipo) ? null : c.tipo })
-      }
-    }
+  if (sub) {
+    const { figli, subListinoNomi, corrPerSub } = sub
     const masterOut = (figli || []).map((m: any) => ({
       id: 'm:' + m.id, ragione_sociale: m.nome || '—', is_master: true,
       email: m.email || '', telefono: m.telefono || '', credito: Number(m.credito || 0),
