@@ -40,10 +40,11 @@ export async function venditoreUsaIva(admin: any, venditore: string | null | und
 // COME E' VENDUTO OGGI UN LISTINO, per l'editor: la scelta del listino e quella di ogni contratto
 // impostato a parte (null = "come il listino"). Vale l'ultima scelta fatta, come in fn_iva_inclusa_al:
 // le scelte partono sempre da oggi o da inizio mese, quindi l'ultima fatta e' quella in vigore adesso.
-export type StatoIvaListino = { listino: boolean; corrieri: Record<string, boolean | null> }
+// `scelto`: il master ha fatto almeno una scelta su questo listino (altrimenti vale il punto di partenza).
+export type StatoIvaListino = { listino: boolean; corrieri: Record<string, boolean | null>; scelto?: boolean }
 
 export async function statoIvaListino(admin: any, listinoId: string): Promise<StatoIvaListino> {
-  const stato: StatoIvaListino = { listino: false, corrieri: {} }
+  const stato: StatoIvaListino = { listino: false, corrieri: {}, scelto: false }
   const { data, error } = await admin.from('listini_iva')
     .select('corriere_id,iva_inclusa,creato_il,id').eq('listino_id', listinoId)
     .order('creato_il', { ascending: false }).order('id', { ascending: false }).limit(1000)
@@ -52,6 +53,7 @@ export async function statoIvaListino(admin: any, listinoId: string): Promise<St
     throw new Error('Impostazioni IVA del listino non leggibili: ' + error.message)
   }
   let listinoVisto = false
+  stato.scelto = (data || []).length > 0
   for (const r of data || []) {
     if (!r.corriere_id) { if (!listinoVisto) { stato.listino = r.iva_inclusa === true; listinoVisto = true } continue }
     if (!(r.corriere_id in stato.corrieri)) stato.corrieri[r.corriere_id] = r.iva_inclusa == null ? null : r.iva_inclusa === true
@@ -62,9 +64,16 @@ export async function statoIvaListino(admin: any, listinoId: string): Promise<St
 // PER L'ETICHETTA "+ IVA / IVA incl." accanto ai prezzi: come e' venduto OGGI il listino di chi compra,
 // con la sua aliquota. Se la lettura non riesce torna null e le pagine non mostrano l'etichetta: un
 // prezzo senza etichetta e' meglio di un prezzo che non si carica.
+//
+// SOLO SE IL MASTER HA SCELTO. "IVA esclusa" e' il punto di partenza dei report, non una dichiarazione
+// del master: Velox vende ai suoi clienti IVA inclusa senza averlo mai impostato, e il 20/11 i suoi clienti
+// si sono trovati "+ IVA" accanto a prezzi che la contenevano gia' (telefonata a Lorenzo). Un listino su
+// cui nessuno ha scelto niente non mostra nessuna etichetta, come prima.
 export async function infoIvaPrezzi(admin: any, listinoId: string | null | undefined, aliquota: number): Promise<InfoIvaPrezzi | null> {
   try {
-    const s = listinoId ? await statoIvaListino(admin, listinoId) : { listino: false, corrieri: {} }
+    if (!listinoId) return null
+    const s = await statoIvaListino(admin, listinoId)
+    if (!s.scelto) return null
     return { aliquota, listino: s.listino, corrieri: s.corrieri }
   } catch (e: any) {
     console.error('[LISTINI IVA] etichetta non calcolata', listinoId, e?.message || e)
