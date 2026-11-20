@@ -148,6 +148,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
       // ...e questo dice "la giacenza e' ancora in corso", quando lo afferma il corriere stesso con i
       // suoi eventi (oggi solo KSync, vedi il ramo poste): allora non si chiede all'ultimo evento salvato.
       let giacenzaInCorso = false
+      // PONTE: la giacenza aperta sulla riga del VENDITORE (data vera e motivo). Vedi il ramo moovexpress.
+      let giacenzaVenditore: { data: string; motivo: string | null } | null = null
       // Contesto SpediamoPro per il recupero di numero/etichetta rimasti indietro (vedi sotto).
       let spAuth: string | null = null
       let spId: number | null = null
@@ -546,11 +548,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // un'altra funzione Vercel e una dozzina di letture per pacco, consumava il limite di 600 richieste al
         // minuto della chiave del cliente, e il 04/11 alle 15:03 due chiamate rimaste appese 300 s su Spedisci
         // hanno fatto morire il giro intero.
-        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi } = venditoreSuQuestoPortale(credMv as any)
+        const { stato: mvStato, consegnata: mvConseg, eventi: mvEventi, giacenza: mvGiacenza } = venditoreSuQuestoPortale(credMv as any)
           ? await trackingMoovexpressLocale(admin, credMv as any, String(s.tracking_number), memoVenditore)
           : await trackingMoovexpress(credMv as any, String(s.tracking_number))
         if (mvStato && prioritaStato(mvStato) > prioritaStato(nuovo)) nuovo = mvStato
         if (mvStato === 'in_giacenza') vistaGiacenza = true
+        // LA GIACENZA APERTA DAL VENDITORE VALE ANCHE QUI. Il venditore la riconosce dal suo corriere con
+        // regole che qui non arrivano (GLS: i codici degli eventi; Poste: le sue letture), e la sua riga puo'
+        // restare 'non_consegnato' con la giacenza aperta. Prima la si copiava solo se il suo stato era
+        // proprio 'in_giacenza': il 20/11/2026 Quick aveva 6 giacenze GLS NI W LIGHT (NI665665733,
+        // "Indirizzo errato") visibili sul tracking e assenti dalla sua pagina Giacenze, e su SDA EXPRESS L
+        // ne mancavano 27 ad altri clienti. L'apertura la paga gia' tutta la fila quando la apre il
+        // venditore: qui si scrive solo la data, e il database non la rimette in coda (fn_giacenza_da_addebitare).
+        if (mvGiacenza) { vistaGiacenza = true; giacenzaVenditore = mvGiacenza }
         // ...ma se il pacco e' tornato al mittente, quella "consegnata" e' il RITORNO: vince il reso.
         if (mvStato === 'reso_mittente') nuovo = 'reso_mittente'
         if (mvConseg && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
@@ -607,14 +617,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // evento della cronologia. Una "mancata consegna" arrivata DOPO la giacenza non basta: non e'
         // certo che il pacco sia tornato in giacenza, e qui si apre solo cio' che e' sicuro.
         // Fa eccezione la frase che il corriere ripete ogni giorno DURANTE la giacenza (`giacenzaInCorso`).
-        let apertaAdesso = nuovo === 'in_giacenza' || giacenzaInCorso
+        // Sul ponte decide il venditore: se da lui la giacenza e' aperta adesso, lo e' anche qui, con la SUA data
+        // (quella vera dell'apertura, non "adesso").
+        let apertaAdesso = nuovo === 'in_giacenza' || giacenzaInCorso || !!giacenzaVenditore
         if (!apertaAdesso) {
           const { data: ult } = await admin.from('tracking_events').select('stato,descrizione')
             .eq('spedizione_id', s.id).order('data_evento', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
           apertaAdesso = (ult as any)?.stato === 'in_giacenza' || /giacenz/i.test(String((ult as any)?.descrizione || ''))
         }
-        if (apertaAdesso) upd.giacenza_data = new Date().toISOString()
+        if (apertaAdesso) upd.giacenza_data = giacenzaVenditore?.data || new Date().toISOString()
       }
+      if (!motivoGiacenza && giacenzaVenditore?.motivo) motivoGiacenza = giacenzaVenditore.motivo.slice(0, 200)
       if (motivoGiacenza && motivoGiacenza !== (s as any).giacenza_motivo) upd.giacenza_motivo = motivoGiacenza
       if (nuovoTracking && nuovoTracking !== s.tracking_number) upd.tracking_number = nuovoTracking
 
