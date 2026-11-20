@@ -55,7 +55,10 @@ export async function POST(req: NextRequest) {
   // rotta: la distinta appena creata e' del cliente loggato.
   //
   // A RISPOSTA DATA, PRIMA LA CHIUSURA AL CORRIERE E POI L'EVASIONE DEI NEGOZI, nello stesso lavoro e in
-  // quest'ordine. La risposta non dipende dalla chiusura (ogni errore e' ignorato qui, la distinta e' gia'
+  // quest'ordine. Se la chiusura salta, NESSUNO la riprende da solo (il giro serale chiude solo le distinte
+  // che crea lui): la distinta resta "in attesa" e la segnala al master il controllo di mezz'ora
+  // (app/api/distinte/non-chiuse); si rifa' col tasto "Conferma al vettore".
+  // La risposta non dipende dalla chiusura (ogni errore e' ignorato qui, la distinta e' gia'
   // nata e agganciata), e il cliente vede solo "Distinta N creata": aspettarla prima di rispondere gli costava
   // ~0,8 s a ogni distinta, perche' le sette funzioni qui sotto fanno ognuna le sue letture per decidere se il
   // contratto e' il loro (p75 del primo byte 1,17 s su ~500 distinte al giorno, 17-18/11/2026).

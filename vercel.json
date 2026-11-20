@@ -15,6 +15,10 @@
       "schedule": "*/15 21-23 * * *"
     },
     {
+      "path": "/api/distinte/non-chiuse",
+      "schedule": "10,40 6-20 * * *"
+    },
+    {
       "path": "/api/abbonamento/rinnovo-mensile",
       "schedule": "0 6 1 * *"
     },
