@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { cronometra, segna, annota } from '@/lib/cronometro'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente, motivoPartenzaNonCoperta } from '@/lib/pricing'
 import { registraMovimento, descrizioneSpedizione } from '@/lib/movimenti'
@@ -90,7 +91,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
   const reg: RegistroPonte = { codice: null, aperta: false }
-  const res = await creaSpedizioneApi(req, t0, reg)
+  // Cronometro (lib/cronometro): come per la creazione dal portale, una riga [V1][TEMPI] per creazione. Serve
+  // soprattutto ai contratti condivisi: il ponte crea qui presso il master a monte, e questa rotta pesa 5,6 s
+  // (mediana, 20/11/2026) dentro i 7-10 s della loro creazione. Misura soltanto.
+  const res = await cronometra('[V1][TEMPI]', async () => {
+    const r = await creaSpedizioneApi(req, t0, reg)
+    annota('stato', r.status)
+    return r
+  })
   if (reg.aperta && reg.codice) await chiudiRichiestaPonte(createAdminSupabase(), reg.codice, res)
   return res
 }
@@ -342,6 +350,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   // CONDIVISIONE: per un ponte (tipo='moovexpress') il gating è sui livelli-ALBERO (CODICE/OWNER li gata
   // il dispatch del venditore). La vecchia verificaCreditoCatena qui bloccherebbe con "MoovExpress non ha
   // listino" (sale l'albero fino alla piattaforma). Gli altri corrieri restano IDENTICI.
+  segna('prima della catena'); annota('tipo', String(corriere.tipo || ''))
   const catena = corriere.tipo === 'moovexpress'
     ? await verificaCreditoCondivisione(admin, {
         masterOriginante: masterId, nomeContratto: corriere.nome_contratto,
@@ -363,6 +372,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   // NON E' SEMPRE CREDITO. La stessa verifica fallisce anche quando la catena non e' configurata o
   // quando cliente e contratto risolvono due zone diverse: rispondere sempre "Credito insufficiente"
   // mandava chi integra a ricaricare un conto che era gia' pieno, mentre il problema era un altro.
+  segna('catena')
   if (!catena.ok) {
     const eCredito = /credito insufficiente/i.test(catena.errore || '')
     return NextResponse.json({ error: catena.errore || 'Credito insufficiente' }, { status: eCredito ? 402 : 400 })

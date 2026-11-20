@@ -406,16 +406,22 @@ export async function pianoAddebitiCondivisione(
 ): Promise<MovimentoPianificato[]> {
   const catena = await risolviCatenaCondivisione(admin, p.masterOriginante, p.nomeContratto)
   const pesoReale = (p.packages || []).reduce((s: number, x: any) => s + (parseFloat(x?.weight) || 0), 0) || 1
+  // SOLO i livelli d'ALBERO sono addebitati dal NUOVO codice (crea), prezzati dal listino del loro
+  // corriere con la STESSA logica della cascata (COD/assic/mittente/accessori/agevolazione). I livelli
+  // CODICE e l'OWNER li addebita il DISPATCH esistente (ledger lato venditore + credito_proprio
+  // dell'owner), col prezzo autorevole del ledger — NON si riprezzano qui (il listino del ponte può
+  // essere sfasato: vedi Wave 4,48 vs 4,28 reale). Per quelli importo=null (dal dispatch).
+  // I LIVELLI SI PREZZANO INSIEME (20/11/2026): il costo di un livello legge solo il suo listino, e la creazione
+  // di un condiviso costruisce questo piano due volte (credito prima del corriere, addebiti dopo). Si rimonta
+  // nell'ordine di prima, e un'eccezione esce al posto del livello che l'ha data, come quando si andava in fila.
+  const importi = await Promise.all(catena.map(liv => liv.ruolo === 'albero'
+    ? costoLivelloAlbero(admin, liv, p.nomeContratto, pesoReale, p).then(v => ({ ok: true, v, e: null as any }), (e: any) => ({ ok: false, v: null, e }))
+    : Promise.resolve({ ok: true, v: null, e: null as any })))
   const out: MovimentoPianificato[] = []
-  for (const liv of catena) {
-    // SOLO i livelli d'ALBERO sono addebitati dal NUOVO codice (crea), prezzati dal listino del loro
-    // corriere con la STESSA logica della cascata (COD/assic/mittente/accessori/agevolazione). I livelli
-    // CODICE e l'OWNER li addebita il DISPATCH esistente (ledger lato venditore + credito_proprio
-    // dell'owner), col prezzo autorevole del ledger — NON si riprezzano qui (il listino del ponte può
-    // essere sfasato: vedi Wave 4,48 vs 4,28 reale). Per quelli importo=null (dal dispatch).
-    const importo = liv.ruolo === 'albero'
-      ? await costoLivelloAlbero(admin, liv, p.nomeContratto, pesoReale, p)
-      : null
+  for (let k = 0; k < catena.length; k++) {
+    const liv = catena[k]
+    if (!importi[k].ok) throw importi[k].e
+    const importo = importi[k].v
     out.push({
       master: liv.master, conto: liv.conto, ledgerClienteId: liv.ledgerClienteId,
       fornitore: liv.fornitore, ruolo: liv.ruolo, importo,
@@ -439,11 +445,15 @@ export async function verificaCreditoCondivisione(
   // chiamanti): qui non viene mai valorizzato — la guardia COD-non-prezzato è un affinamento ancora da fare.
 ): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string; servizioNonPrezzato?: boolean }> {
   const piano = await pianoAddebitiCondivisione(admin, p)
-  for (const liv of piano) {
-    if (liv.ruolo !== 'albero' || liv.importo == null) continue
-    const prezzo = Math.abs(liv.importo)
-    if (!(prezzo > 0)) continue
-    const { data: m }: any = await admin.from('masters').select('nome,tipo_contratto,credito').eq('id', liv.master).maybeSingle()
+  // I saldi dei livelli da controllare si leggono insieme e si valutano NELL'ORDINE di prima: vince sempre il
+  // primo livello a secco, come quando si leggevano uno alla volta.
+  const daControllare = piano.filter(liv => liv.ruolo === 'albero' && liv.importo != null && Math.abs(liv.importo) > 0)
+  const saldi = await Promise.all(daControllare.map(liv =>
+    admin.from('masters').select('nome,tipo_contratto,credito').eq('id', liv.master).maybeSingle()))
+  for (let k = 0; k < daControllare.length; k++) {
+    const liv = daControllare[k]
+    const prezzo = Math.abs(liv.importo as number)
+    const m: any = (saldi[k] as any)?.data
     if (!m) continue
     // Stessa regola di verificaCreditoCatena: solo i prepagati (credito_scalare) si bloccano a secco.
     if ((m.tipo_contratto || 'credito_scalare') === 'credito_scalare' && Number(m.credito || 0) < prezzo) {
