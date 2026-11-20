@@ -55,31 +55,45 @@ const cent = (x: number) => Math.round((Number(x) || 0) * 100) / 100
 // (addebito negativo). Una voce che somma a zero non diventa riga.
 // Le voci scritte a mano entrano nelle righe solo con `conAMano` (la proforma ci passa soltanto quelle
 // spuntate dal master); altrimenti restano fuori e si contano a parte in `aMano` (spesa: + = addebito).
+//
+// IVA INCLUSA (Lorenzo, 20/11/2026): i movimenti di una spedizione che il master ha venduto IVA
+// inclusa (`iva_inclusa`, deciso dal database) contengono gia' l'IVA. Nella voce entrano AL NETTO,
+// scorporati con l'aliquota del cliente, e la loro IVA torna nel totale IVA che il chiamante calcola
+// sull'imponibile. Senza movimenti IVA inclusa le righe sono quelle di sempre, al centesimo.
+// `inclusa` dice quanto di quei movimenti e' uscito dal credito (lordo) e quanta IVA c'era dentro.
 export function righeSpesa(
-  elenco: { tipo: string; con_spedizione: boolean; n: number; importo: number }[],
+  elenco: { tipo: string; con_spedizione: boolean; n: number; importo: number; iva_inclusa?: boolean }[],
   conAMano = false,
-): { righe: RigaVoce[]; imponibile: number; aMano: { n: number; importo: number } } {
-  const perVoce = new Map<string, { n: number; importo: number }>()
+  aliquota = 22,
+): { righe: RigaVoce[]; imponibile: number; aMano: { n: number; importo: number }; inclusa: { lordo: number; iva: number } } {
+  const perVoce = new Map<string, { n: number; importo: number; inclusa: number }>()
   const aMano = { n: 0, importo: 0 }
+  let lordoInclusa = 0
   for (const r of elenco) {
     const k = voceSpesa(r.tipo, r.con_spedizione)
     if (!k) continue
     if (k === 'a_mano' && !conAMano) { aMano.n += Number(r.n) || 0; aMano.importo -= Number(r.importo) || 0; continue }
-    const v = perVoce.get(k) || { n: 0, importo: 0 }
+    const v = perVoce.get(k) || { n: 0, importo: 0, inclusa: 0 }
     v.n += Number(r.n) || 0
-    v.importo += Number(r.importo) || 0
+    if (r.iva_inclusa) { v.inclusa += Number(r.importo) || 0; lordoInclusa += Number(r.importo) || 0 }
+    else v.importo += Number(r.importo) || 0
     perVoce.set(k, v)
   }
+  const scorporo = 1 + (Number(aliquota) || 0) / 100
   const righe: RigaVoce[] = []
   for (const voce of VOCI_SPESA) {
     const v = perVoce.get(voce.chiave)
     if (!v) continue
-    const importo = cent(-v.importo)
+    const importo = cent(-(v.importo + v.inclusa / scorporo))
     if (importo === 0) continue
     righe.push({ voce: voce.chiave, descrizione: voce.descrizione, quantita: v.n, importo })
   }
+  const lordo = cent(-lordoInclusa)
   // Il totale e' la somma delle righe GIA' arrotondate: e' la cifra che si legge sommando il riepilogo.
-  return { righe, imponibile: cent(righe.reduce((t, r) => t + r.importo, 0)), aMano: { n: aMano.n, importo: cent(aMano.importo) } }
+  return {
+    righe, imponibile: cent(righe.reduce((t, r) => t + r.importo, 0)), aMano: { n: aMano.n, importo: cent(aMano.importo) },
+    inclusa: { lordo, iva: cent(lordo - lordo / scorporo) },
+  }
 }
 
 export function unitaVoce(chiave: string, n: number): string {

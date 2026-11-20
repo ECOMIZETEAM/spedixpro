@@ -9,6 +9,7 @@ import { vettoreFisico } from '@/lib/vettore'
 import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
 import { spedizioniInCatena } from '@/lib/catena-report'
+import { ivaVendite } from '@/lib/iva-vendita'
 
 // Il report di un master grande legge decine di migliaia di spedizioni con i loro movimenti ed
 // eventi di tracking (MULTIEXPRESS, 1-14/10/2026: ~60.000 spedizioni). Non sta nella finestra breve.
@@ -189,7 +190,11 @@ async function report(req: NextRequest) {
     const cliIds = Array.from(new Set(mvs.map((m: any) => m.cliente_id).filter(Boolean))) as string[]
     const cli = new Map<string, any>()
     for (const c of await perBlocchi(cliIds, b => leggiTutto(() => adminDb.from('clienti').select('id,ragione_sociale,aliquota_iva').in('id', b).order('id')))) cli.set(c.id, c)
-    return NextResponse.json(mvs.map((m: any) => {
+    // La rettifica segue come era venduta la sua spedizione (IVA inclusa o esclusa): regola nel database.
+    const rettInclusa = await ivaVendite(adminDb, mine, mvs.map((m: any) => m.cliente_id
+      ? { t: 'cliente' as const, s: m.cliente_id, p: m.spedizione_id, m: 'rettifica' }
+      : (m.master_target_id ? { t: 'master' as const, s: m.master_target_id, p: m.spedizione_id, m: 'rettifica' } : null)))
+    return NextResponse.json(mvs.map((m: any, i: number) => {
       const c = m.cliente_id ? cli.get(m.cliente_id) : null
       return {
         id: m.id, created_at: m.created_at, spedizione_id: m.spedizione_id,
@@ -200,6 +205,7 @@ async function report(req: NextRequest) {
         diretto_id: m.cliente_id ? m.cliente_id : 'm:' + m.master_target_id,
         diretto_nome: m.cliente_id ? (c?.ragione_sociale || '—') : (nomeMaster.get(m.master_target_id) || '—'),
         aliquota_iva: m.cliente_id && c?.aliquota_iva != null ? Number(c.aliquota_iva) : 22,
+        iva_inclusa: rettInclusa[i],
       }
     }))
   }
@@ -489,7 +495,16 @@ async function report(req: NextRequest) {
       diretto_id, diretto_nome, aliquota_iva,
     }
   })
-  return NextResponse.json(rows)
+  // IVA INCLUSA O ESCLUSA: come ho venduto ogni riga al mio diretto (Lorenzo, 20/11/2026). La decide il
+  // database (fn_iva_vendita): il listino che il diretto aveva il giorno della spedizione e la scelta
+  // fatta su quel listino per il mio contratto. Le spedizioni proprie non le vendo a nessuno: esclusa.
+  // I file (lib/report-spedizioni-genera) dividono poi imponibile e IVA riga per riga.
+  const inclusa = await ivaVendite(adminDb, mine, rows.map((r: any) => {
+    const d = String(r.diretto_id || '')
+    if (!d || d === 'proprie' || d === 'rete') return null
+    return d.startsWith('m:') ? { t: 'master' as const, s: d.slice(2), p: r.id } : { t: 'cliente' as const, s: d, p: r.id }
+  }))
+  return NextResponse.json(rows.map((r: any, i: number) => ({ ...r, iva_inclusa: inclusa[i] })))
 }
 
 // Qui c'era una POST che registrava un report SENZA file: nessuna pagina la chiamava piu' (i report

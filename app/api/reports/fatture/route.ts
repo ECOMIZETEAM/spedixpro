@@ -50,24 +50,43 @@ export async function GET(req: NextRequest) {
     const { data: c } = await admin.from('clienti').select('id,ragione_sociale,aliquota_iva').eq('id', clienteId).eq('master_id', masterId).maybeSingle()
     if (!c) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 404 })
     try {
-      const calc = await calcolaProforma(admin, masterId, clienteId, dal, al)
-      const aliquota = aliquotaDi(c), iva = ivaDi(calc.imponibile, aliquota)
+      const aliquota = aliquotaDi(c)
+      const calc = await calcolaProforma(admin, masterId, clienteId, dal, al, [], aliquota)
+      const iva = ivaDi(calc.imponibile, aliquota)
       return NextResponse.json({
         cliente: { id: c.id, nome: c.ragione_sociale }, righe: calc.righe, imponibile: calc.imponibile,
-        aliquota, iva, totale: cent(calc.imponibile + iva), movimenti: calc.movimenti, aMano: calc.aMano,
+        aliquota, iva, totale: cent(calc.imponibile + iva), movimenti: calc.movimenti, aMano: calc.aMano, ivaInclusa: calc.ivaInclusa,
       })
     } catch (e: any) { return NextResponse.json({ error: e?.message || 'Calcolo non riuscito' }, { status: 500 }) }
   }
 
-  const { data: importi, error } = await admin.rpc('fatture_importi_periodo_v1', {
-    p_master: masterId, p_dal: inizioGiornoRomaISO(dal), p_al: fineGiornoRomaISO(al),
-  })
-  if (error) return NextResponse.json({ error: 'Importi del periodo non leggibili: ' + error.message }, { status: 500 })
+  // v2 = come la v1, divisa anche per IVA inclusa / esclusa (scripts/iva-listini.sql). Finche' la v2
+  // non c'e' nel database nessuno ha venduto IVA inclusa: la v1 da' gli stessi numeri.
+  // A PAGINE: una riga per cliente, tipo e IVA, e oltre 1.000 righe il database tronca in silenzio
+  // (un master con 200 clienti e cinque tipi di spesa ci arriva). La v2 ha un ordine fisso; se si
+  // ripiega sulla v1, che non ce l'ha, una risposta piena si ferma con un errore invece di perdere clienti.
+  const argomenti = { p_master: masterId, p_dal: inizioGiornoRomaISO(dal), p_al: fineGiornoRomaISO(al) }
+  const importi: any[] = []
+  let errore: string | null = null
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await admin.rpc('fatture_importi_periodo_v2', argomenti).range(da, da + 999)
+    if (error && String(error.code || '') === 'PGRST202' && da === 0) {
+      const v1 = await admin.rpc('fatture_importi_periodo_v1', argomenti)
+      if (v1.error) { errore = v1.error.message; break }
+      if ((v1.data || []).length >= 1000) { errore = 'troppe righe per una lettura sola'; break }
+      importi.push(...(v1.data || []))
+      break
+    }
+    if (error) { errore = error.message; break }
+    importi.push(...(data || []))
+    if (!data || data.length < 1000) break
+  }
+  if (errore) return NextResponse.json({ error: 'Importi del periodo non leggibili: ' + errore }, { status: 500 })
   const perCliente = new Map<string, any[]>()
   for (const r of importi || []) {
     if (suoi && !suoi.has(r.cliente_id)) continue
     const l = perCliente.get(r.cliente_id) || []
-    l.push({ tipo: r.tipo, con_spedizione: r.con_spedizione, n: Number(r.n) || 0, importo: Number(r.importo) || 0 })
+    l.push({ tipo: r.tipo, con_spedizione: r.con_spedizione, n: Number(r.n) || 0, importo: Number(r.importo) || 0, iva_inclusa: r.iva_inclusa === true })
     perCliente.set(r.cliente_id, l)
   }
   // A gruppi: un .in() con centinaia di id diventa un indirizzo troppo lungo e PostgREST risponde
@@ -81,11 +100,12 @@ export async function GET(req: NextRequest) {
   }
   const clienti = []
   for (const [id, l] of perCliente) {
-    const { righe, imponibile, aMano } = righeSpesa(l)
-    if (!righe.length && !aMano.n) continue
     const c = anagrafica.get(id)
-    const aliquota = aliquotaDi(c), iva = ivaDi(imponibile, aliquota)
-    clienti.push({ id, nome: String(c?.ragione_sociale || '—').trim(), righe, imponibile, aliquota, iva, totale: cent(imponibile + iva), aMano })
+    const aliquota = aliquotaDi(c)
+    const { righe, imponibile, aMano, inclusa } = righeSpesa(l, false, aliquota)
+    if (!righe.length && !aMano.n) continue
+    const iva = ivaDi(imponibile, aliquota)
+    clienti.push({ id, nome: String(c?.ragione_sociale || '—').trim(), righe, imponibile, aliquota, iva, totale: cent(imponibile + iva), aMano, ivaInclusa: inclusa })
   }
   clienti.sort((a, b) => b.imponibile - a.imponibile)
   return NextResponse.json({ clienti })

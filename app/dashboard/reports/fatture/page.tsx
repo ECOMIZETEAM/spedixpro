@@ -98,10 +98,12 @@ export default function ReportFatturePage() {
         const d = await leggi('/api/reports/fatture?' + pC.toString(), 'Movimenti del cliente')
         testata = ['Data', 'Voce', 'Descrizione', 'Importo €']
         const voce = new Map<string, string>((d.righe || []).map((r: any) => [r.voce, r.descrizione]))
-        corpo = (d.movimenti || []).map((m: any) => [new Date(m.created_at).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }), voce.get(m.voce) || m.voce, m.descrizione, eur(m.importo)])
+        corpo = (d.movimenti || []).map((m: any) => [new Date(m.created_at).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }), (voce.get(m.voce) || m.voce) + (m.iva_inclusa ? ' (IVA incl.)' : ''), m.descrizione, eur(m.importo)])
         if (corpo.length) {
           corpo.push([], ...(d.righe || []).map((r: any) => ['', r.descrizione, `${r.quantita}`, eur(r.importo)]),
             ['', '', 'IMPONIBILE', eur(d.imponibile)], ['', '', `IVA (${d.aliquota}%)`, eur(d.iva)], ['', '', 'TOTALE', eur(d.totale)])
+          // Spedizioni vendute IVA inclusa: nelle voci sono al netto, l'IVA che contenevano e' nel totale IVA.
+          if (d.ivaInclusa?.lordo) corpo.push(['', '', `di cui venduti IVA inclusa: € ${eur(d.ivaInclusa.lordo)} già pagati (IVA compresa € ${eur(d.ivaInclusa.iva)})`, ''])
         }
         const fuori = d.aMano || []
         if (fuori.length) {
@@ -126,8 +128,12 @@ export default function ReportFatturePage() {
         const vuota = (nome: string, aliquota: number): Riga => ({ nome, n: 0, sped: 0, rett: 0, giac: 0, resi: 0, servizi: 0, aMano: 0, rimborsi: 0, aliquota })
         const per = new Map<string, Riga>()
         const riga = (id: string, nome: string, aliquota: any) => { let v = per.get(id); if (!v) { v = vuota(nome || '—', aliq(aliquota)); per.set(id, v) } return v }
-        for (const s of sped) { if (diCliente(s.diretto_id)) continue; const v = riga(s.diretto_id, s.diretto_nome, s.aliquota_iva); v.n++; v.sped += Number(s.costo_totale) || 0 }
-        for (const r of rett) { if (diCliente(r.diretto_id)) continue; riga(r.diretto_id, r.diretto_nome, r.aliquota_iva).rett += Number(r.importo) || 0 }
+        // Le righe vendute IVA inclusa entrano al NETTO (scorporo, lib/iva-calcolo): l'IVA che contengono
+        // torna nel totale IVA calcolato sull'imponibile, come per i clienti (lib/fatture/voci.ts).
+        const { dividiPrezzo } = await import('@/lib/iva-calcolo')
+        const netto = (importo: any, aliquota: any, inclusa: any) => dividiPrezzo(Number(importo) || 0, aliq(aliquota), !!inclusa).imponibile
+        for (const s of sped) { if (diCliente(s.diretto_id)) continue; const v = riga(s.diretto_id, s.diretto_nome, s.aliquota_iva); v.n++; v.sped += netto(s.costo_totale, s.aliquota_iva, s.iva_inclusa) }
+        for (const r of rett) { if (diCliente(r.diretto_id)) continue; riga(r.diretto_id, r.diretto_nome, r.aliquota_iva).rett += netto(r.importo, r.aliquota_iva, r.iva_inclusa) }
         for (const x of perCliente.clienti || []) {
           const v = riga(x.id, x.nome, x.aliquota)
           for (const r of x.righe) {

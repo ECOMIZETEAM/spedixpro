@@ -117,6 +117,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (cs.length) { const { error } = await admin.from('listini_clienti_corrieri').insert(cs.map((r: any) => ({ ...r, listino_id: nuovo.id }))); if (error) return rollback('Copia contratti non riuscita: ' + error.message) }
       for (let i = 0; i < fs.length; i += 1000) { const { error } = await admin.from('listini_clienti_fasce').insert(fs.slice(i, i + 1000).map((r: any) => ({ ...r, listino_id: nuovo.id }))); if (error) return rollback('Copia prezzi non riuscita: ' + error.message) }
       if (ss.length) { const { error } = await admin.from('listini_clienti_supplementi').insert(ss.map((r: any) => ({ ...r, listino_id: nuovo.id }))); if (error) return rollback('Copia supplementi non riuscita: ' + error.message) }
+      // Come era venduto il listino di partenza (IVA inclusa o esclusa, scripts/iva-listini.sql) passa
+      // anche alla bozza, se no nascerebbe IVA esclusa in silenzio. Non per l'agente: il suo listino dice
+      // come compra lui dal master, non come si vende al cliente. Se non riesce la bozza resta: la scelta
+      // si rifa' dal riquadro del listino.
+      if (!s.isAgente) {
+        const { error: eIva } = await admin.rpc('listini_iva_copia', { p_master: s.master_id, p_da_listino: srcId, p_a_listino: nuovo.id, p_utente: null })
+        if (eIva && String(eIva.code || '') !== 'PGRST202') console.error('[LISTINI IVA] copia nel preventivo non riuscita', srcId, nuovo.id, eIva.message)
+      }
     }
     await admin.from('preventivi').update({ listino_template_id: nuovo.id, updated_at: new Date().toISOString() }).eq('id', id)
     return NextResponse.json({ ok: true, listino_id: nuovo.id })

@@ -1,13 +1,15 @@
 import { righeSpesa, voceSpesa, VOCI_SPESA, type RigaVoce } from './voci'
 import { inizioGiornoRomaISO, fineGiornoRomaISO, giornoRoma } from '@/lib/date-roma'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
+import { ivaVendite } from '@/lib/iva-vendita'
 
 // LA FATTURA PROFORMA (Lorenzo, 13/11/2026): il master sceglie un cliente e un periodo, e la proforma
 // dice tutto quello che il cliente gli deve per quei giorni — spedizioni, rettifiche, giacenze, resi,
 // servizi, voci scritte a mano, meno i rimborsi — "non importa se credito o fattura a scalare".
 // Non e' una fattura: niente SDI, niente numero fiscale. Ha un suo numero per master e per anno.
 
-export type MovimentoProforma = { created_at: string; voce: string; descrizione: string; importo: number }
+// `iva_inclusa`: il movimento e' di una spedizione venduta IVA inclusa (l'importo contiene l'IVA).
+export type MovimentoProforma = { created_at: string; voce: string; descrizione: string; importo: number; iva_inclusa?: boolean }
 export type Accrediti = { n: number; importo: number }
 // Una voce scritta a mano dal master: entra solo se lui la spunta (lib/fatture/voci.ts, 'a_mano').
 export type VoceAMano = { id: string; created_at: string; descrizione: string; importo: number; inclusa: boolean }
@@ -21,6 +23,9 @@ export type CalcoloProforma = {
   // stati accreditati nello stesso periodo (importi positivi = a favore del cliente).
   ricariche: Accrediti
   contrassegni: Accrediti
+  // Movimenti di spedizioni vendute IVA inclusa: quanto e' uscito dal credito e quanta IVA conteneva.
+  // Nelle righe sono gia' al netto (lib/fatture/voci.ts → righeSpesa).
+  ivaInclusa: { lordo: number; iva: number }
 }
 
 // Oltre un anno il PDF diventa un libro, e la lettura tiene occupato il database per niente.
@@ -44,11 +49,12 @@ export function motivoPeriodo(dal: string, al: string): string | null {
 // id): si legge a pagine da 1.000, e un movimento nuovo arriva sempre in fondo, quindi non sposta le
 // pagine gia' lette. `aManoIncluse`: gli id delle voci scritte a mano che il master ha spuntato; un id
 // che non e' una voce a mano di questo cliente in questo periodo non conta.
-export async function calcolaProforma(admin: any, masterId: string, clienteId: string, dal: string, al: string, aManoIncluse: string[] = []): Promise<CalcoloProforma> {
+// `aliquota`: quella del cliente (aliquotaDi), serve a scorporare i movimenti venduti IVA inclusa.
+export async function calcolaProforma(admin: any, masterId: string, clienteId: string, dal: string, al: string, aManoIncluse: string[] = [], aliquota = 22): Promise<CalcoloProforma> {
   const inizio = inizioGiornoRomaISO(dal)
   const fine = fineGiornoRomaISO(al)
   const spuntate = new Set(aManoIncluse)
-  const grezzi: { id: string; created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean }[] = []
+  const grezzi: { id: string; created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean; spedizione_id: string | null; iva_inclusa: boolean }[] = []
   for (let da = 0; ; da += 1000) {
     const { data, error } = await admin.from('movimenti')
       .select('id,created_at,tipo,descrizione,importo,spedizione_id')
@@ -62,11 +68,16 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
       .range(da, da + 999)
     if (error) throw new Error('Movimenti non leggibili: ' + error.message)
     for (const m of data || []) {
-      grezzi.push({ id: m.id, created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id })
+      grezzi.push({ id: m.id, created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id, spedizione_id: m.spedizione_id || null, iva_inclusa: false })
     }
     if (grezzi.length > MOVIMENTI_MAX) throw new Error('Troppi movimenti per una proforma sola: scegli un periodo più corto')
     if (!data || data.length < 1000) break
   }
+
+  // Come il master ha venduto la spedizione di ogni movimento: IVA inclusa o esclusa. Lo decide il
+  // database (fn_iva_vendita, stessa regola dei report); i tipi che non seguono il listino tornano false.
+  const inclusa = await ivaVendite(admin, masterId, grezzi.map(m => m.spedizione_id ? { t: 'cliente' as const, s: clienteId, p: m.spedizione_id, m: m.tipo } : null))
+  grezzi.forEach((m, i) => { m.iva_inclusa = inclusa[i] })
 
   const movimenti: MovimentoProforma[] = []
   const aMano: VoceAMano[] = []
@@ -87,13 +98,13 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
       if (!inclusa) continue
     }
     contano.push(m)
-    movimenti.push({ created_at: m.created_at, voce, descrizione, importo: cent(-m.importo) })
+    movimenti.push({ created_at: m.created_at, voce, descrizione, importo: cent(-m.importo), ...(m.iva_inclusa ? { iva_inclusa: true } : {}) })
   }
   // Qui dentro ci sono gia' solo le voci a mano spuntate.
-  const { righe, imponibile } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo })), true)
+  const { righe, imponibile, inclusa: ivaInclusa } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo, iva_inclusa: m.iva_inclusa })), true, aliquota)
   ricariche.importo = cent(ricariche.importo)
   contrassegni.importo = cent(contrassegni.importo)
-  return { righe, imponibile, movimenti, aMano, ricariche, contrassegni }
+  return { righe, imponibile, movimenti, aMano, ricariche, contrassegni, ivaInclusa }
 }
 
 // ── Chi la emette e a chi va ─────────────────────────────────────────────────────────────────────
