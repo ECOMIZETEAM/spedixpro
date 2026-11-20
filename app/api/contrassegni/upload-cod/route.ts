@@ -5,6 +5,18 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
 import { scendiCodDaSpedizione, risolviGambeSpedizione } from '@/lib/condivisione-catena'
+import { riepilogoDaRichiesta } from '@/lib/cod-file-riepilogo'
+
+// Il dettaglio di dove e' finita ogni riga del file (lib/cod-file-riepilogo.ts) si scrive con un aggiornamento
+// SEPARATO, dopo il record del file: se la colonna non c'e' ancora o la scrittura non riesce, il caricamento
+// resta valido e si perde solo il dettaglio da mostrare.
+async function salvaRiepilogo(admin: any, idFile: string | undefined, masterId: string, s: any) {
+  if (!idFile) return
+  try {
+    const { error } = await admin.from('cod_files').update({ riepilogo: riepilogoDaRichiesta(s) }).eq('id', idFile).eq('master_id', masterId)
+    if (error) console.error('[COD] riepilogo del file non salvato:', error.message)
+  } catch (e) { console.error('[COD] riepilogo del file non salvato:', e) }
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -24,12 +36,13 @@ export async function POST(req: NextRequest) {
   const scriviLog = body.scriviLog !== false
   if (body.soloLog) {
     const s = body.soloLog || {}
-    await supabase.from('cod_files').insert({
+    const { data: rec } = await supabase.from('cod_files').insert({
       master_id: masterId, nome_file: nomeFile, righe_file: Number(s.righeFile) || 0,
       spedizioni_processate: Number(s.spedizioniProcessate) || 0, cod_file: Number(s.codFile) || 0,
       cod_sistema: Number(s.codSistema) || 0, cod_da_pagare: Number(s.codDaPagare) || 0,
       cod_in_distinte: 0, errori: Number(s.errori) || 0,
-    })
+    }).select('id').maybeSingle()
+    await salvaRiepilogo(adminDb, (rec as any)?.id, masterId, s)
     return NextResponse.json({ success: true, logged: true })
   }
   // La catena di un master è la stessa per tutte le sue righe: si risale UNA volta e si riusa.
@@ -250,10 +263,14 @@ export async function POST(req: NextRequest) {
   // In modalità chunk il record riepilogo NON si scrive per ogni blocco: lo scrive la chiamata finale
   // `soloLog` con i totali del file. Le chiamate singole (scriviLog=true) restano identiche a prima.
   if (scriviLog) {
-    await supabase.from('cod_files').insert({
+    const { data: rec } = await supabase.from('cod_files').insert({
       master_id: masterId, nome_file: nomeFile, righe_file: righeTot,
       spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
       cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
+    }).select('id').maybeSingle()
+    await salvaRiepilogo(adminDb, (rec as any)?.id, masterId, {
+      spedizioniProcessate, giaInDistinta: giaInDistintaCount, giaInSosta: giaInSostaCount, propri,
+      saltateNonPagate, doppioniFile, errori, nonClassificate, scarti: erroriDettaglio,
     })
   }
   return NextResponse.json({

@@ -16,6 +16,7 @@ import { useDialog } from '@/app/components/DialogProvider'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
 import { etichettaModalitaCod, eAssegno } from '@/lib/contrassegno-modalita'
+import { scartiPerMotivo } from '@/lib/cod-file-riepilogo'
 // I valori di PARTENZA dei filtri. Stanno in una funzione perche' servono due volte: come stato
 // iniziale e per capire quali filtri ha toccato chi guarda (contatore + caselle accese).
 function filtriDefault() {
@@ -31,6 +32,15 @@ export default function DistinteContrassegniPage() {
   const [distinte, setDistinte] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [codFiles, setCodFiles] = useState<any[]>([])
+  // Dettaglio di un file processato (dove e' finita ogni riga, perche' quelle scartate): si legge al clic.
+  const [dettFile, setDettFile] = useState<{ file: any; dati: any | null; caricamento: boolean } | null>(null)
+  async function apriDettaglioFile(f: any) {
+    setDettFile({ file: f, dati: null, caricamento: true })
+    try {
+      const d = await (await fetch('/api/contrassegni/cod-files?id=' + encodeURIComponent(f.id))).json()
+      setDettFile({ file: f, dati: d, caricamento: false })
+    } catch { setDettFile({ file: f, dati: null, caricamento: false }) }
+  }
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   // Barra di avanzamento: appare per QUALSIASI cosa si carichi/importi (upload file COD, carico
@@ -232,7 +242,11 @@ export default function DistinteContrassegniPage() {
     let fatte = 0
     for (const f of letti) {
       if (!f.righe.length) { problemi.push(`${f.name}: nessuna riga letta`); continue }
-      const agg = { righeFile: f.righe.length, spedizioniProcessate: 0, codFile: 0, codSistema: 0, codDaPagare: 0, errori: 0 }
+      // Totali del file per "File processati", con il riepilogo di dove e' finita ogni riga
+      // (lib/cod-file-riepilogo.ts): scarti con il motivo e blocchi non confermati dal server.
+      const agg = { righeFile: f.righe.length, spedizioniProcessate: 0, codFile: 0, codSistema: 0, codDaPagare: 0, errori: 0,
+        giaInDistinta: 0, giaInSosta: 0, propri: 0, saltateNonPagate: 0, doppioniFile: 0, nonClassificate: 0,
+        blocchiNonCaricati: 0, problemi: [] as string[], scarti: [] as { ldv: string; motivo: string }[] }
       for (let i = 0; i < f.righe.length; i += CHUNK) {
         const blocco = f.righe.slice(i, i + CHUNK)
         try {
@@ -251,8 +265,17 @@ export default function DistinteContrassegniPage() {
             tot.nonClassificate += d.nonClassificate || 0; tot.codFile += Number(d.codFile || 0); tot.codSistema += Number(d.codSistema || 0)
             agg.spedizioniProcessate += d.spedizioniProcessate || 0; agg.codFile += Number(d.codFile || 0)
             agg.codSistema += Number(d.codSistema || 0); agg.codDaPagare += Number(d.codDaPagare || 0); agg.errori += d.errori || 0
-          } else { problemi.push(`${f.name}: ${d.error || 'blocco non caricato'}`) }
-        } catch { problemi.push(`${f.name}: errore di rete su un blocco`) }
+            agg.giaInDistinta += d.giaInDistinta || 0; agg.giaInSosta += d.giaInSosta || 0; agg.propri += d.propri || 0
+            agg.saltateNonPagate += d.saltateNonPagate || 0; agg.doppioniFile += d.doppioniFile || 0; agg.nonClassificate += d.nonClassificate || 0
+            if (Array.isArray(d.erroriDettaglio)) agg.scarti.push(...d.erroriDettaglio)
+          } else {
+            const msg = `righe ${i + 1}-${i + blocco.length}: ${d.error || 'blocco non caricato'}`
+            problemi.push(`${f.name}: ${msg}`); agg.blocchiNonCaricati++; agg.problemi.push(msg)
+          }
+        } catch {
+          const msg = `righe ${i + 1}-${i + blocco.length}: il server non ha risposto (tempo massimo o rete)`
+          problemi.push(`${f.name}: ${msg}`); agg.blocchiNonCaricati++; agg.problemi.push(msg)
+        }
         fatte += blocco.length
         setAvanz(a => a ? { ...a, fatti: fatte, sottotitolo: `${f.name} — ${Math.min(fatte, totaleRighe)}/${totaleRighe} righe` } : a)
       }
@@ -415,7 +438,13 @@ export default function DistinteContrassegniPage() {
                 <tbody>
                   {codFiles.map((f:any)=>(
                     <tr key={f.id} style={{borderBottom:'1px solid #d1d5db'}}>
-                      <td style={{padding:'6px 8px',color:'#f97316',fontWeight:'500',maxWidth:'120px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{f.nome_file}</td>
+                      <td style={{padding:'6px 8px',maxWidth:'160px'}}>
+                        <button onClick={()=>apriDettaglioFile(f)} title="Vedi dove è finita ogni riga del file"
+                          style={{background:'none',border:'none',padding:0,cursor:'pointer',color:'#f97316',fontWeight:'500',fontSize:'11px',maxWidth:'150px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const,display:'block',textAlign:'left' as const,textDecoration:'underline'}}>{f.nome_file}</button>
+                        {Number(f.blocchi_non_caricati) > 0 && (
+                          <div style={{color:'#dc2626',fontWeight:'700',fontSize:'10px',marginTop:'2px'}}>{f.blocchi_non_caricati} {Number(f.blocchi_non_caricati) === 1 ? 'blocco non confermato' : 'blocchi non confermati'}: ricarica il file</div>
+                        )}
+                      </td>
                       <td style={{padding:'6px 8px',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>{new Date(f.created_at).toLocaleString('it-IT')}</td>
                       <td style={{padding:'6px 8px'}}>{f.righe_file}</td>
                       <td style={{padding:'6px 8px'}}>{f.spedizioni_processate}</td>
@@ -423,7 +452,10 @@ export default function DistinteContrassegniPage() {
                       <td style={{padding:'6px 8px'}}>€{Number(f.cod_sistema).toFixed(2)}</td>
                       <td style={{padding:'6px 8px'}}><span style={{background:'#fef9c3',color:'#92400e',padding:'2px 6px',borderRadius:'4px',fontWeight:'700'}}>€{Number(f.cod_da_pagare).toFixed(2)}</span></td>
                       <td style={{padding:'6px 8px'}}>€{Number(f.cod_in_distinte).toFixed(2)}</td>
-                      <td style={{padding:'6px 8px'}}>{f.errori>0?<span style={{background:'#dc2626',color:'#fff',padding:'2px 5px',borderRadius:'4px',fontWeight:'700'}}>{f.errori}</span>:<span style={{color:'#16a34a',fontWeight:'700'}}>0</span>}</td>
+                      <td style={{padding:'6px 8px'}}>{f.errori>0
+                        ? <button onClick={()=>apriDettaglioFile(f)} title="Vedi quali righe sono state scartate e perché"
+                            style={{background:'#dc2626',color:'#fff',padding:'2px 6px',borderRadius:'4px',fontWeight:'700',border:'none',cursor:'pointer',fontSize:'11px'}}>{f.errori}</button>
+                        : <span style={{color:'#16a34a',fontWeight:'700'}}>0</span>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -736,6 +768,77 @@ export default function DistinteContrassegniPage() {
           </div>
         </div>
       </div>
+
+      {dettFile && (() => {
+        const f = dettFile.file
+        const r = dettFile.dati?.riepilogo
+        const c = r?.conteggi
+        const gruppi = r ? scartiPerMotivo(r.scarti || []) : []
+        const voce = (etichetta: string, n: number, colore = '#1a1a1a') => (
+          <div style={{display:'flex',justifyContent:'space-between',gap:'12px',padding:'6px 0',borderBottom:'1px solid #f1f5f9',fontSize:'13px'}}>
+            <span style={{color:'#374151'}}>{etichetta}</span><b style={{color:colore}}>{n}</b>
+          </div>
+        )
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'16px'}} onClick={()=>setDettFile(null)}>
+            <div style={{background:'#fff',borderRadius:'8px',width:'640px',maxWidth:'100%',maxHeight:'85vh',display:'flex',flexDirection:'column' as const,overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
+              <div style={{padding:'14px 20px',borderBottom:'1px solid #d1d5db',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontWeight:'700',fontSize:'15px',color:'#1a1a1a'}}>Dettaglio del caricamento</span>
+                <button onClick={()=>setDettFile(null)} style={{background:'none',border:'none',fontSize:'18px',cursor:'pointer',color:'#1a1a1a'}}>✕</button>
+              </div>
+              <div style={{padding:'16px 20px',overflowY:'auto' as const}}>
+                <div style={{fontSize:'13px',color:'#1a1a1a',marginBottom:'12px'}}>
+                  <b style={{wordBreak:'break-all' as const}}>{f.nome_file}</b><br/>
+                  <span style={{color:'#6b7280'}}>{new Date(f.created_at).toLocaleString('it-IT')} · {f.righe_file} righe lette · € {Number(f.cod_file).toFixed(2)} nel file</span>
+                </div>
+                {dettFile.caricamento ? (
+                  <div style={{fontSize:'13px',color:'#6b7280'}}>Sto leggendo il dettaglio…</div>
+                ) : !r ? (
+                  <div style={{fontSize:'13px',color:'#374151',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'12px'}}>
+                    Il dettaglio riga per riga si salva dai caricamenti del 20/11/2026 in poi. Per questo file restano i totali della tabella: {f.spedizioni_processate} entrate, {f.errori} scartate.
+                  </div>
+                ) : (
+                  <>
+                    {r.blocchiNonCaricati > 0 && (
+                      <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 12px',marginBottom:'12px',fontSize:'13px',color:'#991b1b'}}>
+                        <b>{r.blocchiNonCaricati} {r.blocchiNonCaricati === 1 ? 'blocco non confermato' : 'blocchi non confermati'} dal server.</b> Le righe di {r.blocchiNonCaricati === 1 ? 'quel blocco' : 'quei blocchi'} potrebbero non essere entrate e non sono contate qui sotto. Ricarica lo stesso file: le righe già entrate vengono saltate, le altre entrano.
+                        {(r.problemi || []).map((p: string, i: number) => <div key={i} style={{marginTop:'4px',fontSize:'12px'}}>{p}</div>)}
+                      </div>
+                    )}
+                    <div style={{fontSize:'12px',fontWeight:'700',textTransform:'uppercase' as const,color:'#6b7280',margin:'4px 0'}}>Dove sono finite le righe</div>
+                    {voce('Entrate in "Contrassegni da caricare"', c.entrate, '#15803d')}
+                    {voce('Già in una tua distinta (saltate)', c.giaInDistinta)}
+                    {voce('Già in attesa di essere caricate (file già importato)', c.giaInSosta)}
+                    {c.propri > 0 && voce('Contrassegni tuoi, già incassati', c.propri)}
+                    {voce('Non ancora versate dal corriere', c.nonPagate)}
+                    {voce('Doppioni nel file', c.doppioni)}
+                    {voce('Scartate', c.errori, c.errori > 0 ? '#dc2626' : '#1a1a1a')}
+                    {c.nonClassificate > 0 && voce('Non classificate: avvisa l\'assistenza', c.nonClassificate, '#dc2626')}
+                    {gruppi.length > 0 && (
+                      <>
+                        <div style={{fontSize:'12px',fontWeight:'700',textTransform:'uppercase' as const,color:'#6b7280',margin:'16px 0 6px'}}>Righe scartate e perché</div>
+                        {gruppi.map(g => (
+                          <div key={g.motivo} style={{border:'1px solid #e5e7eb',borderRadius:'6px',padding:'10px 12px',marginBottom:'8px'}}>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
+                              <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{g.motivo} <span style={{color:'#dc2626'}}>({g.ldv.length})</span></span>
+                              <button onClick={()=>{ try { navigator.clipboard.writeText(g.ldv.join('\n')) } catch {} }} title="Copia le lettere di vettura"
+                                style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'4px',padding:'3px 8px',fontSize:'11px',cursor:'pointer',color:'#1a1a1a',whiteSpace:'nowrap' as const}}>Copia</button>
+                            </div>
+                            <div style={{fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace',fontSize:'12px',color:'#374151',lineHeight:'1.6',wordBreak:'break-all' as const}}>{g.ldv.join(' · ')}</div>
+                          </div>
+                        ))}
+                        {(r.scarti || []).length < c.errori && (
+                          <div style={{fontSize:'12px',color:'#6b7280'}}>Mostrate {(r.scarti || []).length} righe scartate su {c.errori}.</div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {modalPagamento && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={chiudiModalPagamento}>
