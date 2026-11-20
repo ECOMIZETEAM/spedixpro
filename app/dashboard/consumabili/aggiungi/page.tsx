@@ -46,6 +46,8 @@ export default function AggiungiSpesaPage() {
     setSaving(false)
     if (data.error) { setErrore(data.error); return }
     setSuccesso('Spesa aggiunta con successo!')
+    // La spesa e' registrata; se non si e' riusciti a segnare l'IVA compresa la rotta lo dice.
+    if (data.avviso) setErrore(data.avviso)
     setForm(f => ({...f, clienteId:'', descrizione:'', prezzoUnitario:'', quantita:'1', vettore:''}))
   }
 
@@ -119,7 +121,7 @@ export default function AggiungiSpesaPage() {
           <div style={{background:'#f9fafb',borderRadius:'8px',padding:'14px',marginBottom:'20px',border:'1px solid #d1d5db',display:'flex',gap:'24px',fontSize:'13px'}}>
             <div><span style={{color:'#1a1a1a'}}>Imponibile: </span><strong>€ {importo.toFixed(2)}</strong></div>
             <div><span style={{color:'#1a1a1a'}}>IVA {form.iva}%: </span><strong>€ {totaleIva.toFixed(2)}</strong></div>
-            <div><span style={{color:'#1a1a1a'}}>Totale: </span><strong style={{color:'#f97316',fontSize:'15px'}}>€ {totale.toFixed(2)}</strong></div>
+            <div><span style={{color:'#1a1a1a'}}>Scalato dal credito{Number(form.iva) > 0 ? ' (IVA compresa)' : ''}: </span><strong style={{color:'#c2410c',fontSize:'15px'}}>€ {totale.toFixed(2)}</strong></div>
           </div>
         )}
 

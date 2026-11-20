@@ -54,7 +54,7 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
   const inizio = inizioGiornoRomaISO(dal)
   const fine = fineGiornoRomaISO(al)
   const spuntate = new Set(aManoIncluse)
-  const grezzi: { id: string; created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean; spedizione_id: string | null; iva_inclusa: boolean }[] = []
+  const grezzi: { id: string; created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean; spedizione_id: string | null; iva_inclusa: boolean; aliquota_compresa: number | null }[] = []
   for (let da = 0; ; da += 1000) {
     const { data, error } = await admin.from('movimenti')
       .select('id,created_at,tipo,descrizione,importo,spedizione_id')
@@ -68,7 +68,7 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
       .range(da, da + 999)
     if (error) throw new Error('Movimenti non leggibili: ' + error.message)
     for (const m of data || []) {
-      grezzi.push({ id: m.id, created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id, spedizione_id: m.spedizione_id || null, iva_inclusa: false })
+      grezzi.push({ id: m.id, created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id, spedizione_id: m.spedizione_id || null, iva_inclusa: false, aliquota_compresa: null })
     }
     if (grezzi.length > MOVIMENTI_MAX) throw new Error('Troppi movimenti per una proforma sola: scegli un periodo più corto')
     if (!data || data.length < 1000) break
@@ -78,6 +78,9 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
   // database (fn_iva_vendita, stessa regola dei report); i tipi che non seguono il listino tornano false.
   const inclusa = await ivaVendite(admin, masterId, grezzi.map(m => m.spedizione_id ? { t: 'cliente' as const, s: clienteId, p: m.spedizione_id, m: m.tipo } : null))
   grezzi.forEach((m, i) => { m.iva_inclusa = inclusa[i] })
+  // Spese aggiunte a mano con l'IVA gia' dentro (Consumabili → Aggiungi spesa): si leggono le loro aliquote.
+  const compresa = await aliquoteCompresa(admin, grezzi.filter(m => m.tipo === 'consumabile').map(m => m.id))
+  for (const m of grezzi) { const a = compresa.get(m.id); if (a) m.aliquota_compresa = a }
 
   const movimenti: MovimentoProforma[] = []
   const aMano: VoceAMano[] = []
@@ -98,13 +101,29 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
       if (!inclusa) continue
     }
     contano.push(m)
-    movimenti.push({ created_at: m.created_at, voce, descrizione, importo: cent(-m.importo), ...(m.iva_inclusa ? { iva_inclusa: true } : {}) })
+    movimenti.push({ created_at: m.created_at, voce, descrizione, importo: cent(-m.importo), ...(m.iva_inclusa || m.aliquota_compresa ? { iva_inclusa: true } : {}) })
   }
   // Qui dentro ci sono gia' solo le voci a mano spuntate.
-  const { righe, imponibile, inclusa: ivaInclusa } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo, iva_inclusa: m.iva_inclusa })), true, aliquota)
+  const { righe, imponibile, inclusa: ivaInclusa } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo, iva_inclusa: m.iva_inclusa, aliquota_compresa: m.aliquota_compresa })), true, aliquota)
   ricariche.importo = cent(ricariche.importo)
   contrassegni.importo = cent(contrassegni.importo)
   return { righe, imponibile, movimenti, aMano, ricariche, contrassegni, ivaInclusa }
+}
+
+// L'aliquota gia' compresa in ogni movimento segnato (scripts/iva-spese-compresa.sql). A blocchi di 200 id
+// (oltre, l'indirizzo della richiesta diventa troppo lungo). Finche' la tabella non c'e', nessuna spesa e'
+// segnata: tutto come prima. Qualunque altro errore ferma il calcolo, come le altre letture della proforma.
+export async function aliquoteCompresa(admin: any, ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await admin.from('movimenti_iva_compresa').select('movimento_id,aliquota').in('movimento_id', ids.slice(i, i + 200))
+    if (error) {
+      if (['42P01', 'PGRST205'].includes(String(error.code || ''))) return out
+      throw new Error('Spese con IVA compresa non leggibili: ' + error.message)
+    }
+    for (const r of data || []) out.set(r.movimento_id, Number(r.aliquota) || 0)
+  }
+  return out
 }
 
 // ── Chi la emette e a chi va ─────────────────────────────────────────────────────────────────────

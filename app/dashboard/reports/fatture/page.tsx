@@ -103,7 +103,7 @@ export default function ReportFatturePage() {
           corpo.push([], ...(d.righe || []).map((r: any) => ['', r.descrizione, `${r.quantita}`, eur(r.importo)]),
             ['', '', 'IMPONIBILE', eur(d.imponibile)], ['', '', `IVA (${d.aliquota}%)`, eur(d.iva)], ['', '', 'TOTALE', eur(d.totale)])
           // Spedizioni vendute IVA inclusa: nelle voci sono al netto, l'IVA che contenevano e' nel totale IVA.
-          if (d.ivaInclusa?.lordo) corpo.push(['', '', `di cui venduti IVA inclusa: € ${eur(d.ivaInclusa.lordo)} già pagati (IVA compresa € ${eur(d.ivaInclusa.iva)})`, ''])
+          if (d.ivaInclusa?.lordo) corpo.push(['', '', `di cui già pagati IVA compresa: € ${eur(d.ivaInclusa.lordo)} (IVA compresa € ${eur(d.ivaInclusa.iva)}), qui al netto`, ''])
         }
         const fuori = d.aMano || []
         if (fuori.length) {

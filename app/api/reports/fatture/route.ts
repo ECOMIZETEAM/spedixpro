@@ -66,10 +66,17 @@ export async function GET(req: NextRequest) {
   // (un master con 200 clienti e cinque tipi di spesa ci arriva). La v2 ha un ordine fisso; se si
   // ripiega sulla v1, che non ce l'ha, una risposta piena si ferma con un errore invece di perdere clienti.
   const argomenti = { p_master: masterId, p_dal: inizioGiornoRomaISO(dal), p_al: fineGiornoRomaISO(al) }
+  // v3 = la v2 con l'aliquota gia' compresa nelle spese di "Aggiungi spesa" (scripts/iva-spese-compresa.sql).
+  // Finche' la v3 non c'e', nessuna spesa e' segnata: la v2 da' gli stessi numeri.
   const importi: any[] = []
   let errore: string | null = null
+  let versione = 'fatture_importi_periodo_v3'
   for (let da = 0; ; da += 1000) {
-    const { data, error } = await admin.rpc('fatture_importi_periodo_v2', argomenti).range(da, da + 999)
+    let { data, error } = await admin.rpc(versione, argomenti).range(da, da + 999)
+    if (error && String(error.code || '') === 'PGRST202' && da === 0 && versione === 'fatture_importi_periodo_v3') {
+      versione = 'fatture_importi_periodo_v2'
+      ;({ data, error } = await admin.rpc(versione, argomenti).range(da, da + 999))
+    }
     if (error && String(error.code || '') === 'PGRST202' && da === 0) {
       const v1 = await admin.rpc('fatture_importi_periodo_v1', argomenti)
       if (v1.error) { errore = v1.error.message; break }
@@ -86,7 +93,7 @@ export async function GET(req: NextRequest) {
   for (const r of importi || []) {
     if (suoi && !suoi.has(r.cliente_id)) continue
     const l = perCliente.get(r.cliente_id) || []
-    l.push({ tipo: r.tipo, con_spedizione: r.con_spedizione, n: Number(r.n) || 0, importo: Number(r.importo) || 0, iva_inclusa: r.iva_inclusa === true })
+    l.push({ tipo: r.tipo, con_spedizione: r.con_spedizione, n: Number(r.n) || 0, importo: Number(r.importo) || 0, iva_inclusa: r.iva_inclusa === true, aliquota_compresa: r.aliquota_compresa != null ? Number(r.aliquota_compresa) : null })
     perCliente.set(r.cliente_id, l)
   }
   // A gruppi: un .in() con centinaia di id diventa un indirizzo troppo lungo e PostgREST risponde

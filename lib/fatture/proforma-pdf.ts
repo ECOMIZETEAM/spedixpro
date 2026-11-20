@@ -125,7 +125,7 @@ export async function pdfProforma(p: {
   // Spedizioni vendute IVA inclusa: sono DENTRO il totale, al netto; qui quanto contenevano di IVA.
   if (p.ivaInclusa?.lordo) {
     doc.setFontSize(8.5); doc.setTextColor(0); doc.setFont('helvetica', 'normal')
-    const nota = doc.splitTextToSize(`Comprende spedizioni vendute IVA inclusa per € ${eur(p.ivaInclusa.lordo)}: nel riepilogo sono riportate al netto, e l'IVA che contenevano (€ ${eur(p.ivaInclusa.iva)}) è nel totale IVA.`, R - L) as string[]
+    const nota = doc.splitTextToSize(`Comprende importi già pagati IVA compresa (spedizioni vendute IVA inclusa, spese con IVA) per € ${eur(p.ivaInclusa.lordo)}: nel riepilogo sono riportati al netto, e l'IVA che contenevano (€ ${eur(p.ivaInclusa.iva)}) è nel totale IVA.`, R - L) as string[]
     doc.text(nota, L, y)
     y += nota.length * 4 + 3
   }
