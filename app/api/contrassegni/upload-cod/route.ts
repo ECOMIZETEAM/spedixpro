@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
@@ -24,6 +25,10 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = no scrittura / no rete
+  // Solo lo staff del master (titolare, admin, operatore). master_id non e' un permesso: ce l'hanno anche le
+  // utenze cliente, e da qui si mettono contrassegni nella sosta del master e si scrive il registro dei file
+  // (cod_files), che dal 20/11/2026 l'utente non puo' piu' scrivere direttamente: scrive solo il server.
+  if (!gestisceLaRete(utente as any)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const masterId = utente?.master_id
   if (!masterId) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const body = await req.json()
@@ -36,7 +41,7 @@ export async function POST(req: NextRequest) {
   const scriviLog = body.scriviLog !== false
   if (body.soloLog) {
     const s = body.soloLog || {}
-    const { data: rec } = await supabase.from('cod_files').insert({
+    const { data: rec } = await adminDb.from('cod_files').insert({
       master_id: masterId, nome_file: nomeFile, righe_file: Number(s.righeFile) || 0,
       spedizioni_processate: Number(s.spedizioniProcessate) || 0, cod_file: Number(s.codFile) || 0,
       cod_sistema: Number(s.codSistema) || 0, cod_da_pagare: Number(s.codDaPagare) || 0,
@@ -263,7 +268,7 @@ export async function POST(req: NextRequest) {
   // In modalità chunk il record riepilogo NON si scrive per ogni blocco: lo scrive la chiamata finale
   // `soloLog` con i totali del file. Le chiamate singole (scriviLog=true) restano identiche a prima.
   if (scriviLog) {
-    const { data: rec } = await supabase.from('cod_files').insert({
+    const { data: rec } = await adminDb.from('cod_files').insert({
       master_id: masterId, nome_file: nomeFile, righe_file: righeTot,
       spedizioni_processate: spedizioniProcessate, cod_file: codFile, cod_sistema: codSistema,
       cod_da_pagare: codDaPagare, cod_in_distinte: codInDistinte, errori,
