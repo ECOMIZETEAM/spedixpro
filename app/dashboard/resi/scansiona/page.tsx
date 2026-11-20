@@ -40,6 +40,7 @@ function avvisoStato(stato?: string | null): string | null {
   return null
 }
 
+const ultimaLettura = (vv: Voce[]) => vv.reduce((m, v) => (v.data_scansione > m ? v.data_scansione : m), '')
 const chiaveGruppo = (v: Voce) => (v.target_master_id ? 'm:' + v.target_master_id : 'c:' + v.cliente_id) + '|' + (v.contratto || '')
 const destinatario = (v: Voce) => v.target_master_id ? (v.target_master_nome || 'Sotto-master') : (v.cliente_nome || 'Cliente')
 
@@ -57,6 +58,10 @@ export default function ScansionaResiPage() {
   const [cercando, setCercando] = useState(false)
   const [registrando, setRegistrando] = useState(false)
   const [fatte, setFatte] = useState<Fatta[]>([])
+  // L'ULTIMA LETTURA SI DEVE VEDERE. Il gruppo dell'ultima lettura sta in cima e la riga si colora per qualche
+  // secondo: con l'elenco in ordine di nome, una lettura nuova finiva in mezzo agli altri gruppi, sotto il bordo
+  // dello schermo, e chi scansionava vedeva il verde ma non il pacco (M.C LOGISTICA, 20/11/2026).
+  const [ultima, setUltima] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const occupato = useRef(false)
   // Una lettura arrivata mentre il server risponde alla precedente: si tiene e si cerca subito dopo,
@@ -83,6 +88,15 @@ export default function ScansionaResiPage() {
     if (!caricata) return
     try { localStorage.setItem(CHIAVE_BOZZA, JSON.stringify(voci)) } catch { /* senza memoria locale si lavora lo stesso */ }
   }, [voci, caricata])
+
+  useEffect(() => {
+    if (!ultima) return
+    // Al computer la riga si porta in vista. Col telefono no: sposterebbe la fotocamera mentre inquadra, e il
+    // gruppo dell'ultima lettura e' comunque il primo sotto il riepilogo.
+    if (!touch.current) document.getElementById('voce-' + ultima)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    const t = setTimeout(() => setUltima(null), 4000)
+    return () => clearTimeout(t)
+  }, [ultima])
 
   // Un suono per lettura: con il pacco in mano non si guarda lo schermo.
   function suona(ok: boolean) {
@@ -120,7 +134,7 @@ export default function ScansionaResiPage() {
         setEsito({ tipo: 'err', testo: d.error }); if (!ripetuto) suona(false)
         return
       }
-      if (vociRef.current.some(v => v.id === d.id)) { setEsito({ tipo: 'info', testo: `${d.numero} è già nell'elenco` }); return }
+      if (vociRef.current.some(v => v.id === d.id)) { setEsito({ tipo: 'info', testo: `${d.numero} è già nell'elenco` }); setUltima(d.id); return }
       if (!d.cliente_id && !d.target_master_id) {
         setEsito({ tipo: 'err', testo: `${d.numero} è una spedizione propria senza cliente: non va in una distinta di reso` }); suona(false); return
       }
@@ -132,6 +146,7 @@ export default function ScansionaResiPage() {
         data_scansione: new Date().toISOString(),
       }
       setVoci(prev => prev.some(x => x.id === v.id) ? prev : [v, ...prev])
+      setUltima(v.id)
       const avviso = avvisoStato(v.stato)
       // IL VERDE NON VUOL DIRE "E' GIA' UN RESO": vuol dire letto e messo in elenco. Il reso nasce e si
       // addebita quando si registra (M.C LOGISTICA, 20/11/2026, chiedeva cosa volesse dire il verde su un
@@ -159,12 +174,12 @@ export default function ScansionaResiPage() {
 
   const onCodici = useCallback((codici: string[]) => { cerca(codici, false) }, [cerca])
 
-  // Gruppi: per destinatario e contratto, in ordine di nome.
+  // Gruppi: per destinatario e contratto; in cima quello con la lettura piu' recente (vedi `ultima`).
   const gruppi = (() => {
     const m = new Map<string, Voce[]>()
     for (const v of voci) { const k = chiaveGruppo(v); if (!m.has(k)) m.set(k, []); m.get(k)!.push(v) }
     return [...m.entries()].map(([k, vv]) => ({ chiave: k, voci: vv, dest: destinatario(vv[0]), rete: !!vv[0].target_master_id, contratto: vv[0].contratto || '—' }))
-      .sort((a, b) => a.dest.localeCompare(b.dest) || a.contratto.localeCompare(b.contratto))
+      .sort((a, b) => ultimaLettura(b.voci).localeCompare(ultimaLettura(a.voci)) || a.dest.localeCompare(b.dest) || a.contratto.localeCompare(b.contratto))
   })()
 
   async function registraGruppo(chiave: string): Promise<boolean> {
@@ -291,7 +306,7 @@ export default function ScansionaResiPage() {
             </button>
           </div>
           {g.voci.map(v => (
-            <div key={v.id} style={{ padding: '10px 14px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div key={v.id} id={'voce-' + v.id} style={{ padding: '10px 14px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: '10px', background: v.id === ultima ? '#fef9c3' : '#fff', transition: 'background 0.6s' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: ARANCIO, wordBreak: 'break-all' }}>{v.numero}</div>
                 <div style={{ fontSize: '12.5px', color: NERO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
