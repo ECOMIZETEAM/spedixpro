@@ -16,9 +16,10 @@
  * sempre per i multicollo (262 ordini su 283 in novanta giorni). Il peso si divide in parti uguali;
  * le misure del pacco o dell'articolo vanno al primo collo e gli altri hanno le misure di ripiego —
  * esattamente cio' che esce dal modulo Nuova spedizione quando lo apre la matita
- * (app/cliente/spedizioni/nuova/page.tsx: il precompilato da' le misure solo al primo collo,
- * buildPackages divide il peso e mette 20×15×10 dove le misure mancano). Se un giorno i colli
- * devono prendere tutti le misure del pacco, va cambiato qui E nel modulo, insieme. */
+ * (app/cliente/spedizioni/nuova/page.tsx: il precompilato scrive in ogni collo il suo pezzo del peso
+ * con pesiDivisiScritti, da' le misure solo al primo collo, e buildPackages mette 20×15×10 dove le
+ * misure mancano). Se un giorno i colli devono prendere tutti le misure del pacco, va cambiato qui E
+ * nel modulo, insieme. */
 
 export type Collo = { weight: number; length: number; width: number; height: number }
 
@@ -48,8 +49,7 @@ export function colliDellOrdine(
 ): Collo[] {
   const n = numeroColli(colli)
   const totale = Number(peso) || 0
-  // Diviso senza arrotondare, come il modulo ((+peso || 0) / n): 20 kg in 3 colli sono 6,666… a collo.
-  const pesi = Array.from({ length: n }, () => totale / n)
+  // Diviso senza arrotondare: 20 kg in 3 colli sono 6,666… a collo.
   // MA LA SOMMA NON DEVE SUPERARE IL PESO DELL'ORDINE. In virgola mobile 100/7 sommato sette volte fa
   // 100,00000000000001: il motore somma i colli senza arrotondare (lib/pricing.ts,
   // calcolaPesoFatturato), confronta con le fasce (peso <= peso_max) e oltre l'ultima conta i blocchi
@@ -57,15 +57,8 @@ export function colliDellOrdine(
   // 22 € col peso intero e 44 € diviso — un blocco "oltre" in piu' per un centomillesimo di
   // miliardesimo di chilo (l'operatore, dalla matita, aveva scritto 99 kg). Succede in 81 casi su 900
   // (pesi interi da 1 a 100 kg, da 2 a 10 colli), e fa danno quando il totale cade su un limite di
-  // fascia. L'eccedenza si toglie dall'ultimo collo, sommando nello stesso ordine del motore: la somma
-  // torna il peso dell'ordine, o un'inezia sotto, e la fascia e' quella del peso vero. La matita
-  // divide allo stesso modo e il difetto ce l'ha ancora (vedi REGOLE.md).
-  for (let giro = 0; giro < 4; giro++) {
-    let somma = 0
-    for (const p of pesi) somma += p
-    if (somma <= totale) break
-    pesi[n - 1] -= somma - totale
-  }
+  // fascia. Vedi senzaEccedenza qui sotto.
+  const pesi = senzaEccedenza(Array.from({ length: n }, () => totale / n), totale)
   return pesi.map((weight, i) => ({
     weight,
     ...(i === 0 && misure ? { length: misure.length, width: misure.width, height: misure.height } : MISURE_RIPIEGO),
@@ -78,4 +71,46 @@ export function descriviColli(colli: Collo[]): string {
   const uno = (c: Collo) => `${kg(c.weight)} kg, ${c.length}×${c.width}×${c.height} cm`
   if (colli.length === 1) return uno(colli[0])
   return `${colli.length} colli (${colli.map(uno).join(' + ')})`
+}
+
+// LA SOMMA DEI COLLI NON DEVE SUPERARE `totale`, sommata come la somma il motore (in fila, senza
+// arrotondare: lib/pricing.ts, calcolaPesoFatturato). L'eccedenza della virgola mobile si toglie
+// dall'ultimo collo; quattro giri bastano, la correzione e' di qualche miliardesimo di grammo.
+export function senzaEccedenza(pesi: number[], totale: number): number[] {
+  const out = [...pesi]
+  const n = out.length
+  if (!n) return out
+  for (let giro = 0; giro < 4; giro++) {
+    let somma = 0
+    for (const p of out) somma += p
+    if (somma <= totale) break
+    out[n - 1] -= somma - totale
+  }
+  return out
+}
+
+// I PESI SCRITTI COLLO PER COLLO nel modulo Nuova spedizione, come numeri per il motore.
+// Dal 16/11/2026 il modulo non ha piu' il peso totale: ogni collo ha il suo. Ma chi scrive i pesi a
+// mano scrive decimali, e in virgola mobile 0,2 + 4,4 + 0,4 fa 5,000000000000001: sopra la fascia
+// "fino a 5 kg" per un niente (misurato: con tre colli succede in 2.200 somme intere su 100.000). Il
+// totale vero e' la somma decimale di quanto scritto; la si ricava arrotondando al milionesimo di
+// chilo, che e' molto sotto qualunque peso si scriva e molto sopra l'errore della virgola mobile.
+export function pesiDelModulo(scritti: Array<string | number | undefined | null>): number[] {
+  const pesi = scritti.map(s => Number(s) || 0)
+  let somma = 0
+  for (const p of pesi) somma += p
+  return senzaEccedenza(pesi, Math.round(somma * 1e6) / 1e6)
+}
+
+// IL PESO DI UN ORDINE SCRITTO NEI SUOI COLLI, quando la matita apre il modulo con un ordine da piu'
+// colli: lo stesso peso di colliDellOrdine, ma scritto come lo scriverebbe una persona, al grammo. I
+// primi colli prendono la parte arrotondata per difetto, l'ultimo il resto: la somma scritta e' il peso
+// dell'ordine, e chi apre il modulo vede in ogni riga un numero che puo' correggere col peso vero.
+// `n` lo decide il modulo: niente tetto di MAX_COLLI_PER_RIGA, oltre il quale e' proprio la matita la
+// strada per spedire l'ordine.
+export function pesiDivisiScritti(peso: number, n: number): string[] {
+  const grammi = Math.round((Number(peso) || 0) * 1000)
+  if (grammi <= 0) return Array.from({ length: n }, () => '')
+  const parte = Math.floor(grammi / n)
+  return Array.from({ length: n }, (_, i) => String((i === n - 1 ? grammi - parte * (n - 1) : parte) / 1000))
 }
