@@ -37,14 +37,15 @@ export async function venditoreUsaIva(admin: any, venditore: string | null | und
   return !!data?.length
 }
 
-// COME E' VENDUTO OGGI UN LISTINO, per l'editor: la scelta del listino e quella di ogni contratto
-// impostato a parte (null = "come il listino"). Vale l'ultima scelta fatta, come in fn_iva_inclusa_al:
-// le scelte partono sempre da oggi o da inizio mese, quindi l'ultima fatta e' quella in vigore adesso.
-// `scelto`: il master ha fatto almeno una scelta su questo listino (altrimenti vale il punto di partenza).
-export type StatoIvaListino = { listino: boolean; corrieri: Record<string, boolean | null>; scelto?: boolean }
+// COME E' VENDUTO OGGI UN LISTINO, per l'editor e per le etichette: la scelta del listino e quella di ogni
+// contratto impostato a parte (null = "come il listino"). Vale l'ultima scelta fatta, come in
+// fn_iva_inclusa_al: le scelte partono sempre da oggi o da inizio mese, quindi l'ultima fatta e' quella in
+// vigore adesso. `listino` null = IL MASTER NON HA ANCORA SCELTO (decisione di Lorenzo, 20/11/2026: finche'
+// non sceglie, i suoi clienti vedono i prezzi come prima; i report restano IVA esclusa come sempre).
+export type StatoIvaListino = { listino: boolean | null; corrieri: Record<string, boolean | null> }
 
 export async function statoIvaListino(admin: any, listinoId: string): Promise<StatoIvaListino> {
-  const stato: StatoIvaListino = { listino: false, corrieri: {}, scelto: false }
+  const stato: StatoIvaListino = { listino: null, corrieri: {} }
   const { data, error } = await admin.from('listini_iva')
     .select('corriere_id,iva_inclusa,creato_il,id').eq('listino_id', listinoId)
     .order('creato_il', { ascending: false }).order('id', { ascending: false }).limit(1000)
@@ -53,7 +54,6 @@ export async function statoIvaListino(admin: any, listinoId: string): Promise<St
     throw new Error('Impostazioni IVA del listino non leggibili: ' + error.message)
   }
   let listinoVisto = false
-  stato.scelto = (data || []).length > 0
   for (const r of data || []) {
     if (!r.corriere_id) { if (!listinoVisto) { stato.listino = r.iva_inclusa === true; listinoVisto = true } continue }
     if (!(r.corriere_id in stato.corrieri)) stato.corrieri[r.corriere_id] = r.iva_inclusa == null ? null : r.iva_inclusa === true
@@ -73,7 +73,7 @@ export async function infoIvaPrezzi(admin: any, listinoId: string | null | undef
   try {
     if (!listinoId) return null
     const s = await statoIvaListino(admin, listinoId)
-    if (!s.scelto) return null
+    if (s.listino === null && !Object.values(s.corrieri).some(v => v != null)) return null
     return { aliquota, listino: s.listino, corrieri: s.corrieri }
   } catch (e: any) {
     console.error('[LISTINI IVA] etichetta non calcolata', listinoId, e?.message || e)

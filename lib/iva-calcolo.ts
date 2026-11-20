@@ -68,23 +68,25 @@ export function modoGruppo(s: SommaIva): 'IVA inclusa' | 'IVA esclusa' | 'misto'
 }
 
 // ── L'ETICHETTA ACCANTO AI PREZZI (Lorenzo, 20/11/2026: "fai il + IVA visibile") ──────────────────
-// Chi compra vede come e' scritto il prezzo: "+ IVA" se il listino e' venduto IVA esclusa, "IVA incl."
-// se inclusa. Prima vedeva "4,00 €" e basta, e non poteva sapere quale dei due fosse.
+// Chi compra vede come e' scritto il prezzo: "IVA escl." se il listino e' venduto IVA esclusa, "IVA incl."
+// se inclusa (Lorenzo, 20/11: "IVA escl." e non "+ IVA").
+// SOLO DOVE IL MASTER HA SCELTO (lib/iva-vendita.ts → infoIvaPrezzi): altrimenti nessuna etichetta. Prima vedeva "4,00 €" e basta, e non poteva sapere quale dei due fosse.
 // Niente etichetta a chi ha l'aliquota allo 0% (esenti, lettere d'intento): li' non c'e' IVA da
-// aggiungere, e "+ IVA" sarebbe falso.
+// aggiungere, e "IVA escl." sarebbe fuorviante.
 
-export type InfoIvaPrezzi = { aliquota: number; listino: boolean; corrieri: Record<string, boolean | null> }
+// `listino` null = il master non ha scelto per tutto il listino: valgono solo i contratti scelti a parte.
+export type InfoIvaPrezzi = { aliquota: number; listino: boolean | null; corrieri: Record<string, boolean | null> }
 
 export function ivaDelCorriere(info: InfoIvaPrezzi | null | undefined, corriereId: string | null | undefined): boolean | null {
   if (!info) return null
   const v = corriereId ? info.corrieri?.[corriereId] : null
-  return v == null ? !!info.listino : v
+  return v == null ? (info.listino ?? null) : v
 }
 
 export function testoIva(inclusa: boolean | null | undefined, aliquota?: number | null): string {
   if (inclusa == null) return ''
   if (aliquota != null && Number(aliquota) === 0) return ''
-  return inclusa ? 'IVA incl.' : '+ IVA'
+  return inclusa ? 'IVA incl.' : 'IVA escl.'
 }
 
 // Per un totale: l'etichetta solo se tutti i prezzi dentro sono scritti allo stesso modo.

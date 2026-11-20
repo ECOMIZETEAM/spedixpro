@@ -9,10 +9,12 @@ import { useEffect, useState } from 'react'
 // imponibile e IVA (scripts/iva-listini.sql, lib/iva-calcolo.ts). Si salva da sola, a parte dal
 // pulsante Salva dei prezzi: e' una decisione diversa, e la finestra chiede da quando vale.
 
-export type StatoIva = { listino: boolean; corrieri: Record<string, boolean | null> }
+// `listino` null = il master non ha ancora scelto (Lorenzo, 20/11/2026: non sappiamo chi vende IVA inclusa e
+// chi esclusa, quindi finche' non sceglie i suoi clienti vedono i prezzi come prima, senza etichette).
+export type StatoIva = { listino: boolean | null; corrieri: Record<string, boolean | null> }
 type Richiesta = { corriereId: string | null; nomeCorriere?: string; valore: boolean | null }
 
-const nomeIva = (v: boolean) => (v ? 'IVA inclusa' : 'IVA esclusa')
+const nomeIva = (v: boolean | null) => (v == null ? 'IVA non ancora scelta' : v ? 'IVA inclusa' : 'IVA esclusa')
 
 // Il primo del mese e oggi, sul giorno di Roma: sono le due date che il database usera'.
 function dateDiRoma() {
@@ -30,7 +32,7 @@ export function useIvaListino(listinoId: string, nomeListino: string, iniziale: 
   const [errore, setErrore] = useState('')
   const [fatto, setFatto] = useState('')
 
-  const vale = (corriereId: string) => { const v = stato.corrieri[corriereId]; return v == null ? stato.listino : v }
+  const vale = (corriereId: string): boolean | null => { const v = stato.corrieri[corriereId]; return v == null ? stato.listino : v }
   // Impostato a parte = ha una scelta sua, anche se oggi coincide col listino: cambiando il listino, lui non segue.
   const aParte = (corriereId: string) => stato.corrieri[corriereId] != null
   const chiedi = (r: Richiesta) => { setRichiesta(r); setDa('mese'); setErrore(''); setFatto('') }
@@ -79,7 +81,9 @@ export function useIvaListino(listinoId: string, nomeListino: string, iniziale: 
   if (richiesta) {
     if (!richiesta.corriereId) {
       titolo = `Da quando vale «${nomeIva(!!richiesta.valore)}»?`
-      spiega = `Stai passando il listino «${nomeListino}» da ${nomeIva(stato.listino)} a ${nomeIva(!!richiesta.valore)}. Vale per tutti i contratti del listino, tranne quelli impostati a parte.`
+      spiega = stato.listino == null
+        ? `Stai dicendo che i prezzi del listino «${nomeListino}» sono ${nomeIva(!!richiesta.valore)}. I clienti che lo usano vedranno «${richiesta.valore ? 'IVA incl.' : 'IVA escl.'}» accanto ai prezzi. Vale per tutti i contratti del listino, tranne quelli impostati a parte.`
+        : `Stai passando il listino «${nomeListino}» da ${nomeIva(stato.listino)} a ${nomeIva(!!richiesta.valore)}. Vale per tutti i contratti del listino, tranne quelli impostati a parte.`
     } else if (richiesta.valore == null) {
       titolo = `Da quando ${richiesta.nomeCorriere} torna come il listino?`
       spiega = `${richiesta.nomeCorriere} passa da ${nomeIva(vale(richiesta.corriereId))} a «come il listino» (${nomeIva(stato.listino)}).`
@@ -142,7 +146,8 @@ type Iva = ReturnType<typeof useIvaListino>
 
 // Il riquadro in alto: come e' venduto tutto il listino, con l'esempio dei 4,00 €.
 export function RiquadroIva({ iva }: { iva: Iva }) {
-  const incl = iva.stato.listino
+  const scelto = iva.stato.listino != null
+  const incl = iva.stato.listino === true
   const seg = (on: boolean) => ({
     minHeight: '40px', padding: '0 18px', border: 'none', borderRadius: '7px', fontSize: '13px', cursor: on ? 'default' : 'pointer',
     background: on ? '#fff' : 'transparent', color: on ? '#1a1a1a' : '#4b5563', fontWeight: on ? 700 : 500,
@@ -158,11 +163,19 @@ export function RiquadroIva({ iva }: { iva: Iva }) {
           <p style={{ fontSize: '12px', color: '#4b5563', margin: '3px 0 0' }}>Vale per tutti i contratti, tranne quelli che imposti a parte qui sotto.</p>
         </div>
         <div role="group" aria-label="IVA del listino" style={{ display: 'inline-flex', background: '#eef0f3', borderRadius: '9px', padding: '3px', gap: '3px' }}>
-          <button type="button" aria-pressed={!incl} onClick={() => { if (incl) iva.chiedi({ corriereId: null, valore: false }) }} style={seg(!incl)}>IVA esclusa</button>
+          <button type="button" aria-pressed={scelto && !incl} onClick={() => { if (!scelto || incl) iva.chiedi({ corriereId: null, valore: false }) }} style={seg(scelto && !incl)}>IVA esclusa</button>
           <button type="button" aria-pressed={incl} onClick={() => { if (!incl) iva.chiedi({ corriereId: null, valore: true }) }} style={seg(incl)}>IVA inclusa</button>
         </div>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+      {!scelto && (
+        <div role="note" style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '10px 12px' }}>
+          <span aria-hidden="true" style={{ fontSize: '14px', lineHeight: 1.2, color: '#b45309', fontWeight: 700 }}>!</span>
+          <span style={{ fontSize: '12.5px', color: '#78350f', lineHeight: 1.45 }}>
+            <strong>Non hai ancora scelto.</strong> Finché non scegli, i tuoi clienti vedono i prezzi come prima, senza «IVA escl.» né «IVA incl.», e i report aggiungono l'IVA sopra come sempre. Scegli come sono scritti i prezzi di questo listino.
+          </span>
+        </div>
+      )}
+      {scelto && <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
         <div style={box}>
           <div style={tit}>Esempio: in listino</div>
           <div style={{ fontSize: '17px', fontWeight: 700, marginTop: '2px', color: '#1a1a1a' }}>4,00 €</div>
@@ -178,7 +191,7 @@ export function RiquadroIva({ iva }: { iva: Iva }) {
           <div style={{ fontSize: '17px', fontWeight: 700, marginTop: '2px', color: '#1a1a1a' }}>{incl ? '3,28 + 0,72 IVA' : '4,00 + 0,88 IVA'}</div>
           <div style={{ fontSize: '12px', color: '#4b5563' }}>{incl ? 'scorporata: l’IVA è già nei 4,00 €' : 'IVA da incassare a parte: 0,88 €'}</div>
         </div>
-      </div>
+      </div>}
       {iva.acquirenti && <p style={{ fontSize: '12px', color: '#4b5563', margin: 0 }}>{iva.usa}: <strong style={{ color: '#1a1a1a' }}>{iva.acquirenti}</strong>. La scelta vale per tutti quelli che lo usano.</p>}
       {iva.fatto && <p role="status" style={{ fontSize: '12.5px', color: '#15803d', margin: 0, fontWeight: 600 }}>{iva.fatto}</p>}
     </section>
@@ -191,7 +204,9 @@ export function EtichettaIva({ iva, corriereId }: { iva: Iva; corriereId: string
   return (
     <>
       {iva.aParte(corriereId) && <span style={{ fontSize: '11px', fontWeight: 700, color: '#c2410c', background: '#fff', border: '1px solid #f97316', borderRadius: '20px', padding: '2px 8px', whiteSpace: 'nowrap' }}>impostato a parte</span>}
-      <span style={{ fontSize: '11px', fontWeight: 700, borderRadius: '20px', padding: '3px 9px', whiteSpace: 'nowrap', background: v ? '#e3f4f1' : '#eef0f3', color: v ? '#0f5f56' : '#374151' }}>{nomeIva(v)}</span>
+      {v == null
+        ? <span style={{ fontSize: '11px', fontWeight: 600, borderRadius: '20px', padding: '2px 8px', whiteSpace: 'nowrap', background: '#fff', color: '#4b5563', border: '1px dashed #9ca3af' }}>IVA da scegliere</span>
+        : <span style={{ fontSize: '11px', fontWeight: 700, borderRadius: '20px', padding: '3px 9px', whiteSpace: 'nowrap', background: v ? '#e3f4f1' : '#eef0f3', color: v ? '#0f5f56' : '#374151' }}>{nomeIva(v)}</span>}
     </>
   )
 }
@@ -211,7 +226,7 @@ export function SceltaIvaCorriere({ iva, corriereId, nomeCorriere }: { iva: Iva;
           iva.chiedi({ corriereId, nomeCorriere, valore: nuovo })
         }}
         style={{ padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '5px', fontSize: '13px', color: '#1a1a1a', background: '#fff', minWidth: '220px' }}>
-        <option value="">Come il listino ({nomeIva(iva.stato.listino)})</option>
+        <option value="">{iva.stato.listino == null ? 'Come il listino (IVA non ancora scelta)' : `Come il listino (${nomeIva(iva.stato.listino)})`}</option>
         <option value="inclusa">IVA inclusa</option>
         <option value="esclusa">IVA esclusa</option>
       </select>

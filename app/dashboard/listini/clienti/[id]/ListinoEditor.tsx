@@ -167,7 +167,7 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
 
 export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi, costoSupplMC = null, ivaStato, acquirentiIva }: Props) {
   const isCorriere = tipoListino === 'corriere'
-  const iva = useIvaListino(listino.id, listino.nome || '', ivaStato || { listino: false, corrieri: {} }, acquirentiIva || [])
+  const iva = useIvaListino(listino.id, listino.nome || '', ivaStato || { listino: null, corrieri: {} }, acquirentiIva || [])
   const conIva = !isCorriere && !!ivaStato
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
