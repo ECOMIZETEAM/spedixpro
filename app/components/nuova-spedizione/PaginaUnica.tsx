@@ -11,6 +11,7 @@ import { pesiDelModulo, pesiDivisiScritti } from '@/lib/colli-ordine'
 import { isoGiorno, primoGiornoDiRitiro } from '@/lib/festivi'
 import Calendario from './Calendario'
 import Tendina from './Tendina'
+import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { type Tariffa, chiaveTariffa, codiceProv, iconaCorriere, opzioniIncasso, motivoSpento, euro, kg } from './corrieri'
 import './nuova-spedizione.css'
 
@@ -113,16 +114,35 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
   const [riepAperto, setRiepAperto] = useState(false)
 
   // ── suggerimenti (rubriche e comuni) ──
-  const [sugg, setSugg] = useState<{ dove: '' | 'mitt' | 'mittCitta' | 'dest' | 'destCitta'; voci: any[] }>({ dove: '', voci: [] })
+  // VALGONO SOLO PER IL CAMPO IN CUI SI STA SCRIVENDO, E SOLO PER L'ULTIMA COSA SCRITTA. Nella prova (DESIGN, 20/11) una
+  // risposta della rubrica arrivata DOPO aver lasciato «Nome» ha riaperto la tendina sopra «Indirizzo»: il clic sul campo
+  // è finito su una voce e il destinatario è diventato un altro (Giuliana Di Rocco, Via Procida 4), coi tasti dopo in
+  // coda ai suoi dati. E una risposta lenta a «Mi» copriva quella a «Milano». Ora: la tendina si apre solo col fuoco sul
+  // suo campo, si chiude uscendo (Tab, clic altrove) o con Esc, e una risposta che non è dell'ultima ricerca si scarta.
+  type DoveSugg = '' | 'mitt' | 'mittCitta' | 'dest' | 'destCitta'
+  const [sugg, setSugg] = useState<{ dove: DoveSugg; voci: any[] }>({ dove: '', voci: [] })
+  const [fuoco, setFuoco] = useState<DoveSugg>('')
+  const fuocoRef = useRef<DoveSugg>('')
+  const suggReq = useRef(0)
   const refMitt = useRef<HTMLInputElement>(null)
   const refMittCitta = useRef<HTMLInputElement>(null)
   const refDest = useRef<HTMLInputElement>(null)
   const refDestCitta = useRef<HTMLInputElement>(null)
-  async function cerca(dove: typeof sugg.dove, url: string, testo: string) {
+  async function cerca(dove: DoveSugg, url: string, testo: string) {
+    const id = ++suggReq.current
     if (testo.trim().length < 2) { setSugg({ dove: '', voci: [] }); return }
-    try { const j = await (await fetch(url)).json(); setSugg({ dove, voci: Array.isArray(j) ? j : [] }) } catch { setSugg({ dove: '', voci: [] }) }
+    try {
+      const j = await (await fetch(url)).json()
+      if (id !== suggReq.current || fuocoRef.current !== dove) return
+      setSugg({ dove, voci: Array.isArray(j) ? j : [] })
+    } catch { if (id === suggReq.current) setSugg({ dove: '', voci: [] }) }
   }
-  const chiudiSugg = () => setTimeout(() => setSugg({ dove: '', voci: [] }), 200)
+  const chiudiSugg = () => { suggReq.current++; setSugg({ dove: '', voci: [] }) }
+  const entraSugg = (dove: DoveSugg) => { fuocoRef.current = dove; setFuoco(dove) }
+  const esciSugg = () => { fuocoRef.current = ''; setFuoco(''); chiudiSugg() }
+  const apertaSu = (dove: DoveSugg) => fuoco === dove && sugg.dove === dove && sugg.voci.length > 0
+  // Quando la rubrica riscrive mittente o destinatario lo si dice, e si può tornare indietro.
+  const [daRubrica, setDaRubrica] = useState<{ chi: 'mitt' | 'dest'; nome: string; prima: any } | null>(null)
 
   // ── anagrafiche ──
   useEffect(() => {
@@ -198,6 +218,35 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
     }, 500)
     return () => clearTimeout(t)
   }, [dest.telefono])
+
+  // IL CAP DICE LA PROVINCIA (Italia): se tutti i comuni di quel CAP sono della stessa provincia, è quella. La città la si
+  // mette solo se manca e il CAP è di un comune solo (le frazioni hanno lo stesso CAP del comune, e lì si sceglie).
+  const capReq = useRef({ mitt: 0, dest: 0 })
+  async function provinciaDalCap(chi: 'mitt' | 'dest', cap: string) {
+    const id = ++capReq.current[chi]
+    try {
+      const voci = await (await fetch('/api/comuni?q=' + cap + '&paese=IT')).json()
+      if (id !== capReq.current[chi] || !Array.isArray(voci)) return
+      const esatti = voci.filter((v: any) => v.cap === cap)
+      const sigle = Array.from(new Set(esatti.map((v: any) => v.sigla)))
+      if (sigle.length !== 1) return
+      const nomi = Array.from(new Set(esatti.map((v: any) => v.nome)))
+      const metti = (x: any) => x.cap !== cap ? x : { ...x, provincia: sigle[0], citta: x.citta || (nomi.length === 1 ? nomi[0] : x.citta) }
+      if (chi === 'dest') setDest(d => metti(d)); else setMitt(m => metti(m))
+    } catch { /* senza risposta resta quella scritta */ }
+  }
+  useEffect(() => {
+    if (dest.paese !== 'IT' || consegnaA !== 'domicilio' || !/^\d{5}$/.test(dest.cap)) return
+    const t = setTimeout(() => provinciaDalCap('dest', dest.cap), 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dest.cap, dest.paese, consegnaA])
+  useEffect(() => {
+    if (!/^\d{5}$/.test(mitt.cap)) return
+    const t = setTimeout(() => provinciaDalCap('mitt', mitt.cap), 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mitt.cap])
 
   // ── i colli ──
   function cambiaCollo(i: number, campo: keyof Collo, val: string) { setColli(prev => prev.map((c, j) => j === i ? { ...c, [campo]: campo === 'peso' ? decimale(val) : val.replace(/[^0-9]/g, '') } : c)) }
@@ -347,6 +396,11 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
   const totale = selMostrata ? num(selMostrata.total_price) + extraTot : 0
   const opzCod = opzioniIncasso(selMostrata)
   const credito = clienteData && clienteData.credito != null ? num(clienteData.credito) : null
+  // CREDITO A SCALARE: la creazione si ferma se il credito non basta (402 in crea, «credito_scalare»). Qui lo si dice
+  // prima, con l'importo che manca e la ricarica (PagaConCarta, come il modulo di oggi). A fattura niente allarme.
+  const aScalare = !master && clienteData?.tipo_contratto === 'credito_scalare'
+  const mancante = aScalare && selected && credito != null && credito < totale ? Math.ceil((totale - credito) * 100) / 100 : 0
+  function ricaricaCredito() { fetch('/api/cliente/dati').then(r => r.json()).then(c => { if (c && !c.error) setClienteData(c) }).catch(() => {}) }
 
   // ── il tasto ──
   // Per ora porta al modulo di oggi coi dati già scritti, con gli stessi parametri della matita di Importa. Il modulo di
@@ -374,6 +428,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
       return
     }
     if (!selected) { document.getElementById('ns-corriere')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
+    if (mancante > 0) { document.getElementById('ns-paga')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
     window.location.href = urlModuloDiOggi()
   }
 
@@ -382,23 +437,37 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
     : 'Per ora la spedizione si crea dalla pagina di oggi: ti portiamo lì.'
 
   // ── pezzi ripetuti ──
-  const campo = (k: string, etichetta: string, valore: string, onChange: (v: string) => void, extra?: { ref?: React.RefObject<HTMLInputElement | null>; onInput?: (v: string) => void; placeholder?: string; inputMode?: 'decimal' | 'numeric' | 'tel' | 'email'; className?: string; onFocus?: () => void }) => {
+  const campo = (k: string, etichetta: string, valore: string, onChange: (v: string) => void, extra?: { ref?: React.RefObject<HTMLInputElement | null>; onInput?: (v: string) => void; placeholder?: string; inputMode?: 'decimal' | 'numeric' | 'tel' | 'email'; className?: string; sugg?: DoveSugg; maxLength?: number }) => {
     const e = errore(k)
+    const s = extra?.sugg
     return (
       <label className={'ns-campo' + (e ? ' ns-campo--errore' : '') + (extra?.className ? ' ' + extra.className : '')}>
         <span className="ns-campo__et">{etichetta}</span>
-        <input ref={extra?.ref as any} className="ns-campo__val" value={valore} placeholder={extra?.placeholder} inputMode={extra?.inputMode} autoComplete="off"
-          onChange={ev => { onChange(ev.target.value); extra?.onInput?.(ev.target.value) }} onBlur={() => { tocca(k)(); chiudiSugg() }} onFocus={extra?.onFocus}
-          aria-invalid={!!e} />
+        <input ref={extra?.ref as any} className="ns-campo__val" value={valore} placeholder={extra?.placeholder} inputMode={extra?.inputMode} maxLength={extra?.maxLength} autoComplete="off"
+          onChange={ev => { onChange(ev.target.value); extra?.onInput?.(ev.target.value) }}
+          onFocus={s ? () => entraSugg(s) : undefined}
+          onBlur={() => { tocca(k)(); if (s) esciSugg() }}
+          onKeyDown={s ? ev => { if (ev.key === 'Escape') chiudiSugg() } : undefined}
+          aria-invalid={!!e} aria-expanded={s ? apertaSu(s) : undefined} />
         {e && <span className="ns-campo__err" role="alert">{e}</span>}
       </label>
     )
   }
+  // Si sceglie solo premendo DENTRO la tendina; preventDefault tiene il fuoco nel campo, così la scelta arriva prima
+  // che il campo si chiuda.
   const voceSugg = (titolo: string, sotto: string, onScegli: () => void, i: number) => (
-    <div key={i} role="option" aria-selected="false" className="ns-tendina__voce" onMouseDown={onScegli}>
+    <div key={i} role="option" aria-selected="false" className="ns-tendina__voce" onMouseDown={ev => { ev.preventDefault(); onScegli(); chiudiSugg() }}>
       <b>{titolo}</b>{sotto && <span>{sotto}</span>}
     </div>
   )
+  const avvisoRubrica = (chi: 'mitt' | 'dest') => daRubrica?.chi === chi && (
+    <p className="ns-rubrica" role="status">
+      Preso dalla rubrica: <b>{daRubrica.nome}</b>
+      <button type="button" className="ns-link" onClick={() => { if (chi === 'dest') setDest(daRubrica.prima); else setMitt(daRubrica.prima); setDaRubrica(null) }}>Annulla</button>
+    </p>
+  )
+  // Provincia italiana: due lettere maiuscole e basta (nella prova «CB» + «MI» era diventato «CBMI»).
+  const sigla = (v: string) => v.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2)
   const indirizzoBreve = (x: any) => [x.indirizzo, x.citta, x.provincia && `(${x.provincia})`, x.cap].filter(Boolean).join(' ')
 
   return (
@@ -444,18 +513,19 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
               </div>
             ) : (
               <div className="ns-campi">
-                {campo('mittNome', 'Nome o ragione sociale', mitt.nome, v => setMitt(m => ({ ...m, nome: v })), { ref: refMitt, onInput: v => cerca('mitt', '/api/mittenti/cerca?q=' + encodeURIComponent(v), v) })}
-                <Tendina ancora={refMitt} aperta={sugg.dove === 'mitt' && sugg.voci.length > 0}>
-                  {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, indirizzoBreve(c), () => { setMitt(m => ({ ...m, nome: c.nome, indirizzo: c.indirizzo || m.indirizzo, citta: c.citta || m.citta, provincia: c.provincia || m.provincia, cap: c.cap || m.cap, email: c.email || m.email, telefono: c.telefono || m.telefono })); setSugg({ dove: '', voci: [] }) }, i))}
+                {campo('mittNome', 'Nome o ragione sociale', mitt.nome, v => { setMitt(m => ({ ...m, nome: v })); if (daRubrica?.chi === 'mitt') setDaRubrica(null) }, { ref: refMitt, sugg: 'mitt', onInput: v => cerca('mitt', '/api/mittenti/cerca?q=' + encodeURIComponent(v), v) })}
+                <Tendina ancora={refMitt} aperta={apertaSu('mitt')}>
+                  {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, indirizzoBreve(c), () => { setDaRubrica({ chi: 'mitt', nome: c.nome, prima: mitt }); setMitt(m => ({ ...m, nome: c.nome, indirizzo: c.indirizzo || m.indirizzo, citta: c.citta || m.citta, provincia: c.provincia || m.provincia, cap: c.cap || m.cap, email: c.email || m.email, telefono: c.telefono || m.telefono })) }, i))}
                 </Tendina>
+                {avvisoRubrica('mitt')}
                 {campo('mittIndirizzo', 'Indirizzo', mitt.indirizzo, v => setMitt(m => ({ ...m, indirizzo: v })))}
                 <div className="ns-riga3">
-                  {campo('mittCap', 'CAP', mitt.cap, v => setMitt(m => ({ ...m, cap: v })), { inputMode: 'numeric' })}
-                  {campo('mittCitta', 'Città', mitt.citta, v => setMitt(m => ({ ...m, citta: v })), { ref: refMittCitta, onInput: v => cerca('mittCitta', '/api/comuni?q=' + encodeURIComponent(v), v) })}
-                  {campo('mittProvincia', 'Provincia', mitt.provincia, v => setMitt(m => ({ ...m, provincia: v.toUpperCase() })))}
+                  {campo('mittCap', 'CAP', mitt.cap, v => setMitt(m => ({ ...m, cap: v.replace(/[^0-9]/g, '').slice(0, 5) })), { inputMode: 'numeric' })}
+                  {campo('mittCitta', 'Città', mitt.citta, v => setMitt(m => ({ ...m, citta: v })), { ref: refMittCitta, sugg: 'mittCitta', onInput: v => cerca('mittCitta', '/api/comuni?q=' + encodeURIComponent(v), v) })}
+                  {campo('mittProvincia', 'Provincia', mitt.provincia, v => setMitt(m => ({ ...m, provincia: sigla(v) })))}
                 </div>
-                <Tendina ancora={refMittCitta} aperta={sugg.dove === 'mittCitta' && sugg.voci.length > 0} maxAltezza={220}>
-                  {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, `(${c.sigla}) ${c.cap}`, () => { setMitt(m => ({ ...m, citta: c.nome, provincia: c.sigla, cap: c.cap })); setSugg({ dove: '', voci: [] }) }, i))}
+                <Tendina ancora={refMittCitta} aperta={apertaSu('mittCitta')} maxAltezza={220}>
+                  {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, `(${c.sigla}) ${c.cap}`, () => setMitt(m => ({ ...m, citta: c.nome, provincia: c.sigla, cap: c.cap })), i))}
                 </Tendina>
                 <div className="ns-riga2">
                   {campo('mittTelefono', 'Telefono', mitt.telefono, v => setMitt(m => ({ ...m, telefono: v })), { inputMode: 'tel' })}
@@ -505,30 +575,30 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
             <div className="ns-campi">
               <label className="ns-campo ns-campo--select">
                 <span className="ns-campo__et">Paese</span>
-                <select className="ns-campo__val" value={dest.paese} onChange={e => { const paese = e.target.value; setDest(d => ({ ...d, paese, provincia: paese === 'IT' ? (d.paese === 'IT' ? d.provincia : '') : paese })); setSugg({ dove: '', voci: [] }) }}>
+                <select className="ns-campo__val" value={dest.paese} onChange={e => { const paese = e.target.value; setDest(d => ({ ...d, paese, provincia: paese === 'IT' ? (d.paese === 'IT' ? d.provincia : '') : paese })); chiudiSugg() }}>
                   {PAESI_MONDO.map(p => <option key={p.code} value={p.code}>{p.nome}</option>)}
                 </select>
               </label>
-              {campo('destNome', 'Nome e cognome o ragione sociale', dest.nome, v => setDest(d => ({ ...d, nome: v })), { ref: refDest, onInput: v => cerca('dest', '/api/destinatari/cerca?q=' + encodeURIComponent(v), v) })}
-              <Tendina ancora={refDest} aperta={sugg.dove === 'dest' && sugg.voci.length > 0}>
-                {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, indirizzoBreve(c), () => { setDest(d => ({ ...d, nome: c.nome, indirizzo: c.indirizzo || d.indirizzo, citta: c.citta || d.citta, provincia: c.provincia || d.provincia, cap: c.cap || d.cap, email: c.email || d.email, telefono: c.telefono || d.telefono })); setSugg({ dove: '', voci: [] }) }, i))}
+              {campo('destNome', 'Nome e cognome o ragione sociale', dest.nome, v => { setDest(d => ({ ...d, nome: v })); if (daRubrica?.chi === 'dest') setDaRubrica(null) }, { ref: refDest, sugg: 'dest', onInput: v => cerca('dest', '/api/destinatari/cerca?q=' + encodeURIComponent(v), v) })}
+              <Tendina ancora={refDest} aperta={apertaSu('dest')}>
+                {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, indirizzoBreve(c), () => { setDaRubrica({ chi: 'dest', nome: c.nome, prima: dest }); setDest(d => ({ ...d, nome: c.nome, indirizzo: c.indirizzo || d.indirizzo, citta: c.citta || d.citta, provincia: c.provincia || d.provincia, cap: c.cap || d.cap, email: c.email || d.email, telefono: c.telefono || d.telefono })) }, i))}
               </Tendina>
+              {avvisoRubrica('dest')}
               {consegnaA === 'domicilio' ? (<>
                 {campo('destIndirizzo', 'Indirizzo', dest.indirizzo, v => setDest(d => ({ ...d, indirizzo: v })))}
                 <div className="ns-riga3">
-                  {campo('destCap', 'CAP', dest.cap, v => setDest(d => ({ ...d, cap: v })))}
-                  {campo('destCitta', 'Città', dest.citta, v => setDest(d => ({ ...d, citta: v })), { ref: refDestCitta, onInput: v => cerca('destCitta', '/api/comuni?q=' + encodeURIComponent(v) + '&paese=' + encodeURIComponent(dest.paese), v) })}
-                  {campo('destProvincia', estero ? 'Regione (facoltativa)' : 'Provincia', dest.provincia, v => setDest(d => ({ ...d, provincia: estero ? v : v.toUpperCase() })))}
+                  {campo('destCap', 'CAP', dest.cap, v => setDest(d => ({ ...d, cap: estero ? v : v.replace(/[^0-9]/g, '').slice(0, 5) })), { inputMode: estero ? undefined : 'numeric' })}
+                  {campo('destCitta', 'Città', dest.citta, v => setDest(d => ({ ...d, citta: v })), { ref: refDestCitta, sugg: 'destCitta', onInput: v => cerca('destCitta', '/api/comuni?q=' + encodeURIComponent(v) + '&paese=' + encodeURIComponent(dest.paese), v) })}
+                  {campo('destProvincia', estero ? 'Regione (facoltativa)' : 'Provincia', dest.provincia, v => setDest(d => ({ ...d, provincia: estero ? v : sigla(v) })))}
                 </div>
                 {/* Solo le voci del paese scelto ADESSO: una risposta partita prima di cambiare paese non deve rimettere città
                     italiane su un pacco tedesco. Dove l'archivio ha solo la prima parte del CAP, un CAP già scritto non si accorcia. */}
-                <Tendina ancora={refDestCitta} aperta={sugg.dove === 'destCitta' && sugg.voci.some((c: any) => (c.paese || 'IT') === dest.paese)} maxAltezza={220}>
+                <Tendina ancora={refDestCitta} aperta={apertaSu('destCitta') && sugg.voci.some((c: any) => (c.paese || 'IT') === dest.paese)} maxAltezza={220}>
                   {sugg.voci.filter((c: any) => (c.paese || 'IT') === dest.paese).map((c: any, i: number) => voceSugg(c.nome, `(${(c.paese || 'IT') !== 'IT' ? c.provincia : c.sigla}) ${c.cap}${c.parziale ? ' … da completare' : ''}`, () => {
                     if ((c.paese || 'IT') !== 'IT') {
                       const gia = (d: Destinatario) => c.parziale && String(d.cap || '').toUpperCase().replace(/\s/g, '').startsWith(String(c.cap).toUpperCase().replace(/\s/g, ''))
                       setDest(d => ({ ...d, citta: c.nome, cap: gia(d) ? d.cap : c.cap }))
                     } else setDest(d => ({ ...d, citta: c.nome, provincia: c.sigla, cap: c.cap }))
-                    setSugg({ dove: '', voci: [] })
                   }, i))}
                 </Tendina>
               </>) : (
@@ -585,9 +655,9 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                 <div key={i} className="ns-collo">
                   <span className="ns-collo__n">Collo {i + 1}</span>
                   {campo('peso' + i, 'Peso kg', c.peso, v => cambiaCollo(i, 'peso', v), { inputMode: 'decimal', placeholder: '0,0' })}
-                  {campo('l' + i, 'Lung. cm', c.lunghezza, v => cambiaCollo(i, 'lunghezza', v), { inputMode: 'numeric', placeholder: '20' })}
-                  {campo('w' + i, 'Larg. cm', c.larghezza, v => cambiaCollo(i, 'larghezza', v), { inputMode: 'numeric', placeholder: '15' })}
-                  {campo('h' + i, 'Alt. cm', c.altezza, v => cambiaCollo(i, 'altezza', v), { inputMode: 'numeric', placeholder: '10' })}
+                  {campo('l' + i, 'Lung. cm', c.lunghezza, v => cambiaCollo(i, 'lunghezza', v), { inputMode: 'numeric' })}
+                  {campo('w' + i, 'Larg. cm', c.larghezza, v => cambiaCollo(i, 'larghezza', v), { inputMode: 'numeric' })}
+                  {campo('h' + i, 'Alt. cm', c.altezza, v => cambiaCollo(i, 'altezza', v), { inputMode: 'numeric' })}
                   <button type="button" className="ns-togli" disabled={colli.length === 1} onClick={() => setColli(prev => prev.filter((_, j) => j !== i))} aria-label={`Togli il collo ${i + 1}`}><Icona id="i-cestino" /></button>
                 </div>
               ))}
@@ -719,6 +789,11 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
           </section>
 
           <div className="ns-crea">
+            {mancante > 0 && credito != null && (
+              <div id="ns-paga" className="ns-paga">
+                <PagaConCarta mancante={mancante} costo={totale} credito={credito} onPagato={ricaricaCredito} />
+              </div>
+            )}
             {prezzoCambiato && <p className="ns-cambiato" role="status">Il prezzo è cambiato: da {euro(prezzoCambiato.da)} a {euro(prezzoCambiato.a)}.</p>}
             <button type="button" className="ns-crea__tasto" onClick={crea} disabled={inCalcolo}>
               {inCalcolo ? 'Aggiorno i prezzi…' : selected ? `Crea spedizione · ${euro(totale)}` : 'Crea spedizione'}
@@ -768,10 +843,11 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
             ) : (
               <p className="ns-vuoto">Il prezzo compare qui appena c&apos;è un corriere.</p>
             )}
-            {!master && credito != null && (
-              <dl className={'ns-credito' + (selected && credito - totale < 0 ? ' ns-credito--basso' : '')}>
+            {aScalare && credito != null && (
+              <dl className={'ns-credito' + (mancante > 0 ? ' ns-credito--basso' : '')}>
                 <div><dt>Credito disponibile</dt><dd>{euro(credito)}</dd></div>
                 {selected && <div><dt>Dopo questa spedizione</dt><dd>{euro(credito - totale)}</dd></div>}
+                {mancante > 0 && <p className="ns-credito__avviso">Credito insufficiente: mancano {euro(mancante)}. Ricarica per spedire.</p>}
               </dl>
             )}
           </div>
