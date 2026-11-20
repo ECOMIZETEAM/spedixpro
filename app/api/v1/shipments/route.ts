@@ -533,6 +533,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         noteConsegna: noteEc || null,
         contenuto: body.contenuto ? String(body.contenuto) : null,
         contrassegno: Number(body.codValue || 0) || null,
+        assicurazione: Number(body.insuranceValue || 0) || null,
         riferimento: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || null,
         idempotenza: crypto.randomUUID(),
       })
@@ -543,7 +544,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       raw = { _ecosmos: true, numero, stato: risEc.stato, servizio: servizioEc, tracking_url: risEc.trackingUrl }
     } catch (e: any) {
       console.error('[V1][ECOSMOS]', e?.message)
-      // Risposta senza numero: la spedizione forse c'e'. Il credito non si restituisce alla cieca (lo
+      // Nessuna risposta, o risposta senza numero: la spedizione forse c'e'. Il credito non si restituisce alla cieca (lo
       // libera il giro delle prenotazioni scadute se davvero non c'e').
       if (e?.forseCreata) return NextResponse.json({ error: e.message }, { status: 502 })
       return errore(e?.ecosmos ? e.message : erroreCorrierePulito(e?.message))

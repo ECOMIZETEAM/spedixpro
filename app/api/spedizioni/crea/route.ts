@@ -3231,11 +3231,12 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
           noteConsegna: body.notes ? String(body.notes) : null,
           contenuto: body.contenuto ? String(body.contenuto) : null,
           contrassegno: Number(body.codValue || 0) || null,
+          assicurazione: Number(body.insuranceValue || 0) || null,
           riferimento: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || null,
           idempotenza: crypto.randomUUID(),
         })
       } catch (e: any) {
-        // Ecosmos ha risposto 200 ma senza un numero leggibile: forse la spedizione c'e'. Non si storna
+        // Ecosmos non ha risposto, o ha risposto senza un numero leggibile: forse la spedizione c'e'. Non si storna
         // alla cieca (il giro delle prenotazioni scadute la libera se davvero non c'e'): si dice di
         // controllare, col dettaglio nei log per ritrovarla.
         if (e?.forseCreata) {
