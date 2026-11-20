@@ -84,7 +84,7 @@ export async function chiudiDistintaMista(supabase: any, distintaId: string) {
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
     const admin = createAdminSupabase()
     const { data: speds } = await admin
-      .from('spedizioni').select('id, numero, tracking_number, raw_response, corriere_id').eq('distinta_id', distintaId)
+      .from('spedizioni').select('id, numero, tracking_number, raw_response, corriere_id, stato').eq('distinta_id', distintaId)
     if (!speds?.length) return { errore: 'distinta senza spedizioni' }
 
     // Raggruppo per il corriere REALE di ogni spedizione (non per la distinta, che qui non ne ha uno).
@@ -105,9 +105,13 @@ export async function chiudiDistintaMista(supabase: any, distintaId: string) {
       if (!corr) { errori.push('contratto sconosciuto'); continue }
       const cred = (corr.credenziali || {}) as any
       if (corr.tipo === 'gls') {
-        const numeri = gruppo.map(numeroNudoGls).filter(Boolean)
+        // Le annullate non si mandano: su GLS sono gia' cancellate e la chiusura le rifiuterebbe (vedi
+        // lib/gls, chiudiGiornataGls). Un gruppo tutto annullato non ha niente da affidare a GLS.
+        const numeri = gruppo.filter((s: any) => s.stato !== 'annullata').map(numeroNudoGls).filter(Boolean)
+        if (!numeri.length) continue
         const r = await chiudiSpedizioniGls(cred, numeri)
         if (!r.ok) errori.push('GLS: ' + (r.errore || 'chiusura non confermata'))
+        else if (r.riassunto) console.error('[DISTINTE][GLS] mista chiusa con pacchi non chiusi', distintaId, r.riassunto)
       } else if (corr.tipo === 'spedisci') {
         const gruppi = raggruppaPerContractCodeSpedisci(gruppo)
         if (!gruppi.size) { errori.push('Spedisci: nessuna spedizione con shipmentId/contractCode'); continue }

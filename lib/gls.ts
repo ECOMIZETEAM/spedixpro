@@ -589,11 +589,19 @@ export async function statoSpedizioneSuGls(cred: CredenzialiGls, numeroNudo: str
 // crea la spedizione ma resta "in attesa di chiusura" e GLS NON passa a ritirare. Batch: un <Parcel>
 // per numero in una sola chiamata. Il campo è `NumeroDiSpedizioneGLSDaConfermare` (verificato: con
 // <NumeroSpedizione> GLS cercava "-1" → "Spedizione inesistente"). Param `_xmlRequest` (underscore).
+//
+// L'ESITO PER PACCO (manuale MU162, 4.3) e' "OK" oppure "Spedizione inesistente o precedentemente cancellata",
+// che GLS da' anche a un pacco GIA' CHIUSO prima (non lo trova piu' aperto). Prima si guardava solo se almeno
+// un pacco era "OK": una distinta coi pacchi gia' chiusi altrove finiva in "ERRORE: OK" (DescrizioneErrore
+// globale) e il motivo per pacco si perdeva. Casi veri: M.C. LOGISTICA 84206 e 85780 (17-18/11/2026, giro
+// delle 23:30, pacchi poi consegnati). Ora quei pacchi si cercano sul Track&Trace pubblico, che trova solo le
+// spedizioni chiuse: trovati = gia' chiusi, contano come fatti. Quelli che restano finiscono nel testo
+// d'errore, con l'esito di GLS e i numeri. `riassunto` c'e' anche quando la chiusura riesce a meta'.
 export async function chiudiSpedizioniGls(
   cred: CredenzialiGls, numeri: string[]
-): Promise<{ ok: boolean; esiti: Record<string, string>; errore: string | null; raw: string }> {
+): Promise<{ ok: boolean; esiti: Record<string, string>; errore: string | null; raw: string; riassunto: string }> {
   const nums = Array.from(new Set(numeri.map(n => String(n || '').trim()).filter(Boolean)))
-  if (!nums.length) return { ok: true, esiti: {}, errore: null, raw: '' }
+  if (!nums.length) return { ok: true, esiti: {}, errore: null, raw: '', riassunto: '' }
   const parcels = nums.map(n => `<Parcel><NumeroDiSpedizioneGLSDaConfermare>${escXml(n)}</NumeroDiSpedizioneGLSDaConfermare></Parcel>`).join('')
   const xmlReq =
     `<Info>` +
@@ -606,19 +614,62 @@ export async function chiudiSpedizioniGls(
   try {
     soap = await chiamaGls('CloseWorkDayByShipmentNumber', `<_xmlRequest>${escXml(xmlReq)}</_xmlRequest>`)
   } catch (e) {
-    return { ok: false, esiti: {}, errore: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)), raw: '' }
+    return { ok: false, esiti: {}, errore: 'GLS non raggiungibile: ' + (e instanceof Error ? e.message : String(e)), raw: '', riassunto: '' }
   }
   const fault = faultString(soap)
-  if (fault) return { ok: false, esiti: {}, errore: fault, raw: soap.substring(0, 2000) }
+  if (fault) return { ok: false, esiti: {}, errore: fault, raw: soap.substring(0, 2000), riassunto: '' }
   // Esito per-spedizione: coppie <NumeroDiSpedizioneGLSDaConfermare> + <esito> dentro ogni <Parcel>.
   const esiti: Record<string, string> = {}
   const re = /<NumeroDiSpedizioneGLSDaConfermare>\s*([^<]*?)\s*<\/NumeroDiSpedizioneGLSDaConfermare>[\s\S]*?<esito>\s*([^<]*?)\s*<\/esito>/gi
   let m: RegExpExecArray | null
   while ((m = re.exec(soap))) esiti[m[1].trim()] = m[2].trim()
   const descr = (estraiTag(soap, 'DescrizioneErrore') || '').trim()
-  // Trasmesso se GLS risponde OK a livello globale e almeno una spedizione è andata a buon fine.
-  const ok = /^ok$/i.test(descr) && nums.some(n => /ok/i.test(esiti[n] || ''))
-  return { ok, esiti, errore: ok ? null : (descr || 'chiusura GLS non confermata'), raw: soap.substring(0, 2000) }
+  const globaleOk = /^ok$/i.test(descr)
+  const chiusa = (n: string) => /\bok\b/i.test(esiti[n] || '') || esiti[n] === GIA_CHIUSA_GLS
+  // I pacchi che GLS non ha chiuso adesso: se sono gia' nel network, erano chiusi da prima.
+  if (globaleOk) {
+    const daCercare = nums.filter(n => !chiusa(n))
+    for (let i = 0; i < daCercare.length; i += 8) {
+      const gruppo = daCercare.slice(i, i + 8)
+      const trovati = await Promise.all(gruppo.map(n => spedizioneGlsNelNetwork(cred, n)))
+      gruppo.forEach((n, k) => { if (trovati[k]) esiti[n] = GIA_CHIUSA_GLS })
+    }
+  }
+  const chiuse = nums.filter(chiusa)
+  const nonChiuse = nums.filter(n => !chiusa(n))
+  const perEsito = new Map<string, string[]>()
+  for (const n of nonChiuse) { const e = esiti[n] || 'nessun esito'; perEsito.set(e, [...(perEsito.get(e) || []), n]) }
+  const riassunto = nonChiuse.length
+    ? `${chiuse.length} di ${nums.length} chiuse; ` + Array.from(perEsito).map(([e, ns]) => `${ns.length}× «${e}» (${ns.slice(0, 3).join(', ')}${ns.length > 3 ? '…' : ''})`).join('; ')
+    : ''
+  // Trasmesso se GLS risponde OK a livello globale e almeno una spedizione è chiusa (adesso o da prima).
+  const ok = globaleOk && chiuse.length > 0
+  const errore = ok ? null : (globaleOk ? (riassunto || 'chiusura GLS non confermata') : [descr || 'chiusura GLS non confermata', riassunto].filter(Boolean).join(' — '))
+  return { ok, esiti, errore, raw: soap.substring(0, 2000), riassunto }
+}
+
+const GIA_CHIUSA_GLS = 'già chiusa (nel network GLS)'
+
+// La spedizione e' gia' nel network GLS? Il Track&Trace pubblico trova solo le spedizioni CHIUSE: quelle ancora
+// aperte e quelle cancellate rispondono "Spedizione non trovata" (verificato il 20/11/2026 su NN669533268,
+// consegnata, e NI665562224, annullata). Non raggiungibile = non trovata: nel dubbio si resta nell'errore.
+async function spedizioneGlsNelNetwork(cred: CredenzialiGls, numeroNudo: string, timeoutMs = 8000): Promise<boolean> {
+  const sede = (cred.sigla_sede || '').trim()
+  const num = String(numeroNudo || '').replace(/\D/g, '')
+  if (!sede || !num) return false
+  const contratto = (cred.codice_contratto || '').trim()
+  const url = `${GLS_TT_ENDPOINT}?locpartenza=${encodeURIComponent(sede)}&NumSped=${encodeURIComponent(num)}` +
+    (contratto ? `&CodCli=${encodeURIComponent(contratto)}` : '')
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const xml = await (await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/xml, text/xml' } })).text()
+    return /<SPEDIZIONE>/i.test(xml) && !/<TESTOERRORE>/i.test(xml)
+  } catch {
+    return false
+  } finally {
+    clearTimeout(t)
+  }
 }
 
 // Numero GLS "nudo" (quello che vuole la CloseWorkDay) di una spedizione: sta in raw_response.numero,
@@ -815,12 +866,23 @@ export async function chiudiGiornataGls(supabase: any, distintaId: string) {
     if (!cred.sigla_sede || !cred.user_webservice || !cred.password_webservice) return { errore: 'credenziali GLS mancanti' }
 
     const { data: speds } = await supabase
-      .from('spedizioni').select('id, numero, tracking_number, raw_response').eq('distinta_id', distintaId)
+      .from('spedizioni').select('id, numero, tracking_number, raw_response, stato').eq('distinta_id', distintaId)
+    // Le ANNULLATE non si mandano: su GLS sono gia' cancellate (DeleteSped) e la chiusura le rifiuta come
+    // "inesistente o precedentemente cancellata". Se lo sono tutte non c'e' niente da affidare a GLS: la
+    // distinta e' chiusa cosi'. Prima finiva in "ERRORE: OK" e si ritentava a vuoto (Wave, DOLCE LUNA,
+    // distinte 81414 e 81417 del 16/11/2026: 24 spedizioni, tutte annullate).
+    const vive = (speds || []).filter((s: any) => s.stato !== 'annullata')
+    if ((speds || []).length && !vive.length) {
+      await supabase.from('distinte').update({ bordero_id: 'N/A', confermata_vettore: true, data_conferma: new Date().toISOString() }).eq('id', distintaId)
+      return { ok: true, esiti: {}, nienteDaChiudere: true }
+    }
     const numeri: string[] = []
-    for (const s of speds || []) { const n = numeroNudoGls(s); if (n) numeri.push(n) }
+    for (const s of vive) { const n = numeroNudoGls(s); if (n) numeri.push(n) }
     if (!numeri.length) return { errore: 'nessuna spedizione GLS con numero' }
 
     const r = await chiudiSpedizioniGls(cred, numeri)
+    // Chiusa a meta': la distinta resta confermata (come prima), ma i pacchi non chiusi si scrivono nel registro.
+    if (r.ok && r.riassunto) console.error('[DISTINTE][GLS] chiusa con pacchi non chiusi', distintaId, r.riassunto)
     await supabase.from('distinte').update({
       bordero_id: r.ok ? 'N/A' : ('ERRORE: ' + (r.errore || 'chiusura GLS').slice(0, 150)),
       ...(r.ok ? { confermata_vettore: true, data_conferma: new Date().toISOString() } : {}),
