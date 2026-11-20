@@ -74,9 +74,15 @@
 .gx .ns-sezione > .ns-gruppo:first-of-type { margin-top: 0; }
 .gx .ns-spunta { display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px; cursor: pointer; }
 .gx .ns-spunta input, .gx .ns-modo input, .gx .ns-corriere input, .gx .ns-extra input { accent-color: var(--gx-accento-pieno); width: 17px; height: 17px; margin: 2px 0 0; flex: none; }
+/* l'anello del fuoco di caselle e pallini: arancio come il resto, non il blu del browser (Lorenzo 20/11, foto di
+   «Assicurazione»); col mouse niente anello, solo da tastiera */
+.gx .ns input[type="checkbox"]:focus-visible, .gx .ns input[type="radio"]:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; border-radius: 4px; }
+.gx .ns input[type="checkbox"]:focus:not(:focus-visible), .gx .ns input[type="radio"]:focus:not(:focus-visible) { outline: none; }
 .gx .ns-spunta b { display: block; font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-spunta small { display: block; font-size: 12.5px; color: var(--gx-attenuato); }
-.gx .ns-dentro { padding: 0 14px 14px 43px; }
+/* lo stesso spazio sopra e sotto (Lorenzo 20/11: contrassegno e assicurazione aperti avevano il campo attaccato alla
+   riga sopra, 0 px contro 14, come il calendario del ritiro) */
+.gx .ns-dentro { padding: 14px 14px 14px 43px; }
 .gx .ns-dentro.ns-riga2 { padding-left: 43px; }
 
 /* il ritiro: calendario e fascia */
@@ -168,7 +174,7 @@
 .gx .ns-attenz.ns-info { color: var(--gx-attenuato) !important; }
 .gx .ns-meglio { font-style: normal; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--gx-bene); background: color-mix(in srgb, var(--gx-bene) 13%, transparent); }
 .gx .ns-prezzo { font-weight: 600; font-size: 15.5px; color: var(--gx-inchiostro); white-space: nowrap; }
-.gx .ns-corriere__dentro { display: grid; gap: 8px; padding: 10px 14px 14px 43px; background: color-mix(in srgb, var(--gx-accento) 4%, transparent); border-top: 1px solid var(--gx-filo); }
+.gx .ns-corriere__dentro { display: grid; gap: 8px; padding: 14px 14px 14px 43px; background: color-mix(in srgb, var(--gx-accento) 4%, transparent); border-top: 1px solid var(--gx-filo); }
 .gx .ns-extra { display: flex; align-items: center; gap: 10px; font-size: 13.5px; cursor: pointer; }
 .gx .ns-extra span { flex: 1; }
 .gx .ns-extra b { font-weight: 600; color: var(--gx-inchiostro); }
