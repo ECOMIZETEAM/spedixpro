@@ -11,6 +11,7 @@
 
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
+import { leggiZoneCap } from '@/lib/zone-cap'
 import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
 import { leggiSupplementiMulticollo, noloMulticolloDaFasce, pesoMulticolloFornitore, zonaMulticolloDi, TIPO_MULTICOLLO_SUPPLEMENTI, type EsitoMulticollo } from '@/lib/multicollo-zone'
 
@@ -1215,20 +1216,6 @@ export async function calcolaSupplementiCliente(
   return { contrassegno: feeCod, assicurazione: feeAss, disponibile: true }
 }
 
-// Restringe una query zone_cap ai soli CAP da prezzare, PIU' le righe senza CAP (provincia e jolly),
-// che matchZona usa quando il CAP esatto non c'e'. Senza elenco — o con troppi CAP, es. un report su
-// tutto il mese — si legge tutto come prima: meglio una query grossa che mille piccole.
-function zoneCapMirate(q: any, cap?: string[] | null) {
-  const grezzi = (cap || []).map(c => String(c || '').trim())
-  const lista = Array.from(new Set(grezzi.filter(c => /^[A-Za-z0-9-]{1,10}$/.test(c))))
-  // CAP portoghesi: anche il prefisso di 4 cifre, su cui le zone PT possono essere scritte (vedi
-  // capPrefissoZona in zone-match: stessa forma, spazio compreso). Le righe di altri paesi lette in
-  // piu' le scarta il match, che filtra per paese.
-  for (const c of grezzi) { const m = /^(\d{4})[-\s]?\d{3}$/.exec(c); if (m && !lista.includes(m[1])) lista.push(m[1]) }
-  if (!lista.length || lista.length > 200) return q
-  return q.or(`cap.is.null,cap.eq.*,cap.in.(${lista.join(',')})`)
-}
-
 // Versione BATCH: precarica UNA volta i listini/fasce/supplementi/zone_cap del master
 // e ritorna una funzione che calcola il prezzo corriere per una spedizione in memoria,
 // senza query per riga. Risultato identico a calcolaPrezzoCorriere (usato dai report).
@@ -1294,10 +1281,8 @@ async function creaCalcolatoreCorriereBase(
   // garantisce che pagina 2 riprenda dove finisce pagina 1: su SEMPLICE SPEDIRE (21.158 CAP di zona)
   // tre letture di fila davano 16.737, 16.737 e 17.737 righe diverse — il resto doppioni. I CAP
   // persi cambiavano a ogni apertura dell'elenco, e con loro la zona: costo vuoto o di un'altra zona.
-  const zc: any[] = zonaIds.length
-    ? await fetchAll(() => zoneCapMirate(
-        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare).order('id', { ascending: true }))
-    : []
+  // Ora l'ordine per id lo tiene la funzione del database. Una lettura sola, stesse righe nello stesso ordine (lib/zone-cap): prima ~20 blocchi da 1.000 in fila.
+  const zc: any[] = await leggiZoneCap(supabase, zonaIds as string[], capDaPrezzare)
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
     const k = (r.paese || '').toUpperCase()
@@ -1432,11 +1417,9 @@ async function creaCalcolatoreListinoClienteBase(
   for (const c of (corrSettL || [])) settPerCorrL.set(c.id, (c as any).settings || {})
 
   const zonaIds = Array.from(new Set((fasce || []).filter((f: any) => !f.zone?.multicollo).map((f: any) => f.zone?.id).filter(Boolean)))
-  // Ordine fisso per le pagine: stesso guasto del calcolatore del costo, qui sopra.
-  const zc: any[] = zonaIds.length
-    ? await fetchAll(() => zoneCapMirate(
-        supabase.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds), capDaPrezzare).order('id', { ascending: true }))
-    : []
+  // Ordine fisso (per id): stesso guasto del calcolatore del costo, qui sopra.
+  // Una lettura sola, stesse righe nello stesso ordine (lib/zone-cap): prima ~20 blocchi da 1.000 in fila.
+  const zc: any[] = await leggiZoneCap(supabase, zonaIds as string[], capDaPrezzare)
   const zcByPaese = new Map<string, any[]>()
   for (const r of zc || []) {
     const k = (r.paese || '').toUpperCase()

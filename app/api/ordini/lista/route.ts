@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { fetchAll } from '@/lib/fetch-all'
+import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraAudit } from '@/lib/audit'
 import { COLONNE_PAGAMENTO, assorbitiDelCliente, componiPacco, contrassegnoDi, metodoPagamentoDi } from '@/lib/ordini-uniti'
 import { inDistinta, STATI_SPEDIZIONE_IN_ANNULLO } from '@/lib/evasione-ordini'
@@ -36,14 +36,20 @@ export async function GET(req: NextRequest) {
     .eq('cliente_id', utente.cliente_id).eq('piattaforma', piattaforma)
   const integrIds = (integrs || []).map((i: any) => i.id)
   if (!integrIds.length) return NextResponse.json([])
-  const ordini = await fetchAll(() => supabase
-    .from('ordini_ecommerce')
-    .select(`id,integrazione_id,piattaforma,ordine_esterno_id,numero_ordine,cliente_nome,destinatario,articoli,totale,valuta,stato,stato_pagamento,spedizione_id,unito_in,fulfillment_stato,fulfillment_errore,created_at,d1:raw->>creationDate,d2:raw->>date_created,d3:raw->>created_at,d4:raw->>createdDate,d5:raw->>create_time,d6:raw->>date_add,d7:raw->>createdAt,d8:raw->>createdTime,${COLONNE_PAGAMENTO},n1:raw->>note,n2:raw->>customer_note`)
-    .eq('cliente_id', utente.cliente_id)
-    .eq('piattaforma', piattaforma)
-    .in('integrazione_id', integrIds)
-    // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
-    .order('created_at', { ascending: false }).order('id', { ascending: false }))
+  // UNA LETTURA SOLA (funzione del database ordini_ecommerce_lista), stessi campi con gli stessi nomi e
+  // stesso ordine (created_at desc, id desc). Prima i 16 campi si estraevano da `raw` uno per uno con
+  // PostgREST: 16 decompressioni dello stesso JSON per ogni ordine, su TUTTI gli ordini del cliente a ogni
+  // pagina da 1.000 (l'ordinamento viene prima del taglio). Cliente PrestaShop da 9.907 ordini: 3,9 s a
+  // pagina, ~10 pagine; era la lettura piu' pesante dell'intero database (8,6% del tempo, 19/11/2026).
+  // Ora il JSON si apre una volta per ordine: 9.907 ordini in 131 ms. Il perimetro e' quello di prima:
+  // il cliente della sessione e le SUE integrazioni (lette qui sopra col client della sessione); per
+  // questo la funzione la puo' chiamare solo il client di servizio.
+  // Una lettura non riuscita da' un elenco vuoto, come la lettura a pagine di prima; si scrive nei log.
+  const { data: ordiniDb, error: errOrdini } = await createAdminSupabase().rpc('ordini_ecommerce_lista', {
+    p_cliente: utente.cliente_id, p_piattaforma: piattaforma, p_integrazioni: integrIds,
+  })
+  if (errOrdini) console.error('[ORDINI][LISTA] lettura non riuscita:', errOrdini.message)
+  const ordini: any[] = Array.isArray(ordiniDb) ? ordiniDb : []
   // DATA SPEDIZIONE = quando la spedizione l'abbiamo creata NOI. E' il secondo filtro della pagina
   // ("quando e' stato spedito"): uguale per tutti i canali e senza chiedere niente ai negozi. Lettura a
   // parte perche' spedizione_id non ha una FK (niente embed); la sessione del cliente, per RLS, vede
