@@ -57,24 +57,47 @@ export async function contrattiRimossiConMotivo(masterId: string | null | undefi
   const admin = db || createAdminSupabase()
   const norm = (s: any) => String(s || '').trim().toLowerCase()
 
-  let corrente: string | null = masterId
-  const visti = new Set<string>([masterId])
+  // LE LETTURE NON SI ASPETTANO PIU' UNA CON L'ALTRA. Questa funzione la chiamano tariffe, creazione,
+  // API e anteprima a ogni prezzo, e faceva quattro letture IN FILA per ogni livello della catena (il
+  // padre, poi i contratti del padre, poi quelli del figlio, poi i disattivati): un cliente sotto un
+  // sotto-master aspettava una dozzina di viaggi al database prima di vedere un prezzo. Ora si risale
+  // la catena leggendo solo i padri, e le tre letture di ogni livello partono appena il padre e' noto.
+  // Sono le STESSE letture di prima, guardate nello STESSO ordine (livello per livello, dal basso):
+  // il risultato e' lo stesso, e in modalita' stretta solleva lo stesso errore allo stesso livello.
   // Nomi PROPRI del master che legge: non vanno MAI nascosti, nemmeno se un antenato ha tolto un
   // contratto con lo stesso nome (scenario GLS/BRT diretti). Guardia finale.
-  const { data: cMio, error: eMio } = await admin.from('corrieri').select('nome_contratto').eq('master_id', masterId).eq('proprio', true)
+  const pMio = Promise.resolve(admin.from('corrieri').select('nome_contratto').eq('master_id', masterId).eq('proprio', true))
+  // Un client che solleva invece di restituire l'errore (lib/db-memoria) lo fa sentire quando la
+  // lettura si aspetta, sotto: qui si evita solo che diventi un rifiuto orfano se si esce prima.
+  pMio.catch(() => {})
+
+  type Livello = { eM: any; letture?: Promise<any[]> }
+  const livelli: Livello[] = []
+  let corrente: string = masterId
+  const visti = new Set<string>([masterId])
+  for (let i = 0; i < 20; i++) {
+    const { data: mRow, error: eM }: any = await admin.from('masters').select('parent_master_id').eq('id', corrente).maybeSingle()
+    const padre: string | null = mRow?.parent_master_id || null
+    if ((eM && opts?.stretto) || !padre || visti.has(padre)) { livelli.push({ eM }); break }
+    visti.add(padre)
+    const letture = Promise.all([
+      admin.from('corrieri').select('id,nome_contratto,attivo,tipo').eq('master_id', padre),
+      admin.from('corrieri').select('nome_contratto,proprio,tipo').eq('master_id', corrente),
+      admin.from('masters_corrieri_abilitati').select('corriere_id').eq('master_id', corrente).eq('abilitato', false),
+    ])
+    letture.catch(() => {})
+    livelli.push({ eM, letture })
+    corrente = padre
+  }
+
+  const { data: cMio, error: eMio } = await pMio
   verifica(eMio, 'dei contratti propri')
   const nomiPropriMiei = new Set<string>((cMio || []).map((c: any) => norm(c.nome_contratto)))
 
-  for (let i = 0; i < 20; i++) {
-    const { data: mRow, error: eM }: any = await admin.from('masters').select('parent_master_id').eq('id', corrente).maybeSingle()
-    verifica(eM, 'del master')
-    const padre: string | null = mRow?.parent_master_id || null
-    if (!padre || visti.has(padre)) break
-    visti.add(padre)
-
-    const { data: cPadre, error: eP } = await admin.from('corrieri').select('id,nome_contratto,attivo,tipo').eq('master_id', padre)
-    const { data: cFiglio, error: eF } = await admin.from('corrieri').select('nome_contratto,proprio,tipo').eq('master_id', corrente)
-    const { data: disab, error: eD } = await admin.from('masters_corrieri_abilitati').select('corriere_id').eq('master_id', corrente).eq('abilitato', false)
+  for (const livello of livelli) {
+    verifica(livello.eM, 'del master')
+    if (!livello.letture) break
+    const [{ data: cPadre, error: eP }, { data: cFiglio, error: eF }, { data: disab, error: eD }] = await livello.letture
     verifica(eP || eF || eD, 'dei contratti del padre e del figlio')
     const disabIds = new Set((disab || []).map((r: any) => r.corriere_id))
 
@@ -112,7 +135,6 @@ export async function contrattiRimossiConMotivo(masterId: string | null | undefi
       const nome = norm((c as any).nome_contratto)
       if (nome && !offerti.has(nome)) segna(nome, nonDisabilitati.has(nome) ? 'pausa' : 'tolto')
     }
-    corrente = padre
   }
 
   // Guardia finale: un nome che il master che legge possiede come PROPRIO non si nasconde mai.
