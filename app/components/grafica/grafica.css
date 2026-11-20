@@ -50,7 +50,8 @@
   --gx-fondo: #E9ECF1;
   --gx-inchiostro: #0F141B;
   --gx-testo: rgba(18, 24, 34, .86);
-  --gx-attenuato: rgba(52, 62, 78, .62);
+  /* .76 e non .62: etichette e note a contrasto 5 (erano 3,4–3,6, sotto la soglia 4,5 del testo piccolo) */
+  --gx-attenuato: rgba(52, 62, 78, .76);
   --gx-filo: rgba(16, 24, 40, .08);
   --gx-accento: #FF4F00;
   --gx-accento-pieno: #FF4F00;
@@ -69,6 +70,9 @@
    la pagina faceva neri le caselle e i menu a tendina dentro quei riquadri (finché anche loro non avranno il vestito nuovo) */
 [data-grafica="nuova"][data-tema="notte"] .gx-lato, [data-grafica="nuova"][data-tema="notte"] .gx-alto { color-scheme: dark; }
 [data-grafica="nuova"], [data-grafica="nuova"] body { background: var(--gx-fondo); }
+/* le tendine che si aprono in fondo alla pagina (campanella, profilo, conti, supporto, «Spedisci per») stanno fuori dalla
+   cornice: il carattere glielo dà <body>, con la variabile che CorniceNuova copia su <html> */
+[data-grafica="nuova"] body { font-family: var(--font-outfit), system-ui, -apple-system, 'Segoe UI', sans-serif; }
 
 /* GLI STRATI. La cornice è un contesto suo (z-index 0): dentro, il fondo e la base 3D stanno SOTTO a tutto (−1), la
    pagina e la barra in alto sopra, il menu a 20. Prima la colonna di destra aveva z-index 1 e la base della Plancia
@@ -191,6 +195,14 @@
 .gx-prova { position: relative; z-index: 6; flex: none; display: flex; align-items: center; gap: 12px; margin: 12px 16px 0; padding: 8px 8px 8px 16px;
   border-radius: 16px; background: color-mix(in srgb, var(--gx-accento) 10%, var(--gx-vetro)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gx-accento) 28%, transparent);
   font-size: 13px; color: var(--gx-testo); }
+/* la fascia della verifica in due passaggi (app/components/VerificaDuePassaggi, colori in linea): nella cornice nuova
+   una nota di vetro, chiara di giorno e titanio di notte; con la grafica di oggi le classi non hanno regole */
+.gx .v2p-fascia { background: color-mix(in srgb, var(--gx-accento) 9%, var(--gx-vetro)) !important; border: 0 !important; border-radius: 16px !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gx-accento) 28%, transparent); color: var(--gx-testo) !important; padding: 10px 12px 10px 16px !important;
+  -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%); }
+.gx .v2p-fascia b { color: var(--gx-accento-testo); font-weight: 600; }
+.gx .v2p-attiva { background: var(--gx-accento-pieno) !important; color: #fff !important; border-radius: 999px !important; padding: 7px 14px !important; font-weight: 600 !important; }
+.gx .v2p-dopo { color: var(--gx-accento-testo) !important; font-size: 12.5px !important; }
 .gx-prova__punto { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--gx-accento); animation: gx-prova-polso 2.4s ease-out infinite; }
 @keyframes gx-prova-polso { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gx-accento) 50%, transparent); } 70%, 100% { box-shadow: 0 0 0 8px transparent; } }
 .gx-prova__testo { flex: 1; min-width: 0; line-height: 1.35; }

@@ -34,12 +34,13 @@ export function AvvisoVerifica() {
   useEffect(() => { try { setNascosto(sessionStorage.getItem('avviso-verifica') === 'no') } catch { /* niente */ } }, [])
   if (!s || s.attiva || !s.obbligatoriaDal || s.obbligatoria || nascosto) return null
   return (
-    <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 14px', margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '13px', color: '#9a3412' }}>
+    // le classi servono solo alla grafica nuova (grafica.css, .gx .v2p-*): con quella di oggi non hanno regole
+    <div className="v2p-fascia" style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '8px', padding: '10px 14px', margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '13px', color: '#9a3412' }}>
       <span style={{ flex: '1 1 260px' }}>
         <b>Dal {dataItaliana(s.obbligatoriaDal)}</b> per entrare servirà anche un codice dall&apos;app sul telefono o via mail (verifica in due passaggi). Attivala ora: ci vogliono due minuti.
       </span>
-      <a href="#" onClick={e => { e.preventDefault(); window.location.href = verso() }} style={{ background: '#f97316', color: '#fff', borderRadius: '6px', padding: '6px 12px', fontWeight: 700, textDecoration: 'none' }}>Attiva ora</a>
-      <button type="button" onClick={() => { try { sessionStorage.setItem('avviso-verifica', 'no') } catch { /* niente */ } setNascosto(true) }}
+      <a href="#" className="v2p-attiva" onClick={e => { e.preventDefault(); window.location.href = verso() }} style={{ background: '#f97316', color: '#fff', borderRadius: '6px', padding: '6px 12px', fontWeight: 700, textDecoration: 'none' }}>Attiva ora</a>
+      <button type="button" className="v2p-dopo" onClick={() => { try { sessionStorage.setItem('avviso-verifica', 'no') } catch { /* niente */ } setNascosto(true) }}
         style={{ background: 'none', border: 'none', color: '#9a3412', cursor: 'pointer', fontSize: '12px', textDecoration: 'underline' }}>Più tardi</button>
     </div>
   )

@@ -70,8 +70,10 @@ export default async function Layout({ children }: { children: React.ReactNode }
   // produzione si accende solo col suo ok), e mai per l'agente, che ha la sua plancia confinata e non ancora disegnata.
   // La prova vale per la pagina aperta con «?nuova=1»: il proxy lo dice con x-grafica-prova.
   const provaAperta = (process.env.GRAFICA_PROVA_APERTA === '1' || puoGraficaNuova) && String(utente?.ruolo || '').toLowerCase() !== 'agente'
-  const provaQui = provaAperta && !graficaPiena && (await headers()).get('x-grafica-prova') === '1'
-  const graficaNuova = graficaPiena || provaQui
+  const intestazioni = await headers()
+  const provaQui = provaAperta && !graficaPiena && intestazioni.get('x-grafica-prova') === '1'
+  // «?versione=oggi» (dalla Nuova spedizione su una pagina): quella pagina tutta nella versione di oggi, cornice compresa
+  const graficaNuova = (graficaPiena || provaQui) && intestazioni.get('x-grafica-oggi') !== '1'
   const graficaScelta = sceltaTema(biscotti.get('mx_tema')?.value)
   const pagina = (
     <DashboardLayout user={{

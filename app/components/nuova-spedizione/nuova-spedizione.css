@@ -159,7 +159,8 @@
 
 /* il tasto */
 .gx .ns-crea { display: grid; gap: 10px; padding-bottom: 8px; }
-.gx .ns-crea__tasto { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 54px; border-radius: 999px; font-size: 16px; font-weight: 600; color: #fff;
+/* 18,7 px in grassetto: è «testo grande», e il bianco sull'International Orange (3,3) passa la sua soglia (3); a 16 px no */
+.gx .ns-crea__tasto { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 56px; border-radius: 999px; font-size: 18.7px; font-weight: 700; color: #fff;
   background: var(--gx-accento-pieno); box-shadow: 0 12px 26px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); }
 .gx .ns-crea__tasto:hover { transform: translateY(-1px); }
 .gx .ns-crea__tasto:focus-visible { outline: 2px solid var(--gx-inchiostro); outline-offset: 3px; }

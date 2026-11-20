@@ -235,6 +235,10 @@ export async function middleware(req: NextRequest) {
   const intestazioni = new Headers(req.headers)
   intestazioni.delete('x-grafica-prova')
   if (req.nextUrl.searchParams.get('nuova') === '1' && PAGINE_PROVA.has(pathname)) intestazioni.set('x-grafica-prova', '1')
+  // «?versione=oggi»: la Nuova spedizione su una pagina rimanda al modulo di oggi, e quella pagina si apre TUTTA nella
+  // versione di oggi, cornice compresa. Il modulo di oggi dentro la cornice nuova, di notte, era scritto scuro su scuro.
+  intestazioni.delete('x-grafica-oggi')
+  if (req.nextUrl.searchParams.get('versione') === 'oggi') intestazioni.set('x-grafica-oggi', '1')
   let response = NextResponse.next({ request: { headers: intestazioni } })
   response.headers.set('x-pathname', pathname)
 

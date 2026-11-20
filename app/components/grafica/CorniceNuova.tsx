@@ -139,11 +139,15 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
   // le due luci pronte in memoria: al cambio, la foto nuova c'è già e il passaggio non mostra un buco
   useEffect(() => { for (const l of ['argilla', 'notte']) { const im = new Image(); im.src = `/grafica/luce-${l}.webp` } }, [])
   // anche su <html>: i menu a tendina (campanella, profilo, conti) si aprono in fondo alla pagina, fuori dalla cornice
+  // e il carattere: --font-outfit nasce sul contenitore del layout, e senza questa copia le tendine erano in Geist
+  const radiceGx = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const r = document.documentElement
     r.dataset.grafica = 'nuova'; r.dataset.luce = luce; r.dataset.tema = tema
+    const f = radiceGx.current ? getComputedStyle(radiceGx.current).getPropertyValue('--font-outfit').trim() : ''
+    if (f) r.style.setProperty('--font-outfit', f)
   }, [luce, tema])
-  useEffect(() => () => { const r = document.documentElement; delete r.dataset.grafica; delete r.dataset.luce; delete r.dataset.tema }, [])
+  useEffect(() => () => { const r = document.documentElement; delete r.dataset.grafica; delete r.dataset.luce; delete r.dataset.tema; r.style.removeProperty('--font-outfit') }, [])
   // Il passaggio fra giorno e notte: la luce nuova si allarga in un cerchio dall'icona premuta (View Transitions;
   // dove il browser non le ha, o con meno movimento, cambia e basta)
   const scegli = (s: Scelta, e?: React.MouseEvent) => {
@@ -192,7 +196,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
   let gruppoPrima: string | undefined
 
   return (
-    <div className="gx" data-grafica="nuova" data-luce={luce} data-tema={tema}>
+    <div ref={radiceGx} className="gx" data-grafica="nuova" data-luce={luce} data-tema={tema}>
       {/* le transizioni fra le pagine del portale (stessa origine, navigazione intera): menu e barra in alto restano
           fermi, la pagina vecchia scivola via e la nuova sale. Solo con la grafica nuova: è in questo componente */}
       <style>{'@view-transition { navigation: auto; }'}</style>
