@@ -9,7 +9,7 @@
    pixel; qui prendono i colori della grafica nuova. Il 20/11 di notte il CAP del Punto Poste era bianco su bianco: il
    testo ereditava il bianco della notte, lo sfondo restava il #fff in linea.
    color-scheme: caselle, pallini, tendine native e barre di scorrimento seguono la luce (di notte erano quadrati bianchi). */
-.gx .ns { color-scheme: light; --ns-v-carta: #fff; --ns-v-filo: rgba(16, 24, 40, .1); --ns-v-inchiostro: var(--gx-inchiostro);
+.gx .ns { color-scheme: light; --ns-v-carta: #fff; --ns-v-filo: rgba(30, 28, 25, .1); --ns-v-inchiostro: var(--gx-inchiostro);
   --ns-v-attenuato: var(--gx-attenuato); --ns-v-accento: var(--gx-accento-pieno); --ns-v-accento-testo: var(--gx-accento-testo);
   --ns-v-su: rgba(255, 79, 0, .08); --ns-v-su-filo: rgba(255, 79, 0, .35); --ns-v-bene: var(--gx-bene); --ns-v-problema: var(--gx-problema);
   --ns-v-avviso-testo: var(--gx-accento-testo); --ns-v-attenzione: #B45309; }
@@ -22,7 +22,7 @@
 .gx .ns-sottotitolo { margin: 0; font-size: 14px; color: var(--gx-attenuato); }
 
 .gx .ns-sezione { padding: 20px 22px 22px; border-radius: var(--ns-r); background: var(--gx-vetro);
-  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(30, 42, 66, .04), 0 22px 48px -30px rgba(30, 42, 66, .28); }
+  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(40, 37, 33, .04), 0 22px 48px -30px rgba(40, 37, 33, .28); }
 .gx[data-luce="notte"] .ns-sezione { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -30px rgba(0, 0, 0, .6); }
 .gx .ns-sezione__testa { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .gx .ns-sezione__testa h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 17px; font-weight: 600; color: var(--gx-inchiostro); }
@@ -216,12 +216,12 @@
 /* Il pannello vestito non ha colori in linea (SelectCercabile, 20/11): li decide tutti questo blocco, di giorno e di
    notte, in ogni stato — voce sotto il mouse, voce scelta, voce spenta, nessun risultato. Prima il vestito notte
    rendeva bianco il testo ma lo sfondo della voce sotto il mouse restava #f7f7f7 in linea: bianco su bianco. */
-.sc-pannello { border-radius: 12px; overflow: hidden; background: #fff; color: #0F141B; font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif;
+.sc-pannello { border-radius: 12px; overflow: hidden; background: #fff; color: #141413; font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif;
   box-shadow: 0 18px 40px -18px rgba(15, 20, 27, .35), 0 0 0 1px rgba(15, 20, 27, .08); }
 [data-luce="notte"] .sc-pannello { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
-.sc-cerca { display: block; width: 100%; box-sizing: border-box; padding: 11px 12px; border: 0; border-bottom: 1px solid rgba(16, 24, 40, .08);
+.sc-cerca { display: block; width: 100%; box-sizing: border-box; padding: 11px 12px; border: 0; border-bottom: 1px solid rgba(30, 28, 25, .08);
   outline: 0; background: transparent; font: inherit; font-size: 13.5px; color: inherit; }
-.sc-cerca::placeholder { color: rgba(52, 62, 78, .62); opacity: 1; }
+.sc-cerca::placeholder { color: rgba(70, 67, 62, .62); opacity: 1; }
 [data-luce="notte"] .sc-cerca { border-bottom-color: rgba(255, 255, 255, .1); }
 [data-luce="notte"] .sc-cerca::placeholder { color: rgba(226, 224, 220, .64); }
 .sc-voci { max-height: 260px; overflow-y: auto; }
@@ -233,8 +233,8 @@
 .sc-voce--spenta { cursor: default; opacity: .45; }
 .sc-voce--spenta:hover { background: transparent; }
 .sc-vuoto { padding: 14px; font-size: 12.5px; text-align: center; opacity: .6; }
-.ns-tendina { position: fixed; z-index: 1000000; overflow-y: auto; border-radius: 12px; background: #fff; color: #0F141B;
-  box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(16, 24, 40, .08); font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif; }
+.ns-tendina { position: fixed; z-index: 1000000; overflow-y: auto; border-radius: 12px; background: #fff; color: #141413;
+  box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(30, 28, 25, .08); font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif; }
 [data-luce="notte"] .ns-tendina { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
 .ns-tendina__voce { display: grid; gap: 1px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
 .ns-tendina__voce b { font-weight: 600; }

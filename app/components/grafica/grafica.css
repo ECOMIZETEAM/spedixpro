@@ -47,12 +47,12 @@
 /* «argilla» (27/10, dai riferimenti RoutaX che Lorenzo ha mandato): il giorno è il plastico bianco su grigio perla
    freddo; vetro bianco latte, inchiostro quasi nero, ombre morbide e azzurrine, l'arancio MoovExpress come unico colore */
 [data-grafica="nuova"][data-luce="argilla"] {
-  --gx-fondo: #E9ECF1;
-  --gx-inchiostro: #0F141B;
-  --gx-testo: rgba(18, 24, 34, .86);
-  /* .76 e non .62: etichette e note a contrasto 5 (erano 3,4–3,6, sotto la soglia 4,5 del testo piccolo) */
-  --gx-attenuato: rgba(52, 62, 78, .76);
-  --gx-filo: rgba(16, 24, 40, .08);
+  --gx-fondo: #ECEBE8;
+  --gx-inchiostro: #141413;
+  --gx-testo: rgba(24, 23, 21, .86);
+  /* .8 e non .62: etichette e note sopra 4,5 anche sul fondo nudo (erano 3,4–3,6, sotto la soglia del testo piccolo) */
+  --gx-attenuato: rgba(70, 67, 62, .8);
+  --gx-filo: rgba(30, 28, 25, .08);
   --gx-accento: #FF4F00;
   --gx-accento-pieno: #FF4F00;
   --gx-accento-testo: #B83A00;
@@ -61,11 +61,14 @@
   --gx-vetro: rgba(255, 255, 255, .7);
   --gx-vetro-orlo: rgba(255, 255, 255, 1);
   --gx-vetro-luce: rgba(255, 255, 255, 1);
-  --gx-incavo: rgba(16, 24, 40, .045);
-  --gx-velo: rgba(233, 236, 241, .66);
+  --gx-incavo: rgba(30, 28, 25, .045);
+  --gx-velo: rgba(236, 235, 232, .66);
 }
-[data-luce="argilla"] .gx-vetro { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(30, 42, 66, .04), 0 22px 48px -26px rgba(30, 42, 66, .26); }
-[data-luce="argilla"] .gx-marca--logo { background: #141A24; }
+[data-luce="argilla"] .gx-vetro { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(40, 37, 33, .04), 0 22px 48px -26px rgba(40, 37, 33, .26); }
+/* il giorno è TITANIO CHIARO (Lorenzo 20/11, «molto meglio»): grigio neutro appena caldo, nessuna tinta azzurra, la
+   foto del magazzino in grigio. Lo stesso materiale della notte, chiaro invece che scuro; l'arancio unico colore */
+[data-luce="argilla"] .gx-fondo img { filter: blur(22px) grayscale(1) brightness(1.04); }
+[data-luce="argilla"] .gx-marca--logo { background: #1C1B1A; }
 /* scuro solo per la cornice: le pagine dentro hanno ancora i riquadri bianchi di oggi, e un color-scheme scuro su tutta
    la pagina faceva neri le caselle e i menu a tendina dentro quei riquadri (finché anche loro non avranno il vestito nuovo) */
 [data-grafica="nuova"][data-tema="notte"] .gx-lato, [data-grafica="nuova"][data-tema="notte"] .gx-alto { color-scheme: dark; }

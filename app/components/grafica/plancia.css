@@ -35,10 +35,10 @@
 }
 /* argilla: veli grigio perla, la mappa vuota chiara */
 [data-grafica="nuova"][data-luce="argilla"] {
-  --pn-velo-alto: linear-gradient(180deg, rgba(233, 236, 241, .7) 0%, rgba(233, 236, 241, 0) 30%);
+  --pn-velo-alto: linear-gradient(180deg, rgba(236, 235, 232, .7) 0%, rgba(236, 235, 232, 0) 30%);
   --pn-velo-sinistra: radial-gradient(60% 55% at 16% 24%, rgba(236, 239, 244, .75) 0%, rgba(236, 239, 244, 0) 72%);
   --pn-ombra-testo: 0 1px 16px rgba(240, 243, 247, .85);
-  --pn-puntino-vuoto: rgba(16, 24, 40, .12);
+  --pn-puntino-vuoto: rgba(30, 28, 25, .12);
 }
 
 /* sulla base: l'insegna col nome del master e i cartellini sui punti (dentro la telecamera: si muovono con la foto) */

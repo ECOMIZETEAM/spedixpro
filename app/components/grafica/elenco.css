@@ -28,7 +28,7 @@
 
 /* le due schede: vetro senza sfocatura (una sfocatura chiuderebbe dentro la scheda le finestre fisse delle righe) */
 .gx .gx-elenco .el-scheda { background: var(--gx-vetro) !important; border: 0 !important; border-radius: var(--el-r) !important;
-  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(30, 42, 66, .04), 0 22px 48px -30px rgba(30, 42, 66, .28); }
+  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(40, 37, 33, .04), 0 22px 48px -30px rgba(40, 37, 33, .28); }
 .gx[data-luce="notte"] .gx-elenco .el-scheda { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -30px rgba(0, 0, 0, .6); }
 .gx .gx-elenco .el-filtri { padding: 20px 22px 22px !important; margin-bottom: 18px !important; }
 .gx .gx-elenco .el-sezione { display: flex; align-items: center; gap: 8px; margin-bottom: 14px !important; font-size: 13px !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; }
