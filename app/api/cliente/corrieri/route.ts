@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { annotaPuntoPoste, contrattiConFasceATaglia, eTariffaAUnPunto } from '@/lib/tariffe-offerte'
+import { fetchAll } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,10 +22,18 @@ export async function GET() {
   if (!cliente?.listino_cliente_id) return NextResponse.json({ corrieri: [] })
 
   // Niente campo `tipo`: e' il provider tecnico e non deve arrivare al cliente (nessuno lo usava).
-  const { data: fasce } = await supabase
+  const leggiFasce = () => supabase
     .from('listini_clienti_fasce')
     .select('corrieri(id,nome_contratto,attivo,master_id)')
     .eq('listino_id', cliente.listino_cliente_id)
+  let { data: fasce } = await leggiFasce()
+  // Il database risponde al massimo 1000 righe per lettura. Un listino con piu' fasce (il 20/11/2026
+  // ce n'erano due, da 1043 e 1023) perdeva le ultime, e con loro un corriere che compariva solo li'
+  // sarebbe sparito dalla tendina del cliente. Se la prima lettura arriva piena si rilegge tutto a
+  // blocchi (ordinati per id, perche' non si accavallino) e si accodano: la prima lettura resta in testa,
+  // cosi' l'ordine della tendina e' quello di sempre e un corriere che stava oltre la millesima riga
+  // compare in fondo (sotto, ogni corriere si prende una volta sola). Sotto le 1000 non cambia nulla.
+  if ((fasce?.length || 0) >= 1000) fasce = [...(fasce || []), ...(await fetchAll(() => leggiFasce().order('id', { ascending: true })))]
 
   // Contratti in pausa: qui non si controllava affatto, quindi un contratto sospeso restava
   // selezionabile dal cliente e la spedizione veniva poi rifiutata alla creazione. Vale anche la
