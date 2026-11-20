@@ -20,6 +20,8 @@ export default function AggiungiSpesaPage() {
     prezzoUnitario: '',
     quantita: '1',
     iva: '0',
+    // Il prezzo scritto e' IVA esclusa o inclusa: si sceglie ogni volta, nessun valore di partenza.
+    prezzoIva: '' as '' | 'esclusa' | 'inclusa',
   })
 
   useEffect(() => {
@@ -28,14 +30,21 @@ export default function AggiungiSpesaPage() {
 
   const set = (k: string, v: string) => setForm(f => ({...f, [k]: v}))
 
-  const importo = parseFloat(form.prezzoUnitario||'0') * parseInt(form.quantita||'1')
-  const totaleIva = importo * (parseFloat(form.iva||'0') / 100)
-  const totale = importo + totaleIva
+  // Il credito scala SEMPRE il prezzo scritto (Lorenzo, 20/11/2026). IVA esclusa: l'IVA va nei documenti.
+  // IVA inclusa: e' gia' dentro il prezzo, e i documenti la scorporano.
+  const aliquota = parseFloat(form.iva||'0') || 0
+  const prezzo = Math.round((parseFloat(form.prezzoUnitario||'0') * parseInt(form.quantita||'1')) * 100) / 100
+  const conIva = aliquota > 0
+  const inclusa = form.prezzoIva === 'inclusa'
+  const imponibile = conIva && inclusa ? prezzo / (1 + aliquota / 100) : prezzo
+  const totaleIva = conIva ? (inclusa ? prezzo - imponibile : prezzo * aliquota / 100) : 0
+  const sceltaMancante = conIva && !form.prezzoIva
 
   async function salva() {
     if (!form.clienteId) { setErrore('Seleziona un cliente'); return }
     if (!form.descrizione) { setErrore('Descrizione obbligatoria'); return }
     if (!form.prezzoUnitario) { setErrore('Prezzo obbligatorio'); return }
+    if (sceltaMancante) { setErrore('Scegli se il prezzo che hai scritto è IVA esclusa o IVA inclusa'); return }
     setSaving(true); setErrore('')
     const res = await fetch('/api/consumabili', {
       method: 'POST',
@@ -48,7 +57,7 @@ export default function AggiungiSpesaPage() {
     setSuccesso('Spesa aggiunta con successo!')
     // La spesa e' registrata; se non si e' riusciti a segnare l'IVA compresa la rotta lo dice.
     if (data.avviso) setErrore(data.avviso)
-    setForm(f => ({...f, clienteId:'', descrizione:'', prezzoUnitario:'', quantita:'1', vettore:''}))
+    setForm(f => ({...f, clienteId:'', descrizione:'', prezzoUnitario:'', quantita:'1', vettore:'', prezzoIva:''}))
   }
 
   return (
@@ -116,12 +125,32 @@ export default function AggiungiSpesaPage() {
           </div>
         </div>
 
-        {/* Riepilogo */}
-        {form.prezzoUnitario && (
-          <div style={{background:'#f9fafb',borderRadius:'8px',padding:'14px',marginBottom:'20px',border:'1px solid #d1d5db',display:'flex',gap:'24px',fontSize:'13px'}}>
-            <div><span style={{color:'#1a1a1a'}}>Imponibile: </span><strong>€ {importo.toFixed(2)}</strong></div>
-            <div><span style={{color:'#1a1a1a'}}>IVA {form.iva}%: </span><strong>€ {totaleIva.toFixed(2)}</strong></div>
-            <div><span style={{color:'#1a1a1a'}}>Scalato dal credito{Number(form.iva) > 0 ? ' (IVA compresa)' : ''}: </span><strong style={{color:'#c2410c',fontSize:'15px'}}>€ {totale.toFixed(2)}</strong></div>
+        {/* Il prezzo scritto e' IVA esclusa o inclusa: serve solo se c'e' un'IVA */}
+        {conIva && (
+          <div style={{display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap',marginBottom:'16px'}}>
+            <span id="prezzo-iva-etichetta" style={{fontSize:'12.5px',fontWeight:600,color:'#1a1a1a'}}>Il prezzo che hai scritto è</span>
+            <div role="group" aria-labelledby="prezzo-iva-etichetta" style={{display:'inline-flex',background:'#eef0f3',borderRadius:'9px',padding:'3px',gap:'3px'}}>
+              {(['esclusa','inclusa'] as const).map(v => {
+                const on = form.prezzoIva === v
+                return (
+                  <button key={v} type="button" aria-pressed={on} onClick={()=>setForm(f=>({...f, prezzoIva: v}))}
+                    style={{minHeight:'36px',padding:'0 16px',border:'none',borderRadius:'7px',fontSize:'13px',cursor:'pointer',
+                      background: on ? '#fff' : 'transparent', color: on ? '#1a1a1a' : '#4b5563', fontWeight: on ? 700 : 500, boxShadow: on ? '0 1px 2px rgba(0,0,0,0.12)' : 'none'}}>
+                    IVA {v}
+                  </button>
+                )
+              })}
+            </div>
+            {sceltaMancante && <span style={{fontSize:'12px',color:'#b45309'}}>Scegli prima di salvare</span>}
+          </div>
+        )}
+
+        {/* Riepilogo: il credito scala sempre il prezzo scritto */}
+        {form.prezzoUnitario && !sceltaMancante && (
+          <div style={{background:'#f9fafb',borderRadius:'8px',padding:'14px',marginBottom:'20px',border:'1px solid #d1d5db',display:'flex',gap:'24px',flexWrap:'wrap',fontSize:'13px'}}>
+            <div><span style={{color:'#1a1a1a'}}>Imponibile: </span><strong>€ {imponibile.toFixed(2)}</strong></div>
+            <div><span style={{color:'#1a1a1a'}}>IVA {form.iva}%{conIva ? (inclusa ? ' (già nel prezzo)' : ' (nei documenti, non dal credito)') : ''}: </span><strong>€ {totaleIva.toFixed(2)}</strong></div>
+            <div><span style={{color:'#1a1a1a'}}>Scalato dal credito: </span><strong style={{color:'#c2410c',fontSize:'15px'}}>€ {prezzo.toFixed(2)}</strong></div>
           </div>
         )}
 

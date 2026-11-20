@@ -67,13 +67,27 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   if (nonStaff(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
-  const { clienteId, descrizione, prezzoUnitario, quantita, iva, vettore, dataAcquisto } = body
+  const { clienteId, descrizione, prezzoUnitario, quantita, iva, vettore, dataAcquisto, prezzoIva } = body
   if (!clienteId) return NextResponse.json({ error: 'Cliente obbligatorio' }, { status: 400 })
   if (!descrizione) return NextResponse.json({ error: 'Descrizione obbligatoria' }, { status: 400 })
-  const importo = parseFloat(prezzoUnitario) * parseInt(quantita)
-  const totaleIva = importo * (parseFloat(iva) / 100)
-  const totale = importo + totaleIva
-  const aliquotaCompresa = Number(parseFloat(iva)) > 0 ? Number(parseFloat(iva)) : 0
+  const cent = (x: number) => Math.round(x * 100) / 100
+  const prezzo = cent(parseFloat(prezzoUnitario) * parseInt(quantita))
+  if (!Number.isFinite(prezzo) || prezzo <= 0) return NextResponse.json({ error: 'Prezzo o quantità non validi' }, { status: 400 })
+  const aliquota = Number(parseFloat(iva)) > 0 ? Number(parseFloat(iva)) : 0
+  // IL PREZZO E' IVA ESCLUSA O INCLUSA? (Lorenzo, 20/11/2026) Lo dice il master nel modulo, e il credito
+  // scala SEMPRE il prezzo scritto, come per i listini: IVA esclusa → l'IVA compare solo nei documenti;
+  // IVA inclusa → la spesa si segna con la sua aliquota e i documenti la scorporano.
+  // Una pagina aperta prima di questa versione non manda `prezzoIva`: per lei vale quello che aveva a
+  // schermo, prezzo + IVA scalati e spesa segnata con l'IVA dentro.
+  let totale: number
+  let aliquotaCompresa = 0
+  if (prezzoIva === 'esclusa' || prezzoIva === 'inclusa') {
+    totale = prezzo
+    aliquotaCompresa = prezzoIva === 'inclusa' ? aliquota : 0
+  } else {
+    totale = cent(prezzo * (1 + aliquota / 100))
+    aliquotaCompresa = aliquota
+  }
   // Un minuto di margine: l'orologio del server e quello del database non sono identici al millisecondo.
   const dalle = new Date(Date.now() - 60_000).toISOString()
 
