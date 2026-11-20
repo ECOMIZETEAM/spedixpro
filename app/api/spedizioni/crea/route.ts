@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { cronometra, segna, annota } from '@/lib/cronometro'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
 import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
@@ -55,7 +56,13 @@ export const maxDuration = 120
 // d'errore restano intatte: quella del credito insufficiente (402) porta in `costo` il prezzo DEL
 // CLIENTE, ed e' quello che la finestra di pagamento mostra.
 export async function POST(req: NextRequest) {
-  const res = await creaSpedizioneInterna(req, Date.now())
+  // Cronometro (lib/cronometro): una riga [CREA][TEMPI] per creazione, con le fasi e l'attesa per indirizzo esterno.
+  // Misura soltanto: serve a capire dove vanno i 9 secondi (mediana, 13-20/11/2026) prima di toccare la creazione.
+  const res = await cronometra('[CREA][TEMPI]', async () => {
+    const r = await creaSpedizioneInterna(req, Date.now())
+    annota('stato', r.status)
+    return r
+  })
   if (!res.ok) return res
   const corpo = await res.clone().json().catch(() => null)
   if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo) || !('costo' in corpo)) return res
@@ -300,6 +307,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
   if (!body.shipTo?.state?.trim() && !String(body.puntoArrivo || '').trim()) return NextResponse.json({ error: 'Provincia destinatario obbligatoria' }, { status: 400 })
   if (!body.shipFrom?.state?.trim()) return NextResponse.json({ error: 'Provincia mittente obbligatoria' }, { status: 400 })
 
+  segna('guardia')
   // ── CITTÀ SCRITTA MALE SU UN CAP CON ZONA SPECIALE → SI FERMA QUI ──
   // Le zone disagiata/isole nel DB sono scritte col nome UFFICIALE del comune. Se la città in
   // spedizione è un'altra scrittura ("Castelnuovo Monti" per "Castelnovo ne' Monti"), il match
@@ -495,6 +503,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     }
   }
 
+  segna('prezzo')
   // ── Blocco credito insufficiente ("credito a scalare"): vale per CLIENTE, SOTTO-MASTER e
   //    MASTER su spedizione propria. Il costo di riferimento e' quello del SERVER (prima si usava
   //    body.totalPrice: con 0 il blocco non scattava e si spediva a credito esaurito).
@@ -559,6 +568,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
   }
   // Libera la prenotazione quando la spedizione NON nasce. Idempotente: se e' gia' stata
   // confermata non fa nulla.
+  segna('prenotazione')
   async function stornaPrenotazione() {
     if (!prenotazioneRif) return
     const rif = prenotazioneRif; prenotazioneRif = null
@@ -600,6 +610,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
   // Helper: registra la detrazione del credito dopo una spedizione riuscita.
   // Non deve mai far fallire la spedizione (è già creata sul corriere + DB).
   async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
+    segna('addebito')
     // FULFILLMENT LOGISTICA: se il cliente e' "gestione_logistica", la merce sta nel magazzino del
     // master detentore, che prepara FISICAMENTE il pacco. Qui — punto UNICO che tutti i 5 rami
     // corriere attraversano con l'id gia' creato — marco la spedizione 'da_preparare'. Lo staff del
@@ -681,6 +692,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     }
   }
 
+  segna('prima della catena')
   // ── Blocco a monte: verifica il credito dei MASTER della catena (prezzo da listino
   //    ereditato). Se un master "credito_scalare" è a secco, tutta la catena è bloccata.
   //    Il proprietario del corriere non viene bloccato qui (costo API noto solo dopo). ──
@@ -748,6 +760,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
   // ═══════════════════════════════════════════════════════════════════════════
   // SPEDISCI.ONLINE
   // ═══════════════════════════════════════════════════════════════════════════
+  segna('catena'); annota('tipo', String(corriereRecord.tipo || ''))
   if (corriereRecord.tipo === 'spedisci') {
     const baseUrl = `https://${cred.master_domain}/api/v2`
 
