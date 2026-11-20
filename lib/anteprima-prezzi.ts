@@ -92,13 +92,16 @@ async function prezzaRiga(ctx: ContestoAnteprima, riga: RigaDaPrezzare, aTaglia:
 
   const packages = riga.colli
   if (!packages.length) return senza('Manca il collo da spedire.')
-  if (packages.length > MAX_COLLI_PER_RIGA) return senza(`Troppi colli per spedirlo da qui (massimo ${MAX_COLLI_PER_RIGA}): aprilo con la matita.`)
+  // «Dalla riga»: nell'import da file e' la matita, negli ordini dei negozi «Crea spedizione». Dal
+  // 20/11/2026 anche gli ordini dei negozi possono avere piu' colli (lib/colli-negozio), e li' una
+  // matita non c'e'.
+  if (packages.length > MAX_COLLI_PER_RIGA) return senza(`Troppi colli per spedirlo da qui (massimo ${MAX_COLLI_PER_RIGA}): aprilo dalla riga (matita o «Crea spedizione»).`)
   // ESTERO CON PIU' COLLI: il modulo della spedizione singola vuole il peso di OGNI collo e non divide
   // quello dell'ordine (app/cliente/spedizioni/nuova/page.tsx, esteroMulti). Qui il peso per collo non
   // c'e': dividerlo in parti uguali sarebbe una dichiarazione inventata verso la dogana. Si manda alla
   // matita, come fa il modulo. Al 19/10/2026 nessun ordine importato estero ha piu' di un collo.
   if (packages.length > 1 && (riga.paese || 'IT').toUpperCase() !== 'IT') {
-    return senza('Spedizione estera con più colli: aprila con la matita e indica il peso di ogni collo.')
+    return senza('Spedizione estera con più colli: aprila dalla riga (matita o «Crea spedizione») e controlla il peso di ogni collo.')
   }
 
   // 1) IL PAESE: un indirizzo italiano col paese di un altro non si prezza con nessun contratto.

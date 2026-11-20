@@ -25,6 +25,10 @@ export async function POST(req: NextRequest) {
     lunghezza: Number(b.lunghezza) || 0, larghezza: Number(b.larghezza) || 0, altezza: Number(b.altezza) || 0,
     predefinito: !!b.predefinito,
     sku: typeof b.sku === 'string' ? b.sku.trim() || null : null,   // uno o più SKU (separati da virgola/spazio/newline)
+    // «Un collo per ogni pezzo» (lib/colli-negozio): si scrive SOLO se la chiamata lo porta. La stella
+    // «predefinito» della lista risalva il pacco con i soli campi di sempre: senza questa condizione
+    // spegnerebbe la casella in silenzio, e gli ordini tornerebbero a un collo solo.
+    ...(typeof b.un_collo_per_pezzo === 'boolean' ? { un_collo_per_pezzo: b.un_collo_per_pezzo } : {}),
   }
   if (b.predefinito) {
     await supabase.from('pacchi_predefiniti').update({ predefinito: false }).eq('cliente_id', u.cliente_id)
