@@ -1,4 +1,4 @@
-import { createServerSupabase } from '@/lib/supabase'
+import { profiloDellaRichiesta } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
@@ -18,11 +18,10 @@ import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 // accorgimento per lo stesso identico motivo).
 export const dynamic = 'force-dynamic'
 export default async function Layout({ children }: { children: React.ReactNode }) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sessione e profilo una volta sola per pagina: getPermessiUtente qui sotto e i layout annidati
+  // riusano questa stessa verifica invece di rifarla (lib/supabase, profiloDellaRichiesta).
+  const { supabase, user, utente, errore: errUtente } = await profiloDellaRichiesta()
   if (!user) redirect('/')
-  const { data: utente, error: errUtente } = await supabase
-    .from('utenti').select('nome,ruolo,master_id,attivo').eq('id', user.id).maybeSingle()
   // Un guasto MOMENTANEO della query non deve buttare fuori nessuno: si distingue l'errore
   // (rete/database non raggiungibile -> si lascia proseguire con permessi minimi) dal caso in cui
   // la riga davvero non esiste.

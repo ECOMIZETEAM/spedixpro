@@ -40,7 +40,7 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
   const admin = createAdminSupabase()
   const { data, error: errChiave } = await admin
     .from('api_keys')
-    .select('id,cliente_id,master_id,corriere_id,attivo')
+    .select('id,cliente_id,master_id,corriere_id,attivo,last_used_at')
     .eq('chiave', token)
     .maybeSingle()
   // Un guasto nella lettura non e' una chiave sbagliata: non si registra come rifiuto.
@@ -62,15 +62,36 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
   if (!cli || cli.attivo === false) return null
   if (cor && cor.attivo === false) return null
 
-  // aggiorna last_used_at senza bloccare la risposta
-  admin.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', data.id).then(() => {}, () => {})
+  // ULTIMO USO, AL MASSIMO UNA VOLTA AL MINUTO, senza bloccare la risposta.
+  // Si scriveva a OGNI chiamata: 231.122 scritture in un giorno (19-20/10/2026) su 132 chiavi, perche'
+  // le chiavi che lavorano davvero fanno raffiche di centinaia di tracking al minuto. Chi legge il
+  // campo vuole sapere SE una chiave e' stata usata (avviso API del cliente, piano API) o al piu'
+  // QUANDO, all'incirca: nessuno guarda i secondi. Il primo uso si scrive subito (da vuoto a pieno, che
+  // e' cio' che quei controlli guardano); dopo, solo se il valore salvato ha piu' di un minuto. Il
+  // confronto e' sulla riga appena letta qui sopra, non su una memoria del processo.
+  const ultimoUso = data.last_used_at ? new Date(data.last_used_at).getTime() : NaN
+  if (!(Date.now() - ultimoUso < 60_000)) {
+    admin.from('api_keys').update({ last_used_at: new Date().toISOString() }).eq('id', data.id).then(() => {}, () => {})
+  }
+
+  // Il pacchetto e il freno di frequenza sono due domande indipendenti al database: partono INSIEME,
+  // invece che una dopo l'altra come prima, su ognuna delle ~224.000 chiamate al giorno. Restano DOPO
+  // i controlli qui sopra, come prima: una chiave di un cliente sospeso o di un contratto spento non
+  // consuma la quota, e il conteggio sale esattamente nei casi di prima. Ognuna conserva il suo try
+  // qui sotto (un guasto non blocca nessuno): il catch vuoto serve solo perche' l'errore della seconda,
+  // se arriva mentre si aspetta la prima, non risulti "non gestito" e non faccia cadere il processo.
+  const statoP = Promise.resolve(admin.rpc('fn_stato_api_cliente', { p_cliente: data.cliente_id }))
+  const frenoP = Promise.resolve(admin.rpc('fn_api_rate_limit', {
+    p_key_id: data.id, p_bucket: 'global', p_limite: LIMITE_RATE_GLOBALE, p_finestra_sec: 60,
+  }))
+  statoP.catch(() => {}); frenoP.catch(() => {})
 
   // Il pacchetto: chi sfora o non paga si ferma QUI, non nel portale. E' la differenza col master,
   // dove a chiudersi e' il pannello: qui le API sono lo strumento che sta usando, e fermare quelle
   // significa fermare lui e nessun altro — i suoi pacchi gia' partiti continuano il loro giro.
   let blocco: ApiContext['blocco'] = null
   try {
-    const { data: st } = await admin.rpc('fn_stato_api_cliente', { p_cliente: data.cliente_id })
+    const { data: st } = await statoP
     const s: any = st || {}
     // I TRE GIORNI PARTONO DA QUI. Il primo momento in cui il pacchetto risulta finito si segna,
     // e da li' si contano. Quando il mese riparte e si torna sotto, il segno si cancella:
@@ -97,9 +118,7 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
   // conteggio NON deve bloccare chi ha pagato: in caso di guasto si lascia passare.
   let rateLimit: ApiContext['rateLimit'] = null
   try {
-    const { data: rl } = await admin.rpc('fn_api_rate_limit', {
-      p_key_id: data.id, p_bucket: 'global', p_limite: LIMITE_RATE_GLOBALE, p_finestra_sec: 60,
-    })
+    const { data: rl } = await frenoP
     const r: any = rl || {}
     if (r.permesso === false) rateLimit = { conteggio: Number(r.conteggio || 0), limite: Number(r.limite || 0) }
     // Una riga per minuto in cui il freno scatta (la prima chiamata respinta), non una per chiamata:

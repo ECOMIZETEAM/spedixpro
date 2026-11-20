@@ -2,6 +2,8 @@
 
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
+import { pollaSeVisibile } from '@/lib/polling-visibile'
+import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 
 const ACCENT = '#f97316'
 
@@ -105,7 +107,9 @@ export default function ClienteNav({ soloEtichette = false }: { soloEtichette?: 
   // Sottovoci dinamiche "Ordini {Piattaforma}" per ogni integrazione attiva del cliente
   const [integrazioni, setIntegrazioni] = useState<any[]>([])
   useEffect(() => {
-    fetch('/api/integrazioni/lista').then(r=>r.json()).then(d=>{
+    // La pagina degli ordini di un negozio chiede la stessa rotta nello stesso istante: una richiesta
+    // sola (lib/richiesta-condivisa). Il risultato si filtra, non si modifica.
+    leggiCondiviso('/api/integrazioni/lista').then(d=>{
       const lista = Array.isArray(d) ? d : (d?.integrazioni || [])
       // Anche il negozio Shopify in 'errore': dal 21/10/2026 ci va quando il suo accesso a Shopify e' morto
       // (lib/shopify.ts), e gli ordini gia' importati da spedire devono restare raggiungibili finche' il
@@ -123,7 +127,9 @@ export default function ClienteNav({ soloEtichette = false }: { soloEtichette?: 
       fetch('/api/assistenza/non-letti').then(r=>r.json()).then(d=>setTicketBadge({ count: d.count||0, ticket: d.ticket||0, pod: d.pod||0 })).catch(()=>{})
       fetch('/api/cliente/giacenze/nuove').then(r=>r.json()).then(d=>setGiacenzeNuove(Number(d?.count)||0)).catch(()=>{})
     }
-    load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load() }, 30000); return () => clearInterval(t)
+    // Gia' fermo a scheda nascosta; in piu' (lib/polling-visibile) al ritorno, se e' saltato un giro,
+    // ricarica subito invece di aspettare il prossimo.
+    return pollaSeVisibile(load, 30000)
   }, [pathname])
   const badgeStyle = { background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, minWidth: '17px', height: '17px', borderRadius: '9px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' } as const
   const NOMI_PIATT: Record<string,string> = { shopify:'Shopify', prestashop:'PrestaShop', woocommerce:'WooCommerce', ebay:'eBay', tiktok:'TikTok Shop', temu:'Temu' }

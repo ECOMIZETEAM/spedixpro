@@ -13,6 +13,7 @@ import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, test
 import { descriviColli } from '@/lib/colli-ordine'
 import { colliOrdineNegozio, mappaCatalogo, mappaPacchi } from '@/lib/colli-negozio'
 import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
+import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
@@ -157,7 +158,8 @@ export default function OrdiniPage() {
     setLoading(true)
     const [ord, integr] = await Promise.all([
       fetch('/api/ordini/lista?piattaforma='+piattaforma).then(r=>r.json()).catch(()=>[]),
-      fetch('/api/integrazioni/lista').then(r=>r.json()).catch(()=>[]),
+      // Il menu laterale chiede la stessa rotta all'apertura: una richiesta sola (lib/richiesta-condivisa).
+      leggiCondiviso('/api/integrazioni/lista').catch(()=>[]),
     ])
     setOrdini(Array.isArray(ord)?ord:[])
     const listaIntegr = Array.isArray(integr) ? integr : (integr?.integrazioni || [])
