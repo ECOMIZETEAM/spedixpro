@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import MoovyIcon from './MoovyIcon'
+import { Icona } from './grafica/icone'
 
 // MOOVY — assistente AI di MoovExpress. Widget fluttuante presente in entrambi i
 // portali (master e cliente). L'API /api/moovy determina ruolo e contesto dalla
@@ -27,7 +28,9 @@ function renderTesto(t: string) {
   )
 }
 
-export default function Moovy({ senzaPulsante = false }: { senzaPulsante?: boolean } = {}) {
+// aspetto «nuova»: la grafica nuova (CorniceNuova) ha la sua finestra, con le classi mv-* in grafica.css. La logica
+// (chat, voce, conferme) è la stessa; con la grafica di oggi il disegno qui sotto resta quello di sempre.
+export default function Moovy({ senzaPulsante = false, aspetto }: { senzaPulsante?: boolean; aspetto?: 'nuova' } = {}) {
   const [open, setOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [input, setInput] = useState('')
@@ -149,6 +152,22 @@ export default function Moovy({ senzaPulsante = false }: { senzaPulsante?: boole
 
   useEffect(() => { if (open && !isMobile) inputRef.current?.focus() }, [open, isMobile])
 
+  // grafica nuova: la finestra parte sotto la barra in alto (con la striscia della prova la barra scende), così non
+  // copre tema, campanella e profilo
+  const [cima, setCima] = useState<number | null>(null)
+  useEffect(() => {
+    if (!open || aspetto !== 'nuova') return
+    const misura = () => { const b = document.querySelector('.gx-alto')?.getBoundingClientRect().bottom; setCima(b ? Math.round(b + 10) : null) }
+    misura(); window.addEventListener('resize', misura); return () => window.removeEventListener('resize', misura)
+  }, [open, aspetto])
+
+  // grafica nuova: Esc chiude la finestra (e la chiamata, se c'è)
+  useEffect(() => {
+    if (!open || aspetto !== 'nuova') return
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { chiudiCall(); setOpen(false) } }
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
+  }, [open, aspetto, chiudiCall])
+
   const invia = useCallback(async (testo: string) => {
     const t = testo.trim()
     if (!t || loading) return
@@ -177,6 +196,74 @@ export default function Moovy({ senzaPulsante = false }: { senzaPulsante?: boole
       setMessages(prev => { const c = [...prev]; c[c.length - 1] = { role: 'assistant', content: 'Mi dispiace, non sono riuscito a rispondere. Riprova tra poco.' }; return c }) }
     finally { setLoading(false) }
   }, [messages, loading])
+
+  // ── la finestra della grafica nuova (Lorenzo 20/11: «moovy è ancora il vecchio moovy.. aggiorniamolo») ──
+  // vetro titanio di notte e titanio chiaro di giorno, l'arancio solo dove si agisce, icone a linea al posto delle emoji;
+  // sul telefono a tutto schermo. Il saluto perde il camioncino (niente emoji nella grafica nuova).
+  if (aspetto === 'nuova') {
+    if (!open) return null
+    const chiudi = () => { chiudiCall(); setOpen(false) }
+    return (
+      <div className="mv" role="dialog" aria-label="Moovy, l'assistente MoovExpress" style={cima ? ({ '--mv-cima': cima + 'px' } as React.CSSProperties) : undefined}>
+        <div className="mv-testa">
+          <span className="mv-avatar" aria-hidden="true"><Icona id="i-moovy" /></span>
+          <div className="mv-nome"><b>Moovy</b><span>Assistente MoovExpress</span></div>
+          {supportata && !inCall && (
+            <button type="button" className="mv-tondo" onClick={avviaCall} aria-label="Parla con Moovy" title="Parla con Moovy"><Icona id="i-telefono" /></button>
+          )}
+          <button type="button" className="mv-tondo" onClick={chiudi} aria-label="Chiudi" title="Chiudi"><Icona id="i-x" /></button>
+        </div>
+
+        {inCall ? (
+          <div className="mv-chiamata">
+            <div className="mv-msgs">
+              {voceMsg.map((m, i) => (
+                <div key={i} className={'mv-msg mv-msg--' + (m.role === 'user' ? 'tu' : 'moovy')}>{renderTesto(m.content)}</div>
+              ))}
+            </div>
+            <div className="mv-voce">
+              <p className="mv-stato" aria-live="polite">{speaking ? 'Moovy sta parlando…' : listening ? 'Ti ascolto…' : pending ? 'Aspetto la tua conferma' : 'In pausa'}</p>
+              {pending ? (
+                <div className="mv-conferma">
+                  <button type="button" className="mv-si" onClick={() => eseguiConferma(pending)}><Icona id="i-spunta" />Conferma</button>
+                  <button type="button" className="mv-no" onClick={() => { setPending(null); const r = 'Ok, annullato.'; setVoceMsg(prev => [...prev, { role: 'assistant', content: r }]); parla(r, () => ascolta()) }}>Annulla</button>
+                </div>
+              ) : (
+                <div className="mv-tasti">
+                  <button type="button" className={'mv-mic' + (listening ? ' mv-mic--su' : '')} onClick={() => (listening ? recRef.current?.stop() : ascolta())} disabled={speaking}
+                    aria-label={listening ? 'Smetti di ascoltare' : 'Parla'} title={listening ? 'Smetti di ascoltare' : 'Parla'}><Icona id="i-microfono" /></button>
+                  <button type="button" className="mv-giu" onClick={chiudiCall} aria-label="Termina la chiamata" title="Termina la chiamata"><Icona id="i-riaggancia" /></button>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div ref={scrollRef} className="mv-msgs" aria-live="polite">
+              {messages.map((m, i) => (
+                <div key={i} className={'mv-msg mv-msg--' + (m.role === 'user' ? 'tu' : 'moovy')}>
+                  {m.content
+                    ? renderTesto(m.role === 'assistant' ? m.content.replace(/\s*🚚/u, '').replace('**MOOVY**', '**Moovy**') : m.content)
+                    : <span className="mv-scrive" role="status" aria-label="Moovy sta scrivendo"><i /><i /><i /></span>}
+                </div>
+              ))}
+              {messages.length <= 1 && (
+                <div className="mv-sugg">
+                  {SUGGERIMENTI.map((s, i) => <button key={i} type="button" onClick={() => invia(s)} disabled={loading}>{s}</button>)}
+                </div>
+              )}
+            </div>
+            <form className="mv-scrivi" onSubmit={e => { e.preventDefault(); invia(input) }}>
+              <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} rows={1} aria-label="La tua domanda"
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); invia(input) } }}
+                placeholder="Chiedi a Moovy…" />
+              <button type="submit" className="mv-invia" disabled={loading || !input.trim()} aria-label="Invia" title="Invia"><Icona id="i-invia" /></button>
+            </form>
+          </>
+        )}
+      </div>
+    )
+  }
 
   const panelStyle: React.CSSProperties = isMobile
     ? { position: 'fixed', inset: 0, width: '100%', height: '100%', borderRadius: 0, zIndex: 1300 }

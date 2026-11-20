@@ -321,7 +321,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
           <GraficaNuova.Provider value={{ attiva: true, ruolo: (user?.ruolo || '').toLowerCase(), luce, tema, chi: `${user?.brandNome || ''}|${user?.nome || ''}`, entrata: !!user?.graficaEntrata, proposta: user?.graficaProposta || '' }}>{children}</GraficaNuova.Provider>
         </main>
       </div>
-      <Moovy senzaPulsante />
+      <Moovy senzaPulsante aspetto="nuova" />
     </div>
   )
 }

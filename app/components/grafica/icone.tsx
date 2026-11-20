@@ -59,6 +59,13 @@ const SIMBOLI: Record<string, string> = {
   'i-altro': '<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>',
   'i-cuffie': '<path d="M4.5 15v-3a7.5 7.5 0 0 1 15 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/>',
   'i-moovy': '<rect x="4.5" y="7" width="15" height="11.5" rx="4"/><path d="M12 7V4.5"/><circle cx="12" cy="3.6" r="1"/><path d="M9.5 12.5h.01M14.5 12.5h.01M10 15.5h4"/>',
+  // Moovy nella grafica nuova (20/11): la chiamata, il microfono, invia, chiudi, conferma (al posto di 📞 📵 🎙 ➤ × ✓)
+  'i-telefono': '<path d="M6.2 3.8h2.6l1.5 4-1.9 1.3a11.5 11.5 0 0 0 6.5 6.5l1.3-1.9 4 1.5v2.6a2 2 0 0 1-2.1 2C10.6 19.4 4.6 13.4 4.2 5.9a2 2 0 0 1 2-2.1z"/>',
+  'i-riaggancia': '<path d="M3.2 13.6c4.9-4.3 12.7-4.3 17.6 0 .5.5.5 1.3 0 1.8l-1.6 1.5a1 1 0 0 1-1.3.1l-2.4-1.7a1 1 0 0 1-.4-.9l.2-1.9a10.5 10.5 0 0 0-6.6 0l.2 1.9a1 1 0 0 1-.4.9l-2.4 1.7a1 1 0 0 1-1.3-.1l-1.6-1.5a1.3 1.3 0 0 1 0-1.8z"/>',
+  'i-microfono': '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/>',
+  'i-invia': '<path d="M12 19.5V5M6 11l6-6 6 6"/>',
+  'i-x': '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  'i-spunta': '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
 }
 
 export function FoglioIcone() {
