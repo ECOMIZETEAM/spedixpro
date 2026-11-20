@@ -112,8 +112,9 @@ for (const rel of MENU) {
         const e = ini.expression
         // href={item.href}, href={s.href}: e' la voce di un elenco, gia' controllata come oggetto qui sopra.
         if (!ts.isPropertyAccessExpression(e)) {
-          if (ts.isConditionalExpression(e)) { segnala(nodo, valore(e.whenTrue)); segnala(nodo, valore(e.whenFalse)) }
-          else segnala(nodo, valore(e))
+          // a ? 'x' : b ? 'y' : 'z': ogni ramo e' un indirizzo, e si controllano tutti
+          const rami = (x) => ts.isParenthesizedExpression(x) ? rami(x.expression) : ts.isConditionalExpression(x) ? [...rami(x.whenTrue), ...rami(x.whenFalse)] : [x]
+          for (const r of rami(e)) segnala(nodo, valore(r))
         }
       }
     }

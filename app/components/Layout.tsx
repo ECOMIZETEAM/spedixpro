@@ -450,7 +450,7 @@ export default function Layout({ children, user }: { children: React.ReactNode, 
             {/* Lorenzo 19/11: chi vuole prova la nuova versione (Dashboard ed Elenco spedizioni) e la vota. Solo da computer:
                 sul telefono la grafica nuova non è ancora pronta. Si apre con «?nuova=1», così il tasto indietro riporta qui. */}
             {user?.provaNuova && !isMobile && (
-              <a href={(path === '/dashboard' || path === '/dashboard/spedizioni' ? path : '/dashboard') + '?nuova=1'} className="prova-scopri"
+              <a href={path === '/dashboard/spedizioni' ? '/dashboard/spedizioni?nuova=1' : path === '/dashboard/spedizioni/nuova' ? '/dashboard/spedizioni/nuova?nuova=1' : '/dashboard?nuova=1'} className="prova-scopri"
                 style={{display:'inline-flex',alignItems:'center',gap:'8px',marginLeft:'6px',padding:'6px 14px 6px 12px',borderRadius:'999px',background:'#111827',color:'#fff',fontSize:'12.5px',fontWeight:600,textDecoration:'none',whiteSpace:'nowrap' as const,boxShadow:'0 6px 16px -8px rgba(17,24,39,.6)'}}>
                 <span style={{width:'7px',height:'7px',borderRadius:'50%',background:'#f97316',boxShadow:'0 0 0 3px rgba(249,115,22,.25)'}} />
                 Scopri la nuova versione

@@ -87,8 +87,9 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome, 
 
   // LA PROVA DELLA GRAFICA NUOVA (Lorenzo 19/11): la stessa cornice del portale master, col menu del cliente
   if (grafica?.prova) {
+    // le voci passano così come sono: gli indirizzi li controlla la guardia della build dove nascono, in ClienteNav
     const voci = NAV_BASE.filter(v => !(soloEtichette && VOCI_A_PAGAMENTO.includes(v.id)))
-      .map(v => ({ label: v.label, href: v.href, sub: v.sub, ...(v.href?.startsWith('http') ? { external: true } : {}) }))
+      .map(v => (v.href?.startsWith('http') ? { ...v, external: true } : v))
     return (
       <>
         <CorniceNuova portale="cliente" path={path} nav={voci} isMobile={isMobile}
@@ -149,7 +150,7 @@ export default function ClienteShell({ cliente, children, brandLogo, brandNome, 
             <button onClick={() => { if (isMobile) setDrawerOpen(true); else toggleSidebar() }} aria-label="Menu" title={isMobile?'Menu':(sidebarChiusa?'Apri il menu':'Chiudi il menu')} style={{ background: 'none', border: 'none', fontSize: '23px', cursor: 'pointer', color: '#1a1a1a', padding: '2px 6px', lineHeight: 1 }}>☰</button>
             {!isMobile && <div style={{ fontSize: '13px', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nome}</div>}
             {grafica?.offri && !isMobile && (
-              <a href={(path === '/cliente/dashboard' || path === '/cliente/spedizioni' ? path : '/cliente/dashboard') + '?nuova=1'}
+              <a href={path === '/cliente/spedizioni' ? '/cliente/spedizioni?nuova=1' : path === '/cliente/spedizioni/nuova' ? '/cliente/spedizioni/nuova?nuova=1' : '/cliente/dashboard?nuova=1'}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginLeft: '6px', padding: '6px 14px 6px 12px', borderRadius: '999px', background: '#111827', color: '#fff', fontSize: '12.5px', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap', boxShadow: '0 6px 16px -8px rgba(17,24,39,.6)' }}>
                 <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#f97316', boxShadow: '0 0 0 3px rgba(249,115,22,.25)' }} />
                 Scopri la nuova versione
