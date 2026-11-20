@@ -219,8 +219,12 @@ export default function DistinteContrassegniPage() {
     setAvanz(a => a ? { ...a, totale: totaleRighe, etichetta: 'Sto caricando i contrassegni',
       sottotitolo: `${totaleRighe} righe da ${files.length} file` } : a)
 
-    // 2) ELABORAZIONE a blocchi.
-    const CHUNK = 200
+    // 2) ELABORAZIONE a blocchi. Da 50, non da 200: il 20/11/2026 il file GLS di M.C LOGISTICA (755 righe)
+    // e' rimasto fermo a "0 di 755" per 5 minuti e il primo blocco da 200 e' andato oltre i 300 secondi
+    // della funzione (le righe sono entrate, ma il riepilogo le ha perse). Con 50 la barra si muove ogni
+    // poche decine di secondi e nessun blocco si avvicina al limite. Ogni blocco rilegge sosta e distinte
+    // del master (MULTI: ~9.000 righe, 10 letture con indice): costo trascurabile.
+    const CHUNK = 50
     const tot = { righeFile: 0, spedizioniProcessate: 0, inAttesa: 0, codFile: 0, codSistema: 0, codDaPagare: 0,
       giaInDistinta: 0, giaInSosta: 0, giaPagati: 0, propri: 0, doppioniFile: 0, saltateNonPagate: 0, errori: 0, nonClassificate: 0,
       erroriDettaglio: [] as { ldv: string; motivo: string }[] }
