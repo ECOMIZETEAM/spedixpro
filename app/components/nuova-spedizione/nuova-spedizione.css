@@ -244,3 +244,5 @@
 .gx .ns-rubrica b { font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-credito__avviso { margin: 4px 0 0; font-size: 12.5px; font-weight: 500; color: var(--gx-problema); }
 .gx .ns-paga > * { margin-bottom: 0 !important; }
+/* campo riempito dal CAP (20/11, revisione DESIGN «MilanoMilano») */
+.gx .ns-dalcap { font-style: normal; font-weight: 500; color: var(--gx-accento-testo); }

@@ -128,6 +128,8 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
   const refMittCitta = useRef<HTMLInputElement>(null)
   const refDest = useRef<HTMLInputElement>(null)
   const refDestCitta = useRef<HTMLInputElement>(null)
+  const refMittProv = useRef<HTMLInputElement>(null)
+  const refDestProv = useRef<HTMLInputElement>(null)
   async function cerca(dove: DoveSugg, url: string, testo: string) {
     const id = ++suggReq.current
     if (testo.trim().length < 2) { setSugg({ dove: '', voci: [] }); return }
@@ -221,18 +223,42 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
 
   // IL CAP DICE LA PROVINCIA (Italia): se tutti i comuni di quel CAP sono della stessa provincia, è quella. La città la si
   // mette solo se manca e il CAP è di un comune solo (le frazioni hanno lo stesso CAP del comune, e lì si sceglie).
+  // I campi riempiti così si vedono («dal CAP») e, entrandoci, il testo è tutto selezionato: nella prova (DESIGN, 20/11)
+  // chi scriveva «Milano» per abitudine dopo il CAP la accodava, e il riepilogo diceva «MilanoMilano (MI)». Una città
+  // messa dal CAP si cambia se cambia il CAP; una scritta a mano no.
   const capReq = useRef({ mitt: 0, dest: 0 })
+  const [dalCap, setDalCap] = useState<Record<string, boolean>>({})
+  const selAlRilascio = useRef<HTMLInputElement | null>(null)
+  const statoRef = useRef({ mitt, dest, dalCap })
+  statoRef.current = { mitt, dest, dalCap }
+  const scritto = (k: string) => setDalCap(m => m[k] ? { ...m, [k]: false } : m)
   async function provinciaDalCap(chi: 'mitt' | 'dest', cap: string) {
     const id = ++capReq.current[chi]
     try {
       const voci = await (await fetch('/api/comuni?q=' + cap + '&paese=IT')).json()
       if (id !== capReq.current[chi] || !Array.isArray(voci)) return
+      const x: any = statoRef.current[chi]
+      if (x.cap !== cap) return
       const esatti = voci.filter((v: any) => v.cap === cap)
-      const sigle = Array.from(new Set(esatti.map((v: any) => v.sigla)))
+      const sigle = Array.from(new Set(esatti.map((v: any) => v.sigla))) as string[]
       if (sigle.length !== 1) return
-      const nomi = Array.from(new Set(esatti.map((v: any) => v.nome)))
-      const metti = (x: any) => x.cap !== cap ? x : { ...x, provincia: sigle[0], citta: x.citta || (nomi.length === 1 ? nomi[0] : x.citta) }
-      if (chi === 'dest') setDest(d => metti(d)); else setMitt(m => metti(m))
+      const nomi = Array.from(new Set(esatti.map((v: any) => v.nome))) as string[]
+      // Se il cursore è già nella città o nella provincia, quel campo non si tocca: la risposta arriverebbe mentre si
+      // scrive, e il testo si accoderebbe a quello messo da qui (l'altra strada del «MilanoMilano»).
+      const attivo = typeof document !== 'undefined' ? document.activeElement : null
+      const inCitta = !!attivo && attivo === (chi === 'dest' ? refDestCitta.current : refMittCitta.current)
+      const inProv = !!attivo && attivo === (chi === 'dest' ? refDestProv.current : refMittProv.current)
+      const cittaAuto = !!statoRef.current.dalCap[chi + 'Citta']
+      let citta = x.citta, cittaDalCap = cittaAuto
+      if (!inCitta) {
+        if (nomi.length === 1 && (!pieno(x.citta) || cittaAuto)) { citta = nomi[0]; cittaDalCap = true }
+        else if (cittaAuto && !nomi.includes(x.citta)) { citta = ''; cittaDalCap = false }
+      }
+      const provincia = inProv ? x.provincia : sigle[0]
+      const provDalCap = !inProv && (x.provincia !== sigle[0] || !!statoRef.current.dalCap[chi + 'Provincia'])
+      const nuovo = { ...x, provincia, citta }
+      if (chi === 'dest') setDest(nuovo); else setMitt(nuovo)
+      setDalCap(m => ({ ...m, [chi + 'Citta']: cittaDalCap, [chi + 'Provincia']: provDalCap }))
     } catch { /* senza risposta resta quella scritta */ }
   }
   useEffect(() => {
@@ -437,17 +463,22 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
     : 'Per ora la spedizione si crea dalla pagina di oggi: ti portiamo lì.'
 
   // ── pezzi ripetuti ──
-  const campo = (k: string, etichetta: string, valore: string, onChange: (v: string) => void, extra?: { ref?: React.RefObject<HTMLInputElement | null>; onInput?: (v: string) => void; placeholder?: string; inputMode?: 'decimal' | 'numeric' | 'tel' | 'email'; className?: string; sugg?: DoveSugg; maxLength?: number }) => {
+  const campo = (k: string, etichetta: string, valore: string, onChange: (v: string) => void, extra?: { ref?: React.RefObject<HTMLInputElement | null>; onInput?: (v: string) => void; placeholder?: string; inputMode?: 'decimal' | 'numeric' | 'tel' | 'email'; className?: string; sugg?: DoveSugg; maxLength?: number; dalCap?: string }) => {
     const e = errore(k)
     const s = extra?.sugg
+    const auto = !!(extra?.dalCap && dalCap[extra.dalCap])
     return (
-      <label className={'ns-campo' + (e ? ' ns-campo--errore' : '') + (extra?.className ? ' ' + extra.className : '')}>
-        <span className="ns-campo__et">{etichetta}</span>
+      <label className={'ns-campo' + (e ? ' ns-campo--errore' : '') + (auto ? ' ns-campo--dalcap' : '') + (extra?.className ? ' ' + extra.className : '')}>
+        <span className="ns-campo__et">{etichetta}{auto && <em className="ns-dalcap"> · dal CAP</em>}</span>
         <input ref={extra?.ref as any} className="ns-campo__val" value={valore} placeholder={extra?.placeholder} inputMode={extra?.inputMode} maxLength={extra?.maxLength} autoComplete="off"
-          onChange={ev => { onChange(ev.target.value); extra?.onInput?.(ev.target.value) }}
-          onFocus={s ? () => entraSugg(s) : undefined}
+          onChange={ev => { if (extra?.dalCap) scritto(extra.dalCap); onChange(ev.target.value); extra?.onInput?.(ev.target.value) }}
+          // Riempito dal CAP: entrando si seleziona tutto, così chi riscrive sostituisce invece di accodare. Col mouse
+          // il cursore lo piazza il RILASCIO del tasto: lì si riseleziona, ma solo se nel frattempo non si è scritto
+          // niente. Un timer al posto del rilascio riselezionava le prime lettere già scritte, e il tasto dopo le cancellava.
+          onFocus={ev => { if (auto) { ev.currentTarget.select(); selAlRilascio.current = ev.currentTarget } if (s) entraSugg(s) }}
+          onMouseUp={ev => { if (selAlRilascio.current === ev.currentTarget) { ev.preventDefault(); ev.currentTarget.select() } selAlRilascio.current = null }}
           onBlur={() => { tocca(k)(); if (s) esciSugg() }}
-          onKeyDown={s ? ev => { if (ev.key === 'Escape') chiudiSugg() } : undefined}
+          onKeyDown={ev => { selAlRilascio.current = null; if (s && ev.key === 'Escape') chiudiSugg() }}
           aria-invalid={!!e} aria-expanded={s ? apertaSu(s) : undefined} />
         {e && <span className="ns-campo__err" role="alert">{e}</span>}
       </label>
@@ -521,11 +552,11 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                 {campo('mittIndirizzo', 'Indirizzo', mitt.indirizzo, v => setMitt(m => ({ ...m, indirizzo: v })))}
                 <div className="ns-riga3">
                   {campo('mittCap', 'CAP', mitt.cap, v => setMitt(m => ({ ...m, cap: v.replace(/[^0-9]/g, '').slice(0, 5) })), { inputMode: 'numeric' })}
-                  {campo('mittCitta', 'Città', mitt.citta, v => setMitt(m => ({ ...m, citta: v })), { ref: refMittCitta, sugg: 'mittCitta', onInput: v => cerca('mittCitta', '/api/comuni?q=' + encodeURIComponent(v), v) })}
-                  {campo('mittProvincia', 'Provincia', mitt.provincia, v => setMitt(m => ({ ...m, provincia: sigla(v) })))}
+                  {campo('mittCitta', 'Città', mitt.citta, v => setMitt(m => ({ ...m, citta: v })), { ref: refMittCitta, sugg: 'mittCitta', dalCap: 'mittCitta', onInput: v => cerca('mittCitta', '/api/comuni?q=' + encodeURIComponent(v), v) })}
+                  {campo('mittProvincia', 'Provincia', mitt.provincia, v => setMitt(m => ({ ...m, provincia: sigla(v) })), { dalCap: 'mittProvincia', ref: refMittProv })}
                 </div>
                 <Tendina ancora={refMittCitta} aperta={apertaSu('mittCitta')} maxAltezza={220}>
-                  {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, `(${c.sigla}) ${c.cap}`, () => setMitt(m => ({ ...m, citta: c.nome, provincia: c.sigla, cap: c.cap })), i))}
+                  {sugg.voci.map((c: any, i: number) => voceSugg(c.nome, `(${c.sigla}) ${c.cap}`, () => { setMitt(m => ({ ...m, citta: c.nome, provincia: c.sigla, cap: c.cap })); scritto('mittCitta'); scritto('mittProvincia') }, i))}
                 </Tendina>
                 <div className="ns-riga2">
                   {campo('mittTelefono', 'Telefono', mitt.telefono, v => setMitt(m => ({ ...m, telefono: v })), { inputMode: 'tel' })}
@@ -588,8 +619,8 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                 {campo('destIndirizzo', 'Indirizzo', dest.indirizzo, v => setDest(d => ({ ...d, indirizzo: v })))}
                 <div className="ns-riga3">
                   {campo('destCap', 'CAP', dest.cap, v => setDest(d => ({ ...d, cap: estero ? v : v.replace(/[^0-9]/g, '').slice(0, 5) })), { inputMode: estero ? undefined : 'numeric' })}
-                  {campo('destCitta', 'Città', dest.citta, v => setDest(d => ({ ...d, citta: v })), { ref: refDestCitta, sugg: 'destCitta', onInput: v => cerca('destCitta', '/api/comuni?q=' + encodeURIComponent(v) + '&paese=' + encodeURIComponent(dest.paese), v) })}
-                  {campo('destProvincia', estero ? 'Regione (facoltativa)' : 'Provincia', dest.provincia, v => setDest(d => ({ ...d, provincia: estero ? v : sigla(v) })))}
+                  {campo('destCitta', 'Città', dest.citta, v => setDest(d => ({ ...d, citta: v })), { ref: refDestCitta, sugg: 'destCitta', dalCap: 'destCitta', onInput: v => cerca('destCitta', '/api/comuni?q=' + encodeURIComponent(v) + '&paese=' + encodeURIComponent(dest.paese), v) })}
+                  {campo('destProvincia', estero ? 'Regione (facoltativa)' : 'Provincia', dest.provincia, v => setDest(d => ({ ...d, provincia: estero ? v : sigla(v) })), { dalCap: 'destProvincia', ref: refDestProv })}
                 </div>
                 {/* Solo le voci del paese scelto ADESSO: una risposta partita prima di cambiare paese non deve rimettere città
                     italiane su un pacco tedesco. Dove l'archivio ha solo la prima parte del CAP, un CAP già scritto non si accorcia. */}
@@ -599,6 +630,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                       const gia = (d: Destinatario) => c.parziale && String(d.cap || '').toUpperCase().replace(/\s/g, '').startsWith(String(c.cap).toUpperCase().replace(/\s/g, ''))
                       setDest(d => ({ ...d, citta: c.nome, cap: gia(d) ? d.cap : c.cap }))
                     } else setDest(d => ({ ...d, citta: c.nome, provincia: c.sigla, cap: c.cap }))
+                    scritto('destCitta'); scritto('destProvincia')
                   }, i))}
                 </Tendina>
               </>) : (
@@ -791,7 +823,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
           <div className="ns-crea">
             {mancante > 0 && credito != null && (
               <div id="ns-paga" className="ns-paga">
-                <PagaConCarta mancante={mancante} costo={totale} credito={credito} onPagato={ricaricaCredito} />
+                <PagaConCarta mancante={mancante} costo={totale} credito={credito} onPagato={ricaricaCredito} cifre={n => n.toFixed(2).replace('.', ',')} />
               </div>
             )}
             {prezzoCambiato && <p className="ns-cambiato" role="status">Il prezzo è cambiato: da {euro(prezzoCambiato.da)} a {euro(prezzoCambiato.a)}.</p>}

@@ -3,7 +3,10 @@ import { useState } from 'react'
 import { RICARICHE_CARTA_SOSPESE } from '@/lib/ricarica-carta'
 import DatiBonifico from './DatiBonifico'
 
-type Props = { mancante: number; costo: number; credito: number; onPagato: () => void }
+// cifre: come scrivere gli importi. Il modulo di oggi non lo passa e resta col punto (5.47); la pagina nuova passa la
+// virgola (5,47).
+type Props = { mancante: number; costo: number; credito: number; onPagato: () => void; cifre?: (n: number) => string }
+const conPunto = (n: number) => n.toFixed(2)
 
 // Riquadro "credito insufficiente" di Nuova spedizione, Ordini e Import: compare quando il credito a
 // scalare non copre la spedizione o il lotto.
@@ -17,17 +20,17 @@ type Props = { mancante: number; costo: number; credito: number; onPagato: () =>
 // rilancia il cliente.
 export default function PagaConCarta(props: Props) {
   if (RICARICHE_CARTA_SOSPESE) {
-    return <RiquadroBonifico mancante={props.mancante} costo={props.costo} credito={props.credito} />
+    return <RiquadroBonifico mancante={props.mancante} costo={props.costo} credito={props.credito} cifre={props.cifre} />
   }
   return <RiquadroCarta {...props} />
 }
 
-function RiquadroBonifico({ mancante, costo, credito }: Omit<Props, 'onPagato'>) {
+function RiquadroBonifico({ mancante, costo, credito, cifre = conPunto }: Omit<Props, 'onPagato'>) {
   return (
     <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
       <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 14 }}>Credito insufficiente</div>
       <div style={{ color: '#9a3412', fontSize: 13, marginTop: 3 }}>
-        Spedizione € {costo.toFixed(2)} · credito € {credito.toFixed(2)} — mancano <b>€ {mancante.toFixed(2)}</b>.
+        Spedizione € {cifre(costo)} · credito € {cifre(credito)} — mancano <b>€ {cifre(mancante)}</b>.
       </div>
       <DatiBonifico variante="riquadro" />
     </div>
@@ -38,7 +41,7 @@ function RiquadroBonifico({ mancante, costo, credito }: Omit<Props, 'onPagato'>)
 // sale, RIPROVA la spedizione da solo — nessun redirect, nessuna cassa. Se non c'è carta salvata o la
 // banca chiede il 3DS, manda alla Ricarica (che la cassa Stripe sa gestire, e la prima volta la carta
 // la salva).
-function RiquadroCarta({ mancante, costo, credito, onPagato }: Props) {
+function RiquadroCarta({ mancante, costo, credito, onPagato, cifre = conPunto }: Props) {
   const [invio, setInvio] = useState(false)
   const [msg, setMsg] = useState('')
 
@@ -68,12 +71,12 @@ function RiquadroCarta({ mancante, costo, credito, onPagato }: Props) {
     <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
       <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 14 }}>Credito insufficiente</div>
       <div style={{ color: '#9a3412', fontSize: 13, marginTop: 3 }}>
-        Spedizione € {costo.toFixed(2)} · credito € {credito.toFixed(2)} — mancano <b>€ {mancante.toFixed(2)}</b>.
+        Spedizione € {cifre(costo)} · credito € {cifre(credito)} — mancano <b>€ {cifre(mancante)}</b>.
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
         <button onClick={paga} disabled={invio}
           style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: invio ? 'default' : 'pointer', opacity: invio ? 0.75 : 1 }}>
-          {invio ? 'Addebito in corso…' : `Paga € ${mancante.toFixed(2)} con la carta e spedisci`}
+          {invio ? 'Addebito in corso…' : `Paga € ${cifre(mancante)} con la carta e spedisci`}
         </button>
         <a href="/cliente/ricarica"
           style={{ background: '#fff', color: '#9a3412', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
