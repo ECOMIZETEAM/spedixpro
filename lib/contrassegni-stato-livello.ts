@@ -56,50 +56,19 @@ export async function statiCodPerLivello(
   const ids = righe.map(r => r.id).filter(Boolean)
   if (!ids.length) return out
 
-  const mie = new Map<string, any>(), entrate = new Map<string, any>()
-  // Incassato per tracking (importo_cod della riga nella MIA distinta / in quella in ENTRATA): su un COD
-  // parziale è meno del dichiarato. Preferisco l'importo della distinta IN ENTRATA (quanto mi è arrivato);
-  // per un detentore — che non ha entrata — vale la sua (quanto gli ha pagato il corriere).
-  const codIncassato = new Map<string, number>()
-  // CONDIVISIONE (gamba esplosa): le righe-distinta COD puntano alla spedizione ORIGINANTE (una per
-  // tracking), mentre la lista mostra la GAMBA del livello che guarda (gamba-ponte, id diverso). La
-  // chiave di aggancio e' quindi il TRACKING, non l'id della riga. Raccolgo TUTTE le gambe di ogni
-  // tracking e aggancio la distinta per tracking. Per le spedizioni normali (un solo id per tracking)
-  // la chiave coincide col tracking stesso e il comportamento e' identico; fallback all'id se manca il tracking.
-  const trackings = [...new Set(righe.map(r => r.tracking_number).filter(Boolean) as string[])]
-  const trackingByLeg = new Map<string, string>()
-  const legIds = new Set<string>(ids)
-  for (let i = 0; i < trackings.length; i += 150) {
-    const { data: legs } = await adminDb.from('spedizioni')
-      .select('id,tracking_number').in('tracking_number', trackings.slice(i, i + 150))
-    for (const l of (legs || [])) {
-      if ((l as any).tracking_number) trackingByLeg.set((l as any).id, (l as any).tracking_number)
-      legIds.add((l as any).id)
-    }
-  }
-  const chiaveDi = (sid: string) => trackingByLeg.get(sid) || sid
-  const allIds = [...legIds]
-  // Chunk PICCOLI + fetchAll: ogni spedizione ha UNA riga di distinta PER LIVELLO della catena,
-  // quindi un chunk grande può superare le 1000 righe (cap PostgREST) e perderne pezzi.
-  for (let i = 0; i < allIds.length; i += 150) {
-    const rr = await fetchAll(() => adminDb.from('distinte_contrassegni_righe')
-      .select('id, importo_cod, spedizione_id, distinte_contrassegni!inner(id,numero,stato,master_id,target_master_id)')
-      .in('spedizione_id', allIds.slice(i, i + 150)).order('id', { ascending: true }))
-    for (const r of (rr || [])) {
-      const d: any = (r as any).distinte_contrassegni
-      const sid = (r as any).spedizione_id
-      if (!d || !sid) continue
-      const k = chiaveDi(sid)
-      const inc = Number((r as any).importo_cod) || 0
-      // L'entrata (quanto mi è arrivato) vince sulla mia; per il detentore c'è solo la sua.
-      if (d.target_master_id === masterId) { entrate.set(k, d); codIncassato.set(k, inc) }
-      else if (d.master_id === masterId) { mie.set(k, d); if (!codIncassato.has(k)) codIncassato.set(k, inc) }
-    }
-  }
+  // LETTURE IN PARALLELO, applicate IN ORDINE (20/10/2026). Prima ogni lettura aspettava la
+  // precedente anche quando non ne aveva bisogno: sull'elenco spedizioni questa funzione era la fase
+  // piu' lunga (150-300 ms a pagina, fino a 1,2 s). Ora corrono insieme due strade indipendenti:
+  // le DISTINTE (gambe per tracking, poi righe di distinta) e le CATENE dei contratti (indice di master
+  // e contratti, contratti ponte, poi una catena per combinazione). Dentro ogni strada i risultati si
+  // applicano nello STESSO ordine di prima — blocco dopo blocco, riga dopo riga — perche' a parita' di
+  // chiave vince l'ultima riga letta.
+  const sorgentePronta = caricaSorgenteCatena(adminDb)
+  const moovPronto = adminDb.from('corrieri').select('master_id,nome_contratto').eq('tipo', 'moovexpress').then((r: any) => r)
 
-  const sorgente = await caricaSorgenteCatena(adminDb)
+  type Sorgente = Awaited<typeof sorgentePronta>
   const catene = new Map<string, string[]>()
-  const catenaDi = (mid: string) => {
+  const catenaDi = (sorgente: Sorgente, mid: string) => {
     if (!catene.has(mid)) {
       const path: string[] = []
       let cur: string | null = mid
@@ -116,28 +85,87 @@ export async function statiCodPerLivello(
   // / corrieri_condivisi). Per TUTTO il resto (diretti/aggregatore/albero) il resolver ad albero e' corretto
   // e NON si tocca — verificato 6/10 che lo swap cieco spostava il detentore di ~40 contratti aggregatore
   // (il sub si vedeva detentore al posto di MULTI).
-  const moovSet = new Set<string>()
-  {
-    const { data: mv } = await adminDb.from('corrieri').select('master_id,nome_contratto').eq('tipo', 'moovexpress')
+  const moovSetPronto = moovPronto.then(({ data: mv }: any) => {
+    const moovSet = new Set<string>()
     for (const c of (mv || [])) moovSet.add((c as any).master_id + '|' + nomeContrattoNormalizzato((c as any).nome_contratto))
-  }
-  const comboCache = new Map<string, { detentore: string; masters: string[]; codice: boolean }>()
-  const risolviCombo = async (partenza: string, nome: string | null, corriereId: string | null) => {
+    return moovSet
+  })
+  // In memoria c'e' la PROMESSA, non il risultato: cosi' le combinazioni si risolvono tutte insieme
+  // (qui sotto) e due righe con la stessa combinazione non la chiedono due volte.
+  type Combo = { detentore: string; masters: string[]; codice: boolean }
+  const comboCache = new Map<string, Promise<Combo>>()
+  const risolviCombo = (partenza: string, nome: string | null, corriereId: string | null) => {
     const kk = partenza + '|' + (nome || '') + '|' + (corriereId || '')
     const hit = comboCache.get(kk); if (hit) return hit
-    let res: { detentore: string; masters: string[]; codice: boolean }
-    if (nome && moovSet.has(partenza + '|' + nomeContrattoNormalizzato(nome))) {
-      // Con la riga della gamba, la fila dei puntatori: un ponte comprato da una copia d'albero arriva fino
-      // al detentore vero (MULTI per il GLS che GTS rivende a spedizioni 2000), non si ferma al venditore.
-      const chain = corriereId
-        ? await catenaDaCorriere(adminDb, corriereId, { master: partenza, nomeContratto: nome })
-        : await risolviCatenaCondivisione(adminDb, partenza, nome)
-      if (chain.length && chain.some(l => l.ruolo === 'codice'))
-        res = { detentore: chain[chain.length - 1].master, masters: chain.map(l => l.master), codice: true }
-      else res = { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(partenza), codice: false }
-    } else res = { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(partenza), codice: false }
+    const res = (async (): Promise<Combo> => {
+      const [sorgente, moovSet] = await Promise.all([sorgentePronta, moovSetPronto])
+      if (nome && moovSet.has(partenza + '|' + nomeContrattoNormalizzato(nome))) {
+        // Con la riga della gamba, la fila dei puntatori: un ponte comprato da una copia d'albero arriva fino
+        // al detentore vero (MULTI per il GLS che GTS rivende a spedizioni 2000), non si ferma al venditore.
+        const chain = corriereId
+          ? await catenaDaCorriere(adminDb, corriereId, { master: partenza, nomeContratto: nome })
+          : await risolviCatenaCondivisione(adminDb, partenza, nome)
+        if (chain.length && chain.some(l => l.ruolo === 'codice'))
+          return { detentore: chain[chain.length - 1].master, masters: chain.map(l => l.master), codice: true }
+        return { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(sorgente, partenza), codice: false }
+      }
+      return { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(sorgente, partenza), codice: false }
+    })()
     comboCache.set(kk, res); return res
   }
+  // Ogni combinazione (partenza, contratto, riga del contratto) e' una catena letta dal database —
+  // funzione della catena piu' una o due letture del master — e prima si risolvevano una alla volta,
+  // dopo le distinte. Ora partono subito, tutte insieme.
+  const combinazioniPronte = Promise.all(righe.map(r => risolviCombo(r.master_id || masterId, r.corrieri?.nome_contratto || null, r.corriere_id || null)))
+  // Si aspetta dopo le distinte: se nel frattempo fallisse, Node chiuderebbe il processo per un rifiuto
+  // "non gestito". Il catch vuoto lo segna gestito; l'errore arriva comunque all'`await` qui sotto.
+  combinazioniPronte.catch(() => {})
+
+  const mie = new Map<string, any>(), entrate = new Map<string, any>()
+  // Incassato per tracking (importo_cod della riga nella MIA distinta / in quella in ENTRATA): su un COD
+  // parziale è meno del dichiarato. Preferisco l'importo della distinta IN ENTRATA (quanto mi è arrivato);
+  // per un detentore — che non ha entrata — vale la sua (quanto gli ha pagato il corriere).
+  const codIncassato = new Map<string, number>()
+  // CONDIVISIONE (gamba esplosa): le righe-distinta COD puntano alla spedizione ORIGINANTE (una per
+  // tracking), mentre la lista mostra la GAMBA del livello che guarda (gamba-ponte, id diverso). La
+  // chiave di aggancio e' quindi il TRACKING, non l'id della riga. Raccolgo TUTTE le gambe di ogni
+  // tracking e aggancio la distinta per tracking. Per le spedizioni normali (un solo id per tracking)
+  // la chiave coincide col tracking stesso e il comportamento e' identico; fallback all'id se manca il tracking.
+  const trackings = [...new Set(righe.map(r => r.tracking_number).filter(Boolean) as string[])]
+  const trackingByLeg = new Map<string, string>()
+  const legIds = new Set<string>(ids)
+  const blocchiTracking: string[][] = []
+  for (let i = 0; i < trackings.length; i += 150) blocchiTracking.push(trackings.slice(i, i + 150))
+  const gambe = await Promise.all(blocchiTracking.map(b => adminDb.from('spedizioni')
+    .select('id,tracking_number').in('tracking_number', b).then((r: any) => r)))
+  for (const { data: legs } of gambe) {
+    for (const l of (legs || [])) {
+      if ((l as any).tracking_number) trackingByLeg.set((l as any).id, (l as any).tracking_number)
+      legIds.add((l as any).id)
+    }
+  }
+  const chiaveDi = (sid: string) => trackingByLeg.get(sid) || sid
+  const allIds = [...legIds]
+  // Chunk PICCOLI + fetchAll: ogni spedizione ha UNA riga di distinta PER LIVELLO della catena,
+  // quindi un chunk grande può superare le 1000 righe (cap PostgREST) e perderne pezzi.
+  const blocchiIds: string[][] = []
+  for (let i = 0; i < allIds.length; i += 150) blocchiIds.push(allIds.slice(i, i + 150))
+  const righeDistinte = await Promise.all(blocchiIds.map(b => fetchAll(() => adminDb.from('distinte_contrassegni_righe')
+    .select('id, importo_cod, spedizione_id, distinte_contrassegni!inner(id,numero,stato,master_id,target_master_id)')
+    .in('spedizione_id', b).order('id', { ascending: true }))))
+  for (const rr of righeDistinte) {
+    for (const r of (rr || [])) {
+      const d: any = (r as any).distinte_contrassegni
+      const sid = (r as any).spedizione_id
+      if (!d || !sid) continue
+      const k = chiaveDi(sid)
+      const inc = Number((r as any).importo_cod) || 0
+      // L'entrata (quanto mi è arrivato) vince sulla mia; per il detentore c'è solo la sua.
+      if (d.target_master_id === masterId) { entrate.set(k, d); codIncassato.set(k, inc) }
+      else if (d.master_id === masterId) { mie.set(k, d); if (!codIncassato.has(k)) codIncassato.set(k, inc) }
+    }
+  }
+  await combinazioniPronte
 
   for (const r of righe) {
     const nome = r.corrieri?.nome_contratto || null
