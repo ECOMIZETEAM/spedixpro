@@ -13,6 +13,7 @@ import InpostLockerPicker, { type InpostPuntoScelto } from '@/app/components/Inp
 const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
+import { pesiDelModulo } from '@/lib/colli-ordine'
 
 function iconaCorriere(nome:string): string | null {
   const n = (nome||'').toUpperCase()
@@ -154,8 +155,11 @@ export default function NuovaSpedizionePage() {
   const [ritiroData, setRitiroData] = useState(() => { const d = new Date(); while ([0,6].includes(d.getDay())) d.setDate(d.getDate()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })   // weekend -> primo giorno lavorativo (data LOCALE, non UTC)
   const [ritiroOrario, setRitiroOrario] = useState('mattina')
   const [numColli, setNumColli] = useState(1)
-  const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:''}])
-  const [peso, setPeso] = useState('1')
+  // PESO COLLO PER COLLO, NIENTE PESO TOTALE (Lorenzo, 16/11/2026). Prima un peso solo, "1" gia' scritto,
+  // diviso in parti uguali fra i colli: 7.883 multicollo su 7.883 partite dal modulo avevano colli tutti
+  // uguali, mentre alla ripesatura 548 su 889 avevano piu' di 2 kg di scarto fra un collo e l'altro — e
+  // il prezzo si fa collo per collo. Il collo nasce col peso VUOTO: senza, il prezzo non si calcola.
+  const [colli, setColli] = useState<Collo[]>([{lunghezza:'',larghezza:'',altezza:'',peso:''}])
   const [sku, setSku] = useState('')
   const [skuQta, setSkuQta] = useState('1')
   const [skuMsg, setSkuMsg] = useState('')
@@ -216,7 +220,7 @@ export default function NuovaSpedizionePage() {
   // costringe a ricalcolare "Seleziona Corriere" sui nuovi dati (no tariffe stale)
   useEffect(() => {
     setTariffe([]); setSelected(null); setVista('dati')
-  }, [dest, mitt, clienteId, peso, colli, numColli, contrassegno, assicurazione, consegnaA])
+  }, [dest, mitt, clienteId, colli, numColli, contrassegno, assicurazione, consegnaA])
   // Tariffe da mostrare in base alla modalità: "a un punto" → solo i contratti che consegnano a un
   // punto (P2TAB/P2UP); "a domicilio" → tutti gli altri (esclusi quelli a punto).
   // Il Locker InPost è consegna A UN PUNTO (come PuntoPoste): sta nella tab "a un punto", non a domicilio.
@@ -280,9 +284,8 @@ export default function NuovaSpedizionePage() {
 
   // Applica un pacco salvato: riempie peso + misure del 1° collo (mono-collo).
   function applicaPacco(p:any) {
-    setPeso(String(p.peso||''))
     setNumColli(1)
-    setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||'') }])
+    setColli([{ lunghezza:String(p.lunghezza||''), larghezza:String(p.larghezza||''), altezza:String(p.altezza||''), peso:String(p.peso||'') }])
     setTariffe([]); setSelected(null)
   }
 
@@ -302,10 +305,13 @@ export default function NuovaSpedizionePage() {
       const a = (d?.articoli||[]).find((x:any)=> eq(x.sku,codice) || eq(x.ean13,codice))
       if (!a) { setSkuMsg('non è in catalogo'); return }
       const q = Math.max(1, parseInt(String(skuQta))||1)
-      if (a.peso) setPeso(String(+(Number(a.peso)*q).toFixed(3)))
+      // Il peso dell'articolo va nel PRIMO collo, come le misure: e' il pacco che si sta preparando.
+      const pesoArt = a.peso ? String(+(Number(a.peso)*q).toFixed(3)) : ''
       if (a.lunghezza && a.larghezza && a.altezza) {
         setNumColli(1)
-        setColli([{ lunghezza:String(a.lunghezza), larghezza:String(a.larghezza), altezza:String(a.altezza) }])
+        setColli(prev => [{ lunghezza:String(a.lunghezza), larghezza:String(a.larghezza), altezza:String(a.altezza), peso: pesoArt || prev[0]?.peso || '' }])
+      } else if (pesoArt) {
+        setColli(prev => prev.map((c, i) => i === 0 ? { ...c, peso: pesoArt } : c))
       }
       if (!contenuto && a.nome) setContenuto(String(a.nome).slice(0,60))
       setTariffe([]); setSelected(null)
@@ -314,30 +320,19 @@ export default function NuovaSpedizionePage() {
     } catch { setSkuMsg('non riesco a leggere il catalogo') }
   }
 
-  // ESTERO MULTICOLLO: il peso va indicato COLLO PER COLLO (i corrieri internazionali — es. UPS —
-  // lo pretendono per ogni collo, non un totale). Solo estero (non Italia) e piu' di un collo.
-  const esteroMulti = dest.paese !== 'IT' && colli.length > 1
-  const pesoTotaleColli = colli.reduce((s,c)=>s+(+(c.peso||0)||0), 0)
+  // Somma dei pesi scritti: solo da leggere sotto i colli ("In tutto"), non si scrive.
+  const pesoInTutto = colli.reduce((s,c)=>s+(+(c.peso||0)||0), 0)
+  const pesiMancanti = colli.some(c => !(+(c.peso||0) > 0))
 
   function buildPackages() {
-    if (esteroMulti) {
-      // Ogni collo col SUO peso, così com'e' stato inserito.
-      return colli.map(c => ({
-        length: +c.lunghezza||20,
-        width: +c.larghezza||15,
-        height: +c.altezza||10,
-        weight: +(c.peso||0)||0,
-      }))
-    }
-    // "Peso totale" = peso dell'intera spedizione, NON per collo: lo distribuisco equamente
-    // tra i colli così la somma dei pesi = il totale inserito (niente peso × numero colli).
-    const n = Math.max(1, colli.length)
-    const pesoPerCollo = (+peso || 0) / n
-    return colli.map(c => ({
+    // Ogni collo col SUO peso, cosi' com'e' stato scritto (pesiDelModulo toglie solo l'eccedenza della
+    // virgola mobile, che altrimenti spingerebbe una somma esatta nella fascia dopo).
+    const pesi = pesiDelModulo(colli.map(c => c.peso))
+    return colli.map((c, i) => ({
       length: +c.lunghezza||20,
       width: +c.larghezza||15,
       height: +c.altezza||10,
-      weight: pesoPerCollo
+      weight: pesi[i],
     }))
   }
 
@@ -346,7 +341,7 @@ export default function NuovaSpedizionePage() {
     if (!mitt.nome||!mitt.indirizzo||!mitt.citta||!mitt.cap||!mitt.provincia) { setErrore('Dati mittente incompleti: compila indirizzo, città, CAP e PROVINCIA del mittente (obbligatori per l\'Italia).'); return }
     if (consegnaA==='punto' ? (!dest.nome||!dest.cap||!dest.telefono) : (!dest.nome||!dest.indirizzo||!dest.citta||!dest.cap||!dest.telefono)) { setErrore(consegnaA==='punto' ? 'Per la consegna a un punto servono nome, CAP e telefono del destinatario.' : 'Compila tutti i dati destinatario (incluso il telefono)'); return }
     if (consegnaA==='domicilio' && dest.paese==='IT' && !dest.provincia) { setErrore('La provincia è obbligatoria per le spedizioni in Italia'); return }
-    if (esteroMulti && colli.some(c => !(+(c.peso||0)>0))) { setErrore('Spedizione estera multicollo: indica il peso (kg) di OGNI collo'); return }
+    if (pesiMancanti) { setErrore(colli.length > 1 ? 'Indica il peso (kg) di ogni collo.' : 'Indica il peso (kg) del collo.'); return }
     setErrore(''); setLoading(true); setTariffe([]); setSelected(null)
     const res = await fetch('/api/spedizioni/tariffe', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -393,8 +388,8 @@ export default function NuovaSpedizionePage() {
     setClienteId('')
     setMitt(mittAzienda || {nome:'',indirizzo:'',citta:'',provincia:'',cap:'',email:'',telefono:''})
     setDest({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:'',rif:'',ordine:''})
-    setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:''}])
-    setPeso('1'); setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setHscode('')
+    setNumColli(1); setColli([{lunghezza:'',larghezza:'',altezza:'',peso:''}])
+    setContenuto(''); setTipoContenuto('Merce destinata alla vendita'); setValoreMerce(''); setHscode('')
     setContrassegno('0'); setAssicurazione('0')
     setTariffe([]); setSelected(null); setExtraNomi([])
     // Esplicito anche se setClienteId('') qui sopra lo farebbe gia' scattare: se un domani l'ordine
@@ -802,24 +797,12 @@ export default function NuovaSpedizionePage() {
                   </div>
                 </div>
               )}
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px',marginBottom:'14px'}}>
                 <div>
                   <label style={lbl}>Colli</label>
                   <input type="number" value={numColli} min="1"
                     onChange={e=>aggiornaNumColli(parseInt(e.target.value)||1)}
                     style={inp}/>
-                </div>
-                <div>
-                  <label style={lbl}>Peso totale{esteroMulti ? ' (somma colli)' : ''}</label>
-                  {esteroMulti ? (
-                    <input type="number" value={pesoTotaleColli ? pesoTotaleColli.toFixed(2) : ''} readOnly disabled
-                      title="Spedizione estera multicollo: il peso si indica per collo qui sotto"
-                      style={{...inp, background:'#f1f5f9', color:'#475569'}}/>
-                  ) : (
-                    <input type="number" value={peso} min="0.1" step="0.1"
-                      onChange={e=>{setPeso(e.target.value);setTariffe([]);setSelected(null)}}
-                      style={inp}/>
-                  )}
                 </div>
                 <div>
                   <label style={lbl}>Contrassegno €</label>
@@ -834,26 +817,32 @@ export default function NuovaSpedizionePage() {
               </div>
 
               <div style={{marginBottom:'14px'}}>
-                <div style={{display:'grid',gridTemplateColumns: esteroMulti ? '32px 1fr 1fr 1fr 1fr' : '32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px'}}>
+                <div style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr 1fr',gap:'6px',marginBottom:'6px'}}>
                   <div style={{...lbl,marginBottom:0}}>#</div>
+                  <div style={{...lbl,marginBottom:0}}>Peso (kg)</div>
                   <div style={{...lbl,marginBottom:0}}>Lunghezza (cm)</div>
                   <div style={{...lbl,marginBottom:0}}>Larghezza (cm)</div>
                   <div style={{...lbl,marginBottom:0}}>Altezza (cm)</div>
-                  {esteroMulti && <div style={{...lbl,marginBottom:0}}>Peso (kg)</div>}
                 </div>
                 {colli.map((c,i)=>(
-                  <div key={i} style={{display:'grid',gridTemplateColumns: esteroMulti ? '32px 1fr 1fr 1fr 1fr' : '32px 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
+                  <div key={i} style={{display:'grid',gridTemplateColumns:'32px 1fr 1fr 1fr 1fr',gap:'6px',marginBottom:'6px',alignItems:'center'}}>
                     <div style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600',textAlign:'center'}}>{i+1}</div>
+                    <input type="number" value={c.peso||''} min="0.1" step="0.1" placeholder="kg"
+                      onChange={e=>aggiornaCollo(i,'peso',e.target.value)} style={inp}/>
                     <input type="number" value={c.lunghezza} placeholder="es. 30"
                       onChange={e=>aggiornaCollo(i,'lunghezza',e.target.value)} style={inp}/>
                     <input type="number" value={c.larghezza} placeholder="es. 20"
                       onChange={e=>aggiornaCollo(i,'larghezza',e.target.value)} style={inp}/>
                     <input type="number" value={c.altezza} placeholder="es. 15"
                       onChange={e=>aggiornaCollo(i,'altezza',e.target.value)} style={inp}/>
-                    {esteroMulti && <input type="number" value={c.peso||''} min="0.1" step="0.1" placeholder="kg"
-                      onChange={e=>aggiornaCollo(i,'peso',e.target.value)} style={inp}/>}
                   </div>
                 ))}
+                {colli.length > 1 && (
+                  <div style={{fontSize:'12px',color:'#555',marginTop:'2px',paddingLeft:'38px'}}>
+                    In tutto <strong>{pesoInTutto.toLocaleString('it-IT',{maximumFractionDigits:3})} kg</strong>
+                    {pesiMancanti && <span style={{color:'#b45309'}}> · manca il peso di qualche collo</span>}
+                  </div>
+                )}
               </div>
 
 
