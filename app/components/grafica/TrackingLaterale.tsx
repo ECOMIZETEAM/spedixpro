@@ -48,7 +48,7 @@ export default function TrackingLaterale({ s, st, dati, caricando, scheda, setSc
           </div>
           <div className="tl-numero">{numeroMostrato(s.numero, s.tracking_number)}</div>
           <div className="tl-stato">
-            {st && <span className="tl-pillola" style={{ background: st.bg, color: st.color }}>{st.label}</span>}
+            {st && <span className="tl-pillola" data-stato={s.stato} style={{ background: st.bg, color: st.color }}>{st.label}</span>}
             {luogo && <span className="tl-dove">{luogo}</span>}
           </div>
           <nav className="tl-schede">

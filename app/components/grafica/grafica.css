@@ -25,7 +25,8 @@
   --gx-vetro-luce: rgba(255, 255, 255, .16);
   --gx-incavo: rgba(255, 255, 255, .065);
   --gx-velo: rgba(22, 22, 22, .64);
-  --gx-pallino: #E0434F;
+  /* il rosso dei numerini (menu, campanella): #C8303F e non #E0434F, il numero bianco sopra passa da 4,1 a 5,3 */
+  --gx-pallino: #C8303F;
 }
 [data-grafica="nuova"][data-tema="giorno"] {
   --gx-fondo: #E8DAC4;
@@ -57,7 +58,8 @@
   --gx-accento-pieno: #FF4F00;
   --gx-accento-testo: #B83A00;
   --gx-bene: #12805A;
-  --gx-problema: #D23446;
+  /* #BE2537 e non #D23446: il credito negativo nella barra in alto stava a 4,1 sul fondo, sotto la soglia del testo */
+  --gx-problema: #BE2537;
   --gx-vetro: rgba(255, 255, 255, .7);
   --gx-vetro-orlo: rgba(255, 255, 255, 1);
   --gx-vetro-luce: rgba(255, 255, 255, 1);

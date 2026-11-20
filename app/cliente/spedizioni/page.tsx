@@ -580,7 +580,7 @@ async function apriTracking(s: any) {
                     { l: 'Colli', v: s.colli },
                     ...(Number(s.contrassegno)>0 ? [{ l: 'Contrassegno', v: <span style={{...codBadgeStyle(s.stato_contrassegno),padding:'1px 6px',borderRadius:'4px',fontSize:'11px',fontWeight:'600'}}>€{fe(Number(s.contrassegno))}</span> }] : []),
                     ...(s.id_ordine ? [{ l: 'Ordine', v: s.id_ordine }] : []),
-                    { soldi: true, l: 'Totale', v: <span><b style={{color:'#1a1a1a'}}>€ {fe(Number(s.costo_totale||0))}</b>{Number(s.contrassegno)>0&&<span style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
+                    { soldi: true, l: 'Totale', v: <span><b style={{color:'#1a1a1a'}}>€ {fe(Number(s.costo_totale||0))}</b>{Number(s.contrassegno)>0&&<span className="el-r" style={{color:'#dc2626',fontSize:'10px',marginLeft:'3px'}} title="Include il contrassegno">R</span>}</span> },
                   ]
                   return (
                     <Fragment key={s.id}>
@@ -614,7 +614,7 @@ async function apriTracking(s: any) {
                           : <>{new Date(s.created_at).toLocaleDateString('it-IT')} {new Date(s.created_at).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})}</>}
                       </td>
                       <td style={{padding:'9px 12px'}}>
-                        <span className="el-stato" style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
+                        <span className="el-stato" data-stato={s.stato} style={{background:st.bg,color:st.color,padding:'3px 8px',borderRadius:'4px',fontSize:'11px',fontWeight:'600',whiteSpace:'nowrap' as const}}>{st.label}</span>
                         {nuova && <Percorso s={s} />}
                         {s.stato==='annullamento_pending' && <div style={{fontSize:'10px',color:'#ea580c',marginTop:'3px',whiteSpace:'nowrap' as const}}>invio corriere {oreAllAnnullo(s.annullamento_richiesto_at)}</div>}
                         {/* "Spedita" puo' voler dire solo "chiusa in distinta": il numero dice in quale (QUICK, 16/11). */}
@@ -699,7 +699,7 @@ async function apriTracking(s: any) {
                     .filter(n => n===1 || n===totalePagine || Math.abs(n-paginaCorr)<=2)
                     .map((n,idx,arr)=>(
                       <span key={n} style={{display:'flex',alignItems:'center'}}>
-                        {idx>0 && arr[idx-1] !== n-1 && <span style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>…</span>}
+                        {idx>0 && arr[idx-1] !== n-1 && <span className="el-puntini" style={{padding:'0 4px',color:'#bbb',fontSize:'12px'}}>…</span>}
                         <button onClick={()=>vaiAPagina(n)}
                           style={{minWidth:'30px',padding:'5px 8px',border:'1px solid',borderColor:n===paginaCorr?'#f97316':'#d1d5db',borderRadius:'5px',background:n===paginaCorr?'#f97316':'#fff',color:n===paginaCorr?'#fff':'#1a1a1a',fontSize:'12px',fontWeight:n===paginaCorr?'700':'400',cursor:'pointer'}}>{n}</button>
                       </span>

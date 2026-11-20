@@ -74,7 +74,37 @@
 
 /* lo stato: pillola tonda */
 .gx .gx-elenco .el-stato { display: inline-flex; padding: 4px 11px !important; border-radius: 999px !important; font-size: 11.5px !important; font-weight: 600 !important; }
-.gx[data-luce="notte"] .gx-elenco .el-stato { filter: saturate(.9) brightness(.92); }
+/* i bollini di stato: i colori di oggi (scritti nel bollino, STATI in spedizioni/page.tsx) avevano lettere chiare su
+   fondo chiaro (In Lavorazione 2,8) e di notte erano adesivi accesi sul titanio. Qui una tinta leggera del colore e la
+   scritta piena: contrasto sopra 5,5 di giorno e di notte. data-stato lo mette la pagina, con la grafica di oggi non
+   ha regole */
+.gx .el-stato[data-stato], .gx .tl-pillola[data-stato] { background: var(--st-f) !important; color: var(--st-t) !important; }
+.gx [data-stato="in_lavorazione"] { --st-f: #FFF1C2; --st-t: #7A4F00; }
+.gx [data-stato="spedita"] { --st-f: #E3F2FD; --st-t: #0B5A8C; }
+.gx [data-stato="in_transito"] { --st-f: #E6EEFF; --st-t: #1E40AF; }
+.gx [data-stato="in_consegna"], .gx [data-stato="annullamento_pending"], .gx [data-stato="storno_richiesto"] { --st-f: #FFE9DC; --st-t: #A63A00; }
+.gx [data-stato="consegnata"] { --st-f: #E3F6EA; --st-t: #166534; }
+.gx [data-stato="in_giacenza"], .gx [data-stato="annullamento_manuale"] { --st-f: #FDE7E9; --st-t: #A31D2B; }
+.gx [data-stato="reso_mittente"], .gx [data-stato="annullata"], .gx [data-stato="non_consegnato"] { --st-f: #EDECEA; --st-t: #3F3D39; }
+.gx[data-luce="notte"] [data-stato="in_lavorazione"] { --st-f: rgba(245, 196, 81, .16); --st-t: #F5C451; }
+.gx[data-luce="notte"] [data-stato="spedita"] { --st-f: rgba(124, 196, 242, .16); --st-t: #8FD0F7; }
+.gx[data-luce="notte"] [data-stato="in_transito"] { --st-f: rgba(147, 180, 255, .16); --st-t: #A9C2FF; }
+.gx[data-luce="notte"] [data-stato="in_consegna"], .gx[data-luce="notte"] [data-stato="annullamento_pending"], .gx[data-luce="notte"] [data-stato="storno_richiesto"] { --st-f: rgba(255, 133, 82, .16); --st-t: #FF9A6E; }
+.gx[data-luce="notte"] [data-stato="consegnata"] { --st-f: rgba(110, 219, 154, .15); --st-t: #7BE3A6; }
+.gx[data-luce="notte"] [data-stato="in_giacenza"], .gx[data-luce="notte"] [data-stato="annullamento_manuale"] { --st-f: rgba(255, 138, 148, .15); --st-t: #FF9AA3; }
+.gx[data-luce="notte"] [data-stato="reso_mittente"], .gx[data-luce="notte"] [data-stato="annullata"], .gx[data-luce="notte"] [data-stato="non_consegnato"] { --st-f: rgba(255, 255, 255, .08); --st-t: rgba(240, 239, 236, .82); }
+/* il margine verde dell'elenco e le frecce dell'ordinamento (colori scritti nella pagina di oggi): il verde #16a34a
+   era 3,1 sul bianco, le frecce #cbd5e1 si vedevano appena (1,4) */
+/* :not([data-stato]): la pillola «Consegnata» ha lo stesso verde scritto nella pagina, e questa regola (che viene dopo)
+   le toglieva il suo colore (4,4 invece di 7,2) */
+.gx .gx-elenco [style*="color: rgb(22, 163, 74)"]:not([data-stato]), .gx .gx-elenco [style*="color:#16a34a"]:not([data-stato]) { color: var(--gx-bene) !important; }
+/* la «R» del contrassegno accanto al totale (#dc2626 scritto nella pagina: 3,6 sul titanio) e i puntini fra i numeri di
+   pagina (#bbb: 1,9 sul bianco) */
+.gx .gx-elenco .el-r { color: var(--gx-problema) !important; }
+.gx .gx-elenco .el-puntini { color: var(--gx-attenuato) !important; }
+.gx .gx-elenco th > span[style*="color: rgb(203, 213, 225)"], .gx .gx-elenco th > span[style*="color:#cbd5e1"] { color: var(--gx-attenuato) !important; }
+/* il prezzo verde del dettaglio (scritto nel componente di oggi, #16a34a: 3,2 sul bianco) col verde della grafica nuova */
+.gx .ds [style*="color: rgb(22, 163, 74)"], .gx .ds [style*="color:#16a34a"] { color: var(--gx-bene) !important; }
 
 /* le azioni della riga: icone a linea in tasti tondi uguali */
 .gx .gx-elenco .el-azioni { gap: 6px !important; }
@@ -146,7 +176,7 @@
   transform: translate(-50%, 140%); opacity: 0; pointer-events: none; transition: transform .45s cubic-bezier(.2, .9, .25, 1.15), opacity .3s ease; }
 .gx .gx-elenco .el-blocco--su { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
 .gx .gx-elenco .el-blocco-n { margin-right: 10px; padding-right: 14px; border-right: 1px solid var(--gx-filo); font-size: 13px; color: var(--gx-testo) !important; white-space: nowrap; }
-.gx .gx-elenco .el-blocco-n b { color: var(--gx-accento); font-weight: 700; }
+.gx .gx-elenco .el-blocco-n b { color: var(--gx-accento-testo); font-weight: 700; }
 .gx .gx-elenco .el-blocco > button { height: 38px !important; padding: 0 15px !important; background: transparent !important; color: var(--gx-inchiostro) !important; font-size: 13px !important; }
 .gx .gx-elenco .el-blocco > button:hover { background: var(--gx-incavo) !important; }
 .gx .gx-elenco .el-blocco > button[style*="220, 38, 38"], .gx .gx-elenco .el-blocco > button[style*="#dc2626"] { color: var(--gx-problema) !important; }
@@ -208,7 +238,8 @@
   border: 1px solid var(--gx-filo); background: var(--gx-incavo); color: var(--gx-inchiostro); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .gx .tl-chi { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .gx .tl-chi b { font-size: 15px; font-weight: 600; color: var(--gx-inchiostro); }
-.gx .tl-chi span { font-size: 12.5px; color: var(--gx-attenuato); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* il cliente e l'ordine vanno a capo invece di tagliarsi coi puntini (sul telefono «LA BOUTIQUE DEL REGALO DI…») */
+.gx .tl-chi span { font-size: 12.5px; color: var(--gx-attenuato); overflow-wrap: anywhere; }
 .gx .tl-x { all: unset; cursor: pointer; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; line-height: 1;
   color: var(--gx-attenuato); background: var(--gx-incavo); }
 .gx .tl-x:hover { color: var(--gx-inchiostro); }

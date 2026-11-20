@@ -118,6 +118,8 @@ export function Portata({ mesi, tinte }: { mesi: any[] | null; tinte: Tinte | nu
   return (
     <section className="pb-sez pb-scheda gx-vetro pb-portata" aria-labelledby="pb-t-portata">
       <div className="pb-scheda__testa"><h3 id="pb-t-portata">La portata, mese per mese</h3><span>spedizioni create, il mese in corso fino a oggi</span></div>
+      {/* sul telefono il grafico tiene almeno 600 px e scorre di lato: in 350 px i cinque mesi si accavallavano */}
+      <div className="pb-portata__scorri">
       <div className="pb-portata__tela" ref={box} style={{ height: G?.H || 250 }}>
         {!mesi ? <div className="pb-vuoto">…</div> : !ultimi.length ? <div className="pb-vuoto">Ancora nessun mese da mostrare.</div> : G && <>
           <svg width={G.W} height={G.H} viewBox={`0 0 ${G.W} ${G.H}`} role="img" aria-label={'Spedizioni per mese: ' + ultimi.map(m => `${meseItaliano(m.mese)} ${m.totale}`).join(', ')}>
@@ -135,6 +137,7 @@ export function Portata({ mesi, tinte }: { mesi: any[] | null; tinte: Tinte | nu
             </div>
           ))}
         </>}
+      </div>
       </div>
     </section>
   )

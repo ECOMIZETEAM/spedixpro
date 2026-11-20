@@ -52,8 +52,21 @@ function useEntrate(radice: React.RefObject<HTMLElement | null>, dipende: unknow
   }, [radice, dipende])
 }
 
+// a credito a scalare il saldo che finisce ferma il cliente; a fattura andare sotto zero è normale (si fattura a fine
+// mese) e non va detto «ricarica». Il tipo di contratto lo dà /api/cliente/dati; vuoto vale «a scalare», come in lib/cascata.
+function useAScalare() {
+  const [aScalare, setAScalare] = useState<boolean | null>(null)
+  useEffect(() => {
+    let vivo = true
+    fetch('/api/cliente/dati', { cache: 'no-store' }).then(r => r.json()).then(c => { if (vivo && c && !c.error) setAScalare((c.tipo_contratto || 'credito_scalare') === 'credito_scalare') }).catch(() => {})
+    return () => { vivo = false }
+  }, [])
+  return aScalare
+}
+
 export default function PlanciaBCliente() {
   const { data, quando, tema } = useDatiCliente()
+  const aScalare = useAScalare()
   const radice = useRef<HTMLDivElement>(null)
   useScorrimentoMorbido(radice)
   useEntrate(radice, !!data)
@@ -86,12 +99,12 @@ export default function PlanciaBCliente() {
         <p className="pb-didascalia">Le spedizioni create negli ultimi 30 giorni, nello stato in cui sono oggi. Lo spessore è proporzionale al numero; i fili più sottili hanno uno spessore minimo per restare visibili.</p>
       </section>
 
-      <Chiusa data={data} />
+      <Chiusa data={data} aScalare={aScalare} />
 
       <div className="pb-sezioni">
         <div className="pb-due">
           <Numeri data={data} />
-          <Soldi data={data} />
+          <Soldi data={data} aScalare={aScalare} />
         </div>
         <Portata mesi={data ? (data.statsMensili || []) : null} tinte={tinte} />
       </div>
@@ -100,7 +113,7 @@ export default function PlanciaBCliente() {
 }
 
 // ── Da fare adesso: le cose che aspettano il cliente. Le righe a zero spariscono ──
-function Chiusa({ data }: { data: any }) {
+function Chiusa({ data, aScalare }: { data: any; aScalare: boolean | null }) {
   const credito = Number(data?.credito || 0)
   // singolare e plurale secondo il numero (come la Dashboard dei master)
   const nG = Number(data?.inGiacenza || 0), nS = Number(data?.daSpedire || 0)
@@ -108,7 +121,8 @@ function Chiusa({ data }: { data: any }) {
     { k: 'giac', n: nG, nome: nG === 1 ? 'giacenza' : 'giacenze', frase: nG === 1 ? 'aspetta le tue istruzioni' : 'aspettano le tue istruzioni', verbo: 'Rispondi', href: '/cliente/spedizioni/giacenze', problema: true },
     { k: 'sped', n: nS, nome: 'da spedire', frase: nS === 1 ? 'pronta, da chiudere in una distinta' : 'pronte, da chiudere in una distinta', verbo: 'Crea distinta', href: '/cliente/distinte/nuova', problema: false },
   ].filter(v => v.n > 0)
-  const senzaCredito = !!data && credito <= 0
+  // il 20/11 BLOOD SRLS, a fattura mensile e a -2.636 €, vedeva «credito finito: serve una ricarica»
+  const senzaCredito = !!data && aScalare === true && credito <= 0
   const quante = voci.length + (senzaCredito ? 1 : 0)
   return (
     <section className="pb-chiusa gx-vetro" aria-labelledby="pb-t-chiusa">
@@ -169,15 +183,16 @@ function Numeri({ data }: { data: any }) {
 }
 
 // ── I soldi del cliente: il credito, quanto ha speso, i contrassegni ──
-function Soldi({ data }: { data: any }) {
+function Soldi({ data, aScalare }: { data: any; aScalare: boolean | null }) {
   const credito = Number(data?.credito || 0)
   return (
     <section className="pb-sez pb-scheda gx-vetro pbc-soldi" aria-labelledby="pbc-t-soldi">
       <div className="pb-scheda__testa"><h3 id="pbc-t-soldi">I tuoi soldi</h3><a href="/cliente/movimenti">Movimenti<Icona id="i-chevron" /></a></div>
       <div className="pbc-credito">
         <span>Credito disponibile</span>
-        <b className={credito <= 0 ? 'pbc-meno' : undefined}>{data ? <Euro v={credito} /> : '…'}</b>
-        <a href="/cliente/ricarica">Ricarica<Icona id="i-chevron" /></a>
+        <b className={credito <= 0 && aScalare ? 'pbc-meno' : undefined}>{data ? <Euro v={credito} /> : '…'}</b>
+        {/* la dashboard di oggi non ha la ricarica: qui c'è, ma solo per chi va a credito a scalare */}
+        {aScalare && <a href="/cliente/ricarica">Ricarica<Icona id="i-chevron" /></a>}
       </div>
       <dl className="pbc-voci">
         <div><dt>Speso questo mese</dt><dd>{data ? <Euro v={Number(data.speseMese || 0)} /> : '…'}</dd></div>
