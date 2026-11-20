@@ -227,8 +227,9 @@ export default function NuovaSpedizioneCliente() {
         : { lunghezza: '', larghezza: '', altezza: '', peso }))
     }
     // OGNI COLLO CON LE SUE MISURE E IL SUO PESO, quando l'ordine di un negozio ne ha piu' d'uno (pacchi
-    // con «Un collo per ogni pezzo», lib/colli-negozio). Sta DOPO il blocco qui sopra, che riscrive il
-    // primo collo senza peso. Il peso del collo conta per l'estero; in Italia il modulo divide il totale.
+    // con «Un collo per ogni pezzo», lib/colli-negozio). Sta DOPO il blocco qui sopra, che divide il peso
+    // dell'ordine in parti uguali: qui ogni collo arriva col suo peso, e il modulo lo usa com'e' (dal
+    // 16/11 il peso si scrive collo per collo, in Italia come all'estero).
     const dett = (() => { try { const v = JSON.parse(q.get('colli_dett') || 'null'); return Array.isArray(v) ? v : null } catch { return null } })()
     if (dett && dett.length > 1) {
       const testo = (x: unknown) => (Number(x) > 0 ? String(x) : '')
