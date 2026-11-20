@@ -6,6 +6,24 @@ clienti, 25 master. Next.js (App Router) + Supabase, rilascio su Vercel.
 Ogni modifica tocca pacchi veri e soldi veri di aziende terze. Non esiste un ambiente di prova:
 quello che si rilascia va addosso a chi sta lavorando in quel momento.
 
+## L'obiettivo: la piattaforma migliore del mercato
+
+MoovExpress sta per essere venduta con campagne pubbliche. Deve essere la piattaforma di riferimento
+del settore, quella a cui tutti aspirano: **super veloce, super dettagliata, professionale,
+intelligente, con un design unico.** Ogni lavoro si misura su questo, non su "funziona".
+
+- **Calcoli e movimenti non sbagliano mai.** Prezzi, credito, contrassegni, rettifiche e Lista
+  Movimenti sono la cosa più importante della piattaforma: un errore lì vale più di qualunque
+  funzione nuova. Si verificano sui dati veri, prima e dopo (vedi "Come si verifica").
+- **La velocità è un requisito, non un'ottimizzazione.** Una pagina lenta, una barra ferma, un
+  caricamento che va oltre il tempo massimo sono difetti da correggere, non da sopportare.
+- **Il costo dell'infrastruttura non è un motivo per scegliere la soluzione peggiore.** Se un indice,
+  un piano Supabase più grande o più risorse rendono la piattaforma più veloce e più solida, si
+  propongono (Lorenzo, 20/11/2026: "non mi frega di pagare in più Supabase").
+- **Dettaglio e professionalità ovunque:** messaggi chiari con i numeri veri, avanzamento visibile,
+  nessun dato inventato o approssimato, nessuna schermata che lascia l'utente senza sapere cosa sta
+  succedendo.
+
 ## Prima di toccare prezzi, credito, addebiti o perimetro
 
 **Leggi [REGOLE.md](REGOLE.md).** Dice quali sono le regole che valgono soldi e — soprattutto —
