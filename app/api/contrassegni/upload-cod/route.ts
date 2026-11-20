@@ -126,6 +126,18 @@ export async function POST(req: NextRequest) {
       .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
       .eq('numero', ldv)
       .limit(1).maybeSingle()
+    // Stessa LDV scritta in minuscolo ("nn669100493" contro NN669100493 nel portale): l'indice distingue le
+    // maiuscole, e senza questo passo la riga finiva nella ricerca parziale, che scorre tutta la tabella
+    // (1 secondo per riga). Il 19-20/11/2026 il file GLS di M.C LOGISTICA (755 righe, tutte minuscole) non e'
+    // mai entrato: i blocchi da 200 superavano i 300 secondi della funzione.
+    const ldvMaiuscolo = ldv.toUpperCase()
+    if (!spedizione && ldvMaiuscolo !== ldv) {
+      const rM = await adminDb.from('spedizioni')
+        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
+        .eq('numero', ldvMaiuscolo)
+        .limit(1).maybeSingle()
+      spedizione = rM.data as any
+    }
     if (!spedizione && /^[A-Za-z0-9_-]+$/.test(ldv)) {
       // Export SpediamoPro: 'Shipment' e' il codice del provider (raw_response.code), non la LDV in elenco.
       // PRIMA della ricerca parziale: tracking e codice hanno un indice, la ricerca parziale scorre tutta la
@@ -134,7 +146,7 @@ export async function POST(req: NextRequest) {
       // e' entrato solo l'ultimo blocco, 2 contrassegni invece di 100.
       const r2 = await adminDb.from('spedizioni')
         .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
-        .or(`tracking_number.eq.${ldv},raw_response->>code.eq.${ldv}`)
+        .or(`tracking_number.eq.${ldv},tracking_number.eq.${ldvMaiuscolo},raw_response->>code.eq.${ldv}`)
         .limit(1).maybeSingle()
       spedizione = r2.data as any
     }
