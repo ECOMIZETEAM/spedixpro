@@ -288,7 +288,7 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
         </div>
 
         <div className="ds-piede" style={{ padding: '14px 20px', borderTop: '1px solid #e8e8e8', display: 'flex', justifyContent: 'flex-end', gap: '10px', background: '#fff', borderRadius: '0 0 12px 12px' }}>
-          {puoCorreggere && !mod && <button className="ds-btn ds-btn-secondario ds-sinistra" onClick={() => setMod(true)} style={{ marginRight: 'auto', padding: '9px 16px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{nuova ? <Icona id="i-matita" /> : '✏️ '}Correggi peso e misure</button>}
+          {puoCorreggere && !mod && <button className="ds-btn ds-btn-secondario ds-sinistra" onClick={() => setMod(true)} style={{ marginRight: 'auto', padding: '9px 16px', background: '#fff', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{nuova ? <><Icona id="i-matita" />Correggi peso e misure</> : '✏️ Correggi peso/misure'}</button>}
           {etichettaHref && <a className="ds-btn ds-btn-secondario" href={etichettaHref} download style={{ padding: '9px 16px', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '7px', fontSize: '13px', fontWeight: 700, textDecoration: 'none' }}>{nuova ? <Icona id="i-stampa" /> : '🖨️ '}Etichetta</a>}
           <button className="ds-btn ds-btn-primario" onClick={onClose} style={{ padding: '9px 18px', background: '#f97316', color: '#fff', border: 'none', borderRadius: '7px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>Chiudi</button>
         </div>
