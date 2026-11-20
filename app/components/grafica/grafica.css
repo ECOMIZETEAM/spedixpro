@@ -262,6 +262,8 @@
 .sv-campo textarea { font: inherit; font-size: 13.5px; font-weight: 400; resize: vertical; min-height: 76px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--gx-filo);
   background: var(--gx-incavo); color: var(--gx-testo); }
 .sv-campo textarea:focus { outline: none; border-color: var(--gx-accento); }
+/* sul telefono il commento a 16 px: sotto, l'iPhone ingrandisce la pagina quando lo si tocca */
+@media (max-width: 720px) { .sv-campo textarea { font-size: 16px; } }
 .sv-errore { margin-top: 12px; padding: 10px 12px; border-radius: 12px; font-size: 13px; color: var(--gx-problema); background: color-mix(in srgb, var(--gx-problema) 9%, transparent); }
 .sv-piede { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .sv-piede button { all: unset; cursor: pointer; height: 42px; padding: 0 18px; border-radius: 999px; font-size: 13.5px; font-weight: 600; }

@@ -50,6 +50,15 @@
 .gx .ns-campo__val { border: 0; outline: 0; padding: 0; width: 100%; min-width: 0; background: transparent; font: inherit; font-size: 15px; color: var(--gx-inchiostro); }
 .gx .ns-campo__val::placeholder { color: var(--gx-attenuato); opacity: .7; }
 .gx .ns-campo select.ns-campo__val { cursor: pointer; }
+/* le tendine si aprono toccando tutto il riquadro, non solo la riga del valore (sul telefono «Paese» rispondeva in 21 px
+   dei 52 del riquadro, «Spedisci per» in 26): il campo si allunga sopra l'etichetta e ai lati, con altrettanto margine
+   negativo, così niente si sposta. L'etichetta resta visibile sotto (il campo è trasparente) */
+.gx .ns-campo select.ns-campo__val, .gx .ns-campo button.ns-campo__val { position: relative; z-index: 1; box-sizing: content-box;
+  margin: -24px -12px -8px; padding: 24px 12px 8px; width: 100%; }
+.gx .ns-campo button.ns-campo__val { padding-top: 27px; }
+/* le tendine di sistema (Paese, Tipo di merce) solo in alto e in basso: la loro freccia sta contro il bordo del campo e,
+   allargato ai lati, finiva attaccata al bordo del riquadro */
+.gx .ns-campo select.ns-campo__val { margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; }
 .gx .ns-campo__err { font-size: 12px; font-weight: 500; color: var(--gx-problema); }
 .gx[data-luce="notte"] .ns-campo select { color-scheme: dark; }
 
@@ -252,6 +261,25 @@
 .ns-tendina__voce:hover { background: rgba(255, 79, 0, .1); }
 
 .gx .ns-solo-telefono { display: none; }
+
+/* sul telefono (20/11, controllo da telefono chiesto da Lorenzo):
+   - i campi a 16 px: sotto i 16 l'iPhone ingrandisce la pagina ogni volta che se ne tocca uno (erano tutti a 15);
+   - i link piccoli («Modifica», «Dal catalogo», «Aggiungi un riferimento ordine») alti 20 px: la zona da toccare si
+     allunga sopra e sotto senza spostare niente;
+   - la tendina dei comuni larga quanto lo schermo: sotto un campo largo metà riga era di 170 px, «Milano (MI) 20121»
+     andava su due righe */
+@media (max-width: 720px) {
+  .gx .ns-campo__val, .gx button.ns-campo__val { font-size: 16px; }
+  .sc-cerca { font-size: 16px !important; }
+  .gx .ns-link { padding: 10px 0; margin: -10px 0; }
+  .ns-tendina { left: 10px !important; right: 10px !important; width: auto !important; }
+  .ns-tendina__voce { display: flex; align-items: baseline; gap: 8px; padding: 11px 14px; font-size: 15px; }
+  .ns-tendina__voce span { font-size: 13px; }
+  /* il ritiro col pollice: giorni e frecce a 40 px (erano 34), Mattina / Pomeriggio a 40 (erano 32) */
+  .gx .ns-cal__g { height: 40px; font-size: 15px; }
+  .gx .ns-cal__freccia { width: 40px; height: 40px; }
+  .gx .ns-segmenti button { padding: 10px 18px; font-size: 14px; }
+}
 
 @media (max-width: 899px) {
   .gx .ns-griglia { grid-template-columns: minmax(0, 1fr); gap: 14px; }

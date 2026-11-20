@@ -494,6 +494,10 @@
   .gx .gx-elenco .el-blocco { left: 10px; right: 10px; bottom: 12px; width: auto; max-width: none; flex-wrap: wrap; gap: 6px;
     padding: 10px; border-radius: 22px; transform: translateY(140%); }
   .gx .gx-elenco .el-blocco--su { transform: none; }
+  /* i campi a 16 px: sotto i 16 l'iPhone ingrandisce la pagina quando se ne tocca uno (filtri, «Cerca», «Mostra»,
+     «Ordina» erano a 13) */
+  .gx .gx-elenco .el-filtri input:not([type="checkbox"]), .gx .gx-elenco .el-filtri select, .gx .gx-elenco .el-testa input,
+  .gx .gx-elenco .el-testa select, .gx .gx-elenco .el-tabella select { font-size: 16px !important; }
   .gx .gx-elenco .el-blocco-n { order: 0; flex: 1 1 calc(100% - 52px); margin: 0; padding: 0 0 0 8px; border-right: 0; }
   .gx .gx-elenco .el-blocco > .el-blocco-x { order: 1; margin-left: 0; }
   .gx .gx-elenco .el-blocco > button:not(.el-blocco-x) { order: 2; flex: 1 1 calc(50% - 3px); justify-content: center; padding: 0 10px !important;
