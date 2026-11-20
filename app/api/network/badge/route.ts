@@ -66,10 +66,20 @@ export async function GET(_req: NextRequest) {
   ])
 
   // ── DA CONFERMARE (Rettifica Costi) ── rettifiche MIE ancora in attesa: il credito non è sceso.
-  const { data: rettDaConf } = await adminDb.from('rettifiche')
-    .select('differenza,fuori_sagoma')
-    .eq('master_id', mio).eq('confermata', false)
-  const confermaImporto = (rettDaConf || []).reduce((a: number, r: any) =>
+  // SI PAGINA anche qui, come per quelle da accettare: il 20/11/2026 MULTIEXPRESS ne aveva 2.582 per 147,43 EUR e il
+  // pallino (e la plancia nuova) diceva 1.000 per 92,28. Il database ne torna mille per volta; .order('id') perché
+  // senza un ordine le pagine non sono stabili e una riga può comparire due volte o mai.
+  const rettDaConf: any[] = []
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await adminDb.from('rettifiche')
+      .select('differenza,fuori_sagoma')
+      .eq('master_id', mio).eq('confermata', false)
+      .order('id').range(da, da + 999)
+    if (error) { console.error('[BADGE] rettifiche da confermare:', error.message); break }
+    rettDaConf.push(...(data || []))
+    if (!data || data.length < 1000) break
+  }
+  const confermaImporto = rettDaConf.reduce((a: number, r: any) =>
     a + (Number(r.differenza) < 0 ? -Number(r.differenza) : 0) + (Number(r.fuori_sagoma) || 0), 0)
 
   const daAccettare = rettDaAccettare.length + (cod.count || 0) + (resi.count || 0)
@@ -77,7 +87,7 @@ export async function GET(_req: NextRequest) {
     daAccettare,
     daAccettareRettifiche: rettDaAccettare.length,
     daAccettareImporto: Math.round(rettAccettareImporto * 100) / 100,
-    daConfermare: (rettDaConf || []).length,
+    daConfermare: rettDaConf.length,
     daConfermareImporto: Math.round(confermaImporto * 100) / 100,
   })
 }
