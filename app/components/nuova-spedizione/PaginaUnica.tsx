@@ -492,9 +492,9 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
 
           {/* ── DESTINATARIO ── */}
           <section id="ns-destinatario" className="ns-sezione" aria-labelledby="ns-h-dest">
-            <div className="ns-sezione__testa"><h2 id="ns-h-dest"><Icona id="i-percorso" />Destinatario</h2></div>
+            <div className="ns-sezione__testa"><h2 id="ns-h-dest"><Icona id="i-segnaposto" />Destinatario</h2></div>
             <div className="ns-modi" role="radiogroup" aria-label="Dove si consegna">
-              {([['domicilio', 'A domicilio', "Il corriere consegna all'indirizzo", 'i-magazzino'], ['punto', 'A un punto', 'Punto Poste, Ufficio Postale o locker', 'i-percorso']] as const).map(([v, t, s, ic]) => (
+              {([['domicilio', 'A domicilio', "Il corriere consegna all'indirizzo", 'i-casa'], ['punto', 'A un punto', 'Punto Poste, Ufficio Postale o locker', 'i-segnaposto']] as const).map(([v, t, s, ic]) => (
                 <label key={v} className={'ns-modo' + (consegnaA === v ? ' ns-modo--su' : '')}>
                   <input type="radio" name="ns-consegna" checked={consegnaA === v} onChange={() => setConsegnaA(v)} />
                   <Icona id={ic} />
@@ -593,7 +593,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
               ))}
             </div>
             <div className="ns-colli__piede">
-              <button type="button" className="ns-tasto2" onClick={() => setColli(prev => [...prev, COLLO_VUOTO])}><Icona id="i-pacco" />Aggiungi un collo</button>
+              <button type="button" className="ns-tasto2" onClick={() => setColli(prev => [...prev, COLLO_VUOTO])}><Icona id="i-piu" />Aggiungi un collo</button>
               <span className="ns-nota">{colli.length === 1 ? '1 collo' : `${colli.length} colli`} · in tutto <b>{kg(colli.reduce((s, c) => s + num(c.peso), 0))}</b></span>
             </div>
             <p className="ns-nota">Misure vuote: si conta 20×15×10 cm. Scriverle evita le rettifiche dopo.</p>

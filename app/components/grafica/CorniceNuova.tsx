@@ -14,6 +14,7 @@ import ContiTendina from '../ContiTendina'
 import { FoglioIcone, Icona, ICONA_VOCE } from './icone'
 import { GraficaNuova } from './contesto'
 import Sondaggio from './Sondaggio'
+import { PAGINE_PROVA } from './pagine-prova'
 import './grafica.css'
 
 export type VoceMenu = { label: string; href?: string; external?: boolean; sub?: { label: string; href: string }[] }
@@ -61,7 +62,6 @@ function riordina(nav: VoceMenu[], ruolo?: string, prova?: boolean): VoceMenu[] 
 }
 
 // le pagine già pronte nella grafica nuova (le stesse del proxy, middleware.ts)
-const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni', '/cliente/dashboard', '/cliente/spedizioni'])
 
 // i gruppi del menu del portale cliente (le voci sono quelle di ClienteNav)
 // (nell'ordine in cui le voci arrivano: un gruppo spezzato in due farebbe comparire due volte lo stesso titoletto)
@@ -266,7 +266,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
         {prova && (
           <div className="gx-prova" role="region" aria-label="Prova della nuova versione">
             <span className="gx-prova__punto" aria-hidden="true" />
-            <span className="gx-prova__testo"><b>Stai provando la nuova MoovExpress.</b> Per ora sono pronte la Dashboard e l'Elenco spedizioni: le altre voci arrivano presto.</span>
+            <span className="gx-prova__testo"><b>Stai provando la nuova MoovExpress.</b> Per ora sono pronte la Dashboard, l'Elenco spedizioni e la Nuova spedizione: le altre voci arrivano presto.</span>
             <button type="button" className="gx-prova__voto" onClick={() => setVoto('voto')}>Lascia il tuo voto</button>
             <button type="button" className="gx-prova__esci" onClick={() => setVoto('esci')}>Torna alla versione attuale<Icona id="i-chevron" /></button>
           </div>

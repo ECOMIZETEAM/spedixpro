@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { PARAM_ERRORE, PARAM_COLLEGATO } from '@/lib/esiti-collegamento'
+// le pagine che si possono provare con la grafica nuova (vedi x-grafica-prova più sotto): un elenco solo, col menu
+import { PAGINE_PROVA } from '@/app/components/grafica/pagine-prova'
 import { API_SENZA_VERIFICA, CODICE_CAMBIO_PASSWORD, CODICE_VERIFICA, PAGINA_CAMBIO_PASSWORD, PAGINA_VERIFICA, bloccataDallaVerifica, statoSessione } from '@/lib/verifica-due-passaggi'
 
 // SCRITTURE CONSENTITE ALL'AGENTE.
@@ -40,9 +42,6 @@ const SCRITTURE_AUTISTA = [
 // La rete SOTTO continua a lavorare: il conto e' di ciascuno, e il flag sta sulla riga del singolo
 // master. Un sotto-master che ha pagato il suo canone non si ferma perche' si e' fermato il padre —
 // e se non lo ha pagato si congela per conto suo, non per colpa di chi sta sopra.
-
-// Le pagine che si possono provare con la grafica nuova (vedi x-grafica-prova più sotto)
-const PAGINE_PROVA = new Set(['/dashboard', '/dashboard/spedizioni', '/cliente/dashboard', '/cliente/spedizioni'])
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
