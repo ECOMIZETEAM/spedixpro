@@ -126,27 +126,40 @@ export async function POST(req: NextRequest) {
       .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
       .eq('numero', ldv)
       .limit(1).maybeSingle()
+    // Stessa LDV scritta in minuscolo ("nn669100493" contro NN669100493 nel portale): l'indice distingue le
+    // maiuscole. Il 19-20/11/2026 il file GLS di M.C LOGISTICA (755 righe, tutte minuscole) non e' mai entrato:
+    // ogni riga finiva nella vecchia ricerca per contenuto e i blocchi da 200 superavano i 300 secondi.
+    const ldvMaiuscolo = ldv.toUpperCase()
+    if (!spedizione && ldvMaiuscolo !== ldv) {
+      const rM = await adminDb.from('spedizioni')
+        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
+        .eq('numero', ldvMaiuscolo)
+        .limit(1).maybeSingle()
+      spedizione = rM.data as any
+    }
     if (!spedizione && /^[A-Za-z0-9_-]+$/.test(ldv)) {
-      // Export SpediamoPro: 'Shipment' e' il codice del provider (raw_response.code), non la LDV in elenco.
-      // PRIMA della ricerca parziale: tracking e codice hanno un indice, la ricerca parziale scorre tutta la
-      // tabella. Il 19/11/2026 il file SpediamoPro di MULTIEXPRESS (251 righe, tutte codici) passava prima dalla
-      // ricerca parziale riga per riga: il blocco da 200 e' andato oltre i 300 secondi della funzione ed
-      // e' entrato solo l'ultimo blocco, 2 contrassegni invece di 100.
-      const r2 = await adminDb.from('spedizioni')
+      // Tracking e codice del provider in DUE letture separate, ognuna sul suo indice. Messe insieme in un
+      // OR con limit 1 il database sceglieva di scorrere tutta la tabella (EXPLAIN del 20/11/2026: 1 s e
+      // 140.000 pagine per riga); separate rispondono in 0,1 ms.
+      const rT = await adminDb.from('spedizioni')
         .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
-        .or(`tracking_number.eq.${ldv},raw_response->>code.eq.${ldv}`)
+        .in('tracking_number', ldvMaiuscolo !== ldv ? [ldv, ldvMaiuscolo] : [ldv])
         .limit(1).maybeSingle()
-      spedizione = r2.data as any
+      spedizione = rT.data as any
+      if (!spedizione) {
+        // Export SpediamoPro: 'Shipment' e' il codice del provider (raw_response.code), non la LDV in elenco.
+        const rC = await adminDb.from('spedizioni')
+          .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
+          .eq('raw_response->>code', ldv)
+          .limit(1).maybeSingle()
+        spedizione = rC.data as any
+      }
     }
-    if (!spedizione) {
-      // Ultimo ripiego: match parziale (numero che CONTIENE la LDV). Scorre la tabella: gira solo sulle
-      // righe che nessuna ricerca con indice ha risolto.
-      const rLike = await adminDb.from('spedizioni')
-        .select('id,cliente_id,master_id,numero,contrassegno,stato_contrassegno,corriere_id,corrieri(tipo,nome_contratto)')
-        .ilike('numero', `%${ldv}%`)
-        .limit(1).maybeSingle()
-      spedizione = rLike.data as any
-    }
+    // NIENTE ricerca per contenuto (numero ilike '%ldv%'): scorreva tutte le 677.000 spedizioni, 1 secondo e
+    // ~800 MB letti PER RIGA, e su spedizioni.numero vale la regola "solo uguaglianza, mai LIKE" (crash del
+    // 26/10). Con il ripiego il file GLS di M.C (372 righe di pacchi mai fatti sul portale) superava i 300
+    // secondi a blocco. Tolta il 20/11/2026: su 10 file di 8 formati non aveva mai trovato niente che le
+    // ricerche esatte non trovassero. Una LDV che non c'e' esatta e' "non trovata a sistema".
     if (!spedizione) { segnaErrore(ldv, 'non trovata a sistema'); continue }
     // Trovata per RIPIEGO (non per numero esatto): se è la gamba di un venditore di un pacco condiviso
     // (stesso tracking, numero col suffisso), si riporta alla gamba ORIGINANTE. Il contrassegno è del pacco,

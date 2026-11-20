@@ -292,6 +292,9 @@ export type MoovexpressTracking = {
   stato: string | null
   consegnata: boolean
   eventi: { data: string; descrizione: string; luogo: string }[]
+  // La giacenza APERTA ADESSO sulla spedizione del venditore (o piu' su nella catena), con la data vera
+  // dell'apertura e il motivo del corriere. Solo dalla lettura locale (trackingMoovexpressLocale).
+  giacenza?: { data: string; motivo: string | null } | null
 }
 
 // TRACKING: chiede al venditore lo stato della spedizione (GET /api/v1/tracking/<numero>). Il venditore
@@ -361,11 +364,20 @@ export async function trackingMoovexpressLocale(
   const trk = String(tracking).trim().replace(/[^A-Za-z0-9._-]/g, '')
   if (!trk) throw new Error('Numero di tracking mancante o non valido')
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,stato,numero,tracking_number,master_id,corrieri(tipo,nome_contratto)')
+    .select('id,stato,numero,tracking_number,master_id,giacenza_data,giacenza_stato,giacenza_motivo,corrieri(tipo,nome_contratto)')
     .eq('cliente_id', ctx.clienteId)
     .or(`tracking_number.eq.${trk},numero.eq.${trk}`)
     .limit(1).maybeSingle()
   if (!sped) throw new Error('Spedizione non trovata')
+  // GIACENZA APERTA QUI: entrata in giacenza, non ancora svincolata o chiusa, pacco non arrivato. Il venditore
+  // la riconosce dal suo corriere con regole che il compratore non ha (GLS: i codici degli eventi), e la sua
+  // riga puo' restare 'non_consegnato' con la giacenza aperta: senza passarla, la riga del compratore non la
+  // apriva mai (Quick, GLS NI W LIGHT, 20/11/2026).
+  const giacenzaQui = sped.giacenza_data
+    && (!sped.giacenza_stato || sped.giacenza_stato === 'aperta' || sped.giacenza_stato === 'in_gestione')
+    && !['consegnata', 'reso_mittente', 'annullata'].includes(String(sped.stato || ''))
+    ? { data: String(sped.giacenza_data), motivo: sped.giacenza_motivo ? String(sped.giacenza_motivo) : null }
+    : null
   const salvati = async () => {
     const { data: ev } = await admin.from('tracking_events')
       .select('stato,descrizione,luogo,data_evento')
@@ -388,9 +400,9 @@ export async function trackingMoovexpressLocale(
           ? await trackingMoovexpressLocale(admin, credSu, trkSu, memo, salto + 1)
           : await trackingMoovexpress(credSu, trkSu)
         const stato = su.stato || statoQui
-        return { stato, consegnata: stato === 'consegnata', eventi: su.eventi.length ? su.eventi : await salvati() }
+        return { stato, consegnata: stato === 'consegnata', eventi: su.eventi.length ? su.eventi : await salvati(), giacenza: su.giacenza || giacenzaQui }
       }
     } catch { /* come la rotta: se il salto sopra non risponde, vale cio' che c'e' qui */ }
   }
-  return { stato: statoQui, consegnata: statoQui === 'consegnata', eventi: await salvati() }
+  return { stato: statoQui, consegnata: statoQui === 'consegnata', eventi: await salvati(), giacenza: giacenzaQui }
 }
