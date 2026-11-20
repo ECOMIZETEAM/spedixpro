@@ -389,7 +389,6 @@ rect.pb-q--fuori { fill: var(--gx-accento); }
 @media (max-width: 599px) {
   /* sul telefono i nomi vanno a capo invece di tagliarsi («Poste Delivery Business S…», i destinatari delle giacenze) */
   .pb-rete__corriere > div > b, .pb-giac__righe > li > div > b, .pb-foce__nome, .pb-fonte__dett { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
-  .pb-portata__tela { min-width: 600px; }
   .pb-sommario { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .pb-sommario > div { min-width: 0; margin-left: 0; padding-left: 12px; }
   .pb-sommario > div:first-child { padding-left: 0; }
@@ -430,3 +429,89 @@ rect.pb-q--fuori { fill: var(--gx-accento); }
 .pbc-voci { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin: 16px 0 0; }
 .pbc-voci dt { font-size: 12px; color: var(--gx-attenuato); }
 .pbc-voci dd { margin: 3px 0 0; font-size: 19px; font-weight: 400; color: var(--gx-inchiostro); font-variant-numeric: tabular-nums; }
+
+/* ── la Dashboard sul telefono, secondo giro (Lorenzo 20/11: «controlla anche la dashboard da telefono») ───────────
+   Fiume, cascata dei soldi e foce sotto i 560 px hanno una loro forma (Fiume.tsx FiumeVerticale, Soldi.tsx
+   CascataLista, Fondo.tsx FoceLista): larghi 700–860 px e da scorrere di lato, le scritte cadevano sopra i disegni o
+   restavano fuori dallo schermo. Stessi numeri, disposti dall'alto in basso */
+
+/* il fiume che scende */
+.pb-fv { display: grid; margin-top: 18px; }
+.pb-fv__capo { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 14px; }
+.pb-fv__segno { width: 56px; height: 56px; object-fit: contain; filter: drop-shadow(0 10px 14px rgba(40, 37, 33, .16)); }
+.pb--notte .pb-fv__segno { filter: drop-shadow(0 0 16px rgba(255, 95, 31, .28)); }
+.pb-fv__capo b { display: block; font-weight: 200; font-size: 40px; letter-spacing: -.04em; line-height: 1; color: var(--gx-inchiostro); }
+.pb-fv__capo--foce b { color: var(--gx-accento-testo); }
+.pb--notte .pb-fv__capo--foce b { color: var(--gx-accento); text-shadow: 0 0 24px rgba(255, 95, 31, .4); }
+.pb-fv__nome { display: block; margin-top: 6px; font-size: 11px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--gx-inchiostro); }
+.pb-fv__frase { display: block; font-size: 12.5px; line-height: 1.35; color: var(--gx-attenuato); }
+/* il fiume: una linea che scende dal pacco alla casa, una tacca per tappa */
+.pb-fv__tappe { position: relative; display: grid; gap: 18px; margin: 4px 0; padding: 18px 0 18px 70px; list-style: none; }
+.pb-fv__tappe::before { content: ''; position: absolute; left: 26px; top: 0; bottom: 0; width: 4px; border-radius: 4px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--gx-accento) 28%, transparent), var(--gx-accento)); }
+.pb-fv__tappa { position: relative; display: grid; grid-template-columns: minmax(2.2em, auto) minmax(0, 1fr); align-items: baseline; column-gap: 12px; row-gap: 8px; }
+.pb-fv__tappa::before { content: ''; position: absolute; left: -47px; top: 8px; width: 10px; height: 10px; border-radius: 50%; background: var(--gx-fondo); box-shadow: 0 0 0 2.5px var(--gx-accento); }
+.pb-fv__tappa > b { font-weight: 200; font-size: 28px; letter-spacing: -.03em; line-height: 1; color: var(--gx-inchiostro); }
+.pb-fv__tappa .pb-fv__nome { margin-top: 0; }
+.pb-fv__barra { position: relative; grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--gx-inchiostro) 8%, transparent); }
+.pb-fv__barra::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--q); border-radius: 3px; background: var(--gx-accento); }
+.pb-fv__uscite { display: grid; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--gx-filo); }
+.pb-fv__titolo { font-size: 11px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--gx-attenuato); }
+.pb-fv__uscite ul { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.pb-fv__uscite li { display: grid; grid-template-columns: 3.2em minmax(0, 1fr); align-items: baseline; gap: 10px; }
+.pb-fv__uscite li > b { font-weight: 300; font-size: 21px; letter-spacing: -.02em; line-height: 1; color: var(--gx-inchiostro); }
+.pb-fv__uscite li.pb-fv__uscita--problema > b { color: var(--gx-problema); }
+.pb-fv__unome { display: block; font-size: 13.5px; font-weight: 500; color: var(--gx-inchiostro); }
+
+/* la foce in classifica */
+.pb-fl { display: grid; gap: 18px; }
+.pb-fl__tronco { display: grid; }
+.pb-fl__tronco > b { font-weight: 200; font-size: 44px; letter-spacing: -.04em; line-height: 1; color: var(--gx-inchiostro); }
+.pb-fl__tronco > span { margin-top: 6px; font-size: 11px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; color: var(--gx-inchiostro); }
+.pb-fl__tronco > em { font-style: normal; font-size: 12.5px; color: var(--gx-attenuato); }
+.pb-fl__righe { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.pb-fl__riga { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 46px; align-items: baseline; column-gap: 10px; row-gap: 7px; font-size: 14px; }
+.pb-fl__rango { font-size: 11.5px; color: var(--gx-attenuato); font-variant-numeric: tabular-nums; }
+.pb-fl__nome { min-width: 0; color: var(--gx-inchiostro); overflow-wrap: anywhere; }
+.pb-fl__nome > small { margin-left: 7px; font-size: 11px; letter-spacing: .06em; color: var(--gx-attenuato); }
+.pb-fl__riga > b { font-weight: 400; color: var(--gx-inchiostro); }
+.pb-fl__riga > em { font-style: normal; font-size: 12px; text-align: right; color: var(--gx-attenuato); }
+.pb-fl__barra { position: relative; grid-column: 2 / -1; height: 4px; overflow: hidden; border-radius: 4px; background: color-mix(in srgb, var(--gx-inchiostro) 7%, transparent); }
+.pb-fl__barra::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--q); border-radius: 4px; background: var(--gx-accento); }
+.pb-fl__riga--altre > .pb-fl__nome, .pb-fl__riga--estero > .pb-fl__nome { color: var(--gx-attenuato); }
+.pb-fl__riga--altre .pb-fl__barra::after, .pb-fl__riga--estero .pb-fl__barra::after { background: color-mix(in srgb, var(--gx-inchiostro) 30%, transparent); }
+
+/* i soldi in elenco */
+.pb-cl { display: grid; gap: 18px; }
+.pb-cl__testa { display: grid; gap: 4px; }
+.pb-cl__testa > span { font-size: 12.5px; color: var(--gx-attenuato); }
+.pb-cl__testa > b { font-weight: 200; font-size: 40px; letter-spacing: -.04em; line-height: 1.05; color: var(--gx-inchiostro); }
+.pb-cl__barra { display: flex; gap: 3px; height: 10px; margin: 10px 0 6px; }
+.pb-cl__barra > i { min-width: 3px; border-radius: 5px; }
+.pb-cl__guadagno { background: var(--gx-accento); }
+.pb-cl__costi { background: color-mix(in srgb, var(--gx-inchiostro) 16%, transparent); }
+.pb-cl__due { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.pb-cl__due > div { display: grid; gap: 2px; align-content: start; }
+/* solo l'etichetta (figlia diretta): la regola su tutti gli span rimpiccioliva anche le cifre dentro l'importo */
+.pb-cl__due > div > span { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--gx-testo); }
+.pb-cl__due b { font-weight: 300; font-size: 22px; letter-spacing: -.02em; color: var(--gx-inchiostro); }
+.pb-cl__due em { font-style: normal; font-size: 12px; line-height: 1.35; color: var(--gx-attenuato); }
+.pb-cl__punto { width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--gx-inchiostro) 22%, transparent); }
+.pb-cl__punto--guadagno { background: var(--gx-accento); }
+.pb-cl__voci { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--gx-filo); }
+.pb-cl__voci > li { border-bottom: 1px solid var(--gx-filo); }
+.pb-cl__voce { display: grid; gap: 3px; padding: 12px 0; color: inherit; text-decoration: none; }
+.pb-cl__voce:hover .pb-fonte__nome { color: var(--gx-accento-testo); }
+.pb-cl__voce:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; border-radius: 8px; }
+.pb-cl .pb-fonte__dett { white-space: normal; }
+
+@media (max-width: 599px) {
+  /* la didascalia parla dello spessore dei fili: sul telefono il fiume scende ed è fatto di tacche */
+  .pb-lastra > .pb-didascalia { display: none; }
+  /* il periodo dei soldi su due righe: in una riga «Questa settimana» e «Questo mese» andavano a capo e uscivano dalla
+     pillola */
+  .pb-periodo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; box-sizing: border-box; margin-left: 0; border-radius: 22px; }
+  .pb-periodo > button { box-sizing: border-box; height: 40px; padding: 0 10px; text-align: center; white-space: nowrap; line-height: 40px; }
+  /* i link nelle testate e nei saldi: la zona da toccare si allunga sopra e sotto senza spostare niente */
+  .pb .pb-scheda__testa > a, .pb .pb-saldi > ul > li > span > em > a, .pb .pb-netto__lucchetto > a { padding: 10px 0; margin: -10px 0; }
+}

@@ -85,7 +85,9 @@ export default function Soldi({ data, tinte }: { data: any; tinte: Tinte | null 
 type Fonte = { k: string; nome: string; href: string; r: number; g: number; c: number }
 function Cascata({ tot, sped, voci, gest, tinte, chiave }: { tot: any; sped: any; voci: any[]; gest: any; tinte: Tinte | null; chiave: string }) {
   const box = useRef<HTMLDivElement>(null), tela = useRef<HTMLCanvasElement>(null)
-  const misura = useLarghezza(box), W = misura ? Math.max(misura, 760) : 0
+  // sotto i 560 px (il telefono) la cascata è un elenco (CascataLista): a 760 px da scorrere di lato i nastri passavano
+  // sopra le cifre delle voci (20/11)
+  const misura = useLarghezza(box), lista = !!misura && misura < 560, W = misura && !lista ? Math.max(misura, 760) : 0
   const pronto = !!tot && !!sped && voci.every(Boolean)
   const fonti: Fonte[] = useMemo(() => {
     if (!pronto) return []
@@ -151,7 +153,9 @@ function Cascata({ tot, sped, voci, gest, tinte, chiave }: { tot: any; sped: any
   const vediGestione = tot?.costiGestione !== undefined
   return (
     <div className="pb-cascata" ref={box}>
-      {!pronto ? <div className="pb-vuoto pb-vuoto--alto">…</div> : G?.vuoto ? <div className="pb-vuoto pb-vuoto--alto">Nessun incasso in questo periodo.</div> : g && (
+      {!pronto ? <div className="pb-vuoto pb-vuoto--alto">…</div>
+        : lista ? (Number(tot.ricavi || 0) > 0 ? <CascataLista tot={tot} fonti={fonti} gest={gest} vediGestione={vediGestione} /> : <div className="pb-vuoto pb-vuoto--alto">Nessun incasso in questo periodo.</div>)
+        : G?.vuoto ? <div className="pb-vuoto pb-vuoto--alto">Nessun incasso in questo periodo.</div> : g && (
         <div className="pb-cascata__tela" style={{ height: g.H }} key={chiave}>
           <svg width={g.W} height={g.H} viewBox={`0 0 ${g.W} ${g.H}`} role="img" aria-label={`Incassato ${euroPiano(g.R)}: ${euroPiano(g.Cs)} di costi e ${euroPiano(g.Gd)} di guadagno. Per voce: ` + g.nodi.map(n => `${n.nome} ${euroPiano(n.r)}`).join(', ')}>
             <defs>
@@ -197,6 +201,54 @@ function Cascata({ tot, sped, voci, gest, tinte, chiave }: { tot: any; sped: any
               <em>quello che costano le stesse voci</em>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── la cascata sul telefono: in testa l'incassato, una barra divisa fra costi e guadagno e le due cifre; sotto le voci
+// (quanto resta di ognuna, con incassato e costo); in fondo costi di gestione e utile netto. Gli stessi numeri ──
+function CascataLista({ tot, fonti, gest, vediGestione }: { tot: any; fonti: Fonte[]; gest: any; vediGestione: boolean }) {
+  const R = Math.max(0, Number(tot.ricavi || 0)), Gd = Number(tot.guadagno || 0), Cs = Math.max(0, Number(tot.costi || 0))
+  return (
+    <div className="pb-cl">
+      <div className="pb-cl__testa">
+        <span>Incassato</span>
+        <b><Conta v={Math.round(R * 100) / 100}>{x => <Euro v={x} />}</Conta></b>
+        <div className="pb-cl__barra" aria-hidden="true">
+          {Gd > 0 && <i className="pb-cl__guadagno" style={{ flex: Gd }} />}
+          {Cs > 0 && <i className="pb-cl__costi" style={{ flex: Cs }} />}
+        </div>
+        <div className="pb-cl__due">
+          <div>
+            <span><i className="pb-cl__punto pb-cl__punto--guadagno" />Guadagno totale</span>
+            <b className={Gd < 0 ? 'pb-meno' : undefined}><Euro v={Gd} /></b>
+            <em>{Gd >= 0 ? `il ${virgola(Gd / (R || 1) * 100)}% di quello che hai incassato` : 'nel periodo i costi superano gli incassi'}</em>
+          </div>
+          <div>
+            <span><i className="pb-cl__punto" />Costi</span>
+            <b><Euro v={Cs} /></b>
+            <em>quello che costano le stesse voci</em>
+          </div>
+        </div>
+      </div>
+      <ul className="pb-cl__voci">
+        {fonti.map(n => (
+          <li key={n.k}>
+            <a className={'pb-cl__voce' + (n.r <= 0 && n.g === 0 ? ' pb-fonte--ferma' : '')} href={n.href}>
+              <span className="pb-fonte__riga"><span className="pb-fonte__nome">{n.nome}</span><b className={n.g < 0 ? 'pb-meno' : undefined}><Euro v={n.g} /></b></span>
+              <span className="pb-fonte__dett">{n.r > 0 || n.c > 0 ? <>incassato {euroPiano(n.r)} · costo {euroPiano(n.c)}</> : 'nessun movimento nel periodo'}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+      {vediGestione && (
+        <div className="pb-netto">
+          <div><span>Costi di gestione</span><b><Euro v={Number(tot.costiGestione || 0)} segno={Number(tot.costiGestione) > 0} /></b></div>
+          <div className="pb-netto__utile"><span>Utile netto</span><b className={Number(tot.utileNetto) < 0 ? 'pb-meno' : undefined}><Euro v={Number(tot.utileNetto || 0)} /></b></div>
+          {gest?.perCategoria?.length ? <p>{gest.perCategoria.slice(0, 3).map((c: any) => `${c.categoria} ${euroPiano(Number(c.importo || 0))}`).join(' · ')}</p> : null}
+          <p className="pb-netto__lucchetto"><Icona id="i-lucchetto" />Solo tu e i tuoi admin · <a href="/dashboard/costi-gestione">Gestisci</a></p>
         </div>
       )}
     </div>

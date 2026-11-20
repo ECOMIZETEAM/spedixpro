@@ -26,13 +26,19 @@ const USCITE: Record<string, { nome: string; frase: string }> = {
   giac: { nome: 'In giacenza', frase: 'ferme, aspettano istruzioni' },
 }
 
-function geometria(s: Record<string, number>, W: number, Hb: number) {
+// le spedizioni per tappa: le stesse per il fiume largo e per quello verticale del telefono
+function valori(s: Record<string, number>) {
   const n = (k: string) => Math.max(0, Number(s?.[k] || 0))
   const v: Record<string, number> = {
     ok: n('consegnata'), reso: n('reso_mittente'), nc: n('non_consegnato'), giac: n('in_giacenza'),
     cons: n('in_consegna'), tra: n('in_transito'), sped: n('spedita'), lav: n('in_lavorazione'),
     ann: n('annullata') + n('storno_richiesto') + n('annullamento_pending'),
   }
+  return v
+}
+
+function geometria(s: Record<string, number>, W: number, Hb: number) {
+  const v = valori(s)
   const tot = Object.values(v).reduce((a, b) => a + b, 0)
   if (!tot || W < 300) return null
   const LT = 108, T = LT + 16, kpx = Hb / tot
@@ -98,8 +104,10 @@ function geometria(s: Record<string, number>, W: number, Hb: number) {
 
 export default function Fiume({ stati, tinte, pronto }: { stati: Record<string, number> | null; tinte: Tinte | null; pronto: boolean }) {
   const box = useRef<HTMLDivElement>(null), tela = useRef<HTMLCanvasElement>(null)
-  // sul telefono il fiume non si schiaccia: resta largo almeno 860 e il riquadro scorre di lato
-  const misura = useLarghezza(box), W = misura ? Math.max(misura, 860) : 0
+  // sotto i 560 px (il telefono) il fiume scende dall'alto in basso (FiumeVerticale): largo 860 e da scorrere di lato
+  // le scritte delle tappe cadevano sopra il fiume e quelle a destra restavano tagliate (20/11). Sopra resta largo
+  // almeno 860 e, se serve, il riquadro scorre di lato
+  const misura = useLarghezza(box), verticale = !!misura && misura < 560, W = misura && !verticale ? Math.max(misura, 860) : 0
   // lo spessore del fiume segue l'altezza dello schermo (sul portatile il fiume e la chiusa stanno nella prima schermata)
   const [Hb, setHb] = useState(150)
   useEffect(() => { const m = () => setHb(Math.round(Math.min(178, Math.max(112, innerHeight * (innerHeight < 820 ? 0.17 : 0.19))))); m(); addEventListener('resize', m); return () => removeEventListener('resize', m) }, [])
@@ -112,6 +120,10 @@ export default function Fiume({ stati, tinte, pronto }: { stati: Record<string, 
 
   if (stati && !Object.values(stati).some(x => Number(x) > 0)) {
     return <div className="pb-fiume pb-fiume--vuoto"><p>Il fiume è ancora asciutto: nessuna spedizione creata negli ultimi 30 giorni.</p></div>
+  }
+
+  if (verticale && stati) {
+    return <div className="pb-fiume pb-fiume--verticale" ref={box}><FiumeVerticale stati={stati} notte={!!tinte?.notte} /></div>
   }
 
   const tot = G?.tot || 0
@@ -211,6 +223,64 @@ export default function Fiume({ stati, tinte, pronto }: { stati: Record<string, 
           )}
         </>}
       </div>
+    </div>
+  )
+}
+
+// ── il fiume sul telefono: scende dall'alto in basso. In cima le create (col pacco), lungo il fiume le tappe con chi è
+// lì adesso (la barretta è la sua parte del totale), in fondo le consegnate (con la casa), poi chi è uscito dal percorso.
+// Gli stessi numeri del fiume largo ──
+function FiumeVerticale({ stati, notte }: { stati: Record<string, number>; notte: boolean }) {
+  const v = valori(stati), tot = Object.values(v).reduce((a, b) => a + b, 0)
+  const quota = (n: number) => (tot && n ? Math.max(1.5, n / tot * 100) : 0).toFixed(1) + '%'
+  const inAnnullamento = Number(stati?.storno_richiesto || 0) + Number(stati?.annullamento_pending || 0)
+  const uscite = ['reso', 'nc', 'giac'].filter(k => v[k] > 0)
+  return (
+    <div className="pb-fv">
+      <div className="pb-fv__capo">
+        <img className="pb-fv__segno" src={`/grafica/segni/pacco-${notte ? 'notte' : 'giorno'}.webp`} alt="" />
+        <div>
+          <b><Conta v={tot}>{n => fmtN.format(n)}</Conta></b>
+          <span className="pb-fv__nome">Create</span>
+          <span className="pb-fv__frase">negli ultimi 30 giorni, nello stato in cui sono oggi</span>
+        </div>
+      </div>
+      <ol className="pb-fv__tappe">
+        {TAPPE.map(t => (
+          <li key={t.k} className="pb-fv__tappa" style={{ ['--q' as any]: quota(v[t.k]) }}>
+            <b><Conta v={v[t.k]}>{n => fmtN.format(n)}</Conta></b>
+            <span><span className="pb-fv__nome">{t.nome}</span><span className="pb-fv__frase">{t.frase}</span></span>
+            <i className="pb-fv__barra" aria-hidden="true" />
+          </li>
+        ))}
+      </ol>
+      <div className="pb-fv__capo pb-fv__capo--foce">
+        <img className="pb-fv__segno" src={`/grafica/segni/consegna-${notte ? 'notte' : 'giorno'}.webp`} alt="" />
+        <div>
+          <b><Conta v={v.ok}>{n => fmtN.format(n)}</Conta></b>
+          <span className="pb-fv__nome">Consegnate</span>
+          <span className="pb-fv__frase">{pct(v.ok, tot)}% delle spedizioni</span>
+        </div>
+      </div>
+      {(uscite.length > 0 || v.ann > 0) && (
+        <div className="pb-fv__uscite">
+          <span className="pb-fv__titolo">Uscite dal percorso</span>
+          <ul>
+            {uscite.map(k => (
+              <li key={k} className={k === 'giac' ? 'pb-fv__uscita--problema' : undefined}>
+                <b>{fmtN.format(v[k])}</b>
+                <span><span className="pb-fv__unome">{USCITE[k].nome}</span><span className="pb-fv__frase">{USCITE[k].frase} · {pct(v[k], tot)}%</span></span>
+              </li>
+            ))}
+            {v.ann > 0 && (
+              <li>
+                <b>{fmtN.format(v.ann)}</b>
+                <span><span className="pb-fv__unome">Annullate</span><span className="pb-fv__frase">fermate prima di partire{inAnnullamento ? ` · ${fmtN.format(inAnnullamento)} in annullamento` : ''}</span></span>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

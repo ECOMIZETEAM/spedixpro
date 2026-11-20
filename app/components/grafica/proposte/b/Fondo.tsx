@@ -16,18 +16,27 @@ import { PROVINCE, TECNICI, Testa, virgola } from './comuni'
 export function Foce({ tinte }: { tinte: Tinte | null }) {
   const dati = usaJson<any>('/api/dashboard/destinazioni')
   const box = useRef<HTMLDivElement>(null), tela = useRef<HTMLCanvasElement>(null)
-  const misura = useLarghezza(box), W = misura ? Math.max(misura, 700) : 0
-  const G = useMemo(() => {
-    if (!dati || W < 560) return null
+  // sotto i 600 px (il telefono: qui si misura la lastra, margini compresi) la foce è una classifica con le barre (FoceLista): a 700 px da scorrere di lato le
+  // province restavano fuori dallo schermo e si vedeva solo il ventaglio (20/11)
+  const misura = useLarghezza(box), lista = !!misura && misura < 600, W = misura && !lista ? Math.max(misura, 700) : 0
+  // le province (le prime dieci, poi le altre insieme, poi l'estero): le stesse per il ventaglio e per la classifica
+  const base = useMemo(() => {
+    if (!dati) return null
     const prov: any[] = (Array.isArray(dati.province) ? dati.province : []).slice().sort((a: any, b: any) => b.n - a.n)
     const italia = Number(dati.totale || 0), estero = Math.max(0, Number(dati.totalePaesi || 0) - italia)
-    if (!italia && !estero) return { vuoto: true as const }
+    if (!italia && !estero) return { vuoto: true as const, rami: [], italia, estero }
     const prime = prov.slice(0, 10), resto = prov.slice(10), altre = resto.reduce((a, p) => a + Number(p.n || 0), 0)
     const rami = [
       ...prime.map((p, i) => ({ k: p.sigla, rango: String(i + 1).padStart(2, '0'), nome: PROVINCE[p.sigla] || p.sigla, sigla: p.sigla, n: Number(p.n || 0), tipo: 'prov' })),
       ...(altre > 0 ? [{ k: 'altre', rango: '', nome: `Altre ${fmtN.format(resto.length)} province`, sigla: '', n: altre, tipo: 'altre' }] : []),
       ...(estero > 0 ? [{ k: 'estero', rango: '', nome: 'Estero', sigla: '', n: estero, tipo: 'estero' }] : []),
     ]
+    return { vuoto: false as const, rami, italia, estero }
+  }, [dati])
+  const G = useMemo(() => {
+    if (!base || W < 560) return null
+    if (base.vuoto) return { vuoto: true as const }
+    const { rami, italia, estero } = base
     const tot = rami.reduce((a, r) => a + r.n, 0) || 1
     const H = Math.max(380, rami.length * 36 + 30), sopra = 14, sotto = 14, gap = 5, MIN = 31
     const libero = H - sopra - sotto - gap * (rami.length - 1)
@@ -49,7 +58,7 @@ export function Foce({ tinte }: { tinte: Tinte | null }) {
     })
     const corsie = righe.filter(r => r.h > 0).map(r => corsia(r.st, { neutro: r.tipo === 'estero' }))
     return { vuoto: false as const, W, H, xT, xR, righe, corsie, tronco, yT0, italia, estero, tot }
-  }, [dati, W])
+  }, [base, W])
   const g = G && !G.vuoto ? G : null
   const partenza = usePartenza(!!g, 300)
   useParticelle(tela, g?.corsie ?? null, { W: g?.W || 0, H: g?.H || 0, densita: 420, velocita: 46, partenza, tinte, x0: g?.xT || 0, x1: g?.xR || 1, massimo: 360 })
@@ -58,7 +67,7 @@ export function Foce({ tinte }: { tinte: Tinte | null }) {
       <Testa id="pb-t-foce" occhiello="La foce" titolo={<>Dove <b>sfociano</b> le tue spedizioni</>}
         frase="Le province che ricevono di più negli ultimi 30 giorni: ogni ramo è largo quanto le spedizioni che ci arrivano." />
       <div className="pb-lastra gx-vetro pb-foce" ref={box}>
-        {!dati ? <div className="pb-vuoto pb-vuoto--alto">…</div> : G?.vuoto ? <div className="pb-vuoto pb-vuoto--alto">Nessuna spedizione negli ultimi 30 giorni.</div> : g && (
+        {!dati ? <div className="pb-vuoto pb-vuoto--alto">…</div> : base?.vuoto ? <div className="pb-vuoto pb-vuoto--alto">Nessuna spedizione negli ultimi 30 giorni.</div> : lista && base ? <FoceLista {...base} /> : g && (
           <div className="pb-foce__tela" style={{ height: g.H }}>
             <svg width={g.W} height={g.H} viewBox={`0 0 ${g.W} ${g.H}`} role="img" aria-label={'Spedizioni per provincia, ultimi 30 giorni: ' + g.righe.map(r => `${r.nome} ${r.n}`).join(', ')}>
               <defs>
@@ -91,6 +100,32 @@ export function Foce({ tinte }: { tinte: Tinte | null }) {
   )
 }
 
+// ── la foce sul telefono: l'Italia (e l'estero) in testa, poi la classifica con una barra per provincia, lunga quanto
+// le sue spedizioni rispetto alla prima ──
+function FoceLista({ rami, italia, estero }: { rami: { k: string; rango: string; nome: string; sigla: string; n: number; tipo: string }[]; italia: number; estero: number }) {
+  const max = Math.max(1, ...rami.map(r => r.n))
+  return (
+    <div className="pb-fl">
+      <div className="pb-fl__tronco">
+        <b><Conta v={italia}>{n => fmtN.format(n)}</Conta></b>
+        <span>in Italia</span>
+        {estero > 0 && <em>e {fmtN.format(estero)} all&apos;estero</em>}
+      </div>
+      <ol className="pb-fl__righe">
+        {rami.map(r => (
+          <li key={r.k} className={'pb-fl__riga pb-fl__riga--' + r.tipo} style={{ ['--q' as any]: Math.max(1.5, r.n / max * 100).toFixed(1) + '%' }}>
+            <span className="pb-fl__rango">{r.rango}</span>
+            <span className="pb-fl__nome">{r.nome}{r.sigla && <small>{r.sigla}</small>}</span>
+            <b>{fmtN.format(r.n)}</b>
+            <em>{r.tipo === 'estero' ? '' : virgola(r.n / (italia || 1) * 100) + '%'}</em>
+            <i className="pb-fl__barra" aria-hidden="true" />
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 // statsMensili porta il mese all'inglese («Jul 26», dalla funzione del database): qui in italiano
 const INGLESE: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 }
 const meseItaliano = (m: any) => { const s = String(m || '').trim(), i = INGLESE[s.slice(0, 3).toLowerCase()]; return i === undefined ? s.toLowerCase() : MESI[i] }
@@ -99,7 +134,9 @@ const meseItaliano = (m: any) => { const s = String(m || '').trim(), i = INGLESE
 export function Portata({ mesi, tinte }: { mesi: any[] | null; tinte: Tinte | null }) {
   const box = useRef<HTMLDivElement>(null), tela = useRef<HTMLCanvasElement>(null)
   const W = useLarghezza(box)
-  const ultimi = (mesi || []).slice(-6)
+  // sul telefono (sotto i 560 px) gli ultimi tre mesi: sei mesi in 330 px si accavallavano, e a 600 px da scorrere di
+  // lato il terzo mese restava tagliato dal bordo (20/11)
+  const ultimi = (mesi || []).slice(W && W < 560 ? -3 : -6)
   const chiave = JSON.stringify(ultimi.map(m => m.totale))
   const G = useMemo(() => {
     if (!ultimi.length || W < 300) return null
@@ -118,7 +155,6 @@ export function Portata({ mesi, tinte }: { mesi: any[] | null; tinte: Tinte | nu
   return (
     <section className="pb-sez pb-scheda gx-vetro pb-portata" aria-labelledby="pb-t-portata">
       <div className="pb-scheda__testa"><h3 id="pb-t-portata">La portata, mese per mese</h3><span>spedizioni create, il mese in corso fino a oggi</span></div>
-      {/* sul telefono il grafico tiene almeno 600 px e scorre di lato: in 350 px i cinque mesi si accavallavano */}
       <div className="pb-portata__scorri">
       <div className="pb-portata__tela" ref={box} style={{ height: G?.H || 250 }}>
         {!mesi ? <div className="pb-vuoto">…</div> : !ultimi.length ? <div className="pb-vuoto">Ancora nessun mese da mostrare.</div> : G && <>
