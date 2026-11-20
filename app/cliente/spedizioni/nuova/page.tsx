@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect, use, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import PaginaUnica from '@/app/components/nuova-spedizione/PaginaUnica'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -86,7 +88,7 @@ function TendinaPortata({ anchor, aperta, maxHeight = 240, children }: { anchor:
     </div>, document.body)
 }
 
-export default function NuovaSpedizioneCliente() {
+function NuovaSpedizioneCliente() {
   const dialog = useDialog()
   const router = useRouter()
   const [clienteData, setClienteData] = useState<any>(null)
@@ -1038,4 +1040,13 @@ export default function NuovaSpedizioneCliente() {
     </div>
       </div>
   )
+}
+
+// Con la grafica nuova la pagina è quella su una pagina sola (app/components/nuova-spedizione/PaginaUnica, 20/11/2026);
+// con la grafica di oggi resta il modulo qui sopra, che non cambia. «?versione=oggi» apre il modulo di oggi anche dalla
+// grafica nuova: ci porta il tasto della pagina nuova finché da lì non si crea.
+export default function Pagina({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const sp = use(searchParams)
+  const nuova = useContext(GraficaNuova).attiva && sp.versione !== 'oggi'
+  return nuova ? <PaginaUnica portale="cliente" prova={sp.nuova === '1'} /> : <NuovaSpedizioneCliente />
 }

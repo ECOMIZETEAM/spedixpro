@@ -1,0 +1,221 @@
+/* NUOVA SPEDIZIONE SU UNA PAGINA (20/11/2026): la prima stesura, coi colori e i caratteri della grafica nuova
+   (variabili --gx-* di grafica.css). Il vestito vero lo fa la sessione DESIGN: qui solo l'ordine della pagina.
+   Le sezioni NON sono «gx-vetro»: la sfocatura chiude dentro di sé le finestre fisse (scelta del punto, del locker),
+   come è successo sull'Elenco. Il vetro sfocato resta al riepilogo, che di finestre non ne apre. */
+
+.gx .ns { --ns-r: 20px; max-width: 1180px; margin: 0 auto; font-variant-numeric: tabular-nums; color: var(--gx-testo); }
+.gx .ns-griglia { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: 22px; align-items: start; }
+.gx .ns-colonna { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.gx .ns-testa { padding: 4px 4px 2px; }
+.gx .ns-titolo { margin: 0 0 4px; font-size: 30px; font-weight: 500; letter-spacing: -.02em; color: var(--gx-inchiostro); }
+.gx .ns-sottotitolo { margin: 0; font-size: 14px; color: var(--gx-attenuato); }
+
+.gx .ns-sezione { padding: 20px 22px 22px; border-radius: var(--ns-r); background: var(--gx-vetro);
+  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(30, 42, 66, .04), 0 22px 48px -30px rgba(30, 42, 66, .28); }
+.gx[data-luce="notte"] .ns-sezione { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -30px rgba(0, 0, 0, .6); }
+.gx .ns-sezione__testa { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.gx .ns-sezione__testa h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 17px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-sezione__testa h2 .gx-ico { color: var(--gx-accento); }
+
+.gx .ns-link { all: unset; cursor: pointer; font-size: 13.5px; color: var(--gx-accento-testo); text-decoration: underline; text-underline-offset: 3px; }
+.gx .ns-link:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; border-radius: 4px; }
+.gx .ns-link--sotto { justify-self: start; }
+.gx .ns-nota { margin: 0; font-size: 12.5px; color: var(--gx-attenuato); }
+.gx .ns-nota b { color: var(--gx-inchiostro); font-weight: 600; }
+.gx .ns-nota--centro { text-align: center; }
+.gx .ns-avviso { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.45; color: var(--gx-testo);
+  background: color-mix(in srgb, var(--gx-accento) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gx-accento) 25%, transparent); }
+
+/* i campi: etichetta piccola dentro la casella, come il checkout di Shopify */
+.gx .ns-campi { display: grid; gap: 10px; }
+.gx .ns-riga2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.gx .ns-riga3 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, .8fr); gap: 10px; }
+.gx .ns-campo { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 7px 12px 8px; border-radius: 12px;
+  background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); transition: box-shadow .15s ease; }
+.gx .ns-campo:focus-within { box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
+.gx .ns-campo--errore, .gx .ns-campo--errore:focus-within { box-shadow: inset 0 0 0 1.5px var(--gx-problema); }
+.gx .ns-campo--corto { max-width: 240px; }
+.gx .ns-campo__et { font-size: 11.5px; color: var(--gx-attenuato); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gx .ns-campo__val { border: 0; outline: 0; padding: 0; width: 100%; min-width: 0; background: transparent; font: inherit; font-size: 15px; color: var(--gx-inchiostro); }
+.gx .ns-campo__val::placeholder { color: var(--gx-attenuato); opacity: .7; }
+.gx .ns-campo select.ns-campo__val { cursor: pointer; }
+.gx .ns-campo__err { font-size: 12px; font-weight: 500; color: var(--gx-problema); }
+.gx[data-luce="notte"] .ns-campo select { color-scheme: dark; }
+
+/* la scheda del mittente già compilato */
+.gx .ns-scheda { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); font-size: 13.5px; }
+.gx .ns-scheda b { font-size: 14.5px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-scheda span { color: var(--gx-attenuato); }
+.gx .ns-campo--select { margin-bottom: 10px; }
+
+/* gruppi di spunte (ritiro, contrassegno, assicurazione) */
+.gx .ns-gruppo { margin-top: 12px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--gx-filo); overflow: hidden; }
+.gx .ns-gruppo > * + * { border-top: 1px solid var(--gx-filo); }
+.gx .ns-sezione > .ns-gruppo:first-of-type { margin-top: 0; }
+.gx .ns-spunta { display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px; cursor: pointer; }
+.gx .ns-spunta input, .gx .ns-modo input, .gx .ns-corriere input, .gx .ns-extra input { accent-color: var(--gx-accento-pieno); width: 17px; height: 17px; margin: 2px 0 0; flex: none; }
+.gx .ns-spunta b { display: block; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-spunta small { display: block; font-size: 12.5px; color: var(--gx-attenuato); }
+.gx .ns-dentro { padding: 0 14px 14px 43px; }
+.gx .ns-dentro.ns-riga2 { padding-left: 43px; }
+
+/* il ritiro: calendario e fascia */
+.gx .ns-ritiro { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 18px; align-items: start; padding: 0 14px 14px 43px; }
+.gx .ns-ritiro__lato { display: grid; gap: 8px; align-content: start; font-size: 12.5px; color: var(--gx-attenuato); }
+.gx .ns-ritiro__giorno { font-size: 15.5px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-segmenti { display: inline-flex; justify-self: start; padding: 3px; border-radius: 999px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-segmenti button { all: unset; cursor: pointer; padding: 6px 14px; border-radius: 999px; font-size: 13px; color: var(--gx-testo); }
+.gx .ns-segmenti button.ns-segmenti--su { background: var(--gx-accento-pieno); color: #fff; font-weight: 600; }
+.gx .ns-segmenti button:focus-visible { outline: 2px solid var(--gx-accento); }
+.gx .ns-cal { padding: 8px 10px 10px; border-radius: 14px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-cal__testa { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.gx .ns-cal__mese { font-weight: 600; font-size: 14px; color: var(--gx-inchiostro); text-transform: capitalize; }
+.gx .ns-cal__freccia { all: unset; cursor: pointer; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: var(--gx-testo); }
+.gx .ns-cal__freccia:hover { background: var(--gx-incavo); }
+.gx .ns-cal__freccia:disabled { opacity: .3; cursor: default; }
+.gx .ns-cal__freccia:focus-visible { outline: 2px solid var(--gx-accento); }
+.gx .ns-cal__indietro { transform: rotate(180deg); }
+.gx .ns-cal__griglia { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; text-align: center; }
+.gx .ns-cal__sett { font-size: 11px; color: var(--gx-attenuato); padding: 4px 0 2px; }
+.gx .ns-cal__g { all: unset; cursor: pointer; height: 34px; border-radius: 10px; font-size: 13.5px; color: var(--gx-inchiostro); text-align: center; }
+.gx .ns-cal__g:hover:not(:disabled) { background: color-mix(in srgb, var(--gx-accento) 12%, transparent); }
+.gx .ns-cal__g:focus-visible { outline: 2px solid var(--gx-accento); }
+.gx .ns-cal__g--oggi { box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-cal__g--su { background: var(--gx-accento-pieno) !important; color: #fff; font-weight: 600; }
+.gx .ns-cal__g:disabled { cursor: default; color: var(--gx-attenuato); opacity: .45; }
+.gx .ns-cal__g--festa:disabled { text-decoration: line-through; }
+
+/* domicilio / a un punto */
+.gx .ns-modi { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.gx .ns-modo { display: flex; gap: 10px; align-items: flex-start; padding: 13px 14px; border-radius: 14px; cursor: pointer; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-modo .gx-ico { margin-top: 1px; color: var(--gx-attenuato); }
+.gx .ns-modo b { display: block; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-modo small { display: block; font-size: 12.5px; color: var(--gx-attenuato); }
+.gx .ns-modo--su { background: color-mix(in srgb, var(--gx-accento) 9%, var(--gx-incavo)); box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
+.gx .ns-modo--su .gx-ico { color: var(--gx-accento); }
+
+/* colli */
+.gx .ns-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12.5px; color: var(--gx-attenuato); }
+.gx .ns-chip { all: unset; cursor: pointer; display: inline-flex; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 12.5px; color: var(--gx-testo); background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-chip b { font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-chip:hover { box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
+.gx .ns-chip:focus-visible { outline: 2px solid var(--gx-accento); }
+.gx .ns-catalogo { display: grid; gap: 10px; margin-bottom: 12px; }
+.gx .ns-sku { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.gx .ns-sku > .ns-campo:first-child { flex: 1 1 220px; }
+.gx .ns-colli { display: grid; gap: 8px; }
+.gx .ns-collo { display: grid; grid-template-columns: 70px minmax(0, 1.15fr) repeat(3, minmax(0, 1fr)) 40px; gap: 8px; align-items: start; }
+.gx .ns-collo__n { padding-top: 16px; font-size: 13px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-togli { all: unset; cursor: pointer; display: grid; place-items: center; width: 40px; height: 48px; border-radius: 12px; color: var(--gx-attenuato); }
+.gx .ns-togli:hover:not(:disabled) { color: var(--gx-problema); background: var(--gx-incavo); }
+.gx .ns-togli:disabled { opacity: .3; cursor: default; }
+.gx .ns-togli:focus-visible { outline: 2px solid var(--gx-accento); }
+.gx .ns-colli__piede { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 6px; }
+.gx .ns-tasto2 { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--gx-inchiostro); background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-tasto2:hover { box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
+.gx .ns-tasto2:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+.gx .ns-colli + .ns-colli__piede + .ns-nota { margin-bottom: 14px; }
+
+/* corrieri */
+.gx .ns-calcolo { font-size: 12.5px; font-weight: 500; color: var(--gx-accento-testo); }
+.gx .ns-vuoto { margin: 0; padding: 18px 16px; border-radius: 14px; text-align: center; font-size: 13.5px; color: var(--gx-attenuato); background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-vuoto--errore { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; color: var(--gx-problema); }
+.gx .ns-gruppo--vecchio { opacity: .5; transition: opacity .2s ease; pointer-events: none; }
+.gx .ns-corriere { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+.gx .ns-corriere--su { background: color-mix(in srgb, var(--gx-accento) 9%, transparent); box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
+.gx .ns-corriere--spento { cursor: not-allowed; }
+.gx .ns-corriere--spento .ns-corriere__testo b, .gx .ns-corriere--spento .ns-prezzo { color: var(--gx-attenuato); }
+.gx .ns-logo { width: 62px; height: 38px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: 9px; background: #fff; box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-logo img { width: 62px; height: 62px; object-fit: contain; }
+.gx .ns-logo b { font-size: 10px; font-weight: 800; color: #333; }
+.gx .ns-corriere__testo { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.gx .ns-corriere__testo b { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 600; font-size: 14.5px; color: var(--gx-inchiostro); }
+.gx .ns-corriere__testo small { font-size: 12.5px; color: var(--gx-attenuato); }
+.gx .ns-attenz { color: var(--gx-accento-testo) !important; }
+.gx .ns-meglio { font-style: normal; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--gx-bene); background: color-mix(in srgb, var(--gx-bene) 13%, transparent); }
+.gx .ns-prezzo { font-weight: 600; font-size: 15.5px; color: var(--gx-inchiostro); white-space: nowrap; }
+.gx .ns-corriere__dentro { display: grid; gap: 8px; padding: 10px 14px 14px 43px; background: color-mix(in srgb, var(--gx-accento) 4%, transparent); border-top: 1px solid var(--gx-filo); }
+.gx .ns-extra { display: flex; align-items: center; gap: 10px; font-size: 13.5px; cursor: pointer; }
+.gx .ns-extra span { flex: 1; }
+.gx .ns-extra b { font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-corriere--finta { cursor: default; }
+.gx .ns-finta { height: 12px; flex: 1; border-radius: 6px; background: linear-gradient(90deg, var(--gx-incavo), color-mix(in srgb, var(--gx-filo) 160%, transparent), var(--gx-incavo)); background-size: 200% 100%; animation: ns-luccica 1.4s ease-in-out infinite; }
+.gx .ns-finta--corta { flex: 0 0 70px; }
+@keyframes ns-luccica { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .gx .ns-finta { animation: none; } }
+
+/* il tasto */
+.gx .ns-crea { display: grid; gap: 10px; padding-bottom: 8px; }
+.gx .ns-crea__tasto { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 54px; border-radius: 999px; font-size: 16px; font-weight: 600; color: #fff;
+  background: var(--gx-accento-pieno); box-shadow: 0 12px 26px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); }
+.gx .ns-crea__tasto:hover { transform: translateY(-1px); }
+.gx .ns-crea__tasto:focus-visible { outline: 2px solid var(--gx-inchiostro); outline-offset: 3px; }
+.gx .ns-crea__tasto:disabled { cursor: progress; opacity: .55; transform: none; box-shadow: none; }
+.gx .ns-cambiato { margin: 0; padding: 9px 12px; border-radius: 12px; font-size: 13px; text-align: center; color: var(--gx-inchiostro); background: color-mix(in srgb, var(--gx-accento) 12%, transparent); }
+
+/* il riepilogo: fermo mentre si scorre */
+.gx .ns-riep { position: sticky; top: 0; align-self: start; min-width: 0; }
+.gx .ns-riep__dentro { padding: 20px 20px 18px; border-radius: var(--ns-r); }
+.gx .ns-riep h2 { margin: 0 0 14px; font-size: 17px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-rotta { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; row-gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-rotta small { display: block; font-size: 11.5px; color: var(--gx-attenuato); }
+.gx .ns-rotta b { display: block; font-weight: 600; font-size: 13.5px; color: var(--gx-inchiostro); }
+.gx .ns-rotta span:not([aria-hidden]) { display: block; font-size: 12.5px; color: var(--gx-attenuato); }
+.gx .ns-rotta__da, .gx .ns-rotta__a { position: relative; width: 11px; height: 11px; margin-top: 16px; border-radius: 50%; }
+.gx .ns-rotta__da { box-shadow: inset 0 0 0 2.5px var(--gx-inchiostro); }
+.gx .ns-rotta__a { background: var(--gx-accento-pieno); }
+.gx .ns-riep__colli { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 12px; }
+.gx .ns-riep__colli li { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--gx-inchiostro); }
+.gx .ns-riep__colli li > span:nth-child(2) { flex: 1; min-width: 0; }
+.gx .ns-riep__colli b { display: block; font-weight: 600; }
+.gx .ns-riep__colli small { display: block; font-size: 12px; color: var(--gx-attenuato); }
+.gx .ns-riep__icona { position: relative; width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); color: var(--gx-attenuato); }
+.gx .ns-riep__icona em { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; font-style: normal; font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; color: #fff; background: var(--gx-attenuato); }
+.gx .ns-riep__corriere { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.gx .ns-riep__corriere b { display: block; font-size: 13.5px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-riep__corriere small { display: block; font-size: 12px; color: var(--gx-attenuato); }
+.gx .ns-costi, .gx .ns-credito { margin: 0; display: grid; gap: 4px; }
+.gx .ns-costi div, .gx .ns-credito div { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; }
+.gx .ns-costi dt, .gx .ns-credito dt { color: var(--gx-testo); }
+.gx .ns-costi dd, .gx .ns-credito dd { margin: 0; color: var(--gx-inchiostro); }
+.gx .ns-totale { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gx-filo); }
+.gx .ns-totale span { font-size: 16px; font-weight: 600; color: var(--gx-inchiostro); }
+.gx .ns-totale b { font-size: 24px; font-weight: 600; letter-spacing: -.02em; color: var(--gx-inchiostro); }
+.gx .ns-totale small { margin-right: 6px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; color: var(--gx-attenuato); }
+.gx .ns-iva { margin: 0; text-align: right; font-size: 11.5px; color: var(--gx-attenuato); }
+.gx .ns-credito { margin-top: 16px; padding: 10px 12px; border-radius: 12px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-credito--basso { box-shadow: inset 0 0 0 1.5px var(--gx-problema); }
+.gx .ns-credito--basso div:last-child dd { color: var(--gx-problema); font-weight: 600; }
+
+/* il riepilogo sul telefono: chiuso in una barra in alto, come il checkout di Shopify */
+.gx .ns-barra-riep { display: none; }
+
+/* i suggerimenti: disegnati in fondo alla pagina (fuori da .gx), quindi coi colori scritti qui */
+.ns-tendina { position: fixed; z-index: 1000000; overflow-y: auto; border-radius: 12px; background: #fff; color: #0F141B;
+  box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(16, 24, 40, .08); font-family: var(--font-outfit), system-ui, sans-serif; }
+[data-luce="notte"] .ns-tendina { background: #1E2636; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
+.ns-tendina__voce { display: grid; gap: 1px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+.ns-tendina__voce b { font-weight: 600; }
+.ns-tendina__voce span { font-size: 12px; opacity: .65; }
+.ns-tendina__voce:hover { background: rgba(242, 107, 29, .1); }
+
+@media (max-width: 899px) {
+  .gx .ns-griglia { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .gx .ns-barra-riep { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding: 12px 14px; border-radius: 16px;
+    font-size: 14px; color: var(--gx-accento-testo); background: var(--gx-vetro); box-shadow: inset 0 0 0 1px var(--gx-vetro-orlo); }
+  .gx .ns-barra-riep span { display: inline-flex; align-items: center; gap: 8px; }
+  .gx .ns-barra-riep b { font-size: 16px; color: var(--gx-inchiostro); }
+  .gx .ns-riep { position: static; order: -1; display: none; }
+  .gx .ns-riep--aperto { display: block; }
+  .gx .ns-sezione { padding: 16px 14px 18px; }
+  .gx .ns-riga3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
+  .gx .ns-riga3 > :last-child { grid-column: span 2; }
+  .gx .ns-modi, .gx .ns-riga2 { grid-template-columns: minmax(0, 1fr); }
+  .gx .ns-ritiro { grid-template-columns: minmax(0, 1fr); padding-left: 14px; }
+  .gx .ns-dentro, .gx .ns-dentro.ns-riga2, .gx .ns-corriere__dentro { padding-left: 14px; }
+  .gx .ns-collo { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 10px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--gx-filo); }
+  .gx .ns-collo__n { grid-column: 1 / span 3; padding-top: 8px; }
+  .gx .ns-togli { grid-column: 4; grid-row: 1; justify-self: end; height: 36px; }
+  /* il tasto fisso in basso: in fondo a una pagina così lunga non si troverebbe (revisione DESIGN, 20/11) */
+  .gx .ns-crea { position: sticky; bottom: 0; z-index: 2; margin: 0 -10px; padding: 10px 10px 12px; background: linear-gradient(to top, var(--gx-fondo) 70%, transparent); }
+}
