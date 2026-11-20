@@ -161,15 +161,28 @@ export async function costruisciCatena(
   const { detentore: ownerReale, dichiaratoProprio: contrattoDichiaratoProprio } =
     await detentoreContratto(adminDb, params.corriereOwnerId, params.corriereNome)
 
+  // SALIRE PRIMA, PREZZARE INSIEME (20/11/2026). La creazione costruisce la catena due volte (controllo del
+  // credito prima del corriere, addebiti dopo) e ogni livello costa circa 0,3 s di letture: con tre livelli,
+  // quasi due secondi a creazione su 4-10 (cronometro [CREA][TEMPI]). Il costo di un livello NON dipende dagli
+  // altri — legge il suo listino, il suo contratto, il suo fornitore — quindi: prima si sale la catena (una
+  // lettura per master, serve a sapere chi sta sopra), poi si prezzano tutti i livelli insieme, poi la si
+  // rimonta NELL'ORDINE di prima. Il risultato e' lo stesso anche negli errori: ci si ferma al primo livello
+  // che ne ha uno, e l'eccezione di un livello piu' in alto non scavalca l'errore di uno piu' in basso
+  // (prima quel livello non sarebbe nemmeno stato calcolato). Verificato vecchia contro nuova su spedizioni vere.
+  const saliti: any[] = []
+  let erroreSalita: string | null = null
   for (let i = 0; i < 20 && currentId; i++) {
     const { data: m }: any = await adminDb
       .from('masters')
       .select('id,nome,tipo_contratto,credito,credito_proprio,parent_master_id,parent_listino_id')
       .eq('id', currentId).single()
-    if (!m) {
-      return { catena, errore: 'Catena master non leggibile: impossibile verificare i livelli.' }
-    }
+    if (!m) { erroreSalita = 'Catena master non leggibile: impossibile verificare i livelli.'; break }
+    saliti.push(m)
+    if (m.id === ownerReale) break
+    currentId = m.parent_master_id
+  }
 
+  const prezzaLivello = async (m: any): Promise<{ voce?: LivelloCatena; errore?: string }> => {
     const isProprietario = m.id === ownerReale
     let prezzo = 0
 
@@ -239,7 +252,7 @@ export async function costruisciCatena(
         prezzo = Number(params.costoSpedizione || 0)
       } else {
         if (!m.parent_listino_id) {
-          return { catena, errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato.` }
+          return { errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato.` }
         }
         // IL RIPIEGO SUL LISTINO DEL PADRE DEVE PREZZARE QUESTO CONTRATTO, NON IL PIU' ECONOMICO.
         // Senza corriereId, calcolaPrezzoListino sceglie la tariffa piu' bassa di TUTTO il listino: una
@@ -261,7 +274,7 @@ export async function costruisciCatena(
           zonaForzata: params.zonaForzata,
           mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
         })
-        if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
+        if (!ris) return { errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
         prezzo = ris.prezzo
         zonaLivello = ris.zona
         volumeLivello = ris.peso_volume
@@ -279,7 +292,7 @@ export async function costruisciCatena(
     // bloccherebbero le spedizioni di tutti.
     const eVertice = !m.parent_master_id || m.parent_master_id === radiceId
     const pagaDalSuoConto = isProprietario && contrattoDichiaratoProprio && !eVertice
-    catena.push({
+    return { voce: {
       masterId: m.id, nome: m.nome,
       tipoContratto: m.tipo_contratto || 'credito_scalare',
       credito: Number((pagaDalSuoConto ? m.credito_proprio : m.credito) || 0),
@@ -287,11 +300,16 @@ export async function costruisciCatena(
       pagaDalSuoConto,
       contrassegnoOltreMax: codOltreMax, assicurazioneOltreMax: assOltreMax,
       accessoriNonPrezzati: accNonPrezzati,
-    })
-
-    if (isProprietario) break
-    currentId = m.parent_master_id
+    } }
   }
+
+  const esiti = await Promise.all(saliti.map(m => prezzaLivello(m).then(r => ({ r, e: null as any }), (e: any) => ({ r: null as any, e }))))
+  for (const x of esiti) {
+    if (x.e) throw x.e
+    if (x.r.errore) return { catena, errore: x.r.errore }
+    catena.push(x.r.voce!)
+  }
+  if (erroreSalita) return { catena, errore: erroreSalita }
 
   // ── FLOOR ANTI-SOTTO-COSTO: SOLO SUL DETENTORE DEL CONTRATTO ──
   // Il costo reale del provider (`costoSpedizione` = quotation/shipmentCost per SpediamoPro/DVA/Spedisci)
