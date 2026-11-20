@@ -119,7 +119,9 @@ export async function chiudiDistintaMista(supabase: any, distintaId: string) {
         if (r.ok) borderoIds.push(...r.ids)
         else errori.push('Spedisci: ' + (r.errore || 'chiusura non confermata'))
       } else if (corr.tipo === 'brt') {
-        const refs = gruppo.map((s: any) => s.raw_response).filter((r: any) => r && r.numericRef)
+        // Le annullate non si mandano: BRT le rifiuta e l'errore faceva fallire tutta la mista (lib/brt,
+        // chiudiDistintaBrt; caso 81418 di Wave). Un gruppo tutto annullato non ha niente da confermare.
+        const refs = gruppo.filter((s: any) => s.stato !== 'annullata').map((s: any) => s.raw_response).filter((r: any) => r && r.numericRef)
           .map((r: any) => ({ numericRef: Number(r.numericRef), alphaRef: r.alphaRef || null }))
         const r = await confermaSpedizioniBrt(cred, refs)
         if (!r.ok) errori.push('BRT: ' + (r.errore || 'conferma non riuscita'))
