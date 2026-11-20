@@ -9,7 +9,7 @@
 .pb .pn-conta { font: inherit; color: inherit; letter-spacing: inherit; }
 .pb-meno { color: var(--gx-problema) !important; }
 .pb-lastra { border-radius: 28px; padding: 24px 28px 18px; }
-.pb--notte .pb-prima { background: rgba(11, 15, 25, .58); }
+.pb--notte .pb-prima { background: rgba(16, 16, 16, .58); }
 
 /* ── la testata ── */
 .pb-testata { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px; }

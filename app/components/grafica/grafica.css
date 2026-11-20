@@ -5,22 +5,23 @@
    Il menu e la barra in alto sono quelli di oggi (stesse voci, stessi permessi, stessi pallini): cambia il vestito.
    ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
 [data-grafica="nuova"] {
-  /* notte */
-  --gx-fondo: #171E2B;
+  /* notte: TITANIO (Lorenzo 20/11, «come l'iPhone black», al posto del blu notte). Grafite calda e neutra: nessuna
+     tinta blu nel fondo, nel velo e nel vetro; resta un solo colore, l'arancio. */
+  --gx-fondo: #1B1B1C;
   --gx-inchiostro: #FFFFFF;
-  --gx-testo: rgba(236, 241, 248, .88);
-  --gx-attenuato: rgba(214, 224, 238, .68);
-  --gx-filo: rgba(255, 255, 255, .12);
+  --gx-testo: rgba(240, 239, 236, .88);
+  --gx-attenuato: rgba(226, 224, 220, .64);
+  --gx-filo: rgba(255, 255, 255, .11);
   --gx-accento: #FF8A3D;
   --gx-accento-pieno: #FF7A2E;
   --gx-accento-testo: #FFA766;
   --gx-bene: #5BE0B5;
   --gx-problema: #FF8A94;
-  --gx-vetro: rgba(18, 24, 40, .46);
-  --gx-vetro-orlo: rgba(255, 255, 255, .16);
-  --gx-vetro-luce: rgba(255, 255, 255, .18);
-  --gx-incavo: rgba(255, 255, 255, .07);
-  --gx-velo: rgba(16, 22, 36, .62);
+  --gx-vetro: rgba(44, 43, 42, .5);
+  --gx-vetro-orlo: rgba(255, 255, 255, .14);
+  --gx-vetro-luce: rgba(255, 255, 255, .16);
+  --gx-incavo: rgba(255, 255, 255, .065);
+  --gx-velo: rgba(22, 22, 22, .64);
   --gx-pallino: #E0434F;
 }
 [data-grafica="nuova"][data-tema="giorno"] {
@@ -78,6 +79,9 @@
 .gx-fondo { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--gx-fondo); pointer-events: none; }
 .gx-fondo img { position: absolute; inset: -40px; width: calc(100% + 80px); height: calc(100% + 80px); object-fit: cover; filter: blur(22px) saturate(120%); user-select: none; }
 .gx-fondo::after { content: ''; position: absolute; inset: 0; background: var(--gx-velo); }
+/* di notte la foto del magazzino perde il suo blu: grigia, e sopra un riflesso appena accennato, come il metallo spazzolato */
+[data-luce="notte"] .gx-fondo img { filter: blur(22px) grayscale(1) brightness(.82) contrast(1.05); }
+[data-luce="notte"] .gx-fondo::after { background: linear-gradient(155deg, rgba(255, 255, 255, .045) 0%, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, .02) 72%, rgba(255, 255, 255, 0) 100%), var(--gx-velo); }
 
 /* il vetro */
 .gx-vetro { position: relative; isolation: isolate; border-radius: 24px; background: var(--gx-vetro);
@@ -215,7 +219,7 @@
 .sv { width: min(520px, 100%); padding: 26px; border-radius: 26px; background: rgba(250, 251, 253, .95); color: var(--gx-testo);
   -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5);
   box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .5); animation: sv-entra .3s cubic-bezier(.2, .9, .3, 1.15) both; }
-[data-luce="notte"] .sv { background: rgba(26, 33, 48, .96); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7); }
+[data-luce="notte"] .sv { background: rgba(38, 37, 36, .96); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7); }
 @keyframes sv-entra { from { opacity: 0; transform: translateY(8px) scale(.97); } }
 .sv h2 { margin: 0; font-size: 21px; font-weight: 600; letter-spacing: -.01em; color: var(--gx-inchiostro); text-wrap: balance; }
 .sv p { margin: 8px 0 20px; font-size: 13.5px; line-height: 1.5; color: var(--gx-attenuato); }

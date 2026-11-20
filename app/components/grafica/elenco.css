@@ -194,7 +194,7 @@
   border-radius: 28px; background: rgba(255, 255, 255, .9); -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5);
   box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .45); color: var(--gx-testo);
   animation: tl-entra .5s cubic-bezier(.2, .9, .25, 1) both; }
-.gx[data-luce="notte"] .tl { background: rgba(26, 33, 48, .93); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7); }
+.gx[data-luce="notte"] .tl { background: rgba(38, 37, 36, .93); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7); }
 .gx .tl-via { animation: tl-velo .26s ease reverse both; }
 .gx .tl-via .tl { animation: tl-esce .26s ease-in both; }
 @keyframes tl-velo { from { background-color: transparent; } }
@@ -287,7 +287,7 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 1px 2px rgba(20, 30, 50, .06), 0 22px 50px -18px rgba(20, 30, 50, .4);
   transform-origin: top right; animation: am-apre .18s cubic-bezier(.2, .9, .3, 1.2) both; }
 .gx .gx-elenco .am-menu.am-su { transform-origin: bottom right; animation-name: am-apre-su; }
-.gx[data-luce="notte"] .gx-elenco .am-menu { background: rgba(30, 38, 54, .96); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 22px 50px -18px rgba(0, 0, 0, .7); }
+.gx[data-luce="notte"] .gx-elenco .am-menu { background: rgba(44, 43, 42, .96); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 22px 50px -18px rgba(0, 0, 0, .7); }
 @keyframes am-apre { from { opacity: 0; transform: scale(.95) translateY(-4px); } }
 @keyframes am-apre-su { from { opacity: 0; transform: scale(.95) translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .gx .gx-elenco .am-menu { animation: none; } }
@@ -313,7 +313,7 @@
   background: rgba(244, 246, 249, .9) !important; -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5);
   box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .45) !important; color: var(--gx-testo);
   animation: tl-entra .5s cubic-bezier(.2, .9, .25, 1) both; }
-.gx[data-luce="notte"] .ds-velo > .ds { background: rgba(26, 33, 48, .93) !important;
+.gx[data-luce="notte"] .ds-velo > .ds { background: rgba(38, 37, 36, .93) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7) !important; }
 .gx .ds-velo .ds-testa { padding: 22px 22px 14px !important; background: transparent !important; border: 0 !important; border-radius: 0 !important; }
 .gx .ds-velo .ds-titolo { font-size: 13px !important; font-weight: 600 !important; letter-spacing: .09em; text-transform: uppercase; color: var(--gx-attenuato) !important; }
@@ -359,7 +359,7 @@
   -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5); color: var(--gx-testo);
   box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .9), 0 30px 80px -30px rgba(20, 30, 50, .5) !important;
   animation: am-apre .25s cubic-bezier(.2, .9, .3, 1.15) both; }
-.gx[data-luce="notte"] .gx-finestra-velo > .gx-finestra { background: rgba(26, 33, 48, .95) !important;
+.gx[data-luce="notte"] .gx-finestra-velo > .gx-finestra { background: rgba(38, 37, 36, .95) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(255, 255, 255, .1), 0 30px 80px -30px rgba(0, 0, 0, .7) !important; }
 .gx .gx-finestra--imbottita { padding: 26px !important; }
 .gx .gx-finestra h2 { display: flex; align-items: center; gap: 10px; font-weight: 600 !important; }

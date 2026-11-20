@@ -29,14 +29,14 @@
   color-scheme: light;
 }
 [data-tema="notte"] {
-  --fondo: #171E2B; --inchiostro: #FFFFFF; --testo: rgba(236, 241, 248, .88); --attenuato: rgba(214, 224, 238, .68);
-  --filo: rgba(255, 255, 255, .12); --accento: #FF8A3D; --accento-pieno: #FF7A2E; --accento-testo: #FFA766;
-  --bene: #5BE0B5; --problema: #FF8A94; --vetro: rgba(18, 24, 40, .46); --vetro-orlo: rgba(255, 255, 255, .16); --vetro-luce: rgba(255, 255, 255, .18);
-  --incavo: rgba(255, 255, 255, .07);
-  --terra: #222C41; --parete-luce: #1A2337; --parete-ombra: #0D1320; --ombra: rgba(0, 0, 0, .62); --confine: rgba(14, 19, 30, .9);
+  --fondo: #1B1B1C; --inchiostro: #FFFFFF; --testo: rgba(240, 239, 236, .88); --attenuato: rgba(226, 224, 220, .64);
+  --filo: rgba(255, 255, 255, .11); --accento: #FF8A3D; --accento-pieno: #FF7A2E; --accento-testo: #FFA766;
+  --bene: #5BE0B5; --problema: #FF8A94; --vetro: rgba(44, 43, 42, .5); --vetro-orlo: rgba(255, 255, 255, .14); --vetro-luce: rgba(255, 255, 255, .16);
+  --incavo: rgba(255, 255, 255, .065);
+  --terra: #2C2B2A; --parete-luce: #232221; --parete-ombra: #121212; --ombra: rgba(0, 0, 0, .62); --confine: rgba(18, 18, 18, .9);
   --griglia: rgba(255, 255, 255, .055); --cometa: #FFE4CC; --filo-forte: rgba(255, 255, 255, .2); --incavo-forte: rgba(255, 255, 255, .08);
-  --scala: linear-gradient(90deg, #273147, #43394A, #8A4A30, #E0631F, #FF9A55);
-  --pavimento: radial-gradient(90% 75% at 52% 46%, rgba(32, 41, 60, .9) 0%, rgba(25, 32, 47, .75) 45%, rgba(23, 30, 43, 0) 100%);
+  --scala: linear-gradient(90deg, #333231, #4A403A, #8A4A30, #E0631F, #FF9A55);
+  --pavimento: radial-gradient(90% 75% at 52% 46%, rgba(46, 45, 44, .9) 0%, rgba(34, 33, 32, .75) 45%, rgba(27, 27, 28, 0) 100%);
   --ombra-pannello: 0 30px 60px -34px rgba(0, 0, 0, .7);
   color-scheme: dark;
 }
@@ -740,7 +740,7 @@ document.querySelectorAll('.tema > button').forEach(b => b.addEventListener('cli
 
 // ───────────────────────── LA CARTA (la stessa Italia della Torre di controllo) ─────────────────────────
 const INCLINA = 55 * Math.PI / 180, GIRA = -15 * Math.PI / 180, FUOCO = 2100, SPESSORE = 18, ALTEZZA = 44;
-const SCALA = { giorno: ['#F3F5F8', '#FCE7D8', '#F9C6A2', '#F59A62', '#F26B1D'], notte: ['#263047', '#34405C', '#6E4636', '#E0621E', '#FFA060'] };
+const SCALA = { giorno: ['#F3F5F8', '#FCE7D8', '#F9C6A2', '#F59A62', '#F26B1D'], notte: ['#302F2E', '#403E3C', '#6E4636', '#E0621E', '#FFA060'] };
 const LAMPO = { giorno: '#FF5A00', notte: '#FFC08A' };
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 function tinta(n, max, tema) {
