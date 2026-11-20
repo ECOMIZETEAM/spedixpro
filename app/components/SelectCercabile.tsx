@@ -116,31 +116,54 @@ export default function SelectCercabile({ value, onChange, children, style, disa
     onChange?.({ target: { value: v } } as any)
   }
 
+  // CON IL VESTITO (className) I COLORI LI DECIDE IL CSS, non lo stile in linea. Il 20/11 di notte la voce sotto il
+  // mouse prendeva in linea lo sfondo chiaro #f7f7f7 mentre il vestito notte rendeva bianco il testo: bianco su bianco,
+  // illeggibile (Lorenzo, «Spedisci per»). Uno stile in linea batte qualunque regola che non sia !important, e indovinarlo
+  // dal CSS col selettore sull'attributo style e' fragile: cosi' la tendina vestita porta solo classi (sc-voce,
+  // sc-voce--su, …) e il CSS le colora di giorno e di notte. Senza className il ramo di sotto e' quello di sempre.
+  const vestita = !!className
+
   return (
     <div ref={box} style={{ position: 'relative', ...(style?.width ? { width: style.width } : {}) }}>
       {/* className arriva solo dalla grafica nuova (Nuova spedizione su una pagina): veste il tasto e il pannello; senza,
           la tendina resta identica a oggi */}
       <button type="button" disabled={disabled} className={className} onClick={() => { if (!disabled) { setAperto(a => !a); setQ('') } }}
+        aria-haspopup="listbox" aria-expanded={aperto}
         style={{ ...style, textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', opacity: disabled ? 0.6 : 1 }}>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: scelta?.value ? '#1a1a1a' : '#9ca3af' }}>
-          {scelta?.label || opzioni[0]?.label || ''}
-        </span>
-        <span style={{ color: '#9ca3af', fontSize: '10px', flexShrink: 0 }}>▼</span>
+        {vestita ? <>
+          <span className={'sc-testo' + (scelta?.value ? '' : ' sc-testo--vuoto')}>{scelta?.label || opzioni[0]?.label || ''}</span>
+          <span className="sc-freccia" aria-hidden="true">▼</span>
+        </> : <>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: scelta?.value ? '#1a1a1a' : '#9ca3af' }}>
+            {scelta?.label || opzioni[0]?.label || ''}
+          </span>
+          <span style={{ color: '#9ca3af', fontSize: '10px', flexShrink: 0 }}>▼</span>
+        </>}
       </button>
 
       {aperto && montato && pos && createPortal(
-        <div ref={pannello} className={className ? 'sc-pannello' : undefined} style={{ position: 'fixed', zIndex: 1000000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 10px 30px rgba(0,0,0,.16)' }}>
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca…"
+        <div ref={pannello} className={vestita ? 'sc-pannello' : undefined}
+          style={vestita
+            ? { position: 'fixed', zIndex: 1000000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)' }
+            : { position: 'fixed', zIndex: 1000000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 10px 30px rgba(0,0,0,.16)' }}>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca…" className={vestita ? 'sc-cerca' : undefined}
             onKeyDown={e => {
               if (e.key === 'Escape') { setAperto(false); setQ('') }
               // Invio con un solo risultato: si sceglie quello. E' il gesto piu' rapido —
               // tre lettere e via, senza toccare il mouse.
               if (e.key === 'Enter' && filtrate.length === 1) scegli(filtrate[0].value)
             }}
-            style={{ width: '100%', padding: '9px 11px', fontSize: '13px', border: 'none', borderBottom: '1px solid #f0f0f0', outline: 'none', color: '#1a1a1a', boxSizing: 'border-box' }} />
-          <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
+            style={vestita ? undefined : { width: '100%', padding: '9px 11px', fontSize: '13px', border: 'none', borderBottom: '1px solid #f0f0f0', outline: 'none', color: '#1a1a1a', boxSizing: 'border-box' }} />
+          <div role={vestita ? 'listbox' : undefined} className={vestita ? 'sc-voci' : undefined} style={vestita ? undefined : { maxHeight: '260px', overflowY: 'auto' }}>
             {filtrate.map((o, i) => {
               const sel = String(o.value) === String(value ?? '')
+              if (vestita) return (
+                <div key={`${o.value}-${i}`} role="option" aria-selected={sel} aria-disabled={o.disabled || undefined}
+                  onClick={() => !o.disabled && scegli(o.value)}
+                  className={'sc-voce' + (sel ? ' sc-voce--su' : '') + (o.disabled ? ' sc-voce--spenta' : '')}>
+                  {o.label}
+                </div>
+              )
               return (
                 <div key={`${o.value}-${i}`} onClick={() => !o.disabled && scegli(o.value)}
                   style={{ padding: '8px 11px', fontSize: '13px', cursor: o.disabled ? 'default' : 'pointer',
@@ -152,7 +175,9 @@ export default function SelectCercabile({ value, onChange, children, style, disa
                 </div>
               )
             })}
-            {!filtrate.length && <div style={{ padding: '14px', fontSize: '12.5px', color: '#9ca3af', textAlign: 'center' }}>Nessun risultato.</div>}
+            {!filtrate.length && (vestita
+              ? <div className="sc-vuoto">Nessun risultato.</div>
+              : <div style={{ padding: '14px', fontSize: '12.5px', color: '#9ca3af', textAlign: 'center' }}>Nessun risultato.</div>)}
           </div>
         </div>, document.body)}
     </div>

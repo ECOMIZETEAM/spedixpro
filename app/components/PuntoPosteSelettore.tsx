@@ -162,17 +162,17 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
 
   useEffect(() => () => { try { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null } } catch {} }, [])
 
-  const box: React.CSSProperties = { border: '1px solid #e8e8e8', borderRadius: '8px', padding: '10px 12px', background: '#fff' }
-  const inp: React.CSSProperties = { padding: '7px 10px', border: '1px solid #e8e8e8', borderRadius: '6px', fontSize: '13px', width: '110px' }
-  const btn: React.CSSProperties = { padding: '7px 12px', border: 'none', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer', background: '#f97316', color: '#fff' }
-  const btn2: React.CSSProperties = { ...btn, background: '#fff', color: '#f97316', border: '1px solid #f97316' }
+  const box: React.CSSProperties = { border: '1px solid var(--ns-v-filo, #e8e8e8)', borderRadius: '8px', padding: '10px 12px', background: 'var(--ns-v-carta, #fff)' }
+  const inp: React.CSSProperties = { padding: '7px 10px', border: '1px solid var(--ns-v-filo, #e8e8e8)', borderRadius: '6px', fontSize: '13px', width: '110px' }
+  const btn: React.CSSProperties = { padding: '7px 12px', border: 'none', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer', background: 'var(--ns-v-accento, #f97316)', color: '#fff' }
+  const btn2: React.CSSProperties = { ...btn, background: 'var(--ns-v-carta, #fff)', color: 'var(--ns-v-accento-testo, #f97316)', border: '1px solid var(--ns-v-accento, #f97316)' }
 
   if (valore) {
     return (
       <div style={box}>
-        <div style={{ fontSize: '11.5px', color: '#16a34a', fontWeight: 700, marginBottom: '3px' }}>✓ {label} selezionato</div>
-        <div style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: 600 }}>{valore.nome || valore.codice}</div>
-        <div style={{ fontSize: '12px', color: '#666' }}>{valore.indirizzo}, {valore.cap} {valore.localita} ({valore.provincia})</div>
+        <div style={{ fontSize: '11.5px', color: 'var(--ns-v-bene, #16a34a)', fontWeight: 700, marginBottom: '3px' }}>✓ {label} selezionato</div>
+        <div style={{ fontSize: '13px', color: 'var(--ns-v-inchiostro, #1a1a1a)', fontWeight: 600 }}>{valore.nome || valore.codice}</div>
+        <div style={{ fontSize: '12px', color: 'var(--ns-v-attenuato, #666)' }}>{valore.indirizzo}, {valore.cap} {valore.localita} ({valore.provincia})</div>
         <button type="button" onClick={() => { onChange(null); setAperto(true) }} style={{ ...btn, background: '#6b7280', marginTop: '6px', padding: '5px 10px' }}>Cambia punto</button>
       </div>
     )
@@ -186,10 +186,10 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
         <>
           {preferiti.length > 0 && (
             <div style={{ marginBottom: '8px' }}>
-              <div style={{ fontSize: '11px', color: '#888', marginBottom: '4px' }}>I tuoi punti salvati</div>
+              <div style={{ fontSize: '11px', color: 'var(--ns-v-attenuato, #888)', marginBottom: '4px' }}>I tuoi punti salvati</div>
               {preferiti.map(p => (
                 <button key={p.codice} type="button" onClick={() => scegli(p)}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', border: '1px solid #fed7aa', background: '#fff7ed', borderRadius: '6px', padding: '6px 9px', marginBottom: '4px', cursor: 'pointer', fontSize: '12.5px' }}>
+                  style={{ display: 'block', width: '100%', textAlign: 'left', border: '1px solid var(--ns-v-su-filo, #fed7aa)', background: 'var(--ns-v-su, #fff7ed)', borderRadius: '6px', padding: '6px 9px', marginBottom: '4px', cursor: 'pointer', fontSize: '12.5px' }}>
                   ★ {p.nome || p.codice} — {p.indirizzo}, {p.cap} {p.localita}
                 </button>
               ))}
@@ -207,32 +207,32 @@ export default function PuntoPosteSelettore({ corriereId, lato, capIniziale, tip
               {[null, ...categoriePresenti].map(c => (
                 <button key={c ?? 'all'} type="button" onClick={() => setFiltroCat(c)}
                   style={{ padding: '4px 10px', borderRadius: '999px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer',
-                    border: '1px solid ' + (filtroCat === c ? '#f97316' : '#ddd'), background: filtroCat === c ? '#fff7ed' : '#fff', color: filtroCat === c ? '#f97316' : '#666' }}>
+                    border: '1px solid ' + (filtroCat === c ? 'var(--ns-v-accento, #f97316)' : 'var(--ns-v-filo, #ddd)'), background: filtroCat === c ? 'var(--ns-v-su, #fff7ed)' : 'var(--ns-v-carta, #fff)', color: filtroCat === c ? 'var(--ns-v-accento-testo, #f97316)' : 'var(--ns-v-attenuato, #666)' }}>
                   {c ? etichettaCategoria(c) : 'Tutti'}
                 </button>
               ))}
             </div>
           )}
-          {loading && <div style={{ fontSize: '12px', color: '#666' }}>Ricerca in corso…</div>}
-          {err && <div style={{ fontSize: '12px', color: '#dc2626' }}>{err}</div>}
-          {haCoord && <div ref={mapDiv} style={{ height: '260px', width: '100%', borderRadius: '8px', overflow: 'hidden', marginBottom: '8px', border: '1px solid #eef2f6' }} />}
+          {loading && <div style={{ fontSize: '12px', color: 'var(--ns-v-attenuato, #666)' }}>Ricerca in corso…</div>}
+          {err && <div style={{ fontSize: '12px', color: 'var(--ns-v-problema, #dc2626)' }}>{err}</div>}
+          {haCoord && <div ref={mapDiv} style={{ height: '260px', width: '100%', borderRadius: '8px', overflow: 'hidden', marginBottom: '8px', border: '1px solid var(--ns-v-filo, #eef2f6)' }} />}
           <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
             {puntiVis.map((p: any, i: number) => (
               <div key={p.codice}
                 onMouseEnter={() => vaiAlPunto(p)}
                 onClick={() => scegli(p)}
-                style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', border: '1px solid ' + (evid === p.codice ? '#f97316' : '#eef2f6'), background: evid === p.codice ? '#fff7ed' : '#fff', borderRadius: '6px', padding: '8px 10px', marginBottom: '5px', cursor: 'pointer' }}>
+                style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', border: '1px solid ' + (evid === p.codice ? 'var(--ns-v-accento, #f97316)' : 'var(--ns-v-filo, #eef2f6)'), background: evid === p.codice ? 'var(--ns-v-su, #fff7ed)' : 'var(--ns-v-carta, #fff)', borderRadius: '6px', padding: '8px 10px', marginBottom: '5px', cursor: 'pointer' }}>
                 {p.lat && p.lon
-                  ? <span style={{ flexShrink: 0, width: '20px', height: '20px', borderRadius: '50%', background: '#f97316', color: '#fff', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
+                  ? <span style={{ flexShrink: 0, width: '20px', height: '20px', borderRadius: '50%', background: 'var(--ns-v-accento, #f97316)', color: '#fff', fontSize: '11px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{i + 1}</span>
                   : <span style={{ flexShrink: 0, width: '20px' }} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#1a1a1a' }}>
+                  <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--ns-v-inchiostro, #1a1a1a)' }}>
                     {p.nome || p.codice}
                     <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: 700, color: p.categoria === 'locker' ? '#7c3aed' : '#0369a1', background: p.categoria === 'locker' ? '#f3e8ff' : '#e0f2fe', borderRadius: '4px', padding: '1px 6px', whiteSpace: 'nowrap' }}>{etichettaCategoria(p.categoria)}</span>
                   </div>
-                  <div style={{ fontSize: '11.5px', color: '#666' }}>{p.indirizzo}, {p.cap} {p.localita} ({p.provincia}){p.distanzaKm != null ? ` · ${p.distanzaKm} km` : ''}</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--ns-v-attenuato, #666)' }}>{p.indirizzo}, {p.cap} {p.localita} ({p.provincia}){p.distanzaKm != null ? ` · ${p.distanzaKm} km` : ''}</div>
                 </div>
-                <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: '11.5px', fontWeight: 700, color: '#f97316' }}>Scegli</span>
+                <span style={{ flexShrink: 0, alignSelf: 'center', fontSize: '11.5px', fontWeight: 700, color: 'var(--ns-v-accento-testo, #f97316)' }}>Scegli</span>
               </div>
             ))}
           </div>

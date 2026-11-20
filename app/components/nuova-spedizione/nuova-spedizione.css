@@ -4,6 +4,17 @@
    come è successo sull'Elenco. Il vetro sfocato resta al riepilogo, che di finestre non ne apre. */
 
 .gx .ns { --ns-r: 20px; max-width: 1180px; margin: 0 auto; font-variant-numeric: tabular-nums; color: var(--gx-testo); }
+/* I componenti del modulo di oggi riusati qui (Punto Poste, locker, articoli del catalogo, ricarica con carta) hanno i
+   colori in linea come var(--ns-v-…, colore di oggi): fuori da questa pagina la variabile non c'è e restano identici al
+   pixel; qui prendono i colori della grafica nuova. Il 20/11 di notte il CAP del Punto Poste era bianco su bianco: il
+   testo ereditava il bianco della notte, lo sfondo restava il #fff in linea.
+   color-scheme: caselle, pallini, tendine native e barre di scorrimento seguono la luce (di notte erano quadrati bianchi). */
+.gx .ns { color-scheme: light; --ns-v-carta: #fff; --ns-v-filo: rgba(16, 24, 40, .1); --ns-v-inchiostro: var(--gx-inchiostro);
+  --ns-v-attenuato: var(--gx-attenuato); --ns-v-accento: var(--gx-accento-pieno); --ns-v-accento-testo: var(--gx-accento-testo);
+  --ns-v-su: rgba(255, 79, 0, .08); --ns-v-su-filo: rgba(255, 79, 0, .35); --ns-v-bene: var(--gx-bene); --ns-v-problema: var(--gx-problema);
+  --ns-v-avviso-testo: var(--gx-accento-testo); --ns-v-attenzione: #B45309; }
+.gx[data-luce="notte"] .ns { color-scheme: dark; --ns-v-carta: rgba(255, 255, 255, .05); --ns-v-filo: rgba(255, 255, 255, .12);
+  --ns-v-su: rgba(255, 79, 0, .16); --ns-v-su-filo: rgba(255, 95, 31, .45); --ns-v-attenzione: #FBBF24; }
 .gx .ns-griglia { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: 22px; align-items: start; }
 .gx .ns-colonna { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .gx .ns-testa { padding: 4px 4px 2px; }
@@ -152,7 +163,9 @@
   background: var(--gx-accento-pieno); box-shadow: 0 12px 26px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); }
 .gx .ns-crea__tasto:hover { transform: translateY(-1px); }
 .gx .ns-crea__tasto:focus-visible { outline: 2px solid var(--gx-inchiostro); outline-offset: 3px; }
-.gx .ns-crea__tasto:disabled { cursor: progress; opacity: .55; transform: none; box-shadow: none; }
+/* Spento mentre ricalcola: neutro ma leggibile. Prima sbiadiva tutto (opacità .55) e «Aggiorno i prezzi…» restava a 1,9
+   di contrasto sull'arancio: proprio la scritta che spiega perché non si può ancora premere. */
+.gx .ns-crea__tasto:disabled { cursor: progress; opacity: 1; transform: none; background: var(--gx-incavo); color: var(--gx-testo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
 .gx .ns-cambiato { margin: 0; padding: 9px 12px; border-radius: 12px; font-size: 13px; text-align: center; color: var(--gx-inchiostro); background: color-mix(in srgb, var(--gx-accento) 12%, transparent); }
 
 /* il riepilogo: fermo mentre si scorre */
@@ -172,7 +185,7 @@
 .gx .ns-riep__colli b { display: block; font-weight: 600; }
 .gx .ns-riep__colli small { display: block; font-size: 12px; color: var(--gx-attenuato); }
 .gx .ns-riep__icona { position: relative; width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); color: var(--gx-attenuato); }
-.gx .ns-riep__icona em { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; font-style: normal; font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; color: #fff; background: var(--gx-attenuato); }
+.gx .ns-riep__icona em { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; font-style: normal; font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; color: var(--gx-fondo); background: var(--gx-testo); }
 .gx .ns-riep__corriere { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .gx .ns-riep__corriere b { display: block; font-size: 13.5px; font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-riep__corriere small { display: block; font-size: 12px; color: var(--gx-attenuato); }
@@ -196,17 +209,31 @@
 /* «Spedisci per»: la tendina con la ricerca (app/components/SelectCercabile, condivisa col modulo di oggi) ha il suo
    aspetto scritto dentro; la pagina nuova le passa la classe ns-campo__val, e solo allora la si veste qui */
 .gx button.ns-campo__val { background: transparent; border: 0; padding: 3px 0 0; font: inherit; font-size: 15px; color: var(--gx-inchiostro); width: 100%; min-height: 24px; }
-.gx button.ns-campo__val > span:first-child { color: inherit !important; }
-.gx button.ns-campo__val > span:last-child { font-size: 0 !important; width: 7px; height: 7px; margin-right: 4px; border-right: 1.6px solid var(--gx-attenuato); border-bottom: 1.6px solid var(--gx-attenuato); transform: translateY(-2px) rotate(45deg); }
-[data-grafica="nuova"] .sc-pannello { border: 0 !important; border-radius: 12px !important; overflow: hidden; box-shadow: 0 18px 40px -18px rgba(15, 20, 27, .35), 0 0 0 1px rgba(15, 20, 27, .08) !important; }
-[data-grafica="nuova"] .sc-pannello input { padding: 11px 12px !important; font: inherit !important; font-size: 13.5px !important; background: transparent; }
-[data-grafica="nuova"] .sc-pannello > div > div { padding: 9px 12px !important; }
-[data-luce="notte"] .sc-pannello { background: #2A2928 !important; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1) !important; }
-[data-luce="notte"] .sc-pannello input { color: #fff !important; border-bottom-color: rgba(255, 255, 255, .1) !important; }
-[data-luce="notte"] .sc-pannello > div > div { color: #fff !important; }
-[data-luce="notte"] .sc-pannello > div > div[style*="rgb(255, 247, 237)"] { background: rgba(255, 79, 0, .18) !important; }
+.gx button.ns-campo__val .sc-testo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--gx-inchiostro); }
+.gx button.ns-campo__val .sc-testo--vuoto { color: var(--gx-attenuato); }
+.gx button.ns-campo__val .sc-freccia { flex-shrink: 0; font-size: 0; width: 7px; height: 7px; margin-right: 4px; border-right: 1.6px solid var(--gx-attenuato); border-bottom: 1.6px solid var(--gx-attenuato); transform: translateY(-2px) rotate(45deg); }
+/* Il pannello vestito non ha colori in linea (SelectCercabile, 20/11): li decide tutti questo blocco, di giorno e di
+   notte, in ogni stato — voce sotto il mouse, voce scelta, voce spenta, nessun risultato. Prima il vestito notte
+   rendeva bianco il testo ma lo sfondo della voce sotto il mouse restava #f7f7f7 in linea: bianco su bianco. */
+.sc-pannello { border-radius: 12px; overflow: hidden; background: #fff; color: #0F141B; font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif;
+  box-shadow: 0 18px 40px -18px rgba(15, 20, 27, .35), 0 0 0 1px rgba(15, 20, 27, .08); }
+[data-luce="notte"] .sc-pannello { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
+.sc-cerca { display: block; width: 100%; box-sizing: border-box; padding: 11px 12px; border: 0; border-bottom: 1px solid rgba(16, 24, 40, .08);
+  outline: 0; background: transparent; font: inherit; font-size: 13.5px; color: inherit; }
+.sc-cerca::placeholder { color: rgba(52, 62, 78, .62); opacity: 1; }
+[data-luce="notte"] .sc-cerca { border-bottom-color: rgba(255, 255, 255, .1); }
+[data-luce="notte"] .sc-cerca::placeholder { color: rgba(226, 224, 220, .64); }
+.sc-voci { max-height: 260px; overflow-y: auto; }
+.sc-voce { padding: 9px 12px; font-size: 13.5px; cursor: pointer; word-break: break-word; }
+.sc-voce:hover { background: rgba(255, 79, 0, .08); }
+.sc-voce--su, .sc-voce--su:hover { background: rgba(255, 79, 0, .14); color: #B83A00; font-weight: 600; }
+[data-luce="notte"] .sc-voce:hover { background: rgba(255, 255, 255, .08); }
+[data-luce="notte"] .sc-voce--su, [data-luce="notte"] .sc-voce--su:hover { background: rgba(255, 79, 0, .22); color: #fff; }
+.sc-voce--spenta { cursor: default; opacity: .45; }
+.sc-voce--spenta:hover { background: transparent; }
+.sc-vuoto { padding: 14px; font-size: 12.5px; text-align: center; opacity: .6; }
 .ns-tendina { position: fixed; z-index: 1000000; overflow-y: auto; border-radius: 12px; background: #fff; color: #0F141B;
-  box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(16, 24, 40, .08); font-family: var(--font-outfit), system-ui, sans-serif; }
+  box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(16, 24, 40, .08); font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif; }
 [data-luce="notte"] .ns-tendina { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
 .ns-tendina__voce { display: grid; gap: 1px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
 .ns-tendina__voce b { font-weight: 600; }
@@ -233,7 +260,9 @@
   .gx .ns-collo__n { grid-column: 1 / span 3; padding-top: 8px; }
   .gx .ns-togli { grid-column: 4; grid-row: 1; justify-self: end; height: 36px; }
   /* il tasto fisso in basso: in fondo a una pagina così lunga non si troverebbe (revisione DESIGN, 20/11) */
-  .gx .ns-crea { position: sticky; bottom: 0; z-index: 2; margin: 0 -10px; padding: 14px 10px 10px; gap: 6px; background: linear-gradient(to top, var(--gx-fondo) 75%, transparent); }
+  /* l'ombra piena copre i 20 px di margine in fondo al riquadro che scorre (gx-pagina): il tasto fisso si ferma sopra
+     quel margine e sotto passava il testo della pagina (20/11, «kg/collo» sotto «Crea» sul telefono) */
+  .gx .ns-crea { position: sticky; bottom: 0; z-index: 2; margin: 0 -10px; padding: 14px 10px 10px; gap: 6px; background: linear-gradient(to top, var(--gx-fondo) 75%, transparent); box-shadow: 0 24px 0 var(--gx-fondo); }
   .gx .ns-crea .ns-nota--centro { display: none; }
   .gx .ns-solo-telefono { display: block; margin-top: 6px; }
 }

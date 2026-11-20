@@ -27,9 +27,9 @@ export default function PagaConCarta(props: Props) {
 
 function RiquadroBonifico({ mancante, costo, credito, cifre = conPunto }: Omit<Props, 'onPagato'>) {
   return (
-    <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
-      <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 14 }}>Credito insufficiente</div>
-      <div style={{ color: '#9a3412', fontSize: 13, marginTop: 3 }}>
+    <div style={{ background: 'var(--ns-v-su, #fff7ed)', border: '1px solid var(--ns-v-su-filo, #fed7aa)', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+      <div style={{ fontWeight: 700, color: 'var(--ns-v-avviso-testo, #9a3412)', fontSize: 14 }}>Credito insufficiente</div>
+      <div style={{ color: 'var(--ns-v-avviso-testo, #9a3412)', fontSize: 13, marginTop: 3 }}>
         Spedizione € {cifre(costo)} · credito € {cifre(credito)} — mancano <b>€ {cifre(mancante)}</b>.
       </div>
       <DatiBonifico variante="riquadro" />
@@ -68,22 +68,22 @@ function RiquadroCarta({ mancante, costo, credito, onPagato, cifre = conPunto }:
   }
 
   return (
-    <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
-      <div style={{ fontWeight: 700, color: '#9a3412', fontSize: 14 }}>Credito insufficiente</div>
-      <div style={{ color: '#9a3412', fontSize: 13, marginTop: 3 }}>
+    <div style={{ background: 'var(--ns-v-su, #fff7ed)', border: '1px solid var(--ns-v-su-filo, #fed7aa)', borderRadius: 8, padding: '14px 16px', marginBottom: 16 }}>
+      <div style={{ fontWeight: 700, color: 'var(--ns-v-avviso-testo, #9a3412)', fontSize: 14 }}>Credito insufficiente</div>
+      <div style={{ color: 'var(--ns-v-avviso-testo, #9a3412)', fontSize: 13, marginTop: 3 }}>
         Spedizione € {cifre(costo)} · credito € {cifre(credito)} — mancano <b>€ {cifre(mancante)}</b>.
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
         <button onClick={paga} disabled={invio}
-          style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: invio ? 'default' : 'pointer', opacity: invio ? 0.75 : 1 }}>
+          style={{ background: 'var(--ns-v-accento, #f97316)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: invio ? 'default' : 'pointer', opacity: invio ? 0.75 : 1 }}>
           {invio ? 'Addebito in corso…' : `Paga € ${cifre(mancante)} con la carta e spedisci`}
         </button>
         <a href="/cliente/ricarica"
-          style={{ background: '#fff', color: '#9a3412', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+          style={{ background: 'var(--ns-v-carta, #fff)', color: 'var(--ns-v-avviso-testo, #9a3412)', border: '1px solid var(--ns-v-su-filo, #fed7aa)', borderRadius: 8, padding: '10px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
           Ricarica credito
         </a>
       </div>
-      {msg && <div style={{ color: '#9a3412', fontSize: 12, marginTop: 10 }}>{msg}</div>}
+      {msg && <div style={{ color: 'var(--ns-v-avviso-testo, #9a3412)', fontSize: 12, marginTop: 10 }}>{msg}</div>}
     </div>
   )
 }

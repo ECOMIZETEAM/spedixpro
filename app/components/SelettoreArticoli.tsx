@@ -20,7 +20,7 @@ export type ArticoloCat = {
   attributi?: Record<string, any> | null; quantita?: number | null
 }
 
-const inp: any = { width: '100%', padding: '8px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', boxSizing: 'border-box' }
+const inp: any = { width: '100%', padding: '8px 11px', border: '1px solid var(--ns-v-filo, #d1d5db)', borderRadius: '6px', fontSize: '13px', color: 'var(--ns-v-inchiostro, #1a1a1a)', boxSizing: 'border-box' }
 
 export function descriviVariante(a: ArticoloCat): string {
   const at = a.attributi || {}
@@ -64,37 +64,37 @@ export default function SelettoreArticoli({
   if (!articoli.length) return null
 
   return (
-    <div style={{ border: '1px solid #e8e8e8', borderRadius: '8px', background: '#fff', overflow: 'hidden' }}>
+    <div style={{ border: '1px solid var(--ns-v-filo, #e8e8e8)', borderRadius: '8px', background: 'var(--ns-v-carta, #fff)', overflow: 'hidden' }}>
       <button type="button" onClick={() => setAperto(o => !o)}
         style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-        <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>
-          {titolo} <span style={{ fontWeight: 400, color: '#999' }}>(facoltativo)</span>
+        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ns-v-inchiostro, #1a1a1a)' }}>
+          {titolo} <span style={{ fontWeight: 400, color: 'var(--ns-v-attenuato, #999)' }}>(facoltativo)</span>
         </span>
-        <span style={{ fontSize: '12.5px', color: valore.length ? '#15803d' : '#9ca3af', fontWeight: valore.length ? 700 : 400 }}>
+        <span style={{ fontSize: '12.5px', color: valore.length ? 'var(--ns-v-bene, #15803d)' : 'var(--ns-v-attenuato, #9ca3af)', fontWeight: valore.length ? 700 : 400 }}>
           {valore.length ? `${valore.length} articoli · ${pezzi} pezzi` : 'nessuno'} {aperto ? '▲' : '▼'}
         </span>
       </button>
 
       {aperto && (
-        <div style={{ borderTop: '1px solid #f0f0f0', padding: '12px 14px' }}>
+        <div style={{ borderTop: '1px solid var(--ns-v-filo, #f0f0f0)', padding: '12px 14px' }}>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Cerca SKU, nome, colore, taglia…" style={{ ...inp, marginBottom: '10px' }} />
 
-          <div style={{ maxHeight: '260px', overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: '6px' }}>
+          <div style={{ maxHeight: '260px', overflowY: 'auto', border: '1px solid var(--ns-v-filo, #f0f0f0)', borderRadius: '6px' }}>
             {filtrati.map(a => {
               const sel = scelti.has(a.id)
               const qta = scelti.get(a.id) || 1
               const giac = Number(a.quantita ?? 0)
               const variante = descriviVariante(a)
               return (
-                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderBottom: '1px solid #f7f7f7', background: sel ? '#fff7ed' : undefined }}>
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderBottom: '1px solid var(--ns-v-filo, #f7f7f7)', background: sel ? 'var(--ns-v-su, #fff7ed)' : undefined }}>
                   <input type="checkbox" checked={sel} onChange={() => toggle(a)} style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => toggle(a)}>
-                    <div style={{ fontSize: '13px', color: '#1a1a1a' }}>
+                    <div style={{ fontSize: '13px', color: 'var(--ns-v-inchiostro, #1a1a1a)' }}>
                       <b>{a.prodotto || a.nome || a.sku}</b>
-                      {variante && <span style={{ color: '#6b7280' }}> · {variante}</span>}
+                      {variante && <span style={{ color: 'var(--ns-v-attenuato, #6b7280)' }}> · {variante}</span>}
                     </div>
-                    <div style={{ fontSize: '11.5px', color: '#9ca3af' }}>
-                      {a.sku} — ne restano <span style={{ color: giac > 0 ? '#15803d' : giac < 0 ? '#b91c1c' : '#9ca3af', fontWeight: 700 }}>{giac}</span>
+                    <div style={{ fontSize: '11.5px', color: 'var(--ns-v-attenuato, #9ca3af)' }}>
+                      {a.sku} — ne restano <span style={{ color: giac > 0 ? 'var(--ns-v-bene, #15803d)' : giac < 0 ? 'var(--ns-v-problema, #b91c1c)' : 'var(--ns-v-attenuato, #9ca3af)', fontWeight: 700 }}>{giac}</span>
                     </div>
                   </div>
                   {sel && (
@@ -107,21 +107,21 @@ export default function SelettoreArticoli({
                       Bloccare per un conteggio sbagliato fermerebbe il lavoro vero. */}
                   {sel && qta > giac && (
                     <span title="Ne stai spedendo piu' di quanti ne risultano: la giacenza andra' sotto zero"
-                      style={{ color: '#b45309', fontSize: '15px', flexShrink: 0 }}>⚠</span>
+                      style={{ color: 'var(--ns-v-attenzione, #b45309)', fontSize: '15px', flexShrink: 0 }}>⚠</span>
                   )}
                 </div>
               )
             })}
             {!filtrati.length && (
-              <div style={{ padding: '18px', textAlign: 'center', color: '#9ca3af', fontSize: '12.5px' }}>Nessun articolo per la ricerca.</div>
+              <div style={{ padding: '18px', textAlign: 'center', color: 'var(--ns-v-attenuato, #9ca3af)', fontSize: '12.5px' }}>Nessun articolo per la ricerca.</div>
             )}
           </div>
 
           {valore.length > 0 && (
             <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', color: '#6b7280' }}>Alla creazione questi pezzi vengono tolti dal magazzino.</span>
+              <span style={{ fontSize: '12px', color: 'var(--ns-v-attenuato, #6b7280)' }}>Alla creazione questi pezzi vengono tolti dal magazzino.</span>
               <button type="button" onClick={() => onChange([])}
-                style={{ background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb', padding: '6px 12px', borderRadius: '6px', fontSize: '12.5px', cursor: 'pointer' }}>Togli tutti</button>
+                style={{ background: 'var(--ns-v-carta, #fff)', color: 'var(--ns-v-attenuato, #6b7280)', border: '1px solid var(--ns-v-filo, #e5e7eb)', padding: '6px 12px', borderRadius: '6px', fontSize: '12.5px', cursor: 'pointer' }}>Togli tutti</button>
             </div>
           )}
         </div>
