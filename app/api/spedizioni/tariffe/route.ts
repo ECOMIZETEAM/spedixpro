@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { infoIvaPrezzi, aliquotaCliente } from '@/lib/iva-vendita'
+import { ivaDelCorriere } from '@/lib/iva-calcolo'
 import { createServerSupabase } from '@/lib/supabase'
 import { calcolaTariffeCliente, ZONE_MAP, PAESI, superaMisureMax, descriviLimiti } from '@/lib/tariffe-motore'
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
@@ -162,7 +164,7 @@ export async function POST(req: NextRequest) {
     // Sotto-master trattato come cliente: listino = quello assegnato (di tua proprietà → query ok)
     cliente = { master_id: utente!.master_id, listino_cliente_id: subListinoId }
   } else {
-    const { data } = await supabase.from('clienti').select('master_id,listino_cliente_id,impostazioni').eq('id', clienteId).single()
+    const { data } = await supabase.from('clienti').select('master_id,listino_cliente_id,impostazioni,aliquota_iva').eq('id', clienteId).single()
     cliente = data
   }
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
@@ -182,5 +184,9 @@ export async function POST(req: NextRequest) {
   } catch { /* in caso di errore non filtro: meglio mostrare che rompere la pagina */ }
 
   try { await annotaPuntoPoste(createAdminSupabase(), risultati) } catch { /* i flag punto non bloccano la lista */ }
+  // "+ IVA" / "IVA incl." accanto a ogni prezzo (Lorenzo, 20/11/2026): come e' venduto oggi, su quel
+  // contratto, il listino di chi compra (cliente o sotto-master). Il prezzo non cambia: e' solo come leggerlo.
+  const iva = await infoIvaPrezzi(createAdminSupabase(), cliente?.listino_cliente_id, subMatch ? 22 : aliquotaCliente(cliente?.aliquota_iva))
+  if (iva) for (const r of risultati) { r._iva_inclusa = ivaDelCorriere(iva, r._corriere_id || r.corriere_id); r._aliquota = iva.aliquota }
   return NextResponse.json(soloDomicilio(risultati))
 }

@@ -9,6 +9,7 @@ import { confrontaPerData } from '@/lib/data-ordine-import'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo, type TariffaAnteprima } from '@/app/cliente/anteprima-prezzi'
 import { colliDellOrdine, descriviColli } from '@/lib/colli-ordine'
 import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
+import IvaPrezzo from '@/app/components/IvaPrezzo'
 
 // Per quanti ordini A SCHERMO il prezzo si calcola da solo. Quelli SELEZIONATI si calcolano sempre
 // (fino al tetto sotto). Un import tipico sta sotto questi numeri e si vede tutto subito; ma c'e'
@@ -892,18 +893,21 @@ export default function ImportaOrdiniPage() {
   // TOTALE dei selezionati, col contratto scelto nella tendina. E' una somma di cio' che e' a
   // schermo: al clic i prezzi vengono ricalcolati e, se sono cambiati, lo si chiede prima di spedire.
   let totaleSel = 0, selInCalcolo = 0, selSenzaPrezzo = 0
+  // Come sono scritti i prezzi del totale (+ IVA / IVA incl.): l'etichetta solo se sono tutti uguali.
+  const ivaSel: (boolean | null | undefined)[] = []
+  let aliquotaSel: number | undefined
   for (const o of selezionatiSpedibili) {
     if (!nelTotale.has(o.id)) continue
     const e = anteprima.leggi(rigaPrezzoDi(o))
     if (!e || e.stato === 'calcolo') { selInCalcolo++; continue }
     const t = e.stato === 'ok' ? scegliTariffa(e.tariffe, filtro) : null
-    if (t) totaleSel += t.prezzo; else selSenzaPrezzo++
+    if (t) { totaleSel += t.prezzo; ivaSel.push(t.iva_inclusa); aliquotaSel = t.aliquota } else selSenzaPrezzo++
   }
   totaleSel = Math.round(totaleSel * 100) / 100
   const selFuoriTotale = selezionatiSpedibili.length - nelTotale.size
   const riepilogoPrezzi = (anteprimaPronta && selezionatiSpedibili.length > 0) ? (
     <span>
-      {' · '}Totale previsto <b style={{ color: '#1a1a1a' }}>{euro(totaleSel)}</b>
+      {' · '}Totale previsto <b style={{ color: '#1a1a1a' }}>{euro(totaleSel)}<IvaPrezzo gruppo={ivaSel} aliquota={aliquotaSel} /></b>
       {selInCalcolo > 0 ? <span style={{ color: '#999' }}> (calcolo in corso…)</span> : null}
       {selSenzaPrezzo > 0 ? <span style={{ color: '#b45309' }}> · {selSenzaPrezzo} senza prezzo</span> : null}
       {selFuoriTotale > 0 ? <span style={{ color: '#999' }}> · sui primi {PREZZI_SELEZIONATI}: {selFuoriTotale} ordini non inclusi</span> : null}
@@ -957,7 +961,7 @@ export default function ImportaOrdiniPage() {
     return (
       <span title={`Calcolato su ${descriviColli(rp.colli)}.\nÈ l'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.`
         + (e.tariffe.length > 1 ? '\n\nTutti i contratti per questo ordine:\n' + elenco : '')}>
-        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{euro(t.prezzo)}</span>
+        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{euro(t.prezzo)}<IvaPrezzo inclusa={t.iva_inclusa} aliquota={t.aliquota} /></span>
         <div style={sub}>{t.nome}</div>
         {pesoNonIndicato(o) ? <div style={{ ...sub, color: '#b45309' }}>su 1 kg: peso non indicato</div> : null}
       </span>

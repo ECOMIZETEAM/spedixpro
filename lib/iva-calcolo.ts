@@ -66,3 +66,31 @@ export function modoGruppo(s: SommaIva): 'IVA inclusa' | 'IVA esclusa' | 'misto'
   if (s.nInclusa && s.nEsclusa) return 'misto'
   return s.nInclusa ? 'IVA inclusa' : 'IVA esclusa'
 }
+
+// ── L'ETICHETTA ACCANTO AI PREZZI (Lorenzo, 20/11/2026: "fai il + IVA visibile") ──────────────────
+// Chi compra vede come e' scritto il prezzo: "+ IVA" se il listino e' venduto IVA esclusa, "IVA incl."
+// se inclusa. Prima vedeva "4,00 €" e basta, e non poteva sapere quale dei due fosse.
+// Niente etichetta a chi ha l'aliquota allo 0% (esenti, lettere d'intento): li' non c'e' IVA da
+// aggiungere, e "+ IVA" sarebbe falso.
+
+export type InfoIvaPrezzi = { aliquota: number; listino: boolean; corrieri: Record<string, boolean | null> }
+
+export function ivaDelCorriere(info: InfoIvaPrezzi | null | undefined, corriereId: string | null | undefined): boolean | null {
+  if (!info) return null
+  const v = corriereId ? info.corrieri?.[corriereId] : null
+  return v == null ? !!info.listino : v
+}
+
+export function testoIva(inclusa: boolean | null | undefined, aliquota?: number | null): string {
+  if (inclusa == null) return ''
+  if (aliquota != null && Number(aliquota) === 0) return ''
+  return inclusa ? 'IVA incl.' : '+ IVA'
+}
+
+// Per un totale: l'etichetta solo se tutti i prezzi dentro sono scritti allo stesso modo.
+export function testoIvaGruppo(inclusa: (boolean | null | undefined)[], aliquota?: number | null): string {
+  const noti = inclusa.filter(v => v != null) as boolean[]
+  if (!noti.length || noti.length !== inclusa.length) return ''
+  if (noti.some(v => v !== noti[0])) return ''
+  return testoIva(noti[0], aliquota)
+}

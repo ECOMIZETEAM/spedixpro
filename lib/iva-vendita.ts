@@ -9,6 +9,8 @@
 // compratore il giorno della spedizione, e come era venduto su quel listino il contratto del venditore
 // in quel giorno. I movimenti non c'entrano: il credito ha scalato il prezzo del listino comunque.
 
+import type { InfoIvaPrezzi } from '@/lib/iva-calcolo'
+
 export type ChiestaIva = {
   t: 'cliente' | 'master'   // chi ha comprato
   s: string                 // il suo id
@@ -55,6 +57,26 @@ export async function statoIvaListino(admin: any, listinoId: string): Promise<St
     if (!(r.corriere_id in stato.corrieri)) stato.corrieri[r.corriere_id] = r.iva_inclusa == null ? null : r.iva_inclusa === true
   }
   return stato
+}
+
+// PER L'ETICHETTA "+ IVA / IVA incl." accanto ai prezzi: come e' venduto OGGI il listino di chi compra,
+// con la sua aliquota. Se la lettura non riesce torna null e le pagine non mostrano l'etichetta: un
+// prezzo senza etichetta e' meglio di un prezzo che non si carica.
+export async function infoIvaPrezzi(admin: any, listinoId: string | null | undefined, aliquota: number): Promise<InfoIvaPrezzi | null> {
+  try {
+    const s = listinoId ? await statoIvaListino(admin, listinoId) : { listino: false, corrieri: {} }
+    return { aliquota, listino: s.listino, corrieri: s.corrieri }
+  } catch (e: any) {
+    console.error('[LISTINI IVA] etichetta non calcolata', listinoId, e?.message || e)
+    return null
+  }
+}
+
+// L'aliquota del cliente come la usano i report: vuota = 22.
+export function aliquotaCliente(v: any): number {
+  if (v === null || v === undefined || String(v).trim() === '') return 22
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? n : 22
 }
 
 // Una risposta per riga, nello stesso ordine. null = riga senza compratore (spedizioni proprie): esclusa.

@@ -3,6 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { conMemoria, type ContatoreLetture } from '@/lib/db-memoria'
 import { prezziPerRighe, type RigaDaPrezzare } from '@/lib/anteprima-prezzi'
+import { infoIvaPrezzi, aliquotaCliente } from '@/lib/iva-vendita'
+import { ivaDelCorriere } from '@/lib/iva-calcolo'
 import { MAX_COLLI_PER_RIGA, type Collo } from '@/lib/colli-ordine'
 
 export const runtime = 'nodejs'
@@ -116,7 +118,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { data: cliente, error: erroreCliente } = await supabase.from('clienti')
-    .select('master_id,listino_cliente_id,impostazioni,vieta_inserimento').eq('id', utente.cliente_id).single()
+    .select('master_id,listino_cliente_id,impostazioni,vieta_inserimento,aliquota_iva').eq('id', utente.cliente_id).single()
   if (guasto(erroreCliente)) return inciampo()
   if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
   // Chi non puo' inserire spedizioni non ha un prezzo da vedere: la creazione lo fermerebbe.
@@ -143,6 +145,10 @@ export async function POST(req: NextRequest) {
     if (lettureUtente.errori || lettureAdmin.errori) {
       console.error('[ANTEPRIMA] letture tornate con errore', { cliente: utente.cliente_id, sessione: lettureUtente.errori || null, servizio: lettureAdmin.errori || null })
     }
+    // "+ IVA" / "IVA incl." accanto a ogni prezzo (Lorenzo, 20/11/2026): come e' venduto oggi il suo
+    // listino su quel contratto. Il prezzo non cambia; se la lettura non riesce l'etichetta non c'e'.
+    const iva = await infoIvaPrezzi(createAdminSupabase(), (cliente as any).listino_cliente_id, aliquotaCliente((cliente as any).aliquota_iva))
+    if (iva) for (const e of esiti as any[]) for (const t of (e?.tariffe || [])) { t.iva_inclusa = ivaDelCorriere(iva, t.corriere_id); t.aliquota = iva.aliquota }
     return NextResponse.json({ righe: esiti })
   } catch (e: any) {
     console.error('[ANTEPRIMA] calcolo fallito', { cliente: utente.cliente_id, righe: righe.length, errore: e?.message || String(e) })

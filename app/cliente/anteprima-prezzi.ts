@@ -22,7 +22,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Collo } from '@/lib/colli-ordine'
 
-export type TariffaAnteprima = { corriere_id: string; nome: string; prezzo: number }
+// iva_inclusa / aliquota: come e' scritto il prezzo, per l'etichetta "+ IVA" / "IVA incl." (la mette la rotta).
+export type TariffaAnteprima = { corriere_id: string; nome: string; prezzo: number; iva_inclusa?: boolean | null; aliquota?: number }
 
 // Cio' che entra nel prezzo di un ordine. La pagina costruisce da QUESTO oggetto sia la riga
 // dell'anteprima sia i dati mandati alla creazione: stessi valori, stesso prezzo.
