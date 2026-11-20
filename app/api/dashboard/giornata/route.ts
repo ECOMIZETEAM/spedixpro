@@ -20,6 +20,19 @@ function inizioOggiRoma(): Date {
 }
 const oraRoma = (iso: string) => +new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
 
+// Al massimo una lettura al minuto per master, comunque siano aperte le schede: la dashboard la richiede ogni due minuti
+// e per MULTIEXPRESS sono ~6.300 righe di oggi (19/11). Una lettura in corso si condivide fra chi la chiede insieme.
+const memoria = new Map<string, { t: number, p: Promise<any> }>()
+function ricordato(chiave: string, fai: () => Promise<any>): Promise<any> {
+  const m = memoria.get(chiave)
+  if (m && Date.now() - m.t < 60_000) return m.p
+  if (memoria.size > 500) memoria.clear()
+  const p = fai()
+  memoria.set(chiave, { t: Date.now(), p })
+  p.catch(() => memoria.delete(chiave))
+  return p
+}
+
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -30,6 +43,15 @@ export async function GET() {
   const masterId = (utente as any)?.master_id
   if (!masterId) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
+  try {
+    const g = await ricordato(`${masterId}|${inizioOggiRoma().toISOString()}`, () => leggiGiornata(masterId))
+    return NextResponse.json(g)
+  } catch {
+    return NextResponse.json({ error: 'Lettura non riuscita' }, { status: 500 })
+  }
+}
+
+async function leggiGiornata(masterId: string) {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const { sottoAlberoMasterIds, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
   const admin = createAdminSupabase()
@@ -49,7 +71,7 @@ export async function GET() {
     const qq = q.in('master_id', reteIds.length ? reteIds : [masterId]).gte('created_at', da)
     const { data, error } = await (gambe.length ? qq.or(`cliente_id.is.null,cliente_id.not.in.(${gambe.join(',')})`) : qq)
       .order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, from + 999)
-    if (error) return NextResponse.json({ error: 'Lettura non riuscita' }, { status: 500 })
+    if (error) throw new Error(error.message)
     for (const s of (data || []) as any[]) {
       if (s.stato === 'annullata') continue
       const o = ore[oraRoma(s.created_at)]
@@ -59,8 +81,8 @@ export async function GET() {
     lette += data?.length || 0
     if (!data || data.length < 1000) break
   }
-  return NextResponse.json({
+  return {
     da, ore, create: ore.reduce((a, o) => a + o.create, 0), fuoriDistinta: ore.reduce((a, o) => a + o.fuoriDistinta, 0),
     troncata: lette >= LIMITE,
-  })
+  }
 }
