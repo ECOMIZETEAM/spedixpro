@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
-// I risultati del voto sulla nuova versione: SOLO per il super master (Lorenzo). Media, quanti per ogni voto, e i
-// commenti con chi li ha scritti (master, o cliente e il suo master).
+// I risultati del voto sulla nuova versione: SOLO per il super master (Lorenzo). Per ogni argomento (la nuova versione,
+// la Nuova spedizione: app/components/grafica/argomenti.ts) media e quanti per ogni voto; poi i voti uno per uno, coi
+// commenti e chi li ha scritti (master, o cliente e il suo master).
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -16,7 +17,7 @@ export async function GET() {
 
   const admin = createAdminSupabase()
   const { data: voti, error } = await admin.from('grafica_voti')
-    .select('id,utente_id,master_id,cliente_id,ruolo,voto,commento,pagina,creato_il,aggiornato_il')
+    .select('id,utente_id,master_id,cliente_id,ruolo,voto,commento,pagina,argomento,creato_il,aggiornato_il')
     .order('aggiornato_il', { ascending: false }).order('id', { ascending: true }).limit(2000)
   if (error) return NextResponse.json({ error: 'Voti non letti' }, { status: 500 })
   const lista = voti || []
@@ -31,13 +32,17 @@ export async function GET() {
   const nomeM = new Map((mm.data || []).map((x: any) => [x.id, x.nome]))
   const nomeC = new Map((cc.data || []).map((x: any) => [x.id, x.ragione_sociale]))
   const nomeU = new Map((uu.data || []).map((x: any) => [x.id, [x.nome, x.cognome].filter(Boolean).join(' ')]))
-  const conti = [0, 0, 0, 0, 0]
-  for (const v of lista) conti[v.voto - 1]++
-  const media = lista.length ? lista.reduce((s, v) => s + v.voto, 0) / lista.length : null
+  const per: Record<string, { totale: number, media: number | null, conti: number[] }> = {}
+  for (const v of lista) {
+    const a = v.argomento || 'versione'
+    if (!per[a]) per[a] = { totale: 0, media: 0, conti: [0, 0, 0, 0, 0] }
+    per[a].totale++; per[a].conti[v.voto - 1]++; per[a].media = (per[a].media as number) + v.voto
+  }
+  for (const a of Object.values(per)) a.media = a.totale ? (a.media as number) / a.totale : null
   return NextResponse.json({
-    totale: lista.length, media, conti,
+    per,
     voti: lista.map(v => ({
-      voto: v.voto, commento: v.commento, pagina: v.pagina, quando: v.aggiornato_il,
+      argomento: v.argomento || 'versione', voto: v.voto, commento: v.commento, pagina: v.pagina, quando: v.aggiornato_il,
       chi: nomeU.get(v.utente_id) || '—', ruolo: v.ruolo,
       master: v.master_id ? nomeM.get(v.master_id) || '—' : null,
       cliente: v.cliente_id ? nomeC.get(v.cliente_id) || '—' : null,

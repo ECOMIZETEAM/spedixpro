@@ -3,10 +3,13 @@
 // 1 a 5 e, se si vuole, cosa cambiare. Uno per persona: si può cambiare, l'ultimo vale. Si apre da «Lascia il tuo voto»
 // o da «Torna alla versione attuale»: in quel caso, votato o no, si torna poi alla pagina di oggi (senza «?nuova=1»).
 import { useEffect, useRef, useState } from 'react'
+import { ARGOMENTI, argomentoDi } from './argomenti'
 
 const DICITURE = ['', 'Per niente', 'Poco', 'Così così', 'Mi piace', 'Moltissimo']
 
 export default function Sondaggio({ pagina, uscita, chiudi }: { pagina: string; uscita: boolean; chiudi: () => void }) {
+  // dalla Nuova spedizione si vota quella pagina, da tutte le altre la nuova versione (un voto per argomento)
+  const argomento = argomentoDi(pagina)
   const [voto, setVoto] = useState(0)
   const [commento, setCommento] = useState('')
   const [stato, setStato] = useState<'' | 'invio' | 'fatto' | 'errore'>('')
@@ -20,20 +23,20 @@ export default function Sondaggio({ pagina, uscita, chiudi }: { pagina: string; 
 
   useEffect(() => {
     let vivo = true
-    fetch('/api/grafica/voto', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(d => {
+    fetch('/api/grafica/voto?argomento=' + argomento, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(d => {
       if (!vivo || !d?.voto) return
       setVoto(d.voto); setCommento(d.commento || ''); setGiaVotato(true)
     }).catch(() => {})
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') chiudiRif.current() }
     window.addEventListener('keydown', esc)
     return () => { vivo = false; window.removeEventListener('keydown', esc) }
-  }, [])
+  }, [argomento])
 
   const invia = async () => {
     if (!voto || stato === 'invio') return
     setStato('invio')
     try {
-      const r = await fetch('/api/grafica/voto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voto, commento, pagina }) })
+      const r = await fetch('/api/grafica/voto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voto, commento, pagina, argomento }) })
       if (!r.ok) throw new Error()
       setStato('fatto')
       setTimeout(fine, uscita ? 900 : 1400)
@@ -49,7 +52,7 @@ export default function Sondaggio({ pagina, uscita, chiudi }: { pagina: string; 
             <span>Il tuo voto è salvato. Puoi cambiarlo quando vuoi.</span>
           </div>
         ) : <>
-          <h2 id="sv-titolo">{uscita ? 'Prima di tornare: ti è piaciuta?' : 'Ti piace la nuova MoovExpress?'}</h2>
+          <h2 id="sv-titolo">{uscita ? 'Prima di tornare: ti è piaciuta?' : ARGOMENTI[argomento].domanda}</h2>
           <p>Un voto da 1 a 5 e, se vuoi, cosa cambieresti. Ci aiuta a decidere cosa sistemare prima di passare tutti alla nuova versione.{giaVotato && ' Hai già votato: puoi cambiare il tuo voto.'}</p>
           <div className="sv-voti" role="radiogroup" aria-label="Voto da 1 a 5">
             {[1, 2, 3, 4, 5].map(n => (
