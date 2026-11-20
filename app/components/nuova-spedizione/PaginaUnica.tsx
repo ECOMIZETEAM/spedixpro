@@ -35,8 +35,8 @@ const COLLO_VUOTO: Collo = { lunghezza: '', larghezza: '', altezza: '', peso: ''
 // Deposito PuntoPoste preferito (FMP/APT), ricordato per comodità come nel modulo di oggi.
 const depSalvato = (): 'FMP' | 'APT' | '' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
 const num = (v: string | number | undefined | null) => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0 }
-// Chi scrive i pesi in italiano mette la virgola: la si tiene come punto, così il numero è quello scritto.
-const decimale = (v: string) => v.replace(',', '.').replace(/[^0-9.]/g, '')
+// Chi scrive i pesi in italiano mette la virgola: nel campo resta com'è scritta, nel calcolo vale come punto (num).
+const decimale = (v: string) => v.replace(/[^0-9.,]/g, '')
 const pieno = (s: string) => String(s || '').trim().length > 0
 
 function mittDaCliente(c: any): Indirizzo {
@@ -47,7 +47,7 @@ function mittDaCliente(c: any): Indirizzo {
 // I colli per il motore prezzi: ogni collo col suo peso (pesiDelModulo toglie solo l'eccedenza della virgola mobile)
 // e le misure di ripiego dove mancano, come il modulo di oggi.
 function pacchi(colli: Collo[]) {
-  const pesi = pesiDelModulo(colli.map(c => c.peso))
+  const pesi = pesiDelModulo(colli.map(c => c.peso.replace(',', '.')))
   return colli.map((c, i) => ({ length: num(c.lunghezza) || 20, width: num(c.larghezza) || 15, height: num(c.altezza) || 10, weight: pesi[i] }))
 }
 
@@ -377,6 +377,10 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
     window.location.href = urlModuloDiOggi()
   }
 
+  const notaCrea = prova
+    ? (master ? 'Nella prova la spedizione si crea dalla pagina di oggi: ti portiamo lì (i dati vanno riscritti).' : 'Nella prova la spedizione si crea dalla pagina di oggi: ti portiamo lì con destinatario, colli e contrassegno già scritti.')
+    : 'Per ora la spedizione si crea dalla pagina di oggi: ti portiamo lì.'
+
   // ── pezzi ripetuti ──
   const campo = (k: string, etichetta: string, valore: string, onChange: (v: string) => void, extra?: { ref?: React.RefObject<HTMLInputElement | null>; onInput?: (v: string) => void; placeholder?: string; inputMode?: 'decimal' | 'numeric' | 'tel' | 'email'; className?: string; onFocus?: () => void }) => {
     const e = errore(k)
@@ -409,6 +413,8 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
           <header className="ns-testa">
             <h1 className="ns-titolo">Nuova spedizione</h1>
             <p className="ns-sottotitolo">Tutto in una pagina: compili, i corrieri compaiono con il prezzo, scegli e crei.</p>
+            {/* Sul telefono il tasto in fondo resta fisso e da solo: la nota su dove si crea sta qui. */}
+            <p className="ns-nota ns-solo-telefono">{notaCrea}</p>
           </header>
 
           {/* ── MITTENTE ── */}
@@ -418,7 +424,9 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
               {mittCompleto && <button type="button" className="ns-link" onClick={() => setMittAperto(v => !v)}>{mittAperto ? 'Chiudi' : 'Modifica'}</button>}
             </div>
             {master && (
-              <div className={'ns-campo ns-campo--select' + (errore('cliente') ? ' ns-campo--errore' : '')} onBlur={tocca('cliente')}>
+              // Niente «lasciato» su questo campo: la tendina con la ricerca porta via il fuoco mentre si sta ancora
+              // scegliendo, e il campo diventava rosso a metà scelta. Il rosso qui arriva solo premendo «Crea».
+              <div className={'ns-campo ns-campo--select' + (errore('cliente') ? ' ns-campo--errore' : '')}>
                 <span className="ns-campo__et">Spedisci per</span>
                 <SelectCercabile value={clienteId} onChange={(e: any) => selezionaCliente(e.target.value)} className="ns-campo__val">
                   <option value="">— scegli —</option>
@@ -715,12 +723,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
             <button type="button" className="ns-crea__tasto" onClick={crea} disabled={inCalcolo}>
               {inCalcolo ? 'Aggiorno i prezzi…' : selected ? `Crea spedizione · ${euro(totale)}` : 'Crea spedizione'}
             </button>
-            <p className="ns-nota ns-nota--centro">
-              {prova
-                ? (master ? 'Nella prova la spedizione si crea dalla pagina di oggi: ti portiamo lì (i dati vanno riscritti).' : 'Nella prova la spedizione si crea dalla pagina di oggi: ti portiamo lì con destinatario, colli e contrassegno già scritti.')
-                : 'Per ora la spedizione si crea dalla pagina di oggi: ti portiamo lì.'}
-              {' '}Prezzi IVA esclusa.
-            </p>
+            <p className="ns-nota ns-nota--centro">{notaCrea} Prezzi IVA esclusa.</p>
           </div>
         </div>
 
