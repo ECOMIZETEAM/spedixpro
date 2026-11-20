@@ -41,6 +41,7 @@ export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
   // il calendario. Portato su document.body con position:fixed, nessun contenitore lo ritaglia piu'.
   const [pos, setPos] = useState<{ top?: number, bottom?: number, left?: number, right?: number, maxH: number } | null>(null)
   const [montato, setMontato] = useState(false)
+  const [stretto, setStretto] = useState(false)
 
   // default: se non c'e' nulla, imposta oggi-oggi
   useEffect(() => {
@@ -73,9 +74,14 @@ export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
   const misura = useCallback(() => {
     const r = ref.current?.getBoundingClientRect()
     if (!r) return
+    // SCHERMO STRETTO (telefono): due mesi affiancati e la colonna delle scelte rapide fanno ~620 px e
+    // uscivano dallo schermo, "Applica" compreso (portale cliente, 20/11/2026). Sotto i 640 px un mese solo,
+    // le scelte sotto, e il pannello a 8 px dal bordo sinistro.
+    const isStretto = window.innerWidth < 640
+    setStretto(isStretto)
     // Allineamento a destra se il campo sta nella meta' destra dello schermo, come prima.
     const versoDx = r.left > window.innerWidth / 2
-    const oriz = versoDx ? { right: window.innerWidth - r.right } : { left: r.left }
+    const oriz = isStretto ? { left: 8 } : versoDx ? { right: window.innerWidth - r.right } : { left: r.left }
     const alto = pannelloRef.current?.offsetHeight || 300   // al primo giro il pannello non c'e' ancora
     const sotto = window.innerHeight - r.bottom - 8
     const sopra = r.top - 8
@@ -136,9 +142,12 @@ export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
     return (
       <div style={{ padding: '8px' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
-          {isSx ? <button onClick={()=>{ setMeseSx(new Date(anno,m-1,1)); setMeseDx(new Date(anno,m,1)) }} style={navBtn}>‹</button> : <span style={{width:'22px'}}></span>}
+          {stretto
+            // Un mese solo (quello di destra): le frecce lo spostano di un mese, e quello di sinistra lo segue.
+            ? <button onClick={()=>{ setMeseDx(new Date(anno,m-1,1)); setMeseSx(new Date(anno,m-2,1)) }} style={navBtn}>‹</button>
+            : isSx ? <button onClick={()=>{ setMeseSx(new Date(anno,m-1,1)); setMeseDx(new Date(anno,m,1)) }} style={navBtn}>‹</button> : <span style={{width:'22px'}}></span>}
           <div style={{ fontWeight:'700', color:'#1a1a1a', fontSize:'13px' }}>{MESI[m]} {anno}</div>
-          {!isSx ? <button onClick={()=>{ setMeseDx(new Date(anno,m+1,1)); setMeseSx(new Date(anno,m,1)) }} style={navBtn}>›</button> : <span style={{width:'22px'}}></span>}
+          {(stretto || !isSx) ? <button onClick={()=>{ setMeseDx(new Date(anno,m+1,1)); setMeseSx(new Date(anno,m,1)) }} style={navBtn}>›</button> : <span style={{width:'22px'}}></span>}
         </div>
         <table style={{ borderCollapse:'separate', borderSpacing:'2px', tableLayout:'fixed', width:'224px' }}>
           <thead><tr>{GIORNI.map(g => <th key={g} style={{ width:'30px', height:'26px', fontSize:'11px', color:'#1a1a1a', fontWeight:'600', textAlign:'center' }}>{g}</th>)}</tr></thead>
@@ -177,16 +186,20 @@ export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
         <span>📅</span><span style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>{labelText}</span><span style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>▾</span>
       </div>
       {open && montato && pos && createPortal(
-        <div ref={pannelloRef} style={{ position:'fixed', ...(pos.bottom!=null ? { bottom: pos.bottom } : { top: pos.top }), ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), maxHeight: pos.maxH, overflowY:'auto', zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
-          <div style={{ display:'flex' }}>
-            {calendario(meseSx, setMeseSx, true)}
+        <div ref={pannelloRef} style={{ position:'fixed', ...(pos.bottom!=null ? { bottom: pos.bottom } : { top: pos.top }), ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), maxHeight: pos.maxH, overflowY:'auto', zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex', ...(stretto ? { flexDirection:'column' as const, maxWidth:'calc(100vw - 16px)' } : {}) }}>
+          <div style={{ display:'flex', justifyContent:'center' }}>
+            {!stretto && calendario(meseSx, setMeseSx, true)}
             {calendario(meseDx, setMeseDx, false)}
           </div>
-          <div style={{ borderLeft:'1px solid #eee', padding:'8px', display:'flex', flexDirection:'column', gap:'4px', minWidth:'130px' }}>
+          <div style={stretto
+            // Due per riga con flex e non con una griglia: sotto i 700 px app/globals.css porta ogni griglia
+            // scritta in linea a una colonna sola.
+            ? { borderTop:'1px solid #eee', padding:'8px', display:'flex', flexWrap:'wrap' as const }
+            : { borderLeft:'1px solid #eee', padding:'8px', display:'flex', flexDirection:'column', gap:'4px', minWidth:'130px' }}>
             {[['oggi','Oggi'],['ieri','Ieri'],['3g','Ultimi 3 giorni'],['7g','Ultimi 7 giorni'],['30g','Ultimi 30 giorni'],['mese','Questo mese'],['meseScorso','Ultimo mese']].map(([k,lab]) => (
-              <button key={k} onClick={()=>preset(k)} style={presetBtn}>{lab}</button>
+              <button key={k} onClick={()=>preset(k)} style={stretto ? { ...presetBtn, width:'50%' } : presetBtn}>{lab}</button>
             ))}
-            <div style={{ marginTop:'auto', display:'flex', gap:'6px', paddingTop:'8px' }}>
+            <div style={{ marginTop:'auto', display:'flex', gap:'6px', paddingTop:'8px', ...(stretto ? { width:'100%' } : {}) }}>
               <button onClick={()=>setOpen(false)} style={{ ...presetBtn, flex:1, textAlign:'center' as const }}>Annulla</button>
               <button onClick={applica} style={{ flex:1, padding:'6px', background:'#f97316', color:'#fff', border:'none', borderRadius:'5px', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>Applica</button>
             </div>
