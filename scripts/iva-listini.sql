@@ -192,7 +192,7 @@ begin
     -- scelta su quel listino, poi quella che sta nel listino, poi la piu' vecchia.
     select c.id into v_mio from public.corrieri c
      where c.master_id = p_venditore
-       and lower(regexp_replace(c.nome_contratto, '^\s+|\s+$', '', 'g')) = lower(regexp_replace(v_nome, '^\s+|\s+$', '', 'g'))
+       and lower(btrim(c.nome_contratto, E' \t\r\n\u00a0')) = lower(btrim(v_nome, E' \t\r\n\u00a0'))
      order by exists (select 1 from public.listini_iva li where li.listino_id = v_listino and li.corriere_id = c.id) desc,
               exists (select 1 from public.listini_clienti_corrieri lc where lc.listino_id = v_listino and lc.corriere_id = c.id) desc,
               c.created_at, c.id
