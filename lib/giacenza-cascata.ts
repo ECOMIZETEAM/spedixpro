@@ -340,12 +340,27 @@ export async function resoAddebitatoPerSpedizione(
   return out
 }
 
+/**
+ * QUANDO quel soggetto ha pagato il reso di una spedizione (il primo addebito), o null se non l'ha pagato.
+ * Serve alla scansione dei resi: un pacco gia' addebitato si segnala con a chi e quando, qualunque strada
+ * l'abbia addebitato (tracking, svincolo della giacenza, fattura del corriere, distinta). Anche un reso
+ * a 0,00 (reso gratis da listino) e' un reso registrato: conta.
+ */
+export async function quandoResoAddebitato(
+  admin: any, spedizioneId: string, pagatore: { clienteId?: string | null; masterTargetId?: string | null },
+): Promise<string | null> {
+  const { origineDi, quandoDi } = await resoAddebitatoPerOrigine(admin, [spedizioneId], pagatore)
+  const o = origineDi.get(spedizioneId)
+  return (o && quandoDi.get(o)) || null
+}
+
 async function resoAddebitatoPerOrigine(
   admin: any, spedizioneIds: string[], pagatore: { clienteId?: string | null; masterTargetId?: string | null },
-): Promise<{ origineDi: Map<string, string>; importoDi: Map<string, number> }> {
+): Promise<{ origineDi: Map<string, string>; importoDi: Map<string, number>; quandoDi: Map<string, string> }> {
   const origineDi = new Map<string, string>()
   const importoDi = new Map<string, number>()
-  if (!spedizioneIds.length || (!pagatore.clienteId && !pagatore.masterTargetId)) return { origineDi, importoDi }
+  const quandoDi = new Map<string, string>()
+  if (!spedizioneIds.length || (!pagatore.clienteId && !pagatore.masterTargetId)) return { origineDi, importoDi, quandoDi }
   const righe: any[] = []
   for (let i = 0; i < spedizioneIds.length; i += 300) {
     const { data } = await admin.from('spedizioni').select('id,tracking_number').in('id', spedizioneIds.slice(i, i + 300))
@@ -358,13 +373,17 @@ async function resoAddebitatoPerOrigine(
   }
   const ids = [...new Set(origineDi.values())]
   for (let i = 0; i < ids.length; i += 300) {
-    let q = admin.from('movimenti').select('spedizione_id,importo').eq('tipo', 'reso').in('spedizione_id', ids.slice(i, i + 300))
+    let q = admin.from('movimenti').select('spedizione_id,importo,created_at').eq('tipo', 'reso').in('spedizione_id', ids.slice(i, i + 300))
     // Verso un master contano solo le SUE righe (cliente_id vuoto), mai quelle di un cliente.
     q = pagatore.clienteId ? q.eq('cliente_id', pagatore.clienteId) : q.eq('master_target_id', pagatore.masterTargetId).is('cliente_id', null)
     const { data } = await q
-    for (const m of (data || [])) importoDi.set(m.spedizione_id, (importoDi.get(m.spedizione_id) || 0) + Math.abs(Number(m.importo || 0)))
+    for (const m of (data || [])) {
+      importoDi.set(m.spedizione_id, (importoDi.get(m.spedizione_id) || 0) + Math.abs(Number(m.importo || 0)))
+      const prima = quandoDi.get(m.spedizione_id)
+      if (m.created_at && (!prima || m.created_at < prima)) quandoDi.set(m.spedizione_id, m.created_at)
+    }
   }
-  return { origineDi, importoDi }
+  return { origineDi, importoDi, quandoDi }
 }
 
 /**

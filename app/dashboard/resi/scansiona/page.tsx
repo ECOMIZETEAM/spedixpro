@@ -133,11 +133,15 @@ export default function ScansionaResiPage() {
       }
       setVoci(prev => prev.some(x => x.id === v.id) ? prev : [v, ...prev])
       const avviso = avvisoStato(v.stato)
+      // IL VERDE NON VUOL DIRE "E' GIA' UN RESO": vuol dire letto e messo in elenco. Il reso nasce e si
+      // addebita quando si registra (M.C LOGISTICA, 20/11/2026, chiedeva cosa volesse dire il verde su un
+      // pacco che per il corriere era consegnato). Un reso gia' addebitato esce rosso, col nome e l'ora.
       setEsito({
         tipo: avviso ? 'avviso' : 'ok',
         testo: `${v.numero} · ${destinatario(v)} · ${v.contratto || 'contratto ?'}`
           + (avviso ? ` — attenzione: ${avviso}. Si può registrare come reso lo stesso.` : '')
-          + (v.gia_addebitato_giacenza ? ' — già addebitato allo svincolo, non verrà riaddebitato' : ''),
+          + (v.gia_addebitato_giacenza ? ' — già addebitato allo svincolo, non verrà riaddebitato'
+            : ' — aggiunto all\'elenco: diventa reso e si addebita quando registri'),
       })
       suona(true)
       if (manuale) setLdv('')
