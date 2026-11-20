@@ -102,9 +102,11 @@ export default function PlanciaBCliente() {
 // ── Da fare adesso: le cose che aspettano il cliente. Le righe a zero spariscono ──
 function Chiusa({ data }: { data: any }) {
   const credito = Number(data?.credito || 0)
+  // singolare e plurale secondo il numero (come la Dashboard dei master)
+  const nG = Number(data?.inGiacenza || 0), nS = Number(data?.daSpedire || 0)
   const voci = [
-    { k: 'giac', n: Number(data?.inGiacenza || 0), nome: 'giacenze', frase: 'aspettano le tue istruzioni', verbo: 'Rispondi', href: '/cliente/spedizioni/giacenze', problema: true },
-    { k: 'sped', n: Number(data?.daSpedire || 0), nome: 'da spedire', frase: 'pronte, da chiudere in una distinta', verbo: 'Crea distinta', href: '/cliente/distinte/nuova', problema: false },
+    { k: 'giac', n: nG, nome: nG === 1 ? 'giacenza' : 'giacenze', frase: nG === 1 ? 'aspetta le tue istruzioni' : 'aspettano le tue istruzioni', verbo: 'Rispondi', href: '/cliente/spedizioni/giacenze', problema: true },
+    { k: 'sped', n: nS, nome: 'da spedire', frase: nS === 1 ? 'pronta, da chiudere in una distinta' : 'pronte, da chiudere in una distinta', verbo: 'Crea distinta', href: '/cliente/distinte/nuova', problema: false },
   ].filter(v => v.n > 0)
   const senzaCredito = !!data && credito <= 0
   const quante = voci.length + (senzaCredito ? 1 : 0)

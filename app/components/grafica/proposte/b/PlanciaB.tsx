@@ -88,10 +88,12 @@ export default function PlanciaB() {
 
 // ── La chiusa: dove il fiume aspetta il master. Le righe a zero spariscono ──
 function Chiusa({ data, badge }: { data: any; badge: any }) {
+  // singolare e plurale secondo il numero: con 1 si leggeva «1 richieste della rete aspettano» (Lorenzo 20/11)
+  const nG = Number(data?.inGiacenza || 0), nR = Number(badge?.daConfermare || 0), nA = Number(badge?.daAccettare || 0)
   const voci = [
-    { k: 'giac', n: Number(data?.inGiacenza || 0), nome: 'giacenze', frase: 'aspettano le tue istruzioni', importo: 0, verbo: 'Rispondi', href: '/dashboard/spedizioni/giacenze' },
-    { k: 'rett', n: Number(badge?.daConfermare || 0), nome: 'rettifiche da confermare', frase: 'peso e misure ricontrollati dal corriere', importo: Number(badge?.daConfermareImporto || 0), verbo: 'Conferma', href: '/dashboard/spedizioni/rettifica' },
-    { k: 'rete', n: Number(badge?.daAccettare || 0), nome: 'richieste della rete', frase: 'aspettano una tua risposta', importo: 0, verbo: 'Rivedi', href: '/dashboard/network' },
+    { k: 'giac', n: nG, nome: nG === 1 ? 'giacenza' : 'giacenze', frase: nG === 1 ? 'aspetta le tue istruzioni' : 'aspettano le tue istruzioni', importo: 0, verbo: 'Rispondi', href: '/dashboard/spedizioni/giacenze' },
+    { k: 'rett', n: nR, nome: nR === 1 ? 'rettifica da confermare' : 'rettifiche da confermare', frase: 'peso e misure ricontrollati dal corriere', importo: Number(badge?.daConfermareImporto || 0), verbo: 'Conferma', href: '/dashboard/spedizioni/rettifica' },
+    { k: 'rete', n: nA, nome: nA === 1 ? 'richiesta della rete' : 'richieste della rete', frase: nA === 1 ? 'aspetta una tua risposta' : 'aspettano una tua risposta', importo: 0, verbo: 'Rivedi', href: '/dashboard/network' },
   ]
   const attive = voci.filter(v => v.n > 0)
   const caricato = !!data && !!badge
@@ -111,7 +113,7 @@ function Chiusa({ data, badge }: { data: any; badge: any }) {
               <b><Conta v={v.n}>{n => fmtN.format(n)}</Conta></b>
               <div>
                 <span className="pb-chiusa__nome">{v.nome}</span>
-                <span className="pb-chiusa__frase">{v.importo > 0 ? <>per <Euro v={v.importo} /> in tutto</> : v.frase}</span>
+                <span className="pb-chiusa__frase">{v.importo > 0 ? <>per <Euro v={v.importo} />{v.n > 1 ? ' in tutto' : ''}</> : v.frase}</span>
               </div>
               <a className="pb-verbo" href={v.href}>{v.verbo}<Icona id="i-chevron" /></a>
             </li>

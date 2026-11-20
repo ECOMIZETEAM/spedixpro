@@ -99,14 +99,20 @@
 .pb-chiusa__testa h2 { margin: 0; font-size: 19px; font-weight: 500; letter-spacing: -.01em; color: var(--gx-inchiostro); }
 .pb-chiusa__testa p { margin: 3px 0 0; font-size: 13px; color: var(--gx-attenuato); }
 .pb-chiusa__voci { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); margin: 0; padding: 0; list-style: none; }
-.pb-chiusa__voce { position: relative; display: flex; align-items: center; gap: 16px; min-width: 0; padding: 8px 14px 8px 30px; }
+/* ogni voce su due righe: il numero e il tasto sopra, nome e frase sotto, interi. In una riga sola, col numero largo
+   (2.582) la colonna del testo si stringeva: «rettifiche / da / confermare» finiva sopra il tasto e le frasi si
+   tagliavano coi puntini (Lorenzo 20/11, di notte) */
+.pb-chiusa__voce { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "n verbo" "testo testo"; align-items: center; gap: 6px 12px; min-width: 0; padding: 8px 14px 8px 30px; }
+.pb-chiusa__voce > b { grid-area: n; }
+.pb-chiusa__voce > div { grid-area: testo; }
+.pb-chiusa__voce > .pb-verbo { grid-area: verbo; justify-self: end; }
 /* le porte della chiusa: due fili verticali fra una voce e l'altra */
 .pb-chiusa__voce::before { content: ''; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 6px; border-left: 1px solid var(--gx-filo); border-right: 1px solid var(--gx-filo); }
 .pb-chiusa__voce > b { font-weight: 200; font-size: 42px; letter-spacing: -.035em; line-height: 1; color: var(--gx-inchiostro); }
 .pb-chiusa__voce--problema > b { color: var(--gx-problema); }
-.pb-chiusa__voce > div { display: grid; flex: 1; min-width: 0; }
+.pb-chiusa__voce > div { display: grid; gap: 1px; min-width: 0; }
 .pb-chiusa__nome { font-size: 14px; font-weight: 500; color: var(--gx-inchiostro); }
-.pb-chiusa__frase { font-size: 12.5px; color: var(--gx-attenuato); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-chiusa__frase { font-size: 12.5px; color: var(--gx-attenuato); overflow-wrap: anywhere; }
 .pb .pb-verbo { display: inline-flex; align-items: center; gap: 3px; height: 36px; padding: 0 10px 0 16px; border-radius: 999px; font-size: 13.5px; font-weight: 500; white-space: nowrap; color: var(--gx-inchiostro); background: var(--gx-vetro-luce); box-shadow: inset 0 0 0 1px var(--gx-filo), 0 6px 16px -10px rgba(30, 42, 66, .35); transition: transform .25s var(--pb-facile), box-shadow .25s; }
 .pb .pb-verbo > .gx-ico { width: 15px; height: 15px; color: var(--gx-accento); }
 .pb .pb-verbo:hover { transform: translate3d(2px, 0, 0); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gx-accento) 55%, transparent), 0 8px 20px -10px rgba(30, 42, 66, .4); }
@@ -369,6 +375,19 @@ rect.pb-q--fuori { fill: var(--gx-accento); }
   .pb-oggi { grid-template-columns: minmax(0, 1fr); }
   .pb-testa { flex-direction: column; align-items: flex-start; }
   .pb-testa h2 { font-size: 26px; }
+}
+
+/* telefono (20/11): il sommario in alto (tre colonne che non andavano a capo) allargava tutta la Dashboard a 439 px su
+   uno schermo di 390, e la striscia «Da fare adesso» usciva dal bordo coi suoi tasti */
+@media (max-width: 599px) {
+  .pb-sommario { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .pb-sommario > div { min-width: 0; margin-left: 0; padding-left: 12px; }
+  .pb-sommario > div:first-child { padding-left: 0; }
+  .pb-sommario dt { white-space: normal; }
+  .pb-sommario dd { font-size: 24px; }
+  .pb-chiusa__testa { min-width: 0; padding-right: 12px; }
+  .pb-chiusa__voce { padding-left: 24px; }
+  .pb-chiusa__voce > b { font-size: 34px; }
 }
 
 /* schermi bassi (il portatile di Lorenzo, 754 px): la testata si stringe perché fiume e chiusa stiano insieme */
