@@ -33,7 +33,22 @@ const SALTI_MASSIMI = 6
 // d'ingrosso) e su quale contratto del venditore. Se quel contratto e' a sua volta un ponte, si risale dal
 // venditore come fa la sua /api/v1/shipments. Gli stessi controlli di autenticaApiKey (chiave, cliente e
 // contratto attivi), ma in sola lettura: niente ultimo uso, niente contatore di frequenza.
+//
+// Con `corriereOrigine` (il contratto della spedizione d'origine) si prova prima la fila letta dai puntatori, in un
+// colpo solo; se non torna in ogni dettaglio, si fa salto per salto come la staffetta.
 export async function filaDelPonte(
+  admin: Admin, masterOrigine: string, nomeContratto: string, corriereOrigine?: string,
+): Promise<{ fila: LivelloPonte[]; errore?: string; strada: 'puntatori' | 'salti' }> {
+  if (corriereOrigine) {
+    const veloce = await filaDaiPuntatori(admin, corriereOrigine)
+    if (veloce) return { fila: veloce, strada: 'puntatori' }
+  }
+  return { ...(await filaSaltoPerSalto(admin, masterOrigine, nomeContratto)), strada: 'salti' }
+}
+
+// Salto per salto: a ogni venditore si rifa' la catena per nome (risolviCatenaCondivisione) e si legge la chiave.
+// E' esattamente il giro della staffetta, ma ogni salto aspetta il precedente: circa mezzo secondo in produzione.
+export async function filaSaltoPerSalto(
   admin: Admin, masterOrigine: string, nomeContratto: string,
 ): Promise<{ fila: LivelloPonte[]; errore?: string }> {
   const fila: LivelloPonte[] = []
@@ -59,6 +74,49 @@ export async function filaDelPonte(
     master = (cli as any).master_id; nome = (cor as any).nome_contratto
   }
   return { fila, errore: `oltre ${SALTI_MASSIMI} salti: la fila non arriva a un contratto vero` }
+}
+
+// LA FILA IN UN COLPO, DAI PUNTATORI. catena_contratto (la funzione del database che segue "da chi lo compro",
+// corrieri.fornitore_corriere_id) da' tutta la fila del contratto d'origine in una lettura; i suoi salti
+// 'collegamento' sono i passaggi della staffetta, ognuno col suo conto d'ingrosso. Poi in una sola volta i
+// contratti (con la chiave di chi compra), i clienti d'ingrosso e le loro chiavi.
+//
+// Vale SOLO se torna in ogni dettaglio con quello che farebbe la staffetta: la chiave del ponte di chi compra
+// esiste, e' attiva ed e' proprio quella del conto d'ingrosso del collegamento sul contratto del venditore
+// seguente; cliente e contratti attivi; un ponte a ogni salto tranne l'ultimo, che arriva al contratto vero.
+// Qualunque cosa non torni (anche un guasto di lettura) -> null, e si fa salto per salto: gli errori e i casi
+// strani restano quelli di oggi, con le loro parole.
+async function filaDaiPuntatori(admin: Admin, corriereOrigine: string): Promise<LivelloPonte[] | null> {
+  const { data: righe, error } = await admin.rpc('catena_contratto', { p_corriere_id: corriereOrigine })
+  const r = (Array.isArray(righe) ? righe : []) as any[]
+  if (error || !r.length || r[r.length - 1].salto !== 'detentore' || r.some(x => x.salto === 'interrotta')) return null
+  const salti = r.map((x, i) => ({ x, su: r[i + 1] })).filter(s => s.x.salto === 'collegamento')
+  if (!salti.length || salti.length > SALTI_MASSIMI || salti.some(s => !s.su || !s.x.ledger_cliente_id)) return null
+  const idsLedger = salti.map(s => String(s.x.ledger_cliente_id))
+  const [cors, clis, chiavi] = await Promise.all([
+    admin.from('corrieri').select('id,tipo,nome_contratto,master_id,attivo,credenziali').in('id', [...new Set(r.map(x => String(x.corriere_id)))]),
+    admin.from('clienti').select('id,attivo,master_id').in('id', idsLedger),
+    admin.from('api_keys').select('id,chiave,cliente_id,corriere_id,attivo').in('cliente_id', idsLedger),
+  ])
+  if (cors.error || clis.error || chiavi.error) return null
+  const corDi = new Map((cors.data || []).map((c: any) => [c.id, c]))
+  const fila: LivelloPonte[] = []
+  for (let n = 0; n < salti.length; n++) {
+    const { x, su } = salti[n]
+    const chiave = (corDi.get(x.corriere_id) as any)?.credenziali?.api_key
+    const k: any = chiave ? (chiavi.data || []).find((c: any) => c.chiave === chiave) : null
+    if (!k || k.attivo === false || k.cliente_id !== x.ledger_cliente_id || k.corriere_id !== su.corriere_id) return null
+    const cli: any = (clis.data || []).find((c: any) => c.id === k.cliente_id)
+    const cor: any = corDi.get(k.corriere_id)
+    if (!cli || cli.attivo === false || cli.master_id !== su.master_id || !cor || cor.attivo === false) return null
+    const ultimo = n === salti.length - 1
+    if ((cor.tipo === 'moovexpress') === ultimo) return null
+    fila.push({
+      chiaveId: k.id, clienteId: k.cliente_id, venditoreId: cli.master_id, corriereId: k.corriere_id,
+      tipo: String(cor.tipo || ''), nomeContratto: String(cor.nome_contratto || ''), corriereMasterId: String(cor.master_id || ''),
+    })
+  }
+  return fila
 }
 
 // Il contesto di prezzo, uguale per tutti i livelli: e' quello che la staffetta passa di mano in mano.
@@ -96,12 +154,12 @@ const cent = (x: any) => Math.round(Number(x || 0) * 100) / 100
 // del piano degli addebiti. Il conto del detentore viene dopo il corriere vero: movimentiDelDetentore.
 export async function valutaPonteUnico(
   admin: Admin,
-  p: { masterOrigine: string; nomeContratto: string; body: any; contesto: ContestoPonte },
-): Promise<{ fila: LivelloPonte[]; livelli: LivelloValutato[]; movimenti: MovimentoAtteso[]; errore?: string; ms: { fila: number; tutto: number } }> {
+  p: { masterOrigine: string; nomeContratto: string; corriereOrigine?: string; body: any; contesto: ContestoPonte },
+): Promise<{ fila: LivelloPonte[]; strada: string; livelli: LivelloValutato[]; movimenti: MovimentoAtteso[]; errore?: string; ms: { fila: number; tutto: number } }> {
   const t0 = Date.now()
-  const { fila, errore } = await filaDelPonte(admin, p.masterOrigine, p.nomeContratto)
+  const { fila, errore, strada } = await filaDelPonte(admin, p.masterOrigine, p.nomeContratto, p.corriereOrigine)
   const msFila = Date.now() - t0
-  if (errore || !fila.length) return { fila, livelli: [], movimenti: [], errore: errore || 'fila vuota', ms: { fila: msFila, tutto: Date.now() - t0 } }
+  if (errore || !fila.length) return { fila, strada, livelli: [], movimenti: [], errore: errore || 'fila vuota', ms: { fila: msFila, tutto: Date.now() - t0 } }
 
   const c = p.contesto
   const pianoAlbero = (master: string, nome: string, serviziAccessori?: { nome?: string }[]) => pianoAddebitiCondivisione(admin, {
@@ -140,7 +198,7 @@ export async function valutaPonteUnico(
   })
   const errLivello = livelli.find(l => !l.ok) as any
   return {
-    fila, livelli, movimenti,
+    fila, strada, livelli, movimenti,
     errore: errLivello ? `livello ${livelli.indexOf(errLivello) + 1}: ${errLivello.stato} ${errLivello.errore}` : undefined,
     ms: { fila: msFila, tutto: Date.now() - t0 },
   }

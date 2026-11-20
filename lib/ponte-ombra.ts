@@ -81,7 +81,7 @@ export async function confrontaInOmbra(admin: Admin, o: any, nomeContratto: stri
 
       // Quello che la staffetta ha scritto: tutte le righe col tracking, e i loro addebiti.
       const [vp, { data: righeVere, error: eRighe }] = await Promise.all([
-        valutaPonteUnico(admin, { masterOrigine: o.master_id, nomeContratto, body, contesto }),
+        valutaPonteUnico(admin, { masterOrigine: o.master_id, nomeContratto, corriereOrigine: o.corriere_id, body, contesto }),
         admin.from('spedizioni').select('id,numero,cliente_id,corriere_id,master_id,costo_totale,costo_spedizione,stato')
           .eq('tracking_number', o.tracking_number),
       ])
@@ -152,7 +152,7 @@ export async function confrontaInOmbra(admin: Admin, o: any, nomeContratto: stri
         // Solo identificativi e importi: nessun dato di chi spedisce o riceve.
         dettaglio: {
           fila: vp.livelli.map(l => ({ venditore: l.venditoreId, cliente: l.clienteId, corriere: l.corriereId, tipo: l.tipo, prezzo: l.ok ? l.costoCliente : null })),
-          movimenti: { attesi: attesi.length, veri: veri.length },
+          movimenti: { attesi: attesi.length, veri: veri.length }, strada: vp.strada,
           colli: packages.length, contrassegno: contesto.contrassegno > 0,
         },
       } satisfies EsitoOmbra
