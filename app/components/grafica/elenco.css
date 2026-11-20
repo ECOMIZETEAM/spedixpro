@@ -17,7 +17,7 @@
 .gx .gx-elenco [style*="rgb(229, 231, 235)"]:not([style*="position: fixed"] *),
 .gx .gx-elenco [style*="rgb(203, 213, 225)"]:not([style*="position: fixed"] *),
 .gx .gx-elenco [style*="rgb(241, 242, 244)"]:not([style*="position: fixed"] *) { border-color: var(--gx-filo) !important; }
-.gx .gx-elenco [style*="background: rgb(249, 115, 22)"] { background: var(--gx-accento-pieno) !important; }
+.gx .gx-elenco [style*="background: rgb(255, 79, 0)"] { background: var(--gx-accento-pieno) !important; }
 
 /* titolo e pulsante principale */
 .gx .gx-elenco .el-titolo { font-size: 30px !important; font-weight: 500 !important; letter-spacing: -.02em; color: var(--gx-inchiostro) !important; }
@@ -375,7 +375,7 @@
 .gx .gx-finestra input[type="checkbox"] { accent-color: var(--gx-accento-pieno); width: 16px; height: 16px; }
 .gx .gx-finestra button { border-radius: 14px !important; }
 .gx .gx-finestra button[style*="background: rgb(255, 255, 255)"] { background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important; color: var(--gx-inchiostro) !important; }
-.gx .gx-finestra button[style*="background: rgb(249, 115, 22)"] { background: var(--gx-accento-pieno) !important; }
+.gx .gx-finestra button[style*="background: rgb(255, 79, 0)"] { background: var(--gx-accento-pieno) !important; }
 .gx .gx-finestra button[style*="background: rgb(13, 148, 136)"] { background: var(--gx-accento-pieno) !important; }
 /* la POD: invece del blu acceso, il pieno scuro del tema (chiaro di notte) */
 .gx .gx-finestra button[style*="background: rgb(37, 99, 235)"] { background: var(--gx-inchiostro) !important; color: var(--gx-fondo) !important; }

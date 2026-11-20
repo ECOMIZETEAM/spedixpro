@@ -9,7 +9,7 @@ type Conti = { totale: number; media: number | null; conti: number[] }
 type Risposta = { per: Record<string, Conti>; voti: Voto[] }
 
 const DICITURE = ['Per niente', 'Poco', 'Così così', 'Mi piace', 'Moltissimo']
-const testo = '#1a1a1a', grigio = '#6b7280', filo = '#e5e7eb', arancio = '#f26b1d'
+const testo = '#1a1a1a', grigio = '#6b7280', filo = '#e5e7eb', arancio = '#FF4F00'
 
 export default function GraficaVoti() {
   const [d, setD] = useState<Risposta | null>(null)

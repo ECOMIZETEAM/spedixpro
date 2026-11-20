@@ -77,7 +77,7 @@ export function rgb(s: string): RGB {
     return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
   }
   const m = t.match(/[\d.]+/g)
-  return m && m.length >= 3 ? [+m[0], +m[1], +m[2]] : [242, 107, 29]
+  return m && m.length >= 3 ? [+m[0], +m[1], +m[2]] : [255, 79, 0]
 }
 export type Tinte = { notte: boolean; accento: RGB; accentoTesto: RGB; inchiostro: RGB }
 
@@ -89,7 +89,7 @@ export function useTinte(rif: RefObject<HTMLElement | null>, tema: string) {
     const leggi = () => {
       const el = rif.current; if (!el) return
       const cs = getComputedStyle(el), v = (k: string) => cs.getPropertyValue(k)
-      setT({ notte: tema === 'notte', accento: rgb(v('--gx-accento') || '#F26B1D'), accentoTesto: rgb(v('--gx-accento-testo') || '#C2470C'), inchiostro: rgb(v('--gx-inchiostro') || '#0F141B') })
+      setT({ notte: tema === 'notte', accento: rgb(v('--gx-accento') || '#FF4F00'), accentoTesto: rgb(v('--gx-accento-testo') || '#C2470C'), inchiostro: rgb(v('--gx-inchiostro') || '#0F141B') })
     }
     const r = requestAnimationFrame(leggi), t2 = setTimeout(leggi, 500)
     return () => { cancelAnimationFrame(r); clearTimeout(t2) }

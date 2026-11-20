@@ -12,9 +12,12 @@
   --gx-testo: rgba(240, 239, 236, .88);
   --gx-attenuato: rgba(226, 224, 220, .64);
   --gx-filo: rgba(255, 255, 255, .11);
-  --gx-accento: #FF8A3D;
-  --gx-accento-pieno: #FF7A2E;
-  --gx-accento-testo: #FFA766;
+  /* l'arancio: International Orange, quello che Apple accosta al titanio (Watch Ultra). Uno solo per i tasti, di
+     giorno e di notte (#FF4F00: il bianco sopra si legge meglio dell'arancio di prima, 3,3 contro 2,6); di notte un
+     filo più chiaro per linee e bagliori, e più chiaro ancora per le scritte (contrasto 7 sul titanio) */
+  --gx-accento: #FF5F1F;
+  --gx-accento-pieno: #FF4F00;
+  --gx-accento-testo: #FF8552;
   --gx-bene: #5BE0B5;
   --gx-problema: #FF8A94;
   --gx-vetro: rgba(44, 43, 42, .5);
@@ -49,9 +52,9 @@
   --gx-testo: rgba(18, 24, 34, .86);
   --gx-attenuato: rgba(52, 62, 78, .62);
   --gx-filo: rgba(16, 24, 40, .08);
-  --gx-accento: #F26B1D;
-  --gx-accento-pieno: #F26B1D;
-  --gx-accento-testo: #C2470C;
+  --gx-accento: #FF4F00;
+  --gx-accento-pieno: #FF4F00;
+  --gx-accento-testo: #B83A00;
   --gx-bene: #12805A;
   --gx-problema: #D23446;
   --gx-vetro: rgba(255, 255, 255, .7);

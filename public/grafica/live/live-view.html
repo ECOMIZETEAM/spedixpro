@@ -18,19 +18,19 @@
   --sans: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --facile: cubic-bezier(.16, 1, .3, 1);
   --fondo: #E9ECF1; --inchiostro: #0F141B; --testo: rgba(18, 24, 34, .86); --attenuato: rgba(52, 62, 78, .62);
-  --filo: rgba(16, 24, 40, .08); --accento: #F26B1D; --accento-pieno: #F26B1D; --accento-testo: #C2470C;
+  --filo: rgba(16, 24, 40, .08); --accento: #FF4F00; --accento-pieno: #FF4F00; --accento-testo: #C2470C;
   --bene: #12805A; --problema: #D23446; --vetro: rgba(255, 255, 255, .7); --vetro-orlo: #fff; --vetro-luce: #fff;
   --incavo: rgba(16, 24, 40, .045);
   --terra: #fff; --parete-luce: #E2E7EE; --parete-ombra: #BAC3D1; --ombra: rgba(36, 52, 86, .30); --confine: rgba(255, 255, 255, .95);
-  --griglia: rgba(20, 32, 56, .1); --cometa: #F26B1D; --filo-forte: rgba(16, 24, 40, .16); --incavo-forte: rgba(16, 24, 40, .075);
-  --scala: linear-gradient(90deg, #F3F5F8, #FCE7D8, #F9C6A2, #F59A62, #F26B1D);
+  --griglia: rgba(20, 32, 56, .1); --cometa: #FF4F00; --filo-forte: rgba(16, 24, 40, .16); --incavo-forte: rgba(16, 24, 40, .075);
+  --scala: linear-gradient(90deg, #F3F5F8, #FCE7D8, #F9C6A2, #F59A62, #FF4F00);
   --pavimento: radial-gradient(90% 75% at 52% 46%, rgba(250, 251, 253, .92) 0%, rgba(240, 243, 247, .78) 45%, rgba(233, 236, 241, 0) 100%);
   --ombra-pannello: 0 1px 2px rgba(30, 42, 66, .05), 0 26px 50px -30px rgba(30, 42, 66, .30);
   color-scheme: light;
 }
 [data-tema="notte"] {
   --fondo: #1B1B1C; --inchiostro: #FFFFFF; --testo: rgba(240, 239, 236, .88); --attenuato: rgba(226, 224, 220, .64);
-  --filo: rgba(255, 255, 255, .11); --accento: #FF8A3D; --accento-pieno: #FF7A2E; --accento-testo: #FFA766;
+  --filo: rgba(255, 255, 255, .11); --accento: #FF5F1F; --accento-pieno: #FF4F00; --accento-testo: #FF8552;
   --bene: #5BE0B5; --problema: #FF8A94; --vetro: rgba(44, 43, 42, .5); --vetro-orlo: rgba(255, 255, 255, .14); --vetro-luce: rgba(255, 255, 255, .16);
   --incavo: rgba(255, 255, 255, .065);
   --terra: #2C2B2A; --parete-luce: #232221; --parete-ombra: #121212; --ombra: rgba(0, 0, 0, .62); --confine: rgba(18, 18, 18, .9);
@@ -740,7 +740,7 @@ document.querySelectorAll('.tema > button').forEach(b => b.addEventListener('cli
 
 // ───────────────────────── LA CARTA (la stessa Italia della Torre di controllo) ─────────────────────────
 const INCLINA = 55 * Math.PI / 180, GIRA = -15 * Math.PI / 180, FUOCO = 2100, SPESSORE = 18, ALTEZZA = 44;
-const SCALA = { giorno: ['#F3F5F8', '#FCE7D8', '#F9C6A2', '#F59A62', '#F26B1D'], notte: ['#302F2E', '#403E3C', '#6E4636', '#E0621E', '#FFA060'] };
+const SCALA = { giorno: ['#F3F5F8', '#FCE7D8', '#F9C6A2', '#F59A62', '#FF4F00'], notte: ['#302F2E', '#403E3C', '#6E4636', '#E0621E', '#FFA060'] };
 const LAMPO = { giorno: '#FF5A00', notte: '#FFC08A' };
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 function tinta(n, max, tema) {

@@ -204,14 +204,14 @@
 [data-luce="notte"] .sc-pannello { background: #2A2928 !important; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1) !important; }
 [data-luce="notte"] .sc-pannello input { color: #fff !important; border-bottom-color: rgba(255, 255, 255, .1) !important; }
 [data-luce="notte"] .sc-pannello > div > div { color: #fff !important; }
-[data-luce="notte"] .sc-pannello > div > div[style*="rgb(255, 247, 237)"] { background: rgba(242, 107, 29, .18) !important; }
+[data-luce="notte"] .sc-pannello > div > div[style*="rgb(255, 247, 237)"] { background: rgba(255, 79, 0, .18) !important; }
 .ns-tendina { position: fixed; z-index: 1000000; overflow-y: auto; border-radius: 12px; background: #fff; color: #0F141B;
   box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(16, 24, 40, .08); font-family: var(--font-outfit), system-ui, sans-serif; }
 [data-luce="notte"] .ns-tendina { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
 .ns-tendina__voce { display: grid; gap: 1px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
 .ns-tendina__voce b { font-weight: 600; }
 .ns-tendina__voce span { font-size: 12px; opacity: .65; }
-.ns-tendina__voce:hover { background: rgba(242, 107, 29, .1); }
+.ns-tendina__voce:hover { background: rgba(255, 79, 0, .1); }
 
 .gx .ns-solo-telefono { display: none; }
 

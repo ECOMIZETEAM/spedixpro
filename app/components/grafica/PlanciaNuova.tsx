@@ -705,7 +705,7 @@ function Calendario({ attuale, chiudi, scegli }: { attuale: Periodo; chiudi: () 
 }
 
 // ── 04 · Dove vanno: le province colorate per volume (ultimi 30 giorni), passando sopra si accende la provincia ──
-const SCALA: Record<string, string[]> = { giorno: ['#FBE3CC', '#F9B27A', '#F0742A', '#C9460C'], notte: ['#3A4462', '#9A5A3A', '#E8702A', '#FF8A3D'] }
+const SCALA: Record<string, string[]> = { giorno: ['#FBE3CC', '#F9B27A', '#F0742A', '#C9460C'], notte: ['#3A4462', '#9A5A3A', '#E8702A', '#FF5F1F'] }
 function colore(n: number, max: number, tema: string) {
   if (!n) return tema === 'notte' ? '#2B3651' : '#EEF0F4'
   const u = Math.pow(Math.sqrt(n) / Math.sqrt(max), 0.85) * 3, i = Math.min(2, Math.floor(u)), t = u - i
