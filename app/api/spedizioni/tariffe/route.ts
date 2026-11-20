@@ -91,21 +91,43 @@ export async function POST(req: NextRequest) {
     const { contrattiSospesiSopra, sospesoDallaCatena } = await import('@/lib/contratti-catena')
     const sospesiSopra = await contrattiSospesiSopra(masterIdP)
 
+    const quotabili = corrieriDaQuotare.filter((lc: any) => {
+      const corr: any = lc.corrieri
+      if (!corr || corr.attivo === false) return false
+      if (sospesoDallaCatena(corr.nome_contratto, sospesiSopra)) return false   // in pausa da un livello superiore
+      if (motivoGlsNonServe(corr, { paese: body.shipTo?.country, cap: capP, contrassegno: body.codValue })) return false   // GLS: nazionale solo Italia, Parcel solo UE senza contrassegno (lib/gls.ts)
+      if (superaMisureMax(corr.settings, pesoRealeP, colliP)) return false   // fuori misura per il suo scaglione
+      return true
+    })
+
+    // SEI CONTRATTI ALLA VOLTA, NON UNO. Il 20/11/2026 il preventivo della spedizione propria di MULTIEXPRESS ci metteva
+    // 29 secondi: 31 contratti attivi, quasi un secondo ciascuno (una trentina di letture del listino), calcolati in
+    // fila. Il motore non tiene stato fra una chiamata e l'altra, quindi l'ordine in cui finiscono non cambia niente;
+    // i risultati si rimettono comunque nell'ordine dei contratti, così anche i pari prezzo escono come prima.
+    // Verificato sui dati veri, stessa sessione, vecchia e nuova affiancate: Terni 45×67×88 23,7 → 5,7 s, Milano con
+    // contrassegno 31,2 → 6,9, Germania 29,4 → 6,8, due colli Napoli 31,3 → 6,8; risposte identiche al carattere
+    // (e il preventivo cliente, che non passa di qui, invariato). Sei e non tutti insieme: ogni
+    // contratto sono decine di letture, e trenta calcoli contemporanei per un solo preventivo peserebbero sul database.
+    const dettagli: any[] = new Array(quotabili.length)
+    let prossimo = 0
+    await Promise.all(Array.from({ length: Math.min(6, quotabili.length) }, async () => {
+      while (prossimo < quotabili.length) {
+        const i = prossimo++
+        dettagli[i] = await calcolaPrezzoCorriereDettaglio(supabase, {
+          corriereId: (quotabili[i] as any).corriere_id, masterId: masterIdP,
+          provincia: provinciaP, cap: capP, paese: paeseP, citta: (body.shipTo?.city || ''),
+          pesoReale: pesoRealeP, packages: colliP,
+          // mittente: serve alla copertura in partenza dei corrieri a copertura-CAP (InPost)
+          mittCap: (body.shipFrom?.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom?.state || '').toUpperCase().trim(), mittPaese: 'IT',
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })
+      }
+    }))
+
     const risultati: any[] = []
-    for (const lc of corrieriDaQuotare) {
-      const corr: any = (lc as any).corrieri
-      if (!corr || corr.attivo === false) continue
-      if (sospesoDallaCatena(corr.nome_contratto, sospesiSopra)) continue   // in pausa da un livello superiore
-      if (motivoGlsNonServe(corr, { paese: body.shipTo?.country, cap: capP, contrassegno: body.codValue })) continue   // GLS: nazionale solo Italia, Parcel solo UE senza contrassegno (lib/gls.ts)
-      if (superaMisureMax(corr.settings, pesoRealeP, colliP)) continue   // fuori misura per il suo scaglione
-      const dett = await calcolaPrezzoCorriereDettaglio(supabase, {
-        corriereId: (lc as any).corriere_id, masterId: masterIdP,
-        provincia: provinciaP, cap: capP, paese: paeseP, citta: (body.shipTo?.city || ''),
-        pesoReale: pesoRealeP, packages: colliP,
-        // mittente: serve alla copertura in partenza dei corrieri a copertura-CAP (InPost)
-        mittCap: (body.shipFrom?.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom?.state || '').toUpperCase().trim(), mittPaese: 'IT',
-        contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-      })
+    for (let i = 0; i < quotabili.length; i++) {
+      const corr: any = (quotabili[i] as any).corrieri
+      const dett = dettagli[i]
       if (!dett || dett.totale <= 0) continue   // nessun listino/fascia per questa zona o prezzo 0 -> non mostrare
       // Contrassegno/assicurazione oltre il valore massimo configurato -> corriere non disponibile
       // (vale per il master come per il cliente, per tutti i corrieri).
