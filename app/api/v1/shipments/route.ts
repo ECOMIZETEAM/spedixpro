@@ -9,7 +9,7 @@ import { inviaWebhook } from '@/lib/webhooks'
 import { erroreCorrierePulito, MSG_TENTATIVO_IN_ANNULLO, MSG_PONTE_NON_CONCLUSO, MSG_PONTE_NON_REGISTRATA } from '@/lib/errore-corriere'
 import { statoPiano, messaggioBlocco } from '@/lib/limite-piano'
 import { erroreIndirizzoItaliano, cittaPerLaSpedizione } from '@/lib/citta-spedizione'
-import { spedizioneDoppioneAttiva, messaggioDoppione, doppioneSenzaTesta } from '@/lib/guardia-doppione'
+import { spedizioneDoppioneAttiva, messaggioDoppione, doppioneSenzaTesta, prenotaOrdineInCreazione, MSG_ORDINE_IN_CORSO } from '@/lib/guardia-doppione'
 import { emailAlCorriere } from '@/lib/email-corriere'
 import { ritiroInRisposta, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
 import { modalitaCodPoste, modalitaCodDaRichiesta, type ModalitaCod } from '@/lib/contrassegno-modalita'
@@ -170,6 +170,13 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       }
       return NextResponse.json({ error: messaggio, gia_spedito: dup.numero, gia_spedito_id: dup.id }, { status: 409 })
     }
+    // Stesso ordine gia' in creazione da un'altra chiamata di pochi secondi fa: ci si ferma PRIMA di
+    // comprare la LDV, come nel portale (lib/guardia-doppione → prenotaOrdineInCreazione).
+    const inCreazione = await prenotaOrdineInCreazione(admin, {
+      clienteId: ctx.clienteId, rifOrdine: body.rifOrdine, destCap: body.shipTo?.postalCode,
+    })
+    if (inCreazione === 'occupato') return NextResponse.json({ error: MSG_ORDINE_IN_CORSO, in_corso: true }, { status: 409 })
+    if (inCreazione) after(inCreazione.libera)
   }
 
   // Nessun blocco per limite o canone: chi si integra e' un CLIENTE, e non deve subire i conti
@@ -1073,6 +1080,23 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     const annullata = await annullaSpedizioneGls(cred as any, String(raw.numero)).catch(() => false)
     console.error('[V1][GLS][INSERT]', numero, insErr.message, annullata ? 'annullata su GLS' : 'NON annullata su GLS')
     if (annullata) return errore('Spedizione non registrata e annullata sul corriere: riprova.', 500)
+  }
+  // DVA: l'ordine e' pagato ma la riga non c'e'. Si chiede subito lo storno, come nel portale
+  // (lib/storno-dva → stornaOrdineOrfanoDva). Doppio invio scartato dall'indice: risposta della guardia.
+  if (insErr && corriere.tipo === 'easyparcel' && raw?._idOrdine) {
+    const motivoInsert = insErr.code || insErr.message || 'errore senza messaggio'
+    const { stornaOrdineOrfanoDva } = await import('@/lib/storno-dva')
+    const storno = await stornaOrdineOrfanoDva(cred?.apikey, raw._idOrdine, { ldv: numero, porta: 'api', motivo: motivoInsert })
+    if (insErr.code === '23505') {
+      const dup = await spedizioneDoppioneAttiva(admin, { clienteId: ctx.clienteId, rifOrdine: body.rifOrdine, destCap: body.shipTo?.postalCode }).catch(() => null)
+      if (dup) {
+        await stornaPrenotazione()
+        // Al ponte di un altro master si da' il numero del pacco, mai quello interno della gamba (come la guardia).
+        const numeroDup = (cliente as any)?.ledger ? (dup.tracking || dup.numero) : dup.numero
+        return NextResponse.json({ error: messaggioDoppione(numeroDup), gia_spedito: dup.numero, gia_spedito_id: dup.id }, { status: 409 })
+      }
+    }
+    if (storno !== 'non_riuscito') return errore('Spedizione non registrata per un problema tecnico momentaneo: ne è stato chiesto l\'annullamento al corriere e non viene addebitata. Riprova.', 500)
   }
   if (insErr) { console.error('[V1][INSERT]', numero, insErr.message); return NextResponse.json({ error: `Spedizione creata sul corriere (${numero}) ma non registrata: contatta l'assistenza indicando il numero ${numero}`, tracking: numero }, { status: 500 }) }
 

@@ -53,3 +53,50 @@ export async function doppioneSenzaTesta(admin: { from: (t: string) => any }, tr
 export function messaggioDoppione(numero: string): string {
   return `Questo ordine risulta già spedito (spedizione ${numero}): non ne è stata creata un'altra per evitare il doppione.`
 }
+
+// ORDINE IN CREAZIONE. La guardia qui sopra guarda le spedizioni GIA' scritte: due richieste per lo
+// stesso ordine nello stesso secondo (doppio clic, import rilanciato) la passano entrambe, comprano
+// entrambe la LDV dal corriere, e solo dopo l'indice uniq_sped_ordine_attivo_v2 scarta la seconda riga.
+// Il cliente paga una volta sola, ma la seconda LDV resta pagata al fornitore e non la vede nessuno:
+// dal 22/09 al 20/11/2026 sette ordini cosi' (FUTURAL quattro volte in otto minuti il 21/10).
+// Qui la prima richiesta prenota l'ordine PRIMA di chiamare il corriere; la seconda trova la
+// prenotazione e si ferma senza comprare niente. Stessa chiave della guardia (cliente, rif, CAP), stessi
+// rif affidabili. La prenotazione si toglie a fine richiesta; se la funzione muore a meta' scade da sola
+// dopo DURATA_PRENOTAZIONE_MS, oltre il tempo massimo delle due porte (120 s).
+// Se la tabella non risponde si lascia passare: fermare le spedizioni per un guasto di questo controllo
+// sarebbe peggio del doppione, che resta comunque fermato dall'indice e il cui ordine va in storno.
+const DURATA_PRENOTAZIONE_MS = 150_000
+
+export const MSG_ORDINE_IN_CORSO = 'Questo ordine è già in spedizione da una richiesta partita pochi secondi fa: attendi un momento e controlla l\'elenco delle spedizioni prima di riprovare.'
+
+export async function prenotaOrdineInCreazione(
+  admin: { from: (t: string) => any },
+  params: { clienteId: string | null | undefined; rifOrdine: string | null | undefined; destCap: string | null | undefined },
+): Promise<'occupato' | { libera: () => Promise<void> } | null> {
+  const { clienteId, rifOrdine, destCap } = params
+  if (!clienteId || !rifOrdineAffidabile(rifOrdine)) return null
+  // Senza '#': "#1019" e "1019" sono lo stesso ordine, come nella guardia.
+  const chiave = { cliente_id: clienteId, rif_ordine: String(rifOrdine).trim().replace(/^#/, ''), dest_cap: String(destCap || '').trim() }
+  try {
+    await admin.from('spedizioni_in_creazione').delete()
+      .eq('cliente_id', chiave.cliente_id).eq('rif_ordine', chiave.rif_ordine).eq('dest_cap', chiave.dest_cap)
+      .lt('creata_il', new Date(Date.now() - DURATA_PRENOTAZIONE_MS).toISOString())
+    const { error } = await admin.from('spedizioni_in_creazione').insert(chiave)
+    if (error) {
+      if (error.code === '23505') return 'occupato'
+      console.error('[DOPPIONE][IN CREAZIONE] prenotazione non scritta, si prosegue', error.message || error.code)
+      return null
+    }
+  } catch (e: any) {
+    console.error('[DOPPIONE][IN CREAZIONE] prenotazione non scritta, si prosegue', e?.message || e)
+    return null
+  }
+  return {
+    libera: async () => {
+      try {
+        await admin.from('spedizioni_in_creazione').delete()
+          .eq('cliente_id', chiave.cliente_id).eq('rif_ordine', chiave.rif_ordine).eq('dest_cap', chiave.dest_cap)
+      } catch { /* scade da sola */ }
+    },
+  }
+}

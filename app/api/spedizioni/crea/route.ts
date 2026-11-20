@@ -182,6 +182,15 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       { error: messaggioDoppione(dup.numero), gia_spedito: dup.numero, gia_spedito_id: dup.id },
       { status: 409 },
     )
+    // Stesso ordine gia' in creazione da un'altra richiesta di pochi secondi fa: ci si ferma PRIMA di
+    // comprare la LDV (lib/guardia-doppione → prenotaOrdineInCreazione). La prenotazione si toglie
+    // dopo la risposta, qualunque sia l'esito.
+    const { prenotaOrdineInCreazione, MSG_ORDINE_IN_CORSO } = await import('@/lib/guardia-doppione')
+    const inCreazione = await prenotaOrdineInCreazione(adminCrea, {
+      clienteId, rifOrdine: body.rifOrdine, destCap: body.shipTo?.postalCode,
+    })
+    if (inCreazione === 'occupato') return NextResponse.json({ error: MSG_ORDINE_IN_CORSO, in_corso: true }, { status: 409 })
+    if (inCreazione) after(inCreazione.libera)
   }
 
   // NIENTE BLOCCO DELLE SPEDIZIONI. Qui c'era il controllo del piano, che fermava la spedizione
@@ -1711,14 +1720,33 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       }).select('id').single()
 
       if (insertError) {
-        // Caso che con gli altri due provider si risolve annullando: QUI NON SI PUO'. La spedizione
-        // esiste ed e' pagata. Non si addebita il cliente (di una spedizione che non risulta da
-        // nessuna parte non deve pagare) e la prenotazione viene liberata dal giro automatico.
-        // Si lascia una traccia completa nei log per ricostruirla a mano.
+        // L'ordine e' pagato ma la riga non c'e': si chiede subito lo storno al fornitore, come con gli
+        // altri due provider si annulla. Prima non si poteva e ogni caso restava pagato (25 dal 22/09
+        // al 20/11/2026: doppi invii scartati dall'indice anti-doppione, e il riavvio del database del
+        // 20/11 alle 10:55). Il cliente non paga una spedizione che non risulta da nessuna parte: la
+        // prenotazione torna subito (prima aspettava il giro automatico).
+        const motivoInsert = insertError.code || insertError.message || 'errore senza messaggio'
         console.error('[CREA][EASYPARCEL][ORDINE ORFANO] ordine=%s ldv=%s cliente=%s master=%s errore=%s',
-          ordine.idOrdine, ldv || '-', clienteId || '-', masterId, insertError.message)
+          ordine.idOrdine, ldv || '-', clienteId || '-', masterId, motivoInsert)
+        const { stornaOrdineOrfanoDva } = await import('@/lib/storno-dva')
+        const storno = await stornaOrdineOrfanoDva(apikey, ordine.idOrdine, { ldv, porta: 'portale', motivo: motivoInsert })
+        await stornaPrenotazione()
+        // DOPPIO INVIO: l'indice ha scartato la riga perche' lo stesso ordine e' appena stato spedito da
+        // un'altra richiesta. Si risponde come la guardia, cosi' le pagine collegano l'ordine a quella.
+        if (insertError.code === '23505') {
+          const { spedizioneDoppioneAttiva, messaggioDoppione } = await import('@/lib/guardia-doppione')
+          const dup = await spedizioneDoppioneAttiva(adminCrea, { clienteId, rifOrdine: body.rifOrdine, destCap: body.shipTo?.postalCode }).catch(() => null)
+          if (dup) return NextResponse.json(
+            { error: messaggioDoppione(dup.numero), gia_spedito: dup.numero, gia_spedito_id: dup.id },
+            { status: 409 },
+          )
+        }
+        if (storno !== 'non_riuscito') return NextResponse.json({
+          error: 'La spedizione non è stata registrata per un problema tecnico momentaneo e ne è stato chiesto l\'annullamento al corriere: non ti viene addebitata. Puoi riprovare.',
+          numero: numeroFinale, annullataSuCorriere: true,
+        }, { status: 500 })
         return NextResponse.json({
-          error: `Spedizione creata sul corriere (rif. ${numeroFinale}) ma non registrata a sistema, e questo corriere non consente l'annullo automatico. Contatta subito l'assistenza indicando il riferimento.`,
+          error: `Spedizione creata sul corriere (rif. ${numeroFinale}) ma non registrata a sistema, e non è stato possibile annullarla in automatico. Contatta subito l'assistenza indicando il riferimento.`,
           numero: numeroFinale, annullataSuCorriere: false,
         }, { status: 500 })
       }
