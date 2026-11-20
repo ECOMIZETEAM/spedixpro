@@ -6,6 +6,7 @@ export default function BadgeFiltri({ n }: { n: number }) {
   if (!n) return null
   return (
     <span
+      className="badge-filtri"
       title={n === 1 ? '1 filtro attivo' : `${n} filtri attivi`}
       style={{
         marginLeft: '7px', padding: '1px 8px', borderRadius: '10px', background: '#f97316',

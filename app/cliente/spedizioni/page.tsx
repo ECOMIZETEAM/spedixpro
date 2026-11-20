@@ -70,6 +70,7 @@ import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
 import { GraficaNuova } from '@/app/components/grafica/contesto'
 import { Icona } from '@/app/components/grafica/icone'
+import { useFiltriTelefono } from '@/app/components/grafica/filtri-telefono'
 import TrackingLaterale from '@/app/components/grafica/TrackingLaterale'
 import MenuAzioni from '@/app/components/grafica/MenuAzioni'
 import Percorso from '@/app/components/grafica/Percorso'
@@ -79,6 +80,7 @@ export default function SpedizioniPage() {
   // la grafica nuova (la prova «Scopri la nuova versione», 19/11): la stessa pagina, gli stessi dati e le stesse azioni, il
   // vestito dell'elenco dei master (grafica/elenco.css). Con la grafica di oggi `nuova` è falso e la pagina resta identica.
   const nuova = useContext(GraficaNuova).attiva
+  const filtriTel = useFiltriTelefono(nuova)
   const fe = (n: number) => nuova ? n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n.toFixed(2)
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
@@ -381,8 +383,8 @@ async function apriTracking(s: any) {
       </div>
 
       {/* FILTRI */}
-      <div className="el-scheda el-filtri" style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div className="el-sezione" style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>{nuova ? <><Icona id="i-filtro" />Filtri</> : '▼ Filtri'}<BadgeFiltri n={filtriAttivi.size} /></div>
+      <div className="el-scheda el-filtri" {...filtriTel.scheda} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
+        <div className="el-sezione" style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>{nuova ? filtriTel.titolo(filtriAttivi.size) : <>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></>}</div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
@@ -426,7 +428,7 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>N. Spedizione</label>
             <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} style={stileFiltro(inp, attivo('numero'))}/>
           </div>
-          <div><label style={lbl}>Data Spedizione:</label>
+          <div className="el-f-largo"><label style={lbl}>Data Spedizione:</label>
             <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
           <div><label style={lbl}>Contrassegno:</label>
@@ -476,7 +478,7 @@ async function apriTracking(s: any) {
               <option value="">Tutti</option>
             </select>
           </div>
-          <div>
+          <div className="el-f-azzera">
             <button className="el-secondario" onClick={()=>{azzeraFiltri(); setCerca('')}} style={btnFiltri}>Azzera filtri</button>
           </div>
         </div>

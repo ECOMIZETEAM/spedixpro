@@ -219,12 +219,16 @@
 .gx-prova .gx-prova__esci { color: var(--gx-inchiostro); background: var(--gx-vetro); box-shadow: inset 0 0 0 1px var(--gx-filo); }
 .gx-prova__esci .gx-ico { width: 15px; height: 15px; }
 @media (prefers-reduced-motion: reduce) { .gx-prova__punto { animation: none; } }
-/* sul telefono (la Nuova spedizione è fatta anche per il telefono) la frase sta sopra e i due tasti sotto, metà ciascuno:
-   in riga i tasti stringevano la frase a una parola per riga */
+/* sul telefono una riga sola (Lorenzo 20/11, «vai con la B»): striscia e barra restano ferme in alto, e con la frase
+   intera e i tasti sotto prendevano 225 px su 844. Qui la frase corta e «Vota» / «Torna»: 44 px */
+.gx-prova__corto { display: none; }
 @media (max-width: 720px) {
-  .gx-prova { flex-wrap: wrap; gap: 10px; padding: 12px 12px 12px 14px; }
-  .gx-prova__testo { flex: 1 1 calc(100% - 24px); }
-  .gx-prova button { flex: 1 1 0; justify-content: center; }
+  .gx-prova { gap: 8px; margin: 8px 10px 0; padding: 6px 6px 6px 12px; border-radius: 999px; }
+  .gx-prova__lungo { display: none; }
+  .gx-prova__corto { display: inline; }
+  .gx-prova__testo { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+  .gx-prova button { flex: none; height: 32px; padding: 0 12px; font-size: 12.5px; }
+  .gx-prova__esci .gx-ico { display: none; }
 }
 
 /* le voci che non sono ancora nella nuova versione: si vedono (anche i sottomenu) ma non si cliccano */

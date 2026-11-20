@@ -270,9 +270,18 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
         {prova && (
           <div className="gx-prova" role="region" aria-label="Prova della nuova versione">
             <span className="gx-prova__punto" aria-hidden="true" />
-            <span className="gx-prova__testo"><b>Stai provando la nuova MoovExpress.</b> Per ora sono pronte la Dashboard, l'Elenco spedizioni e la Nuova spedizione: le altre voci arrivano presto.</span>
-            <button type="button" className="gx-prova__voto" onClick={() => setVoto('voto')}>Lascia il tuo voto</button>
-            <button type="button" className="gx-prova__esci" onClick={() => setVoto('esci')}>Torna alla versione attuale<Icona id="i-chevron" /></button>
+            {/* sul telefono una riga sola (Lorenzo 20/11, «vai con la B»): frase e tasti corti, la striscia passa da 165 a
+                44 px; i lettori di schermo leggono sempre le parole intere (aria-label) */}
+            <span className="gx-prova__testo">
+              <span className="gx-prova__lungo"><b>Stai provando la nuova MoovExpress.</b> Per ora sono pronte la Dashboard, l'Elenco spedizioni e la Nuova spedizione: le altre voci arrivano presto.</span>
+              <span className="gx-prova__corto" aria-hidden="true"><b>Nuova versione</b> in prova</span>
+            </span>
+            <button type="button" className="gx-prova__voto" aria-label="Lascia il tuo voto" onClick={() => setVoto('voto')}>
+              <span className="gx-prova__lungo">Lascia il tuo voto</span><span className="gx-prova__corto">Vota</span>
+            </button>
+            <button type="button" className="gx-prova__esci" aria-label="Torna alla versione attuale" onClick={() => setVoto('esci')}>
+              <span className="gx-prova__lungo">Torna alla versione attuale</span><span className="gx-prova__corto">Torna</span><Icona id="i-chevron" />
+            </button>
           </div>
         )}
         {prova && voto && <Sondaggio pagina={path} uscita={voto === 'esci'} chiudi={() => setVoto(null)} />}

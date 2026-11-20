@@ -16,6 +16,7 @@ import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
 import { GraficaNuova } from '@/app/components/grafica/contesto'
 import { Icona } from '@/app/components/grafica/icone'
+import { useFiltriTelefono } from '@/app/components/grafica/filtri-telefono'
 import '@/app/components/grafica/elenco.css'
 import TrackingLaterale from '@/app/components/grafica/TrackingLaterale'
 import MenuAzioni from '@/app/components/grafica/MenuAzioni'
@@ -89,6 +90,7 @@ export default function SpedizioniPage() {
   // la grafica nuova (anteprima, Lorenzo 18/11 per i soci): stessa pagina, stessi dati e azioni, un altro vestito.
   // Con la grafica di oggi `nuova` è falso e la pagina resta identica.
   const nuova = useContext(GraficaNuova).attiva
+  const filtriTel = useFiltriTelefono(nuova)
   // gli importi: con la grafica nuova alla italiana («5,34»), con quella di oggi come sempre («5.34»)
   const fe = (n: number) => nuova ? n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n.toFixed(2)
   const dialog = useDialog()
@@ -496,8 +498,8 @@ async function apriTracking(s: any) {
       </div>
 
       {/* FILTRI */}
-      <div className="el-scheda el-filtri" style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
-        <div className="el-sezione" style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>{nuova ? <><Icona id="i-filtro" />Filtri</> : '▼ Filtri'}<BadgeFiltri n={filtriAttivi.size} /></div>
+      <div className="el-scheda el-filtri" {...filtriTel.scheda} style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'14px 16px',marginBottom:'16px'}}>
+        <div className="el-sezione" style={{fontWeight:'700',color:'#1a1a1a',marginBottom:'10px',fontSize:'12px'}}>{nuova ? filtriTel.titolo(filtriAttivi.size) : <>▼ Filtri<BadgeFiltri n={filtriAttivi.size} /></>}</div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
@@ -541,7 +543,7 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>N. Spedizione</label>
             <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} style={stileFiltro(inp, attivo('numero'))}/>
           </div>
-          <div><label style={lbl}>Data Spedizione:</label>
+          <div className="el-f-largo"><label style={lbl}>Data Spedizione:</label>
             <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
           </div>
           <div><label style={lbl}>Contrassegno:</label>
@@ -592,7 +594,7 @@ async function apriTracking(s: any) {
               {staff.map((u:any)=>{const nome=[u.nome,u.cognome].filter(Boolean).join(' ');return <option key={u.id} value={nome}>{nome||u.email||u.id}</option>})}
             </select>
           </div>
-          <div>
+          <div className="el-f-azzera">
             <button className="el-secondario" onClick={()=>{ azzeraFiltri(); setCerca('') }} style={btnFiltri}>Azzera filtri</button>
           </div>
         </div>
