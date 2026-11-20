@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { chiaveDestinatario, destinatarioDaImportato, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
+import { aGruppi, CREAZIONI_INSIEME } from '@/lib/a-gruppi'
 import { confrontaPerData } from '@/lib/data-ordine-import'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo, type TariffaAnteprima } from '@/app/cliente/anteprima-prezzi'
 import { colliDellOrdine, descriviColli } from '@/lib/colli-ordine'
@@ -639,9 +640,13 @@ export default function ImportaOrdiniPage() {
     let nonTentati = 0
     const spedite: SpeditaNelLotto[] = []
 
-    for (let i = 0; i < preparati.length; i++) {
-      if (senzaRetePiuVolte >= 2) { nonTentati = preparati.length - i; break }
-      const { o, packages, shipTo, scelta, corriereId } = preparati[i]
+    // QUATTRO ALLA VOLTA, non una (lib/a-gruppi: perche' il credito non corre rischi). Le spedite si rimettono
+    // nell'ordine del lotto: le etichette si stampano nell'ordine in cui il cliente ha preparato i pacchi.
+    // «Rete giu'» resta: dopo due ordini senza risposta, quelli non ancora partiti non si tentano.
+    const speditePer: (SpeditaNelLotto | null)[] = preparati.map(() => null)
+    await aGruppi(preparati, CREAZIONI_INSIEME, async (p: any, i: number) => {
+      if (senzaRetePiuVolte >= 2) { nonTentati++; return }
+      const { o, packages, shipTo, scelta, corriereId } = p
       const inviataAlle = Date.now()
       // LA CREAZIONE HA TRE ESITI, non due: creata; rifiutata (il server dice perche', e non ha creato
       // niente); oppure SENZA RISPOSTA — il browser smette di aspettare (connessione caduta, risposta
@@ -673,11 +678,11 @@ export default function ImportaOrdiniPage() {
         // esistente): lo segniamo 'spedito' collegandola, cosi' esce dalla lista e non si ritenta —
         // self-heal del disaccoppiamento crea↔segna-spedito che causava i doppioni. NON e' un errore.
         if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.gia_spedito, spedizione_id: cData.gia_spedito_id })) nonCollegate++
-        spedite.push({ ordineId: o.id, spedizioneId: cData.gia_spedito_id || null })
+        speditePer[i] = ({ ordineId: o.id, spedizioneId: cData.gia_spedito_id || null })
         ok++; senzaRetePiuVolte = 0
       } else if (cRes?.ok && cData && !cData.error) {
         if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.numero, spedizione_id: cData.spedizioneId })) nonCollegate++
-        spedite.push({ ordineId: o.id, spedizioneId: cData.spedizioneId || null })
+        speditePer[i] = ({ ordineId: o.id, spedizioneId: cData.spedizioneId || null })
         ok++; senzaRetePiuVolte = 0
       } else if (cData?.error) {
         // Rifiutata, col motivo del server (credito, telefono, corriere…): non e' nata.
@@ -686,11 +691,12 @@ export default function ImportaOrdiniPage() {
       } else {
         setProgress({ done: ko + ok, total: totale, fase: 'verifica' })
         const esito = await verificaCreazione(o.id, inviataAlle)
-        if (esito === 'collegata') { spedite.push({ ordineId: o.id, spedizioneId: null }); ok++; senzaRetePiuVolte = 0 }
+        if (esito === 'collegata') { speditePer[i] = ({ ordineId: o.id, spedizioneId: null }); ok++; senzaRetePiuVolte = 0 }
         else { ko++; senzaRetePiuVolte = esito === 'irraggiungibile' ? senzaRetePiuVolte + 1 : 0 }
       }
       setProgress({ done: ko + ok, total: totale, fase: 'crea' })
-    }
+    })
+    for (const x of speditePer) if (x) spedite.push(x)
 
     lottoRef.current = null
     setSpedendo(false)

@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { chiaveDestinatario, destinatarioDaEcommerce, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
+import { aGruppi, CREAZIONI_INSIEME } from '@/lib/a-gruppi'
 import { useParams, useRouter } from 'next/navigation'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -672,10 +673,14 @@ export default function OrdiniPage() {
   // se il credito basta, oppure dopo "Paga con la carta" (riusa lo stesso lotto, niente ricalcolo).
   async function eseguiCreazioneLotto(preparati: any[], errori: string[], shipFrom: any, cliId: string) {
     setSpedendo(true)
-    let okCount = 0
-    for (let i=0;i<preparati.length;i++){
-      const { id, o, num, arts, packages, shipTo, t } = preparati[i]
-      setMsg('Spedizione '+num+'… ('+(i+1)+'/'+preparati.length+')')
+    let okCount = 0, fatte = 0
+    // QUATTRO ALLA VOLTA, non una (lib/a-gruppi: perche' il credito non corre rischi). Gli errori di ogni
+    // ordine si rimettono poi nell'ordine del lotto, non in quello in cui le risposte arrivano.
+    const erroriPer: string[][] = preparati.map(() => [])
+    setMsg('Spedizioni 0/'+preparati.length+'…')
+    await aGruppi(preparati, CREAZIONI_INSIEME, async (p: any, i: number) => {
+      const { id, o, num, arts, packages, shipTo, t } = p
+      const errori = erroriPer[i]
       // Dogana (estero): il codice HS viene dal CATALOGO tramite lo SKU dell'ordine — lo stesso da cui
       // arrivano peso e misure. Prima merce che ce l'ha; se nessuna, il backend prova l'auto-ricerca TARIC.
       const esteroOrd = String(shipTo?.country || 'IT').toUpperCase() !== 'IT'
@@ -712,9 +717,9 @@ export default function OrdiniPage() {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ ordine_id:id, spedizione_id:creaRes.gia_spedito_id||null })
           }).catch(()=>{})
-          okCount++; continue
+          okCount++; return
         }
-        if (!creaRes || creaRes.error) { errori.push(num+': '+(creaRes?.error||'errore creazione')); continue }
+        if (!creaRes || creaRes.error) { errori.push(num+': '+(creaRes?.error||'errore creazione')); return }
         // SCARICO DAL MAGAZZINO, in automatico. Qui non serve una tendina come nelle pagine di
         // spedizione a mano: l'ordine SA GIA' cosa contiene — SKU e quantita' arrivano da Shopify o
         // da Amazon — e lo SKU e' gia' quello con cui si agganciano peso e misure dal catalogo.
@@ -737,7 +742,9 @@ export default function OrdiniPage() {
         }).catch(()=>{})
         okCount++
       } catch { errori.push(num+': errore imprevisto') }
-    }
+      finally { fatte++; setMsg('Spedizioni '+fatte+'/'+preparati.length+'…') }
+    })
+    for (const e of erroriPer) errori.push(...e)
     lottoRef.current = null
     setSel({})
     setMsg('Spedite '+okCount+' spedizioni'+(errori.length?' — Errori: '+errori.join(' | '):''))
