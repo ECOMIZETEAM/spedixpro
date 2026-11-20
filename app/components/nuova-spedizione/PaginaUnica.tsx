@@ -672,7 +672,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                         <span className="ns-corriere__testo">
                           <b>{nome}{!motivo && num(t.total_price) === minimo && selezionabili.length > 1 && <em className="ns-meglio">Il più conveniente</em>}</b>
                           <small>{motivo || `${String(t.peso_fatturato).replace('.', ',')} kg fatturati${num(t.peso_volume) > t.peso_reale ? ' (volume)' : ''} · zona ${t.zona}`}</small>
-                          {!motivo && t.limiti_collo && <small className="ns-attenz">Limiti collo: {t.limiti_collo}</small>}
+                          {!motivo && t.limiti_collo && <small className="ns-attenz ns-info">Limiti collo: {t.limiti_collo}</small>}
                           {!motivo && t.avviso_fuori_sagoma && <small className="ns-attenz">{t.avviso_fuori_sagoma}</small>}
                         </span>
                         <span className="ns-prezzo">{motivo ? 'Non disponibile' : euro(num(t.total_price))}</span>

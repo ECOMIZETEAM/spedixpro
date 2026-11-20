@@ -118,7 +118,9 @@ export default function SelectCercabile({ value, onChange, children, style, disa
 
   return (
     <div ref={box} style={{ position: 'relative', ...(style?.width ? { width: style.width } : {}) }}>
-      <button type="button" disabled={disabled} onClick={() => { if (!disabled) { setAperto(a => !a); setQ('') } }}
+      {/* className arriva solo dalla grafica nuova (Nuova spedizione su una pagina): veste il tasto e il pannello; senza,
+          la tendina resta identica a oggi */}
+      <button type="button" disabled={disabled} className={className} onClick={() => { if (!disabled) { setAperto(a => !a); setQ('') } }}
         style={{ ...style, textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', opacity: disabled ? 0.6 : 1 }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: scelta?.value ? '#1a1a1a' : '#9ca3af' }}>
           {scelta?.label || opzioni[0]?.label || ''}
@@ -127,7 +129,7 @@ export default function SelectCercabile({ value, onChange, children, style, disa
       </button>
 
       {aperto && montato && pos && createPortal(
-        <div ref={pannello} style={{ position: 'fixed', zIndex: 1000000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 10px 30px rgba(0,0,0,.16)' }}>
+        <div ref={pannello} className={className ? 'sc-pannello' : undefined} style={{ position: 'fixed', zIndex: 1000000, top: pos.top, left: pos.left, width: Math.max(pos.width, 240), maxWidth: 'calc(100vw - 16px)', background: '#fff', border: '1px solid #d5d5d5', borderRadius: '6px', boxShadow: '0 10px 30px rgba(0,0,0,.16)' }}>
           <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca…"
             onKeyDown={e => {
               if (e.key === 'Escape') { setAperto(false); setQ('') }

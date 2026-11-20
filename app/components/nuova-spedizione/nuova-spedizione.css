@@ -132,6 +132,8 @@
 .gx .ns-corriere__testo b { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 600; font-size: 14.5px; color: var(--gx-inchiostro); }
 .gx .ns-corriere__testo small { font-size: 12.5px; color: var(--gx-attenuato); }
 .gx .ns-attenz { color: var(--gx-accento-testo) !important; }
+/* i limiti del collo sono un'informazione, non un errore: grigi come il resto della riga (il fuori sagoma resta arancio) */
+.gx .ns-attenz.ns-info { color: var(--gx-attenuato) !important; }
 .gx .ns-meglio { font-style: normal; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--gx-bene); background: color-mix(in srgb, var(--gx-bene) 13%, transparent); }
 .gx .ns-prezzo { font-weight: 600; font-size: 15.5px; color: var(--gx-inchiostro); white-space: nowrap; }
 .gx .ns-corriere__dentro { display: grid; gap: 8px; padding: 10px 14px 14px 43px; background: color-mix(in srgb, var(--gx-accento) 4%, transparent); border-top: 1px solid var(--gx-filo); }
@@ -139,7 +141,7 @@
 .gx .ns-extra span { flex: 1; }
 .gx .ns-extra b { font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-corriere--finta { cursor: default; }
-.gx .ns-finta { height: 12px; flex: 1; border-radius: 6px; background: linear-gradient(90deg, var(--gx-incavo), color-mix(in srgb, var(--gx-filo) 160%, transparent), var(--gx-incavo)); background-size: 200% 100%; animation: ns-luccica 1.4s ease-in-out infinite; }
+.gx .ns-finta { height: 12px; flex: 1; border-radius: 6px; background: linear-gradient(90deg, color-mix(in srgb, var(--gx-inchiostro) 7%, transparent), color-mix(in srgb, var(--gx-inchiostro) 16%, transparent), color-mix(in srgb, var(--gx-inchiostro) 7%, transparent)); background-size: 200% 100%; animation: ns-luccica 1.4s ease-in-out infinite; }
 .gx .ns-finta--corta { flex: 0 0 70px; }
 @keyframes ns-luccica { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .gx .ns-finta { animation: none; } }
@@ -191,6 +193,18 @@
 .gx .ns-barra-riep { display: none; }
 
 /* i suggerimenti: disegnati in fondo alla pagina (fuori da .gx), quindi coi colori scritti qui */
+/* «Spedisci per»: la tendina con la ricerca (app/components/SelectCercabile, condivisa col modulo di oggi) ha il suo
+   aspetto scritto dentro; la pagina nuova le passa la classe ns-campo__val, e solo allora la si veste qui */
+.gx button.ns-campo__val { background: transparent; border: 0; padding: 3px 0 0; font: inherit; font-size: 15px; color: var(--gx-inchiostro); width: 100%; min-height: 24px; }
+.gx button.ns-campo__val > span:first-child { color: inherit !important; }
+.gx button.ns-campo__val > span:last-child { font-size: 0 !important; width: 7px; height: 7px; margin-right: 4px; border-right: 1.6px solid var(--gx-attenuato); border-bottom: 1.6px solid var(--gx-attenuato); transform: translateY(-2px) rotate(45deg); }
+[data-grafica="nuova"] .sc-pannello { border: 0 !important; border-radius: 12px !important; overflow: hidden; box-shadow: 0 18px 40px -18px rgba(15, 20, 27, .35), 0 0 0 1px rgba(15, 20, 27, .08) !important; }
+[data-grafica="nuova"] .sc-pannello input { padding: 11px 12px !important; font: inherit !important; font-size: 13.5px !important; background: transparent; }
+[data-grafica="nuova"] .sc-pannello > div > div { padding: 9px 12px !important; }
+[data-luce="notte"] .sc-pannello { background: #1E2636 !important; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1) !important; }
+[data-luce="notte"] .sc-pannello input { color: #fff !important; border-bottom-color: rgba(255, 255, 255, .1) !important; }
+[data-luce="notte"] .sc-pannello > div > div { color: #fff !important; }
+[data-luce="notte"] .sc-pannello > div > div[style*="rgb(255, 247, 237)"] { background: rgba(242, 107, 29, .18) !important; }
 .ns-tendina { position: fixed; z-index: 1000000; overflow-y: auto; border-radius: 12px; background: #fff; color: #0F141B;
   box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(16, 24, 40, .08); font-family: var(--font-outfit), system-ui, sans-serif; }
 [data-luce="notte"] .ns-tendina { background: #1E2636; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
