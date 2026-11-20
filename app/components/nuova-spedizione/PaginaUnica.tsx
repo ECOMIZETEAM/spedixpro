@@ -12,7 +12,7 @@ import { isoGiorno, primoGiornoDiRitiro } from '@/lib/festivi'
 import Calendario from './Calendario'
 import Tendina from './Tendina'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
-import { type Tariffa, chiaveTariffa, codiceProv, iconaCorriere, opzioniIncasso, motivoSpento, euro, kg } from './corrieri'
+import { type Tariffa, chiaveTariffa, codiceProv, iconaCorriere, tesseraCorriere, perchePeso, opzioniIncasso, motivoSpento, euro, kg } from './corrieri'
 import './nuova-spedizione.css'
 
 // NUOVA SPEDIZIONE SU UNA PAGINA SOLA (20/11/2026). I soci hanno bocciato la versione a passi: la vogliono come il
@@ -50,6 +50,15 @@ function mittDaCliente(c: any): Indirizzo {
 function pacchi(colli: Collo[]) {
   const pesi = pesiDelModulo(colli.map(c => c.peso.replace(',', '.')))
   return colli.map((c, i) => ({ length: num(c.lunghezza) || 20, width: num(c.larghezza) || 15, height: num(c.altezza) || 10, weight: pesi[i] }))
+}
+
+// Il logo del corriere: la tessera colorata se c'è, altrimenti il logo di oggi (centrato su bianco), altrimenti la sigla.
+function LogoCorriere({ t }: { t: Tariffa }) {
+  const nome = t.corriere_nome || t.carrierCode || ''
+  const tessera = tesseraCorriere(nome)
+  if (tessera) return <span className="ns-logo ns-logo--tessera"><img src={tessera} alt="" /></span>
+  const logo = iconaCorriere(nome)
+  return <span className="ns-logo">{logo ? <img src={logo} alt="" /> : <b>{codiceProv(t._corriere_tipo || t.carrierCode)}</b>}</span>
 }
 
 export default function PaginaUnica({ portale, prova }: { portale: Portale; prova: boolean }) {
@@ -378,6 +387,8 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
   const spento = (t: Tariffa) => motivoSpento(t, colli.length, codAttivo)
   const selezionabili = visibili.filter(t => !spento(t))
   const minimo = selezionabili.reduce((m, t) => Math.min(m, num(t.total_price)), Infinity)
+  // «Il più conveniente» su UNO solo: a pari prezzo il primo della lista (20/11, due Poste a 2,50 lo mostravano entrambi).
+  const piuConveniente = selezionabili.length > 1 ? selezionabili.find(t => num(t.total_price) === minimo) : undefined
   const selMostrata = visibili.find(t => chiaveTariffa(t) === selKey) || null
   // Il corriere con cui si crea: SOLO da un preventivo dei dati di adesso. Mentre si ricalcola non c'è, e il tasto è
   // spento: la creazione addebita il maggiore fra il prezzo che ricalcola il server e quello mandato da qui, quindi un
@@ -764,16 +775,15 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                   const k = chiaveTariffa(t)
                   const motivo = spento(t)
                   const su = k === selKey && !motivo
-                  const logo = iconaCorriere(t.corriere_nome || t.carrierCode || '')
                   const nome = t.corriere_nome || codiceProv(t.carrierCode)
                   return (
                     <div key={k}>
                       <label className={'ns-corriere' + (su ? ' ns-corriere--su' : '') + (motivo ? ' ns-corriere--spento' : '')}>
                         <input type="radio" name="ns-corriere" checked={su} disabled={!!motivo} onChange={() => scegli(t)} />
-                        <span className="ns-logo">{logo ? <img src={logo} alt="" /> : <b>{codiceProv(t._corriere_tipo || t.carrierCode)}</b>}</span>
+                        <LogoCorriere t={t} />
                         <span className="ns-corriere__testo">
-                          <b>{nome}{!motivo && num(t.total_price) === minimo && selezionabili.length > 1 && <em className="ns-meglio">Il più conveniente</em>}</b>
-                          <small>{motivo || `${String(t.peso_fatturato).replace('.', ',')} kg fatturati${num(t.peso_volume) > t.peso_reale ? ' (volume)' : ''} · zona ${t.zona}`}</small>
+                          <b>{nome}{t === piuConveniente && <em className="ns-meglio">Il più conveniente</em>}</b>
+                          <small>{motivo || `${String(t.peso_fatturato).replace('.', ',')} kg fatturati${perchePeso(t)} · zona ${t.zona}`}</small>
                           {!motivo && t.limiti_collo && <small className="ns-attenz ns-info">Limiti collo: {t.limiti_collo}</small>}
                           {!motivo && t.avviso_fuori_sagoma && <small className="ns-attenz">{t.avviso_fuori_sagoma}</small>}
                         </span>
@@ -858,8 +868,8 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
             {selMostrata ? (
               <div className={inCalcolo ? 'ns-gruppo--vecchio' : ''}>
                 <div className="ns-riep__corriere">
-                  <span className="ns-logo">{iconaCorriere(selMostrata.corriere_nome || selMostrata.carrierCode || '') ? <img src={iconaCorriere(selMostrata.corriere_nome || selMostrata.carrierCode || '')!} alt="" /> : <b>{codiceProv(selMostrata._corriere_tipo || selMostrata.carrierCode)}</b>}</span>
-                  <span><b>{selMostrata.corriere_nome || codiceProv(selMostrata.carrierCode)}</b><small>{String(selMostrata.peso_fatturato).replace('.', ',')} kg fatturati · zona {selMostrata.zona}</small></span>
+                  <LogoCorriere t={selMostrata} />
+                  <span><b>{selMostrata.corriere_nome || codiceProv(selMostrata.carrierCode)}</b><small>{String(selMostrata.peso_fatturato).replace('.', ',')} kg fatturati{perchePeso(selMostrata)} · zona {selMostrata.zona}</small></span>
                 </div>
                 <dl className="ns-costi">
                   <div><dt>Trasporto</dt><dd>{euro(num(selMostrata.weight_price || selMostrata.prezzo_spedizione || selMostrata.total_price))}</dd></div>
