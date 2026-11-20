@@ -51,7 +51,7 @@ export async function GET() {
     .eq('master_id', utente.master_id).order('created_at', { ascending: true }).order('id', { ascending: true }))
   if (!tutteLeRighe.length) return NextResponse.json({ gruppi: [], totale: 0, spedizioni: 0 })
 
-  // RESI FERMATI (solo MULTIEXPRESS, lib/cod-resi-fermi.ts): fuori dai gruppi, in un elenco a parte.
+  // RESI FERMATI (MULTIEXPRESS e LOGIXIA, lib/cod-resi-fermi.ts): fuori dai gruppi, in un elenco a parte.
   const rese = fermaIResi(utente.master_id) ? await spedizioniRese(admin, tutteLeRighe.map((r: any) => r.spedizione_id)) : new Set<string>()
   const righe = tutteLeRighe.filter((r: any) => !rese.has(r.spedizione_id))
   const ferme = tutteLeRighe.filter((r: any) => rese.has(r.spedizione_id))
@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
   // delle sue spedizioni, le altre restano in sosta. Il POST poi le raggruppa comunque per
   // destinatario e crea una distinta per gruppo — quindi selezioni miste (più clienti) funzionano.
   const spedizioniSel: string[] = Array.isArray(body.spedizioni) ? body.spedizioni.filter(Boolean).map(String) : []
-  // Resi fermati che il master sceglie di far scendere (riquadro a parte, solo MULTIEXPRESS).
+  // Resi fermati che il master sceglie di far scendere (riquadro a parte, MULTIEXPRESS e LOGIXIA).
   const resiSel: string[] = Array.isArray(body.resi) ? body.resi.filter(Boolean).map(String) : []
   if (!destinatari.length && !spedizioniSel.length && !resiSel.length) return NextResponse.json({ error: 'Seleziona almeno un contrassegno da caricare' }, { status: 400 })
 
@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
   const claim: any[] = []
   let resiFermati = 0
   if (fermaIResi(mio)) {
-    // MULTIEXPRESS: i resi non si prendono con il gruppo né con la tendina, solo se scelti nel loro
+    // MULTIEXPRESS e LOGIXIA: i resi non si prendono con il gruppo né con la tendina, solo se scelti nel loro
     // riquadro (lib/cod-resi-fermi.ts). Le righe scelte si prendono per spedizione, una per una: un
     // reso non viene mai tolto dalla sosta e rimesso, resta dov'è.
     const inSosta = await fetchAll(() => admin.from('cod_da_caricare')
@@ -342,7 +342,7 @@ export async function POST(req: NextRequest) {
       giaCaricate: giaInDistinta.length,
       senzaImporto: senzaImporto.length,
       nonRiuscite: falliti.length,
-      resiFermati,                 // solo MULTIEXPRESS: resi selezionati col gruppo e rimasti fermi
+      resiFermati,                 // MULTIEXPRESS e LOGIXIA: resi selezionati col gruppo e rimasti fermi
     })
   } catch (e: any) {
     await rimettiInSosta(claim)     // errore imprevisto: tutto torna in sosta, niente va perso

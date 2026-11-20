@@ -48,7 +48,7 @@ export default function DistinteContrassegniPage() {
   const [avanz, setAvanz] = useState<{fatti:number;totale:number;da:number|null;etichetta:string;sottotitolo?:string}|null>(null)
   const [caricando, setCaricando] = useState(false)
   const [daCaricare, setDaCaricare] = useState<{gruppi:any[];totale:number;spedizioni:number;perContratto:any[];resiFermi:any[];resiTotale:number}>({gruppi:[],totale:0,spedizioni:0,perContratto:[],resiFermi:[],resiTotale:0})
-  const [selResi, setSelResi] = useState<Set<string>>(new Set())          // resi fermati scelti per farli scendere (solo MULTIEXPRESS)
+  const [selResi, setSelResi] = useState<Set<string>>(new Set())          // resi fermati scelti per farli scendere (MULTIEXPRESS e LOGIXIA)
   const [selDest, setSelDest] = useState<Set<string>>(new Set())        // gruppi INTERI selezionati
   const [selSped, setSelSped] = useState<Record<string, Set<string>>>({}) // spedizioni singole per gruppo
   const [espansi, setEspansi] = useState<Set<string>>(new Set())          // tendine aperte
@@ -157,7 +157,7 @@ export default function DistinteContrassegniPage() {
     setCaricando(false)
   }
 
-  // RESI FERMATI (solo MULTIEXPRESS): scendono solo quelli scelti qui, uno per uno.
+  // RESI FERMATI (MULTIEXPRESS e LOGIXIA): scendono solo quelli scelti qui, uno per uno.
   async function faiScendereResi() {
     const ids = Array.from(selResi)
     if (!ids.length) { await dialog.alert({ title:'Nessuna selezione', message:'Seleziona almeno un reso da far scendere.' }); return }
@@ -595,7 +595,7 @@ export default function DistinteContrassegniPage() {
         )
       })()}
 
-      {/* RESI FERMATI (solo MULTIEXPRESS, lib/cod-resi-fermi.ts): contrassegni di pacchi tornati al mittente.
+      {/* RESI FERMATI (MULTIEXPRESS e LOGIXIA, lib/cod-resi-fermi.ts): contrassegni di pacchi tornati al mittente.
           Fuori dai gruppi verdi: non scendono con "Seleziona tutti", solo se scelti qui. Lasciarli = tenerli. */}
       {daCaricare.resiFermi.length > 0 && (() => {
         const tutti = selResi.size === daCaricare.resiFermi.length
