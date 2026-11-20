@@ -1,5 +1,6 @@
 import { calcolaPrezzoCorriereDettaglio, calcolaPrezzoListino } from '@/lib/pricing'
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
+import { ricordaNellaRichiesta, chiaveDi } from '@/lib/memo-richiesta'
 import { accessoriDelLivello } from '@/lib/cascata'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
@@ -399,6 +400,23 @@ async function costoLivelloAlbero(
 }
 
 export async function pianoAddebitiCondivisione(
+  admin: any,
+  p: {
+    masterOriginante: string; nomeContratto: string
+  } & ContestoPrezzoCondivisione,
+): Promise<MovimentoPianificato[]> {
+  // RIUSO NELLA RICHIESTA (lib/memo-richiesta): il controllo del credito e gli addebiti chiedono lo stesso piano,
+  // con gli stessi campi, nella stessa creazione. La chiave sono SOLO i campi che il piano usa; il piano non legge
+  // saldi, quindi riusarlo non cambia niente di cio' che viene addebitato.
+  const chiave = 'piano-condivisione:' + chiaveDi({
+    masterOriginante: p.masterOriginante, nomeContratto: p.nomeContratto, dest: p.dest, packages: p.packages,
+    contrassegno: p.contrassegno, assicurazione: p.assicurazione, serviziAccessori: p.serviziAccessori,
+    mittCap: p.mittCap, mittProvincia: p.mittProvincia, mittPaese: p.mittPaese,
+  })
+  return ricordaNellaRichiesta(chiave, () => pianoAddebitiCondivisioneCalcolato(admin, p))
+}
+
+async function pianoAddebitiCondivisioneCalcolato(
   admin: any,
   p: {
     masterOriginante: string; nomeContratto: string

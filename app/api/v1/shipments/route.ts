@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { conMemoRichiesta } from '@/lib/memo-richiesta'
 import { cronometra, segna, annota } from '@/lib/cronometro'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente, motivoPartenzaNonCoperta } from '@/lib/pricing'
@@ -95,7 +96,8 @@ export async function POST(req: NextRequest) {
   // soprattutto ai contratti condivisi: il ponte crea qui presso il master a monte, e questa rotta pesa 5,6 s
   // (mediana, 20/11/2026) dentro i 7-10 s della loro creazione. Misura soltanto.
   const res = await cronometra('[V1][TEMPI]', async () => {
-    const r = await creaSpedizioneApi(req, t0, reg)
+    // Memoria della richiesta (lib/memo-richiesta): come nella creazione dal portale.
+    const r = await conMemoRichiesta(() => creaSpedizioneApi(req, t0, reg))
     annota('stato', r.status)
     return r
   })

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { conMemoRichiesta } from '@/lib/memo-richiesta'
 import { cronometra, segna, annota } from '@/lib/cronometro'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
@@ -59,7 +60,9 @@ export async function POST(req: NextRequest) {
   // Cronometro (lib/cronometro): una riga [CREA][TEMPI] per creazione, con le fasi e l'attesa per indirizzo esterno.
   // Misura soltanto: serve a capire dove vanno i 9 secondi (mediana, 13-20/11/2026) prima di toccare la creazione.
   const res = await cronometra('[CREA][TEMPI]', async () => {
-    const r = await creaSpedizioneInterna(req, Date.now())
+    // Memoria della richiesta (lib/memo-richiesta): la catena dei costi e il piano dei condivisi, chiesti due volte
+    // con gli stessi ingressi (credito, poi addebiti), si calcolano una volta sola.
+    const r = await conMemoRichiesta(() => creaSpedizioneInterna(req, Date.now()))
     annota('stato', r.status)
     return r
   })

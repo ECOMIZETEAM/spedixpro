@@ -1,5 +1,6 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
+import { ricordaNellaRichiesta, chiaveDi } from '@/lib/memo-richiesta'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome, detentoreContratto } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
@@ -111,7 +112,7 @@ export async function accessoriDelLivello(
 // altrove con una copia della logica, le due si allontanerebbero al primo ritocco e la rettifica
 // direbbe una cifra che non e' la differenza fra due prezzi confrontabili.
 // Non scrive niente: costruisce la catena e i prezzi, e basta.
-export async function costruisciCatena(
+async function costruisciCatenaGrezza(
   supabase: any,
   params: {
     masterDirettoId: string
@@ -142,8 +143,11 @@ export async function costruisciCatena(
     mittProvincia?: string
     mittPaese?: string
   }
-): Promise<{ catena: LivelloCatena[]; errore?: string }> {
+): Promise<{ catena: LivelloCatena[]; errore?: string; dipendeDalCosto?: boolean }> {
   const catena: LivelloCatena[] = []
+  // true se un livello ha preso il costo dal fornitore (detentore senza listino): allora la catena vale solo
+  // per QUEL costo, e il riuso nella richiesta (costruisciCatena) non la riusa con un costo diverso.
+  let dipendeDalCosto = false
   let currentId: string | null = params.masterDirettoId
   // RLS: la catena e' cross-tenant per natura -> client admin (auth verificata a monte)
   const adminDb = createAdminSupabase()
@@ -250,6 +254,7 @@ export async function costruisciCatena(
     if (!calcolato) {
       if (isProprietario) {
         prezzo = Number(params.costoSpedizione || 0)
+        dipendeDalCosto = true
       } else {
         if (!m.parent_listino_id) {
           return { errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato.` }
@@ -311,6 +316,25 @@ export async function costruisciCatena(
   }
   if (erroreSalita) return { catena, errore: erroreSalita }
 
+  return { catena, dipendeDalCosto }
+}
+// RIUSO NELLA RICHIESTA (lib/memo-richiesta). La creazione e l'API pubblica chiamano questa funzione due volte con
+// gli stessi ingressi (controllo del credito, poi addebiti): la seconda riusa la catena della prima invece di
+// rileggere tutto (circa mezzo secondo a creazione). Cambia solo `costoSpedizione` (0 al controllo, il costo vero
+// del corriere agli addebiti), che serve al ritocco del detentore qui sotto: si applica ogni volta su una copia.
+// Se la catena l'ha gia' usato per prezzare un livello (detentore senza listino) e il costo e' diverso, si ricalcola.
+// Fuori da una creazione (rettifiche, giri automatici) nessuna memoria: si calcola come sempre.
+export async function costruisciCatena(
+  supabase: any,
+  params: Parameters<typeof costruisciCatenaGrezza>[1],
+): Promise<{ catena: LivelloCatena[]; errore?: string }> {
+  const costo = Number(params.costoSpedizione || 0)
+  const { costoSpedizione: _c, ...ingressi } = params
+  let g = await ricordaNellaRichiesta('catena:' + chiaveDi(ingressi), async () => ({ ...(await costruisciCatenaGrezza(supabase, params)), costoUsato: costo }))
+  if (g.dipendeDalCosto && g.costoUsato !== costo) g = { ...(await costruisciCatenaGrezza(supabase, params)), costoUsato: costo }
+  const catena = g.catena
+  if (g.errore) return { catena, errore: g.errore }
+
   // ── FLOOR ANTI-SOTTO-COSTO: SOLO SUL DETENTORE DEL CONTRATTO ──
   // Il costo reale del provider (`costoSpedizione` = quotation/shipmentCost per SpediamoPro/DVA/Spedisci)
   // lo paga materialmente CHI POSSIEDE il contratto: MULTIEXPRESS per i contratti di rete, o il master
@@ -340,6 +364,7 @@ export async function costruisciCatena(
 
   return { catena }
 }
+
 
 // UN MASTER HA DAVVERO DUE CONTI?
 // Stessa condizione che qui sopra decide su quale conto finisce il costo, tenuta in una funzione
