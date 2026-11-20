@@ -510,7 +510,23 @@ export async function addebitaTreeCondivisione(
   })
   let addebitati = 0
   for (const liv of piano) {
-    if (liv.ruolo !== 'albero' || !liv.fornitore || liv.importo == null || !(liv.importo < 0)) continue
+    // UN LIVELLO CHE DEVE PAGARE E NON PAGA NON PUO' ESSERE SILENZIOSO. Il `continue` muto ha lasciato
+    // passare 282343J011760 (spedizioni 2000, 15/10) e 282343J009476 (Dg Express, 14/10) senza addebito:
+    // nei log non c'era NIENTE, e in elenco quei master si vedevano il costo del livello sopra (il
+    // prezzo d'acquisto di chi compra a codice) perche' la lista ripiega su costo_spedizione quando il
+    // movimento manca. Due righe su ~20.000, ma invisibili: senza questo log non si trovano.
+    // (Recuperato il 20/11/2026 da una modifica del 16/10 mai rilasciata. La sua seconda parte, che
+    // riscriveva costo_spedizione col costo di chi origina, NON e' entrata: quella colonna sulle righe
+    // d'origine condivise e' il prezzo pagato da chi compra a codice, ed e' su quello che il report di
+    // E&A MULTIEXPRESS quadra 1 a 1 la spesa per fornitore — 71.979 righe in 30 giorni l'avrebbero
+    // cambiata. Le viste dei master usano gia' il movimento quando c'e'.)
+    if (liv.ruolo !== 'albero') continue
+    if (!liv.fornitore || liv.importo == null || !(liv.importo < 0)) {
+      console.error(
+        `[condivisione-catena][LIVELLO NON ADDEBITATO] sped=${p.spedizioneId} numero=${p.numero} master=${liv.master} contratto="${p.nomeContratto}" fornitore=${liv.fornitore || 'n/d'} importo=${liv.importo}`,
+      )
+      continue
+    }
     try {
       await registraMovimentoMaster(admin, {
         masterOwnerId: liv.fornitore,      // il PADRE (fornitore diretto): dimensione owner del movimento
