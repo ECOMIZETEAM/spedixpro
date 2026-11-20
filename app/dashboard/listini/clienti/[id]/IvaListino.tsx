@@ -96,7 +96,7 @@ export function useIvaListino(listinoId: string, nomeListino: string, iniziale: 
 
   const modale = richiesta ? (
     <div onClick={() => { if (!salvo) setRichiesta(null) }}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(17,24,39,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+      style={{ position: 'fixed', inset: 0, background: 'rgba(17,24,39,0.55)', zIndex: 1300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
       <div role="dialog" aria-modal="true" aria-labelledby="iva-dialogo-titolo" onClick={e => e.stopPropagation()}
         style={{ width: '100%', maxWidth: '560px', background: '#fff', borderRadius: '12px', boxShadow: '0 20px 50px rgba(0,0,0,0.25)', padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: '16px', boxSizing: 'border-box', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto' }}>
         <div>
