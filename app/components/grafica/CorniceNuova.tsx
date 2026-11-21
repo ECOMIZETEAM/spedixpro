@@ -149,8 +149,19 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
     r.dataset.grafica = 'nuova'; r.dataset.luce = luce; r.dataset.tema = tema
     const f = radiceGx.current ? getComputedStyle(radiceGx.current).getPropertyValue('--font-outfit').trim() : ''
     if (f) r.style.setProperty('--font-outfit', f)
+    // <meta name="theme-color"> col fondo della luce accesa, anche al cambio dal vivo (21/11). Safari e Chrome sul
+    // telefono tingono la loro barra con questo colore, e il guscio dell'app degli store (www/ponte-app.js, sessione
+    // APP) legge SOLO questo meta per colorare la barra di stato: di notte non resta una striscia bianca sopra. Con la
+    // grafica di oggi il meta non c'è e tutto resta bianco come prima.
+    const fondo = getComputedStyle(r).getPropertyValue('--gx-fondo').trim()
+    let m = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+    if (!m) { m = document.createElement('meta'); m.name = 'theme-color'; m.dataset.gx = '1'; document.head.appendChild(m) }
+    if (fondo) m.content = fondo
   }, [luce, tema])
-  useEffect(() => () => { const r = document.documentElement; delete r.dataset.grafica; delete r.dataset.luce; delete r.dataset.tema; r.style.removeProperty('--font-outfit') }, [])
+  useEffect(() => () => {
+    const r = document.documentElement; delete r.dataset.grafica; delete r.dataset.luce; delete r.dataset.tema; r.style.removeProperty('--font-outfit')
+    document.querySelector('meta[name="theme-color"][data-gx]')?.remove()
+  }, [])
   // Il passaggio fra giorno e notte: la luce nuova si allarga in un cerchio dall'icona premuta (View Transitions;
   // dove il browser non le ha, o con meno movimento, cambia e basta)
   const scegli = (s: Scelta, e?: React.MouseEvent) => {
