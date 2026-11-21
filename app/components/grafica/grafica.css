@@ -163,7 +163,7 @@
 .gx-avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 13px; font-weight: 500; color: #fff; background: linear-gradient(150deg, #5B7CFA, #2B3FA8); }
 .gx-segno { position: relative; }
 .gx-segno__pallino { position: absolute; top: 7px; right: 8px; min-width: 8px; height: 8px; border-radius: 999px; background: var(--gx-pallino); }
-.gx-segno__pallino--n { top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; font-weight: 600; line-height: 16px; color: #fff; text-align: center; }
+.gx-segno__pallino--n { top: 2px; right: 1px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; line-height: 18px; color: #fff; text-align: center; }
 .gx-pagina { flex: 1; min-height: 0; overflow-y: auto; padding: 26px 16px 24px 16px; }
 
 /* ── le transizioni fra le pagine e fra giorno e notte (View Transitions) ── */
@@ -497,7 +497,7 @@
   .gx-alto__marca { display: flex; align-items: center; gap: 8px; min-width: 0; margin-right: auto; color: var(--gx-inchiostro); font-size: 16px; font-weight: 600; }
   .gx-alto__marca img { max-height: 34px; max-width: 132px; object-fit: contain; object-position: left center; }
   /* senza logo solo l'iniziale: accanto a credito, assistenza, campanella e profilo il nome restava a 4 lettere («GREE…») */
-  .gx-alto__marca b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .gx-alto__marca b { display: none; }   /* il nome lo dicono aria-label e title del collegamento */
 
   /* la ricerca: un campo in alto, il resto velato */
   .gx-ricerca-velo { display: block; position: fixed; inset: 0; z-index: 1001; background: rgba(15, 20, 27, .28); animation: tl-velo .2s ease both; }

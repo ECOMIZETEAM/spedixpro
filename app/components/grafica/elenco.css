@@ -559,3 +559,9 @@
   .gx .ds-velo input, .gx .ds-velo textarea, .gx .ds-velo select { font-size: 16px !important; }
   .gx .ds-velo .ds-etichetta { font-size: 11px !important; }
 }
+
+/* le schede del telefono hanno il fondo incavato, più scuro del vetro: di giorno il verde del margine (4,3) e l'arancio
+   del cartellino della rete (4,4) scendevano sotto 4,5 (controllo completo 21/11). Un tono più scuro, solo nelle schede */
+@media (max-width: 720px) {
+  .gx:not([data-luce="notte"]) .gx-elenco .el-tab { --gx-bene: #0D6B4B; --gx-accento-testo: #9A3000; }
+}
