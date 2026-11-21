@@ -40,7 +40,7 @@ const num = (x: any) => { const n = Number(x); return Number.isFinite(n) && n > 
 
 // I colli come li ha mandati chi ha creato: collo per collo se la riga d'origine ne ha il dettaglio, altrimenti
 // colli uguali col peso diviso in parti uguali e le misure salvate sulla riga (quelle del primo collo).
-async function colliDellOrigine(admin: Admin, o: any): Promise<any[]> {
+export async function colliDellOrigine(admin: Admin, o: any): Promise<any[]> {
   const n = Math.max(1, Number(o.colli) || 1)
   if (n > 1) {
     const { data } = await admin.from('spedizioni').select('colli_dettaglio').eq('id', o.id).maybeSingle()

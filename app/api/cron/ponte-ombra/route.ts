@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { confrontaInOmbra, COLONNE_ORIGINE, type EsitoOmbra } from '@/lib/ponte-ombra'
+import { provaScritturaInOmbra, type EsitoScrittura } from '@/lib/ponte-ombra-scrittura'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,11 @@ export const maxDuration = 300
 //
 // Interruttori (variabili su Vercel): PONTE_OMBRA=spento lo ferma; PONTE_OMBRA_CONTRATTI sceglie i contratti
 // (nomi separati da virgola, predefinito SDA EXPRESS L, il primo deciso da Lorenzo il 20/11/2026).
+//
+// FASE 3: su ogni condiviso controllato si prova anche la SCRITTURA UNICA a vuoto (lib/ponte-ombra-scrittura): il piano
+// del ponte unico scritto davvero nel database e annullato, confrontato campo per campo con le righe e i movimenti della
+// staffetta. Le sue differenze finiscono nella stessa riga del registro, con «scrittura:» davanti. PONTE_OMBRA_SCRITTURA=
+// spento la ferma; finche' le funzioni del database (scripts/ponte-unico-scrittura.sql) non ci sono, si salta da sola.
 
 const FINESTRA_MIN = 60          // quanto indietro si guarda
 const ATTESA_MIN = 4             // la staffetta deve aver finito: righe e addebiti di tutti i livelli scritti
@@ -64,8 +70,33 @@ export async function GET(req: NextRequest) {
   const daFare = origini.filter((o: any) => !gia.has(o.id)).slice(0, PER_GIRO)
 
   const esiti: EsitoOmbra[] = []
+  const scrittura = process.env.PONTE_OMBRA_SCRITTURA !== 'spento'
+  let scritturaAssente = false
+  // La prova della scrittura nella riga del registro: le sue differenze con «scrittura:» davanti, il suo esito che
+  // peggiora quello della riga, i suoi numeri nel dettaglio.
+  const conScrittura = (e: EsitoOmbra, s: EsitoScrittura | null): EsitoOmbra => {
+    if (!s) return e
+    if (s.esito === 'saltata') return { ...e, dettaglio: { ...(e.dettaglio || {}), scrittura: 'saltata: ' + (s.differenze[0]?.cosa || '') } }
+    if (s.esito === 'errore' && s.differenze.some(d => /Could not find the function|does not exist/i.test(String(d.vero || '')))) {
+      scritturaAssente = true
+      return { ...e, dettaglio: { ...(e.dettaglio || {}), scrittura: 'funzioni non installate' } }
+    }
+    const peggiore = e.esito === 'errore' || s.esito === 'errore' ? 'errore' : e.esito === 'diverso' || s.esito === 'diverso' ? 'diverso' : 'uguale'
+    return {
+      ...e, esito: peggiore,
+      differenze: [...e.differenze, ...s.differenze.slice(0, 40).map(d => ({ ...d, cosa: 'scrittura: ' + d.cosa }))],
+      dettaglio: { ...(e.dettaglio || {}), scrittura: { esito: s.esito, ms: s.ms, righe: s.righe, movimenti: s.movimenti, differenze: s.differenze.length } },
+    }
+  }
   for (let i = 0; i < daFare.length && Date.now() - t0 < TEMPO_MS; i += INSIEME) {
-    const blocco = await Promise.all(daFare.slice(i, i + INSIEME).map((o: any) => confrontaInOmbra(admin, o, nomePonte.get(o.corriere_id)!)))
+    const blocco = await Promise.all(daFare.slice(i, i + INSIEME).map(async (o: any) => {
+      const nome = nomePonte.get(o.corriere_id)!
+      const [e, s] = await Promise.all([
+        confrontaInOmbra(admin, o, nome),
+        scrittura && !scritturaAssente ? provaScritturaInOmbra(admin, o, nome) : Promise.resolve(null),
+      ])
+      return conScrittura(e, s)
+    }))
     esiti.push(...blocco)
     const { error } = await admin.from('ponte_ombra').upsert(blocco, { onConflict: 'spedizione_origine_id', ignoreDuplicates: true })
     if (error) { console.error('[OMBRA] registro non scritto:', error.message); break }
