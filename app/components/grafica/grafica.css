@@ -12,11 +12,13 @@
   --gx-testo: rgba(240, 239, 236, .88);
   --gx-attenuato: rgba(226, 224, 220, .64);
   --gx-filo: rgba(255, 255, 255, .11);
-  /* l'arancio: International Orange, quello che Apple accosta al titanio (Watch Ultra). Uno solo per i tasti, di
-     giorno e di notte (#FF4F00: il bianco sopra si legge meglio dell'arancio di prima, 3,3 contro 2,6); di notte un
-     filo più chiaro per linee e bagliori, e più chiaro ancora per le scritte (contrasto 7 sul titanio) */
+  /* l'arancio: International Orange, quello che Apple accosta al titanio (Watch Ultra), per icone, linee e bagliori; di
+     notte un filo più chiaro, e più chiaro ancora per le scritte (contrasto 7 sul titanio).
+     I TASTI PIENI (--gx-accento-pieno) sono un arancio più bruciato, #D93F00, di giorno e di notte: col bianco sopra
+     #FF4F00 dava 3,3 e le scritte dei tasti vogliono 4,5 (21/11, Lorenzo: «valutate voi»; misure della sessione APP).
+     #D93F00 col bianco fa 4,5; il portale di oggi (#f97316) fa 2,8 */
   --gx-accento: #FF5F1F;
-  --gx-accento-pieno: #FF4F00;
+  --gx-accento-pieno: #D93F00;
   --gx-accento-testo: #FF8552;
   --gx-bene: #5BE0B5;
   --gx-problema: #FF8A94;
@@ -55,7 +57,7 @@
   --gx-attenuato: rgba(70, 67, 62, .8);
   --gx-filo: rgba(30, 28, 25, .08);
   --gx-accento: #FF4F00;
-  --gx-accento-pieno: #FF4F00;
+  --gx-accento-pieno: #D93F00;
   --gx-accento-testo: #B83A00;
   --gx-bene: #12805A;
   /* #BE2537 e non #D23446: il credito negativo nella barra in alto stava a 4,1 sul fondo, sotto la soglia del testo */
