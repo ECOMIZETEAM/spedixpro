@@ -1,4 +1,4 @@
-import { createServerSupabase } from '@/lib/supabase'
+import { profiloDellaRichiesta } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import DashboardLayout from '../components/Layout'
 import { getPermessiUtente } from '@/lib/permessi'
@@ -14,17 +14,17 @@ import { eTitolareOAdmin } from '@/lib/ruoli'
 import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 import { cookies, headers } from 'next/headers'
 import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
+import { RuoloUtente } from './RuoloUtente'
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
 // SENZA utente -> sidebar assente al primo accesso (il portale cliente aveva gia' lo stesso
 // accorgimento per lo stesso identico motivo).
 export const dynamic = 'force-dynamic'
 export default async function Layout({ children }: { children: React.ReactNode }) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Sessione e profilo una volta sola per pagina: getPermessiUtente qui sotto e i layout annidati
+  // riusano questa stessa verifica invece di rifarla (lib/supabase, profiloDellaRichiesta).
+  const { supabase, user, utente, errore: errUtente } = await profiloDellaRichiesta()
   if (!user) redirect('/')
-  const { data: utente, error: errUtente } = await supabase
-    .from('utenti').select('nome,ruolo,master_id,attivo').eq('id', user.id).maybeSingle()
   // Un guasto MOMENTANEO della query non deve buttare fuori nessuno: si distingue l'errore
   // (rete/database non raggiungibile -> si lascia proseguire con permessi minimi) dal caso in cui
   // la riga davvero non esiste.
@@ -112,7 +112,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
             e autisti, ne' per le prove demo, i cui clienti un negozio non lo possono collegare. */}
         {!demo && ['master', 'admin', 'operatore'].includes(String(utente?.ruolo || '').toLowerCase()) && <BannerNovitaTiktok per="master" />}
         <AvvisoVerifica />
-        {children}
+        <RuoloUtente ruolo={utente?.ruolo || 'master'} haMaster={!!utente?.master_id}>{children}</RuoloUtente>
       </DialogProvider>
     </DashboardLayout>
   )

@@ -43,6 +43,10 @@ export async function pdfProforma(p: {
   ricariche: Accrediti
   contrassegni: Accrediti
   movimenti: MovimentoProforma[]
+  // Spedizioni vendute IVA inclusa: gia' al netto nelle righe; qui quanto e' uscito dal credito e l'IVA dentro.
+  ivaInclusa?: { lordo: number; iva: number }
+  // Venduto esente IVA (21/11/2026): righe a parte nel riepilogo, fuori dall'imponibile, dentro il totale.
+  esente?: number
 }): Promise<Uint8Array> {
   const { default: jsPDF } = await import('jspdf')
   const { default: autoTable } = await import('jspdf-autotable')
@@ -109,6 +113,7 @@ export async function pdfProforma(p: {
     foot: [
       ['Imponibile', '', eur(p.imponibile)],
       [ivaTesto, '', eur(p.iva)],
+      ...(p.esente ? [['Esente IVA', '', eur(p.esente)]] : []),
       ['Totale', '', eur(p.totale)],
     ],
     styles: { fontSize: 9, cellPadding: 2 },
@@ -119,6 +124,14 @@ export async function pdfProforma(p: {
     didParseCell: (c: any) => { if (c.section !== 'body' && c.column.index > 0) c.cell.styles.halign = 'right' },
   })
   y = ((doc as any).lastAutoTable?.finalY || y) + 6
+
+  // Spedizioni vendute IVA inclusa: sono DENTRO il totale, al netto; qui quanto contenevano di IVA.
+  if (p.ivaInclusa?.lordo) {
+    doc.setFontSize(8.5); doc.setTextColor(0); doc.setFont('helvetica', 'normal')
+    const nota = doc.splitTextToSize(`Comprende importi già pagati IVA compresa (spedizioni vendute IVA inclusa, spese con IVA) per € ${eur(p.ivaInclusa.lordo)}: nel riepilogo sono riportati al netto, e l'IVA che contenevano (€ ${eur(p.ivaInclusa.iva)}) è nel totale IVA.`, R - L) as string[]
+    doc.text(nota, L, y)
+    y += nota.length * 4 + 3
+  }
 
   // Fuori dal totale: soldi entrati nel conto del cliente nello stesso periodo.
   const info: string[] = []
@@ -147,7 +160,7 @@ export async function pdfProforma(p: {
     autoTable(doc, {
       startY: 20,
       head: [['Data', 'Voce', 'Descrizione', 'Importo €']],
-      body: p.movimenti.map(m => [dataIt(m.created_at), etichettaVoce(m.voce), m.descrizione, eur(m.importo)]),
+      body: p.movimenti.map(m => [dataIt(m.created_at), etichettaVoce(m.voce) + (m.iva_inclusa ? ' (IVA incl.)' : m.esente ? ' (esente IVA)' : ''), m.descrizione, eur(m.importo)]),
       styles: { fontSize: 7, cellPadding: 1 },
       headStyles: { fillColor: ARANCIO },
       columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 34 }, 3: { halign: 'right', cellWidth: 20 } },

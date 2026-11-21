@@ -146,10 +146,11 @@ export default function FatturaProformaPage() {
                 <thead><tr><th style={th}>Voce</th><th style={{ ...th, textAlign: 'right' }}>Quante</th><th style={{ ...th, textAlign: 'right' }}>Importo</th></tr></thead>
                 <tbody>
                   {a.righe.map((r: any) => (
-                    <tr key={r.voce}><td style={td}>{r.descrizione}</td><td style={{ ...td, textAlign: 'right' }}>{r.quantita}</td><td style={{ ...td, textAlign: 'right' }}>{eur(r.importo)}</td></tr>
+                    <tr key={r.voce + (r.esente ? ':esente' : '')}><td style={td}>{r.descrizione}</td><td style={{ ...td, textAlign: 'right' }}>{r.quantita}</td><td style={{ ...td, textAlign: 'right' }}>{eur(r.importo)}</td></tr>
                   ))}
                   <tr><td style={{ ...td, fontWeight: 700 }}>Imponibile</td><td style={td}></td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{eur(a.imponibile)}</td></tr>
                   <tr><td style={td}>IVA {a.aliquota}%{a.aliquota === 0 && a.natura ? ` (${a.natura})` : ''}</td><td style={td}></td><td style={{ ...td, textAlign: 'right' }}>{eur(a.iva)}</td></tr>
+                  {a.esente ? <tr><td style={td}>Esente IVA</td><td style={td}></td><td style={{ ...td, textAlign: 'right' }}>{eur(a.esente)}</td></tr> : null}
                   <tr><td style={{ ...td, fontWeight: 700 }}>Totale</td><td style={td}></td><td style={{ ...td, textAlign: 'right', fontWeight: 700, color: ARANCIO }}>{eur(a.totale)}</td></tr>
                 </tbody>
               </table>

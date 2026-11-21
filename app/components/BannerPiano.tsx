@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useAppNativa } from '@/lib/app-nativa'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
+import { pollaSeVisibile } from '@/lib/polling-visibile'
 
 // AVVISO SUL PIANO, in cima a ogni pagina del portale.
 //
@@ -42,12 +43,12 @@ export default function BannerPiano({ linkUpgrade = null }: { linkUpgrade?: stri
     let vivo = true
     // CongelatoGate chiede la stessa rotta nello stesso istante: una richiesta sola (lib/richiesta-condivisa).
     const carica = () => leggiCondiviso('/api/piano/stato').then(d => { if (vivo) setS(d) }).catch(() => {})
-    carica()
     // Il piano puo' sbloccarsi mentre uno sta lavorando (upgrade fatto da un'altra scheda, o dal
     // master sopra): senza un ricontrollo periodico resterebbe il banner rosso di prima.
-    // 5 minuti: lo stato cambia di rado, e questo giro lo fa OGNI scheda aperta di OGNI utente.
-    const t = setInterval(carica, 300000)
-    return () => { vivo = false; clearInterval(t) }
+    // 5 minuti: lo stato cambia di rado, e questo giro lo fa OGNI scheda aperta di OGNI utente —
+    // per questo a scheda nascosta si ferma, e al ritorno ricarica subito (lib/polling-visibile).
+    const ferma = pollaSeVisibile(carica, 300000)
+    return () => { vivo = false; ferma() }
   }, [])
 
   if (!s || s.error) return null

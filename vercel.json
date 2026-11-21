@@ -15,6 +15,10 @@
       "schedule": "*/15 21-23 * * *"
     },
     {
+      "path": "/api/distinte/non-chiuse",
+      "schedule": "10,40 6-20 * * *"
+    },
+    {
       "path": "/api/abbonamento/rinnovo-mensile",
       "schedule": "0 6 1 * *"
     },
@@ -95,6 +99,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/cron/registro-home",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/spedizioni/tmp-recupero",
       "schedule": "*/15 * * * *"
     },
@@ -157,6 +165,14 @@
     {
       "path": "/api/cron/stime-rettifiche",
       "schedule": "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
+    },
+    {
+      "path": "/api/cron/ponte-ombra",
+      "schedule": "3,13,23,33,43,53 * * * *"
+    },
+    {
+      "path": "/api/cron/ponte-recupero",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

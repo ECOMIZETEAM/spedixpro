@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import DateRangePicker from './DateRangePicker'
+import { prendiAnticipata } from '@/lib/richieste-anticipate'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -11,6 +12,10 @@ function meseCorrente(): { dal: string; al: string } {
   const str = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   return { dal: str(new Date(oggi.getFullYear(), oggi.getMonth(), 1)), al: str(oggi) }
 }
+
+const urlGuadagno = (dal: string, al: string) => `/api/reports/guadagno?dal=${dal}&al=${al}`
+// L'indirizzo della PRIMA richiesta (mese corrente): la home la anticipa prima di montare il grafico.
+export const urlInizialeGuadagnoChart = () => { const r = meseCorrente(); return urlGuadagno(r.dal, r.al) }
 
 function fmtGiorno(g: string) {
   if (!g) return ''
@@ -30,7 +35,9 @@ export default function GuadagnoChart() {
   useEffect(() => {
     if (!range.dal || !range.al) return
     setLoading(true)
-    fetch(`/api/reports/guadagno?dal=${range.dal}&al=${range.al}`)
+    const url = urlGuadagno(range.dal, range.al)
+    const risposta = prendiAnticipata(url) ?? fetch(url)
+    risposta
       .then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
   }, [range.dal, range.al])
 

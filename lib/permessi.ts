@@ -1,4 +1,5 @@
-import { createServerSupabase } from '@/lib/supabase'
+import { cache } from 'react'
+import { profiloDellaRichiesta } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
 
 // Default permessi per ruolo (usati se il master non ha ancora salvato nulla in master_permessi).
@@ -65,11 +66,13 @@ export type PermessiUtente = {
   permessi: Record<string, boolean>
 }
 
-export async function getPermessiUtente(): Promise<PermessiUtente | null> {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
+// Sessione e profilo arrivano da profiloDellaRichiesta: nella stessa pagina il layout li ha gia'
+// verificati, e qui non si rifanno (lib/supabase). Anche il risultato e' tenuto per la richiesta,
+// perche' i layout annidati di Clienti lo richiedono tramite puoGestireRete: stessa domanda, stessa
+// risposta. Nelle rotte API ogni chiamata rifa' tutto da capo, come prima.
+export const getPermessiUtente = cache(async (): Promise<PermessiUtente | null> => {
+  const { supabase, user, utente: u } = await profiloDellaRichiesta()
   if (!user) return null
-  const { data: u } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   if (!u) return null
   const ruolo = (u.ruolo || '').toLowerCase()
   const nome = ((u.nome || '') + ' ' + (u.cognome || '')).trim()
@@ -94,7 +97,7 @@ export async function getPermessiUtente(): Promise<PermessiUtente | null> {
     }
   }
   return { ruolo, masterId: u.master_id || null, nome, isFull: false, gestioneRete, permessi }
-}
+})
 
 // Helper server-side per proteggere pagine/API della gestione rete.
 //

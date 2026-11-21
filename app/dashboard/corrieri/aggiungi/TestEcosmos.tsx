@@ -17,16 +17,16 @@ export default function TestEcosmos({ corriereId }: { corriereId: string }) {
       const d = await res.json().catch(() => ({}))
       if (!d?.ok) { setStato('ko'); setMsg(d?.error || 'Verifica non riuscita'); return }
       const righe = [
-        `Chiave valida. Account Ecosmos: ${d.account || '(nome non indicato)'}${d.ambiente ? ` · ambiente ${d.ambiente}` : ''}`,
+        `Chiave valida. Account Ecosmos: ${d.account || '(nome non indicato)'}${d.idCliente ? ` (${d.idCliente})` : ''}${d.ambiente ? ` · ambiente ${d.ambiente}` : ''}`,
+        d.chiaveDiProva ? 'Questa è una chiave di PROVA (eco_test_): serve solo a collaudare, le spedizioni vere non partono. Per spedire metti la chiave eco_live_.' : '',
         `Servizio di questo contratto: ${d.servizioContratto}${d.servizioAttivo ? ' — attivo sull\'account' : ' — NON attivo sull\'account: le spedizioni verrebbero rifiutate'}`,
         `Servizi attivi: ${(d.servizi || []).join(', ') || 'nessuno'}`,
         `Orario limite per il ritiro in giornata: ${d.orarioLimite || 'non indicato'}`,
         `Contrassegno: ${d.contrassegno ? 'disponibile (solo contanti)' : 'non disponibile'} · peso massimo ${d.pesoMassimo} kg`,
-        `Fasce di peso: ${(d.fasce || []).join(', ') || 'non indicate'}`,
         `Prova di copertura, CAP ${d.coperturaRoma?.cap}: ${d.coperturaRoma?.servito ? 'servito (' + (d.coperturaRoma.servizi || []).join(', ') + ')' : 'NON servito'}`,
         d.richiedeConferma ? 'Canale in due passi: ogni spedizione viene confermata subito dopo la creazione.' : '',
       ].filter(Boolean)
-      setStato(d.servizioAttivo ? 'ok' : 'ko'); setMsg(righe.join('\n'))
+      setStato(d.servizioAttivo && !d.chiaveDiProva ? 'ok' : 'ko'); setMsg(righe.join('\n'))
     } catch (e) {
       setStato('ko'); setMsg('Chiamata fallita: ' + (e instanceof Error ? e.message : String(e)))
     }

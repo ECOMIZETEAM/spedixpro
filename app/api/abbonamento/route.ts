@@ -16,15 +16,67 @@ export async function GET() {
   if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const admin = createAdminSupabase()
-  const { data: m } = await admin.from('masters')
+  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
+  // LE LETTURE PARTONO INSIEME. Questa rotta la chiama il blocco abbonamento a OGNI apertura del
+  // portale master (~5.500 volte al giorno) e faceva le sue letture una dopo l'altra: master,
+  // pagamenti, circuito di pagamento, albero della rete, contatore. Si aspettano solo fra loro quelle
+  // che ne hanno bisogno: la data di rinnovo parte appena c'e' il master (le serve il suo abbonamento),
+  // l'albero della rete appena si sa se e' il master principale.
+  // Promise.resolve: una lettura di Supabase si esegue OGNI volta che la si aspetta; avvolta cosi'
+  // parte una volta sola anche se due punti la aspettano.
+  const pM = Promise.resolve(admin.from('masters')
     .select('parent_master_id,abbonamento_piano,abbonamento_limite,abbonamento_prezzo,abbonamento_mese,abbonamento_attivato_il,credito,abbonamento_esente,stripe_customer_id,stripe_subscription_id,stripe_stato,abbonamento_piano_programmato,abbonamento_programmato_dal,piani_visibili')
-    .eq('id', utente.master_id).single()
+    .eq('id', utente.master_id).single())
+
+  const pMieiPag = Promise.resolve(admin.from('abbonamenti_pagamenti')
+    .select('id,mese,importo,pagato,pagato_il,metodo,piano,created_at')
+    .eq('master_id', utente.master_id).order('mese', { ascending: false }).limit(24))
+
+  // QUANDO, non solo quanto. La schermata diceva l'importo e taceva la data: chi ha appena visto
+  // spostare il proprio ciclo al 1° non aveva modo di verificarlo, e "fidati" non e' una risposta.
+  //
+  // La data si LEGGE DAL CIRCUITO, non si calcola: e' quella che fara' partire l'addebito davvero.
+  // Ricalcolarla qui vorrebbe dire mostrare cio' che ci aspettiamo invece di cio' che succedera' —
+  // e sarebbe proprio il caso in cui un disallineamento resterebbe invisibile.
+  // Con la pausa attiva il periodo finisce al trial_end: le due date coincidono, si prende la fine
+  // periodo che vale in entrambi i casi. Il punto in cui vive e' cambiato fra le versioni
+  // dell'interfaccia (ora sulla voce, prima sull'abbonamento): si provano tutte e due.
+  // Se il circuito non risponde la schermata resta com'era: una data mancante non deve far fallire
+  // la pagina dell'abbonamento.
+  // Si chiede solo per il master pagante (non principale, non esente, con un piano): gli stessi
+  // casi in cui sotto si compone il prossimo pagamento.
+  const pQuando: Promise<string | null> = pM.then(async ({ data: m }: any) => {
+    if (!m?.parent_master_id || m?.abbonamento_esente || !m?.abbonamento_piano) return null
+    if (!(stripeConfigurato() && m?.stripe_subscription_id && m?.stripe_stato !== 'canceled')) return null
+    try {
+      const sub: any = await stripeClient().subscriptions.retrieve(m.stripe_subscription_id)
+      const fine = sub?.items?.data?.[0]?.current_period_end || sub?.current_period_end
+      return fine ? new Date(Number(fine) * 1000).toISOString() : null
+    } catch (e: any) { console.error('[ABBONAMENTO] data rinnovo non letta:', e?.message); return null }
+  }).catch(() => null)
+
+  // Il piano conta le spedizioni di TUTTA la rete sotto questo master (sé + discendenza):
+  // ogni spedizione di un sotto-master consuma il contratto/piano dei master sopra.
+  // L'albero (che legge la tabella masters intera) serve solo alla panoramica del master principale
+  // e al ripiego del contatore qui sotto: per gli altri master non si legge.
+  const pRete: Promise<string[] | null> = pM.then(({ data: m }: any) =>
+    !m?.parent_master_id ? sottoAlberoMasterIds(admin, utente.master_id) : null).catch(() => null)
+
+  // Il numero si legge dal CONTATORE (una riga per master e mese, tenuta da un trigger), non
+  // contando le spedizioni: contarle era la query piu' costosa del database (~500ms a chiamata)
+  // e a volume non reggerebbe.
+  //
+  // Lo legge fn_usato_rete, la stessa funzione del blocco (fn_limiti_catena): un pacco conta una
+  // volta sola anche quando passa da piu' master della stessa rete (scripts/limite-piano-gambe.sql).
+  // Prima qui si sommava il contatore a mano, e il 19/11/2026 questa pagina diceva a MULTIEXPRESS
+  // 233.000 spedizioni quando i pacchi erano 120.000: ogni gamba di Wave e LOGIXIA contava di nuovo.
+  // Se la funzione non risponde si ripiega sulla somma semplice: un numero alto e' meglio di una
+  // pagina che non si apre, e l'errore resta nei log.
+  const pUsato = Promise.resolve(admin.rpc('fn_usato_rete', { p_master: utente.master_id, p_mese: meseCorrente() }))
+
+  const [{ data: m }, { data: mieiPag }, { data: usatoRete, error: errUsato }] = await Promise.all([pM, pMieiPag, pUsato])
 
   const isRoot = !m?.parent_master_id  // il master principale: illimitato e gratis, mai bloccato
-
-  const { data: mieiPag } = await admin.from('abbonamenti_pagamenti')
-    .select('id,mese,importo,pagato,pagato_il,metodo,piano,created_at')
-    .eq('master_id', utente.master_id).order('mese', { ascending: false }).limit(24)
 
   // PROSSIMO PAGAMENTO (solo master pagante): il rinnovo del piano corrente + il CONGUAGLIO degli
   // upgrade fatti QUESTO mese (la differenza di piano proporzionata ai giorni, che oggi non paga).
@@ -42,47 +94,14 @@ export async function GET() {
     prossimoPagamento = {
       totale: Math.round((rinnovo + conguaglio) * 100) / 100,
       rinnovo, conguaglio, dettaglio, pianoRinnovo: pianoRinnovo?.nome || null,
-      quando: null as string | null,
-    }
-
-    // QUANDO, non solo quanto. La schermata diceva l'importo e taceva la data: chi ha appena visto
-    // spostare il proprio ciclo al 1° non aveva modo di verificarlo, e "fidati" non e' una risposta.
-    //
-    // La data si LEGGE DAL CIRCUITO, non si calcola: e' quella che fara' partire l'addebito davvero.
-    // Ricalcolarla qui vorrebbe dire mostrare cio' che ci aspettiamo invece di cio' che succedera' —
-    // e sarebbe proprio il caso in cui un disallineamento resterebbe invisibile.
-    // Con la pausa attiva il periodo finisce al trial_end: le due date coincidono, si prende la fine
-    // periodo che vale in entrambi i casi. Il punto in cui vive e' cambiato fra le versioni
-    // dell'interfaccia (ora sulla voce, prima sull'abbonamento): si provano tutte e due.
-    // Se il circuito non risponde la schermata resta com'era: una data mancante non deve far fallire
-    // la pagina dell'abbonamento.
-    if (stripeConfigurato() && (m as any)?.stripe_subscription_id && (m as any)?.stripe_stato !== 'canceled') {
-      try {
-        const sub: any = await stripeClient().subscriptions.retrieve((m as any).stripe_subscription_id)
-        const fine = sub?.items?.data?.[0]?.current_period_end || sub?.current_period_end
-        if (fine) prossimoPagamento.quando = new Date(Number(fine) * 1000).toISOString()
-      } catch (e: any) { console.error('[ABBONAMENTO] data rinnovo non letta:', e?.message) }
+      quando: await pQuando,
     }
   }
 
-  // Il piano conta le spedizioni di TUTTA la rete sotto questo master (sé + discendenza):
-  // ogni spedizione di un sotto-master consuma il contratto/piano dei master sopra.
-  const { sottoAlberoMasterIds } = await import('@/lib/rete-masters')
-  const reteIds = await sottoAlberoMasterIds(admin, utente.master_id)
-  // Il numero si legge dal CONTATORE (una riga per master e mese, tenuta da un trigger), non
-  // contando le spedizioni: contarle era la query piu' costosa del database (~500ms a chiamata)
-  // e a volume non reggerebbe.
-  //
-  // Lo legge fn_usato_rete, la stessa funzione del blocco (fn_limiti_catena): un pacco conta una
-  // volta sola anche quando passa da piu' master della stessa rete (scripts/limite-piano-gambe.sql).
-  // Prima qui si sommava il contatore a mano, e il 19/11/2026 questa pagina diceva a MULTIEXPRESS
-  // 233.000 spedizioni quando i pacchi erano 120.000: ogni gamba di Wave e LOGIXIA contava di nuovo.
-  // Se la funzione non risponde si ripiega sulla somma semplice: un numero alto e' meglio di una
-  // pagina che non si apre, e l'errore resta nei log.
   let count = 0
-  const { data: usatoRete, error: errUsato } = await admin.rpc('fn_usato_rete', { p_master: utente.master_id, p_mese: meseCorrente() })
   if (errUsato) {
     console.error('[ABBONAMENTO] fn_usato_rete non letta, ripiego sulla somma del contatore:', errUsato.message)
+    const reteIds = (await pRete) ?? await sottoAlberoMasterIds(admin, utente.master_id)
     const { data: righeConta } = await admin.from('contatori_spedizioni')
       .select('n').in('master_id', reteIds).eq('mese', meseCorrente())
     count = (righeConta || []).reduce((t: number, r: any) => t + Number(r.n || 0), 0)
@@ -99,27 +118,33 @@ export async function GET() {
   let incassatoMese = 0, incassatoAnno = 0, previstoProssimoMese = 0, abbonatiAttivi = 0
   let incassoRealeStimato = 0, conguagliRete = 0
   if (isRoot) {
-    // Pagamenti della rete (per stato incasso). I record ORFANI (master cancellato) vengono scartati sotto.
-    const { data: pagTutti } = await admin.from('abbonamenti_pagamenti')
-      .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo,created_at')
-      .eq('root_id', utente.master_id).order('mese', { ascending: true }).limit(1000)
+    // Per il master principale l'albero e' gia' partito insieme alle prime letture (pRete).
+    const reteIds = (await pRete) ?? await sottoAlberoMasterIds(admin, utente.master_id)
+    // Le quattro letture della panoramica dipendono solo dall'albero: partono insieme.
+    const [{ data: pagTutti }, { data: mastersRete }, { data: sessioni }, { data: contTot }] = await Promise.all([
+      // Pagamenti della rete (per stato incasso). I record ORFANI (master cancellato) vengono scartati sotto.
+      admin.from('abbonamenti_pagamenti')
+        .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo,created_at')
+        .eq('root_id', utente.master_id).order('mese', { ascending: true }).limit(1000),
+      // Master della rete, escluso il root. Solo questi esistono → niente orfani.
+      admin.from('masters')
+        .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
+        .in('id', reteIds).neq('id', utente.master_id),
+      // ARRICCHIMENTO per la panoramica: ultima SESSIONE (login) e spedizioni TOTALI di OGNI master della
+      // rete — così il root vede chi usa e paga, chi ha la posizione aperta ma è fermo, chi non ha mai
+      // scelto un piano. La sessione arriva da auth.users via fn_ultima_sessione (SECURITY DEFINER).
+      admin.rpc('fn_ultima_sessione', { p_masters: reteIds }),
+      admin.from('contatori_spedizioni').select('master_id,n').in('master_id', reteIds),
+    ])
     // Le righe a 0€ sono le fatture-FANTASMA del cambio piano (Stripe emette un'invoice a zero quando
     // si fa l'upgrade): non sono incassi, non vanno né in lista né nei conteggi. Restano nel DB perché
     // il calcolo del conguaglio legge da lì la scaletta dei piani — qui si escludono e basta.
     const pag = (pagTutti || []).filter((p: any) => Number(p.importo || 0) !== 0)
-    // Master ATTIVI della rete (con piano OPPURE esenti), escluso il root. Solo questi esistono → niente orfani.
-    const { data: mastersRete } = await admin.from('masters')
-      .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
-      .in('id', reteIds).neq('id', utente.master_id)
+    // Master ATTIVI della rete: con piano OPPURE esenti.
     const attiviRete = (mastersRete || []).filter((x: any) => x.abbonamento_piano || x.abbonamento_esente)
     const attiviIds = new Set(attiviRete.map((x: any) => x.id))
 
-    // ARRICCHIMENTO per la panoramica: ultima SESSIONE (login) e spedizioni TOTALI di OGNI master della
-    // rete — così il root vede chi usa e paga, chi ha la posizione aperta ma è fermo, chi non ha mai
-    // scelto un piano. La sessione arriva da auth.users via fn_ultima_sessione (SECURITY DEFINER).
-    const { data: sessioni } = await admin.rpc('fn_ultima_sessione', { p_masters: reteIds })
     const ultimaSessione = new Map<string, string>((sessioni || []).map((r: any) => [r.master_id, r.ultima_sessione]))
-    const { data: contTot } = await admin.from('contatori_spedizioni').select('master_id,n').in('master_id', reteIds)
     const spedTot = new Map<string, number>()
     for (const c of (contTot || [])) spedTot.set(c.master_id, (spedTot.get(c.master_id) || 0) + Number((c as any).n || 0))
 

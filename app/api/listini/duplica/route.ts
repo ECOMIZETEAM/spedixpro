@@ -64,5 +64,14 @@ export async function POST(req: NextRequest) {
     if (error) return rollback('Copia supplementi non riuscita: ' + error.message)
   }
 
-  return NextResponse.json({ id: nid, nome: nuovoNome, fasce: fasce.length, corrieri: corrieri.length })
+  // Come e' venduto (IVA inclusa o esclusa, per listino e per contratto): la copia lo eredita, se no
+  // nascerebbe IVA esclusa in silenzio. Se non riesce la copia resta: si avvisa nella risposta, i prezzi
+  // sono gia' tutti al loro posto e la scelta si rifa' dal riquadro del listino.
+  let avvisoIva: string | null = null
+  const { error: eIva } = await admin.rpc('listini_iva_copia', { p_master: utente.master_id, p_da_listino: listinoId, p_a_listino: nid, p_utente: user.id })
+  if (eIva && String(eIva.code || '') !== 'PGRST202') {
+    console.error('[LISTINI IVA] copia non riuscita', listinoId, nid, eIva.message)
+    avvisoIva = 'Prezzi copiati, ma non la scelta IVA inclusa/esclusa: rifalla dal riquadro del listino nuovo.'
+  }
+  return NextResponse.json({ id: nid, nome: nuovoNome, fasce: fasce.length, corrieri: corrieri.length, ...(avvisoIva ? { avviso: avvisoIva } : {}) })
 }

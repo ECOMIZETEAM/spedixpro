@@ -14,6 +14,7 @@ import Tendina from './Tendina'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { type Tariffa, chiaveTariffa, codiceProv, iconaCorriere, tesseraCorriere, perchePeso, opzioniIncasso, motivoSpento, euro, kg } from './corrieri'
 import './nuova-spedizione.css'
+import { testoIva } from '@/lib/iva-calcolo'
 
 // NUOVA SPEDIZIONE SU UNA PAGINA SOLA (20/11/2026). I soci hanno bocciato la versione a passi: la vogliono come il
 // checkout di Shopify, tutto in una pagina. A sinistra le sezioni una sotto l'altra, a destra il riepilogo che resta
@@ -787,7 +788,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                           {!motivo && t.limiti_collo && <small className="ns-attenz ns-info">Limiti collo: {t.limiti_collo}</small>}
                           {!motivo && t.avviso_fuori_sagoma && <small className="ns-attenz">{t.avviso_fuori_sagoma}</small>}
                         </span>
-                        <span className="ns-prezzo">{motivo ? 'Non disponibile' : euro(num(t.total_price))}</span>
+                        <span className="ns-prezzo">{motivo ? 'Non disponibile' : euro(num(t.total_price))}{!motivo && testoIva(t._iva, t._aliquota) && <small className="ns-prezzo__iva">{testoIva(t._iva, t._aliquota)}</small>}</span>
                       </label>
                       {su && (t._deposito || t._consegna_punto || t._inpost_locker || accDisponibili.length > 0) && (
                         <div className="ns-corriere__dentro">
@@ -838,7 +839,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
             )}
             {prezzoCambiato && <p className="ns-cambiato" role="status">Il prezzo è cambiato: da {euro(prezzoCambiato.da)} a {euro(prezzoCambiato.a)}.</p>}
             <button type="button" className="ns-crea__tasto" onClick={crea} disabled={inCalcolo}>
-              {inCalcolo ? 'Aggiorno i prezzi…' : selected ? `Crea spedizione · ${euro(totale)}` : 'Crea spedizione'}
+              {inCalcolo ? 'Aggiorno i prezzi…' : selected ? `Crea spedizione · ${euro(totale)}${testoIva(selMostrata?._iva, selMostrata?._aliquota) ? ' ' + testoIva(selMostrata?._iva, selMostrata?._aliquota) : ''}` : 'Crea spedizione'}
             </button>
             <p className="ns-nota ns-nota--centro">{notaCrea} Prezzi IVA esclusa.</p>
           </div>
@@ -880,7 +881,9 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
                   {extraScelti.map(e => <div key={e.nome}><dt>{e.nome}</dt><dd>{euro(e.importo)}</dd></div>)}
                 </dl>
                 <div className="ns-totale"><span>Totale</span><b><small>EUR</small>{euro(totale)}</b></div>
-                <p className="ns-iva">IVA esclusa</p>
+                {/* come la scritta della Nuova spedizione di oggi (ScrittaIva): diceva sempre «IVA esclusa», anche sui listini
+                    venduti IVA inclusa o esenti (unione col codice online, 21/11). Finché il master non sceglie resta com'era */}
+                <p className="ns-iva">{selMostrata?._iva === 'inclusa' ? 'IVA inclusa' : selMostrata?._iva === 'esente' ? 'Esente IVA' : 'IVA esclusa'}</p>
               </div>
             ) : (
               <p className="ns-vuoto">Il prezzo compare qui appena c&apos;è un corriere.</p>

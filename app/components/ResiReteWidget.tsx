@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { BadgeResi, LegendaResi } from '@/app/components/ResiPercentuale'
 import { COLORI_RESI } from '@/lib/resi-percentuale'
+import { prendiAnticipata } from '@/lib/richieste-anticipate'
 
 // IL BLOCCO "RESI DELLA RETE" DELLA DASHBOARD DEL MASTER (richiesta di Lorenzo, 17/10/2026): i clienti
 // della rete con troppi resi, per accorgersi per tempo di chi truffa o sta per fallire. Ultimi 90 giorni;
@@ -10,6 +11,9 @@ import { COLORI_RESI } from '@/lib/resi-percentuale'
 // sulla rete piu' grande costa circa un secondo al database.
 
 const CHIAVE = 'resi_rete_v1'
+// Esportati perche' la home li anticipa insieme a /api/dashboard (vedi lib/richieste-anticipate).
+export const URL_RESI_RETE = '/api/resi/analisi?giorni=90&riepilogo=1'
+export const INIT_RESI_RETE: RequestInit = { cache: 'no-store' }
 
 export default function ResiReteWidget() {
   const [d, setD] = useState<any>(null)
@@ -17,7 +21,8 @@ export default function ResiReteWidget() {
   useEffect(() => {
     let vivo = true
     try { const c = sessionStorage.getItem(CHIAVE); if (c) setD(JSON.parse(c)) } catch { /* si carica e basta */ }
-    fetch('/api/resi/analisi?giorni=90&riepilogo=1', { cache: 'no-store' }).then(r => r.json()).then(x => {
+    const risposta = prendiAnticipata(URL_RESI_RETE) ?? fetch(URL_RESI_RETE, INIT_RESI_RETE)
+    risposta.then(r => r.json()).then(x => {
       if (!vivo) return
       if (x && !x.error) { setD(x); try { sessionStorage.setItem(CHIAVE, JSON.stringify(x)) } catch { /* idem */ } }
       else setErrore(true)

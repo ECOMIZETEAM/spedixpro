@@ -4,10 +4,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { chiaveDestinatario, destinatarioDaImportato, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
+import { aGruppi, CREAZIONI_INSIEME } from '@/lib/a-gruppi'
 import { confrontaPerData } from '@/lib/data-ordine-import'
 import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, testoDelRifiuto, type RigaPrezzo, type TariffaAnteprima } from '@/app/cliente/anteprima-prezzi'
 import { colliDellOrdine, descriviColli } from '@/lib/colli-ordine'
 import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
+import IvaPrezzo from '@/app/components/IvaPrezzo'
+import type { RegimeIva } from '@/lib/iva-calcolo'
 
 // Per quanti ordini A SCHERMO il prezzo si calcola da solo. Quelli SELEZIONATI si calcolano sempre
 // (fino al tetto sotto). Un import tipico sta sotto questi numeri e si vede tutto subito; ma c'e'
@@ -639,9 +642,13 @@ export default function ImportaOrdiniPage() {
     let nonTentati = 0
     const spedite: SpeditaNelLotto[] = []
 
-    for (let i = 0; i < preparati.length; i++) {
-      if (senzaRetePiuVolte >= 2) { nonTentati = preparati.length - i; break }
-      const { o, packages, shipTo, scelta, corriereId } = preparati[i]
+    // QUATTRO ALLA VOLTA, non una (lib/a-gruppi: perche' il credito non corre rischi). Le spedite si rimettono
+    // nell'ordine del lotto: le etichette si stampano nell'ordine in cui il cliente ha preparato i pacchi.
+    // «Rete giu'» resta: dopo due ordini senza risposta, quelli non ancora partiti non si tentano.
+    const speditePer: (SpeditaNelLotto | null)[] = preparati.map(() => null)
+    await aGruppi(preparati, CREAZIONI_INSIEME, async (p: any, i: number) => {
+      if (senzaRetePiuVolte >= 2) { nonTentati++; return }
+      const { o, packages, shipTo, scelta, corriereId } = p
       const inviataAlle = Date.now()
       // LA CREAZIONE HA TRE ESITI, non due: creata; rifiutata (il server dice perche', e non ha creato
       // niente); oppure SENZA RISPOSTA — il browser smette di aspettare (connessione caduta, risposta
@@ -673,11 +680,11 @@ export default function ImportaOrdiniPage() {
         // esistente): lo segniamo 'spedito' collegandola, cosi' esce dalla lista e non si ritenta —
         // self-heal del disaccoppiamento crea↔segna-spedito che causava i doppioni. NON e' un errore.
         if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.gia_spedito, spedizione_id: cData.gia_spedito_id })) nonCollegate++
-        spedite.push({ ordineId: o.id, spedizioneId: cData.gia_spedito_id || null })
+        speditePer[i] = ({ ordineId: o.id, spedizioneId: cData.gia_spedito_id || null })
         ok++; senzaRetePiuVolte = 0
       } else if (cRes?.ok && cData && !cData.error) {
         if (!await segnaOrdine(o.id, { stato: 'spedito', numero: cData.numero, spedizione_id: cData.spedizioneId })) nonCollegate++
-        spedite.push({ ordineId: o.id, spedizioneId: cData.spedizioneId || null })
+        speditePer[i] = ({ ordineId: o.id, spedizioneId: cData.spedizioneId || null })
         ok++; senzaRetePiuVolte = 0
       } else if (cData?.error) {
         // Rifiutata, col motivo del server (credito, telefono, corriere…): non e' nata.
@@ -686,11 +693,12 @@ export default function ImportaOrdiniPage() {
       } else {
         setProgress({ done: ko + ok, total: totale, fase: 'verifica' })
         const esito = await verificaCreazione(o.id, inviataAlle)
-        if (esito === 'collegata') { spedite.push({ ordineId: o.id, spedizioneId: null }); ok++; senzaRetePiuVolte = 0 }
+        if (esito === 'collegata') { speditePer[i] = ({ ordineId: o.id, spedizioneId: null }); ok++; senzaRetePiuVolte = 0 }
         else { ko++; senzaRetePiuVolte = esito === 'irraggiungibile' ? senzaRetePiuVolte + 1 : 0 }
       }
       setProgress({ done: ko + ok, total: totale, fase: 'crea' })
-    }
+    })
+    for (const x of speditePer) if (x) spedite.push(x)
 
     lottoRef.current = null
     setSpedendo(false)
@@ -886,18 +894,21 @@ export default function ImportaOrdiniPage() {
   // TOTALE dei selezionati, col contratto scelto nella tendina. E' una somma di cio' che e' a
   // schermo: al clic i prezzi vengono ricalcolati e, se sono cambiati, lo si chiede prima di spedire.
   let totaleSel = 0, selInCalcolo = 0, selSenzaPrezzo = 0
+  // Come sono scritti i prezzi del totale (+ IVA / IVA incl.): l'etichetta solo se sono tutti uguali.
+  const ivaSel: (RegimeIva | null | undefined)[] = []
+  let aliquotaSel: number | undefined
   for (const o of selezionatiSpedibili) {
     if (!nelTotale.has(o.id)) continue
     const e = anteprima.leggi(rigaPrezzoDi(o))
     if (!e || e.stato === 'calcolo') { selInCalcolo++; continue }
     const t = e.stato === 'ok' ? scegliTariffa(e.tariffe, filtro) : null
-    if (t) totaleSel += t.prezzo; else selSenzaPrezzo++
+    if (t) { totaleSel += t.prezzo; ivaSel.push(t.iva); aliquotaSel = t.aliquota } else selSenzaPrezzo++
   }
   totaleSel = Math.round(totaleSel * 100) / 100
   const selFuoriTotale = selezionatiSpedibili.length - nelTotale.size
   const riepilogoPrezzi = (anteprimaPronta && selezionatiSpedibili.length > 0) ? (
     <span>
-      {' · '}Totale previsto <b style={{ color: '#1a1a1a' }}>{euro(totaleSel)}</b>
+      {' · '}Totale previsto <b style={{ color: '#1a1a1a' }}>{euro(totaleSel)}<IvaPrezzo gruppo={ivaSel} aliquota={aliquotaSel} /></b>
       {selInCalcolo > 0 ? <span style={{ color: '#999' }}> (calcolo in corso…)</span> : null}
       {selSenzaPrezzo > 0 ? <span style={{ color: '#b45309' }}> · {selSenzaPrezzo} senza prezzo</span> : null}
       {selFuoriTotale > 0 ? <span style={{ color: '#999' }}> · sui primi {PREZZI_SELEZIONATI}: {selFuoriTotale} ordini non inclusi</span> : null}
@@ -951,7 +962,7 @@ export default function ImportaOrdiniPage() {
     return (
       <span title={`Calcolato su ${descriviColli(rp.colli)}.\nÈ l'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.`
         + (e.tariffe.length > 1 ? '\n\nTutti i contratti per questo ordine:\n' + elenco : '')}>
-        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{euro(t.prezzo)}</span>
+        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{euro(t.prezzo)}<IvaPrezzo regime={t.iva} aliquota={t.aliquota} /></span>
         <div style={sub}>{t.nome}</div>
         {pesoNonIndicato(o) ? <div style={{ ...sub, color: '#b45309' }}>su 1 kg: peso non indicato</div> : null}
       </span>

@@ -2,7 +2,8 @@
 //
 // Nel portale ci sono coppie di componenti montati insieme che leggono la stessa rotta, ciascuno per
 // conto suo: la campanella e il riquadro avvisi della home cliente (/api/notifiche/mie), il blocco del
-// canone e il banner del piano su ogni pagina del master (/api/piano/stato). A ogni apertura di pagina
+// canone e il banner del piano su ogni pagina del master (/api/piano/stato), il menu del cliente e la
+// pagina degli ordini di un negozio (/api/integrazioni/lista). A ogni apertura di pagina
 // partivano due richieste identiche, ognuna con la sua autenticazione e le sue letture sul database
 // (misurato il 13/10/2026: circa 10.000 doppioni al giorno solo sullo stato del piano).
 //
@@ -11,7 +12,7 @@
 // Gli errori arrivano a tutti e due gli interessati, ognuno nel suo catch, come prima.
 //
 // Il dato arriva a piu' componenti come lo STESSO oggetto: chi lo usa non deve modificarlo sul posto
-// (niente sort/push/splice sul risultato). Verificato sui quattro chiamanti di oggi.
+// (niente sort/push/splice sul risultato). Verificato sui sei chiamanti di oggi (20/10/2026).
 const inVolo = new Map<string, Promise<any>>()
 
 export function leggiCondiviso(url: string): Promise<any> {

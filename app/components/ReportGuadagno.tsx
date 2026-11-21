@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import DateRangePicker from './DateRangePicker'
+import { prendiAnticipata } from '@/lib/richieste-anticipate'
 
 // Stesso calendario del Guadagno Spedizioni: prima c'era solo Giorno/Settimana/Mese/Anno "fino a
 // oggi", e un mese chiuso (agosto) non si poteva guardare — quindi Guadagno e Rettifiche non si
@@ -11,6 +12,11 @@ function meseCorrente(): { dal: string; al: string } {
   return { dal: str(new Date(oggi.getFullYear(), oggi.getMonth(), 1)), al: str(oggi) }
 }
 
+const urlReport = (endpoint: string, dal: string, al: string) => `${endpoint}?dal=${dal}&al=${al}`
+// L'indirizzo della PRIMA richiesta (mese corrente), calcolato come la fa il riquadro: la home la
+// anticipa prima di montarlo, e la risposta si riusa solo se l'indirizzo e' identico.
+export const urlInizialeReport = (endpoint: string) => { const r = meseCorrente(); return urlReport(endpoint, r.dal, r.al) }
+
 export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api/reports/guadagno', icona = '💰' }: { titolo?: string, endpoint?: string, icona?: string }) {
   const [range, setRange] = useState(meseCorrente)
   const [d, setD] = useState<any>(null)
@@ -19,7 +25,9 @@ export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api
   useEffect(() => {
     if (!range.dal || !range.al) return
     setLoading(true)
-    fetch(`${endpoint}?dal=${range.dal}&al=${range.al}`)
+    const url = urlReport(endpoint, range.dal, range.al)
+    const risposta = prendiAnticipata(url) ?? fetch(url)
+    risposta
       .then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
   }, [range.dal, range.al, endpoint])
 

@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { infoIvaPrezzi, aliquotaCliente } from '@/lib/iva-vendita'
+import { ivaDelCorriere, siNoVecchio } from '@/lib/iva-calcolo'
 import { createServerSupabase } from '@/lib/supabase'
 
 // Listino PREZZI del cliente (quello che paga lui), in SOLA LETTURA.
@@ -9,7 +11,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: u } = await supabase.from('utenti').select('cliente_id,master_id').eq('id', user.id).single()
   if (!u?.cliente_id) return NextResponse.json({ error: 'Solo clienti' }, { status: 403 })
-  const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id').eq('id', u.cliente_id).single()
+  const { data: cliente } = await supabase.from('clienti').select('listino_cliente_id,aliquota_iva').eq('id', u.cliente_id).single()
   const listinoId = cliente?.listino_cliente_id
   if (!listinoId) return NextResponse.json({ assegnato: false, corrieri: [] })
 
@@ -112,6 +114,9 @@ export async function GET() {
     return va - vb
   }
 
+  // IVA inclusa o esclusa (Lorenzo, 20/11/2026): come il master gli vende oggi ogni contratto.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const iva = await infoIvaPrezzi(createAdminSupabase(), listinoId, aliquotaCliente((cliente as any)?.aliquota_iva))
   const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
   const corrieri = Array.from(perCorr.entries())
     .sort((a, b) => a[1].nome_contratto.localeCompare(b[1].nome_contratto))
@@ -120,6 +125,9 @@ export async function GET() {
       const perTipo = (t: string) => sup.filter((r: any) => r.tipo === t)
       return {
         nome_contratto: c.nome_contratto,
+        // Come sono scritti i prezzi di questo contratto: inclusa / esclusa / esente (null = non scelto o non letto).
+        iva: ivaDelCorriere(iva, cid),
+        iva_inclusa: siNoVecchio(ivaDelCorriere(iva, cid)),
         fattore: c.fattore,
         zone: Array.from(c.zoneSet).sort(ordZona as any),
         zoneMittente: Array.from(c.zoneMittenteSet),
@@ -141,6 +149,7 @@ export async function GET() {
     assegnato: true,
     nome: (listino as any)?.nome || 'Listino',
     solo_peso_reale: !!(listino as any)?.solo_peso_reale,
+    aliquota_iva: iva ? iva.aliquota : null,
     corrieri,
   })
 }

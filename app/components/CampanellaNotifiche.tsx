@@ -3,6 +3,7 @@ import { Icona } from './grafica/icone'
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
+import { pollaSeVisibile } from '@/lib/polling-visibile'
 
 // La campanella legge /api/notifiche/mie e le divide in TAB per categoria, così i "Spedizione
 // consegnata" (ad alto volume) non affogano gli AVVISI importanti del master. Il pallino conta solo
@@ -48,11 +49,9 @@ export default function CampanellaNotifiche({ aspetto }: { aspetto?: 'nuova' } =
       .then(d => setLista(Array.isArray(d) ? d : []))
       .catch(() => {})
   }
-  useEffect(() => {
-    carica()
-    const t = setInterval(() => { if (document.visibilityState === 'visible') carica() }, 60000)
-    return () => clearInterval(t)
-  }, [])
+  // Gia' ferma a scheda nascosta; in piu' (lib/polling-visibile) al ritorno, se e' saltato un giro,
+  // ricarica subito invece di aspettare il prossimo.
+  useEffect(() => pollaSeVisibile(carica, 60000), [])
 
   useEffect(() => {
     if (!aperto) return

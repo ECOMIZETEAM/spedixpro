@@ -9,6 +9,8 @@
 //
 // Gli importi dei movimenti sono IVA esclusa e l'addebito e' negativo: la spesa e' -importo.
 
+import { regimeDi, type RegimeIva } from '@/lib/iva-calcolo'
+
 export type Voce = { chiave: string; descrizione: string; uno: string; tanti: string }
 
 // L'ordine e' quello delle righe nel riepilogo.
@@ -47,7 +49,8 @@ export function voceSpesa(tipo: string, conSpedizione: boolean): string | null {
   return NOTE.has(tipo) && tipo !== 'a_mano' && tipo !== 'altro' ? tipo : 'altro'
 }
 
-export type RigaVoce = { voce: string; descrizione: string; quantita: number; importo: number }
+// `esente`: la riga raccoglie i movimenti venduti ESENTI IVA (21/11/2026): fuori dall'imponibile, senza IVA.
+export type RigaVoce = { voce: string; descrizione: string; quantita: number; importo: number; esente?: true }
 
 const cent = (x: number) => Math.round((Number(x) || 0) * 100) / 100
 
@@ -55,31 +58,86 @@ const cent = (x: number) => Math.round((Number(x) || 0) * 100) / 100
 // (addebito negativo). Una voce che somma a zero non diventa riga.
 // Le voci scritte a mano entrano nelle righe solo con `conAMano` (la proforma ci passa soltanto quelle
 // spuntate dal master); altrimenti restano fuori e si contano a parte in `aMano` (spesa: + = addebito).
+//
+// IVA INCLUSA (Lorenzo, 20/11/2026): i movimenti di una spedizione che il master ha venduto IVA
+// inclusa (`iva_inclusa`, deciso dal database) contengono gia' l'IVA. Nella voce entrano AL NETTO,
+// scorporati con l'aliquota del cliente, e la loro IVA torna nel totale IVA che il chiamante calcola
+// sull'imponibile. Senza movimenti IVA inclusa le righe sono quelle di sempre, al centesimo.
+// `inclusa` dice quanto di quei movimenti e' uscito dal credito (lordo) e quanta IVA c'era dentro.
+//
+// SPESE CON L'IVA GIA' DENTRO (Lorenzo, 20/11/2026): in "Aggiungi spesa" il master sceglie l'IVA e il credito
+// scala prezzo + IVA. Quei movimenti portano `aliquota_compresa` (tabella movimenti_iva_compresa): entrano
+// nella voce AL NETTO con la LORO aliquota, e la loro IVA torna nel totale IVA del documento. Prima l'IVA si
+// contava due volte (QUICK → MOI CHERI, 30/10: 240,01 scalati, 292,81 in proforma).
+// `inclusa` somma entrambi i casi: quanto e' uscito dal credito con l'IVA dentro, e quanta IVA conteneva.
+//
+// ESENTE IVA (Lorenzo, 21/11/2026): i movimenti di una spedizione venduta esente (`regime` 'esente', deciso
+// dal database) non hanno IVA, nemmeno se il cliente ha il 22%. Fanno righe loro, «… — esente IVA», dopo le
+// altre, e stanno FUORI dall'imponibile: in `esente`. Il chiamante calcola l'IVA sull'imponibile e il totale
+// e' imponibile + IVA + esente. Senza movimenti esenti righe e imponibile sono quelli di prima, al centesimo.
 export function righeSpesa(
-  elenco: { tipo: string; con_spedizione: boolean; n: number; importo: number }[],
+  elenco: { tipo: string; con_spedizione: boolean; n: number; importo: number; regime?: RegimeIva; iva_inclusa?: boolean; aliquota_compresa?: number | null }[],
   conAMano = false,
-): { righe: RigaVoce[]; imponibile: number; aMano: { n: number; importo: number } } {
-  const perVoce = new Map<string, { n: number; importo: number }>()
+  aliquota = 22,
+): { righe: RigaVoce[]; imponibile: number; esente: number; aMano: { n: number; importo: number }; inclusa: { lordo: number; iva: number } } {
+  const perVoce = new Map<string, { n: number; importo: number; inclusa: number; compresa: Map<number, number> }>()
+  const perVoceEsente = new Map<string, { n: number; importo: number }>()
   const aMano = { n: 0, importo: 0 }
+  let lordoInclusa = 0
+  const compresaTot = new Map<number, number>()
   for (const r of elenco) {
     const k = voceSpesa(r.tipo, r.con_spedizione)
     if (!k) continue
     if (k === 'a_mano' && !conAMano) { aMano.n += Number(r.n) || 0; aMano.importo -= Number(r.importo) || 0; continue }
-    const v = perVoce.get(k) || { n: 0, importo: 0 }
+    const regime = regimeDi(r.regime ?? r.iva_inclusa)
+    if (regime === 'esente' && !(Number(r.aliquota_compresa) > 0)) {
+      const e = perVoceEsente.get(k) || { n: 0, importo: 0 }
+      e.n += Number(r.n) || 0
+      e.importo += Number(r.importo) || 0
+      perVoceEsente.set(k, e)
+      continue
+    }
+    const v = perVoce.get(k) || { n: 0, importo: 0, inclusa: 0, compresa: new Map<number, number>() }
     v.n += Number(r.n) || 0
-    v.importo += Number(r.importo) || 0
+    const ac = Number(r.aliquota_compresa) || 0
+    if (ac > 0) {
+      v.compresa.set(ac, (v.compresa.get(ac) || 0) + (Number(r.importo) || 0))
+      compresaTot.set(ac, (compresaTot.get(ac) || 0) + (Number(r.importo) || 0))
+    } else if (regime === 'inclusa') { v.inclusa += Number(r.importo) || 0; lordoInclusa += Number(r.importo) || 0 }
+    else v.importo += Number(r.importo) || 0
     perVoce.set(k, v)
   }
+  const scorporo = 1 + (Number(aliquota) || 0) / 100
+  const nettoCompresa = (m: Map<number, number>) => { let t = 0; for (const [a, x] of m) t += x / (1 + a / 100); return t }
   const righe: RigaVoce[] = []
   for (const voce of VOCI_SPESA) {
     const v = perVoce.get(voce.chiave)
     if (!v) continue
-    const importo = cent(-v.importo)
+    const importo = cent(-(v.importo + v.inclusa / scorporo + nettoCompresa(v.compresa)))
     if (importo === 0) continue
     righe.push({ voce: voce.chiave, descrizione: voce.descrizione, quantita: v.n, importo })
   }
+  // L'imponibile e' la somma delle righe soggette, prima di aggiungere quelle esenti.
+  const imponibile = cent(righe.reduce((t, r) => t + r.importo, 0))
+  for (const voce of VOCI_SPESA) {
+    const e = perVoceEsente.get(voce.chiave)
+    if (!e) continue
+    const importo = cent(-e.importo)
+    if (importo === 0) continue
+    righe.push({ voce: voce.chiave, descrizione: `${voce.descrizione} — esente IVA`, quantita: e.n, importo, esente: true })
+  }
+  let lordoCompresa = 0
+  for (const x of compresaTot.values()) lordoCompresa += x
+  // L'IVA dei listini venduti IVA inclusa si calcola come nella versione gia' rilasciata (sul lordo arrotondato);
+  // quella delle spese si aggiunge. Senza spese segnate il numero e' identico a prima.
+  const lordoListini = cent(-lordoInclusa)
+  const ivaListini = lordoListini - lordoListini / scorporo
+  const ivaSpese = -lordoCompresa + nettoCompresa(compresaTot)
   // Il totale e' la somma delle righe GIA' arrotondate: e' la cifra che si legge sommando il riepilogo.
-  return { righe, imponibile: cent(righe.reduce((t, r) => t + r.importo, 0)), aMano: { n: aMano.n, importo: cent(aMano.importo) } }
+  return {
+    righe, imponibile, esente: cent(righe.reduce((t, r) => t + (r.esente ? r.importo : 0), 0)), aMano: { n: aMano.n, importo: cent(aMano.importo) },
+    inclusa: { lordo: cent(-(lordoInclusa + lordoCompresa)), iva: cent(ivaListini + ivaSpese) },
+  }
 }
 
 export function unitaVoce(chiave: string, n: number): string {

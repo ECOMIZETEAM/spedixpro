@@ -83,15 +83,44 @@ export async function GET(req: NextRequest) {
       targetMasterNome = tm?.nome || null
     }
   }
+  const clienteNome = (Array.isArray(spedizione.clienti) ? spedizione.clienti[0] : spedizione.clienti)?.ragione_sociale || null
+  // Nei messaggi la LDV dell'etichetta, non il numero della gamba: la gamba di un pacco condiviso si chiama
+  // "<LDV>-<codice>" e chi ha il pacco in mano quel numero non lo trova da nessuna parte.
+  const ldvEtichetta = spedizione.tracking_number || spedizione.numero
+  const quando = (iso: string) => {
+    const d = new Date(iso)
+    return `${d.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' })} alle ${d.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' })}`
+  }
+
+  // RESO GIA' ADDEBITATO, DA QUALUNQUE STRADA. Prima il rosso usciva solo per un pacco gia' in una distinta
+  // di reso di chi scansiona; un reso addebitato dal tracking, dallo svincolo della giacenza o dalla fattura
+  // del corriere usciva VERDE, e chi aveva il pacco in mano non capiva se era gia' stato pagato (M.C
+  // LOGISTICA, 20/11/2026). Si dice a chi e quando, e il nome e' sempre quello del livello SUBITO SOTTO chi
+  // scansiona: il suo cliente diretto, oppure il sotto-master per un pacco della rete (Ecomize Solution vede
+  // Ecomize LL, Ecomize LL vede il suo cliente). Mai il cliente finale di un altro master.
+  const pagatore = targetMasterId ? { masterTargetId: targetMasterId } : { clienteId: spedizione.cliente_id as string | null }
+  if (pagatore.masterTargetId || pagatore.clienteId) {
+    const { quandoResoAddebitato } = await import('@/lib/giacenza-cascata')
+    const il = await quandoResoAddebitato(adminDb, spedizione.id, pagatore)
+    if (il) {
+      const a = (targetMasterId ? targetMasterNome : clienteNome) || (targetMasterId ? 'il sotto-master' : 'il cliente')
+      return NextResponse.json({
+        error: `${ldvEtichetta}: reso già addebitato a ${a} il ${quando(il)}`,
+        reso_addebitato: { a, il },
+      }, { status: 409 })
+    }
+  }
+
   // anti-duplicato PER LIVELLO: blocco solo se GIA' in una distinta reso del MIO master
   // (la stessa LDV puo' legittimamente stare in una distinta di M1 verso M2 e in una di M2 verso il suo cliente)
   const { data: giaMia } = await adminDb.from('distinte_resi')
-    .select('id')
+    .select('id,numero,created_at')
     .eq('master_id', utente!.master_id)
     .contains('voci', JSON.stringify([{ id: spedizione.id }]))
     .limit(1)
   if (giaMia && giaMia.length > 0) {
-    return NextResponse.json({ error: 'Spedizione già messa in reso e addebitata' }, { status: 400 })
+    const dm: any = giaMia[0]
+    return NextResponse.json({ error: `${ldvEtichetta}: già nella tua distinta di reso${dm.numero ? ' n. ' + dm.numero : ''} del ${quando(dm.created_at)}` }, { status: 400 })
   }
 
   // Reso già gestito e addebitato in fase di SVINCOLO GIACENZA: la scansione lo segnala (popup)
@@ -103,7 +132,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ...resto, target_master_id: targetMasterId, target_master_nome: targetMasterNome, gia_addebitato_giacenza,
     contratto: (Array.isArray(corrieri) ? corrieri[0] : corrieri)?.nome_contratto || null,
-    cliente_nome: (Array.isArray(clienti) ? clienti[0] : clienti)?.ragione_sociale || null,
+    cliente_nome: clienteNome,
     codice_letto: trovato.codice,
   })
 }

@@ -139,3 +139,36 @@ export async function riconciliaStorniDvaCron(admin: any): Promise<{ completate:
   }
   return { completate, inCorso, rimandate, manuali, errori, totale: speds.length }
 }
+
+// ORDINE ORFANO: pagato al fornitore ma la riga della spedizione non si e' scritta. Non c'e' niente da
+// rimborsare (il cliente non e' stato addebitato e la prenotazione la libera il giro automatico) e non
+// c'e' una riga da portare in 'storno_richiesto': si chiede solo lo storno, subito, cosi' l'ordine non
+// resta pagato. L'etichetta di quest'ordine non e' mai arrivata a nessuno: la risposta e' stata un errore.
+// Prima non si poteva (DVA non aveva l'annullo via API) e ogni caso restava pagato: il 20/11/2026 ne
+// risultavano 25 dal 22/09 (262 €), 12 ormai oltre il mese in cui il fornitore li accetta ancora.
+// Esiti non 'richiesto' finiscono nel log con tutti i riferimenti, per chiederli a mano.
+export async function stornaOrdineOrfanoDva(
+  apikey: string | null | undefined, idOrdine: number | string | null | undefined,
+  rif: { ldv?: string | null; porta: string; motivo?: string | null },
+): Promise<'richiesto' | 'gia_cancellato' | 'non_riuscito'> {
+  const n = Number(idOrdine)
+  const traccia = `ordine=${idOrdine || '-'} ldv=${rif.ldv || '-'} porta=${rif.porta} motivo=${rif.motivo || '-'}`
+  if (!apikey || !Number.isFinite(n) || n <= 0) {
+    console.error('[DVA][ORFANO] storno NON chiesto: chiave o ordine mancante', traccia)
+    return 'non_riuscito'
+  }
+  try {
+    // Tempo corto: chi ha cliccato aspetta la risposta, e un fornitore lento non deve trascinarla.
+    const r = await easyparcelStorno(apikey, [n], false, 8000)
+    const e = r.esiti[0]
+    if (e && (e.codice === 'ammesso' || e.codice === 'gia_richiesto')) {
+      console.warn('[DVA][ORFANO] storno richiesto', traccia)
+      return 'richiesto'
+    }
+    if (e && e.codice === 'cancellato') { console.warn('[DVA][ORFANO] gia\' cancellato', traccia); return 'gia_cancellato' }
+    console.error('[DVA][ORFANO] storno NON accettato, da chiedere a mano', traccia, e ? `${e.codice}: ${e.messaggio}` : 'nessun esito')
+  } catch (err: any) {
+    console.error('[DVA][ORFANO] storno NON riuscito, da chiedere a mano', traccia, err?.message || err)
+  }
+  return 'non_riuscito'
+}

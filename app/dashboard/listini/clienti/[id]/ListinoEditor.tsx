@@ -10,6 +10,7 @@ import { vociSupplementoDa, type VoceSupplemento } from '@/lib/supplementi-corri
 import TabellaSupplementiCorriere from '@/app/components/TabellaSupplementiCorriere'
 import SupplementiMulticollo from '@/app/components/SupplementiMulticollo'
 import { leggiSupplementiMulticollo, supplementiSottoCosto, type SupplementiMulticollo as SupplMC } from '@/lib/multicollo-zone'
+import { useIvaListino, RiquadroIva, EtichettaIva, SceltaIvaCorriere, type StatoIva } from './IvaListino'
 
 // Input decimale che accetta virgola o punto e valori parziali (es. "0.", "0,5")
 // mentre scrivi, restituendo comunque il NUMERO al parent (nessuna modifica al salvataggio).
@@ -62,6 +63,10 @@ interface Props {
   conSupplementi?: boolean
   // Tabella multicollo: colonne (aree del contratto) e il mio costo per lo stesso contratto. [] / null = niente tabella.
   costoSupplMC?: SupplMC | null   // localita' remota / partenza remota del multicollo nel mio costo
+  // IVA inclusa o esclusa (solo listini venduti): la scelta di oggi e chi usa il listino (./IvaListino).
+  // undefined = non si mostra (non e' lo staff del master del listino); null = non letta (errore).
+  ivaStato?: StatoIva | null
+  acquirentiIva?: string[]
 }
 
 const fattori = [
@@ -160,8 +165,10 @@ function buildAccessoriDa(supplementi: any[], fallback: {nome:string;prezzo:numb
   })
 }
 
-export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi, costoSupplMC = null }: Props) {
+export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti, clientiAssegnati, tipoListino, corriereSelezionatoId, supplementiEsistenti, corrieriDisponibili, fattoreCorriere, fattoreCostoMaster, costiMaster, costiSupplMaster, costiNoloMaster, conSupplementi, costoSupplMC = null, ivaStato, acquirentiIva }: Props) {
   const isCorriere = tipoListino === 'corriere'
+  const iva = useIvaListino(listino.id, listino.nome || '', ivaStato || { listino: null, corrieri: {} }, acquirentiIva || [])
+  const conIva = !isCorriere && !!ivaStato
   const apiAggancio = isCorriere ? '/api/listini/corriere-corrieri' : '/api/listini/cliente-corrieri'
   const basePagina = isCorriere ? '/dashboard/listini/corrieri' : '/dashboard/listini/clienti'
   const [aggiungendoContratto, setAggiungendoContratto] = useState(false)
@@ -698,6 +705,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
         </select>
         {soloPesoReale && <span style={{fontSize:'11px',color:'#f97316'}}>Il cliente paga sempre sul peso reale.</span>}
+        {conIva && corriereId && <SceltaIvaCorriere iva={iva} corriereId={corriereId} nomeCorriere={corrieri.find(c => c.id === corriereId)?.nome_contratto || 'questo contratto'} />}
         <button onClick={salva} disabled={saving} style={{marginLeft:'auto',padding:'9px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.7:1}}>
           {saving?'Salvo...':'Salva'}
         </button>
@@ -988,6 +996,14 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
         )}
       </div>
 
+      {/* IVA inclusa o esclusa: come e' venduto il listino (non tocca prezzi ne' credito) */}
+      {conIva && <RiquadroIva iva={iva} />}
+      {!isCorriere && ivaStato === null && (
+        <div role="alert" style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'12px 16px',marginBottom:'16px',fontSize:'13px',color:'#b91c1c'}}>
+          Non riesco a leggere se questo listino è venduto IVA inclusa o esclusa. Ricarica la pagina; se resta così, avvisa l'assistenza prima di cambiarla.
+        </div>
+      )}
+
       {/* Accordion contratti */}
       {!corrieri.length ? (
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'40px',textAlign:'center' as const,color:'#666',fontSize:'13px',marginBottom:'16px'}}>
@@ -1000,7 +1016,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
             return (
               <div key={c.id} style={{background:'#fff',borderRadius:'10px',border:aperto?'1px solid #f97316':'1px solid #e5e7eb',overflow:'hidden',boxShadow:aperto?'0 1px 3px rgba(249,115,22,0.12)':'none'}}>
                 <div onClick={()=>toggleContratto(c.id)}
-                  style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px 16px',cursor:'pointer',userSelect:'none' as const,background:aperto?'#fff7ed':'#fff'}}>
+                  style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px 16px',cursor:'pointer',userSelect:'none' as const,background:aperto?'#fff7ed':'#fff',flexWrap:'wrap' as const}}>
                   {logoCorriere(c.nome_contratto) ? (
                     <span style={{width:'56px',height:'40px',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                       <img src={logoCorriere(c.nome_contratto)!} alt={c.nome_contratto} style={{maxWidth:'56px',maxHeight:'40px',objectFit:'contain' as const}}/>
@@ -1016,6 +1032,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
                   <span style={{flex:1,fontSize:'14px',fontWeight:'600',color:'#1a1a1a',display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap' as const}}>{c.nome_contratto}
                     <CodiceContratto codice={c.codice} piccolo />
                     {c.pausa && <span title={c.pausaMotivo==='catena' ? 'Un master superiore lo ha messo in pausa: il cliente non lo vede e non puoi riattivarlo finché non lo riattiva chi lo ha fermato.' : 'Tu lo hai messo in pausa: il cliente non lo vede. Riattivalo da Corrieri.'} style={{background:'#fef2f2',color:'#b91c1c',border:'1px solid #fecaca',borderRadius:'20px',fontSize:'10.5px',fontWeight:700,padding:'2px 8px'}}>⏸ {c.pausaMotivo==='catena' ? 'In pausa da un livello superiore' : 'In pausa'}</span>}</span>
+                  {conIva && <EtichettaIva iva={iva} corriereId={c.id} />}
                   {!isCorriere && (
                     <button onClick={(e)=>{e.stopPropagation(); apriDaCosto(c)}} title="Riempi i prezzi dal TUO costo con una maggiorazione (% o € fisso)"
                       style={{padding:'4px 10px',background:'#eff6ff',color:'#1d4ed8',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>€ Da costo</button>
@@ -1162,6 +1179,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           </div>
         </div>
       )}
+      {iva.modale}
     </div>
   )
 }

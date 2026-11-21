@@ -16,12 +16,15 @@ import PagaConCarta from '@/app/cliente/PagaConCarta'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
 import { pesiDelModulo, pesiDivisiScritti } from '@/lib/colli-ordine'
+import { useRicercaSuggerimenti } from '@/lib/use-ricerca-suggerimenti'
+import IvaPrezzo, { ScrittaIva } from '@/app/components/IvaPrezzo'
+import { testoIva, type RegimeIva } from '@/lib/iva-calcolo'
 
 // Sigla di ripiego quando il contratto non ha un marchio riconosciuto. Attenzione: qui arriva
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean; _iva?:RegimeIva|null; _aliquota?:number }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -102,6 +105,17 @@ function NuovaSpedizioneCliente() {
   const [showSuggMitt, setShowSuggMitt] = useState(false)
   const [suggDest, setSuggDest] = useState<any[]>([])   // rubrica destinatari
   const [showSuggDest, setShowSuggDest] = useState(false)
+  // Rubrica mentre si scrive: una ricerca dopo la pausa, non una a tasto (vedi lib/use-ricerca-suggerimenti).
+  const ricercaMitt = useRicercaSuggerimenti({
+    mostra: l => { setSuggMitt(l); setShowSuggMitt(true) },
+    errore: () => setSuggMitt([]),
+    svuota: () => { setSuggMitt([]); setShowSuggMitt(false) },
+  })
+  const ricercaDest = useRicercaSuggerimenti({
+    mostra: l => { setSuggDest(l); setShowSuggDest(true) },
+    errore: () => setSuggDest([]),
+    svuota: () => { setSuggDest([]); setShowSuggDest(false) },
+  })
   const [dest, setDest] = useState({nome:'',indirizzo:'',citta:'',provincia:'',cap:'',paese:'IT',email:'',telefono:'',note:''})
   // Avvertenza (non blocca): destinatario che rifiuta i contrassegni, storico rete per telefono.
   const [codAlert, setCodAlert] = useState<{totCod:number;resi:number;nonConsegnato:number;giacenza:number;rifiutati:number}|null>(null)
@@ -367,6 +381,9 @@ function NuovaSpedizioneCliente() {
     setArticoliScelti([])
     setRichiediRitiro(false); setRitiroData(new Date().toISOString().split('T')[0]); setRitiroOrario('mattina')
     setSuggComuni([]); setShowSugg(false); setDaOrdine('')
+    // La spedizione appena creata puo' aver salvato mittente e destinatario in rubrica: la prossima
+    // ricerca, anche con lo stesso testo, va richiesta e non ripresa da quella di prima.
+    ricercaMitt.dimentica(); ricercaDest.dimentica()
     setErrore(''); setVista('dati')
   }
 
@@ -534,12 +551,11 @@ function NuovaSpedizioneCliente() {
               <div style={{marginBottom:'12px',position:'relative'}}>
                 <label style={lbl}>Rif. Mittente</label>
                 <input ref={refMittNome} value={mitt.nome} autoComplete="off"
-                  onChange={async e=>{
+                  onChange={e=>{
                     const v=e.target.value
                     setMitt(m=>({...m,nome:v}))
-                    if(v.trim().length>=2){
-                      try{ const r=await fetch('/api/mittenti/cerca?q='+encodeURIComponent(v)); const j=await r.json(); setSuggMitt(Array.isArray(j)?j:[]); setShowSuggMitt(true) }catch{ setSuggMitt([]) }
-                    } else { setSuggMitt([]); setShowSuggMitt(false) }
+                    if(v.trim().length>=2) ricercaMitt.cerca('/api/mittenti/cerca?q='+encodeURIComponent(v))
+                    else ricercaMitt.svuota()
                   }}
                   onFocus={()=>{ if(suggMitt.length) setShowSuggMitt(true) }}
                   onBlur={()=>setTimeout(()=>setShowSuggMitt(false),200)}
@@ -634,12 +650,11 @@ function NuovaSpedizioneCliente() {
                 <div style={{position:'relative'}}>
                   <label style={lbl}>Nominativo *</label>
                   <input ref={refDestNome} value={dest.nome} autoComplete="off" placeholder="Mario Rossi"
-                    onChange={async e=>{
+                    onChange={e=>{
                       const v=e.target.value
                       setDest(d=>({...d,nome:v}))
-                      if(v.trim().length>=2){
-                        try{ const r=await fetch('/api/destinatari/cerca?q='+encodeURIComponent(v)); const j=await r.json(); setSuggDest(Array.isArray(j)?j:[]); setShowSuggDest(true) }catch{ setSuggDest([]) }
-                      } else { setSuggDest([]); setShowSuggDest(false) }
+                      if(v.trim().length>=2) ricercaDest.cerca('/api/destinatari/cerca?q='+encodeURIComponent(v))
+                      else ricercaDest.svuota()
                     }}
                     onFocus={()=>{ if(suggDest.length) setShowSuggDest(true) }}
                     onBlur={()=>setTimeout(()=>setShowSuggDest(false),200)}
@@ -891,12 +906,12 @@ function NuovaSpedizioneCliente() {
                           {Number(r.costo_contrassegno||0) > 0 && <div style={{fontSize:'11px',color:'#666'}}>Contrassegno: € {r.costo_contrassegno}</div>}
                           {Number(r.costo_assicurazione||0) > 0 && <div style={{fontSize:'11px',color:'#666'}}>Assicurazione: € {r.costo_assicurazione}</div>}
                           <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',marginTop:'2px'}}>Totale € {r.total_price}</div>
-                          <div style={{fontSize:'10px',color:'#bbb',marginTop:'1px'}}>iva esclusa</div>
+                          <ScrittaIva regime={r._iva} />
                         </>
                       ) : (
                         <>
                           <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316'}}>€ {r.total_price}</div>
-                          <div style={{fontSize:'10px',color:'#bbb',marginTop:'1px'}}>iva esclusa</div>
+                          <ScrittaIva regime={r._iva} />
                         </>
                       )}
                     </div>
@@ -906,7 +921,7 @@ function NuovaSpedizioneCliente() {
               {selected && (
                 <button onClick={creaSpedizione} disabled={creating}
                   style={{width:'100%',marginTop:'4px',padding:'12px',background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13.5px',fontWeight:'700',cursor:'pointer',opacity:creating?0.7:1}}>
-                  {creating?'Creazione in corso...':'✓ Crea Spedizione — € '+totaleConExtra.toFixed(2)}
+                  {creating?'Creazione in corso...':'✓ Crea Spedizione — € '+totaleConExtra.toFixed(2)+(testoIva(selected?._iva, selected?._aliquota) ? ' '+testoIva(selected?._iva, selected?._aliquota) : '')}
                 </button>
               )}
             </div>
@@ -938,7 +953,7 @@ function NuovaSpedizioneCliente() {
                     <div style={{fontWeight:'700',color:'#1a1a1a',fontSize:'14px'}}>{r.corriere_nome||carrier.nome}</div>
                     <div style={{fontSize:'11px',color:'#999',marginTop:'1px'}}>{r.peso_fatturato}kg · zona {r.zona}</div>
                   </div>
-                  <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',flexShrink:0}}>€ {r.total_price}</div>
+                  <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',flexShrink:0}}>€ {r.total_price}<IvaPrezzo regime={r._iva} aliquota={r._aliquota} /></div>
                 </div>
               )
             })}
@@ -1023,11 +1038,11 @@ function NuovaSpedizioneCliente() {
                   {Number(selected.costo_contrassegno||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px'}}><span>Costo Contrassegno</span><span>€ {selected.costo_contrassegno}</span></div>}
                   {Number(selected.costo_assicurazione||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fafafa',fontSize:'13px'}}><span>Costo Assicurazione</span><span>€ {selected.costo_assicurazione}</span></div>}
                   {extraScelti.map((e,i)=>(<div key={i} style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>{e.nome}</span><span>€ {e.importo.toFixed(2)}</span></div>))}
-                  <div style={{display:'flex',justifyContent:'space-between',padding:'11px 14px',borderTop:'1px solid #eee',fontSize:'14px',fontWeight:'800',color:'#f97316'}}><span>Costo Totale</span><span>€ {totaleConExtra.toFixed(2)}</span></div>
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'11px 14px',borderTop:'1px solid #eee',fontSize:'14px',fontWeight:'800',color:'#f97316'}}><span>Costo Totale</span><span>€ {totaleConExtra.toFixed(2)}<IvaPrezzo regime={selected._iva} aliquota={selected._aliquota} /></span></div>
                 </div>
                 <button onClick={creaSpedizione} disabled={creating}
                   style={{width:'100%',padding:'12px',background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13.5px',fontWeight:'700',cursor:'pointer',opacity:creating?0.7:1}}>
-                  {creating?'Creazione in corso...':'✓ Crea Spedizione — € '+totaleConExtra.toFixed(2)}
+                  {creating?'Creazione in corso...':'✓ Crea Spedizione — € '+totaleConExtra.toFixed(2)+(testoIva(selected?._iva, selected?._aliquota) ? ' '+testoIva(selected?._iva, selected?._aliquota) : '')}
                 </button>
               </div>
             )}

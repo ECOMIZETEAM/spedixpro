@@ -12,6 +12,13 @@ import { pacchiGiaInDistintaResi } from '@/lib/distinte-resi'
 // intero legge molte righe, quindi serve più della finestra breve di default.
 export const maxDuration = 60
 
+// Esegue `fn` su tutte le voci, `quanti` alla volta, e restituisce i risultati NELL'ORDINE delle voci.
+async function aGruppi<T, R>(voci: T[], quanti: number, fn: (v: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = []
+  for (let i = 0; i < voci.length; i += quanti) out.push(...await Promise.all(voci.slice(i, i + quanti).map(fn)))
+  return out
+}
+
 export async function GET(req: NextRequest) {
   // TEMPI: una riga sola in fondo, con i ms di ogni fase. Serve a sapere DOVE va il tempo in
   // produzione (i log di Vercel non danno la durata, e misurare da fuori non dice quante chiamate
@@ -19,6 +26,8 @@ export async function GET(req: NextRequest) {
   const t0 = Date.now(); let tPrec = t0
   const tempi: string[] = []
   const segna = (fase: string) => { const ora = Date.now(); tempi.push(`${fase} ${ora - tPrec}`); tPrec = ora }
+  // I pezzi che girano IN PARALLELO dentro una fase (arricchimento): ognuno col suo tempo, in coda alla riga.
+  const dettagli: string[] = []
   const supabase = await createServerSupabase()
   // UN SOLO client di servizio per tutta la richiesta: prima ogni blocco ne apriva uno suo (fino a
   // otto) e il primo uso di ognuno pagava l'apertura della connessione — 240-299 ms misurati sul
@@ -113,7 +122,9 @@ export async function GET(req: NextRequest) {
   // spedizione che matchano, poi filtro (più i campi diretti id_ordine_esterno/rif_ordine).
   const sanitizza = (v: string) => v.replace(/[,()"\\%]/g, ' ').trim()
   let idOrdineSpedIds: string[] = []
-  if (fIdOrdine) {
+  // Parte insieme alle altre letture che precedono la query (piu' sotto): non dipende da nessuna.
+  const cercaIdOrdine = async () => {
+    if (!fIdOrdine) return
     const adminIO = admin
     const cIO = sanitizza(fIdOrdine)
     const [a, b] = await Promise.all([
@@ -135,9 +146,12 @@ export async function GET(req: NextRequest) {
   const filtroCodPerViewer = !!fStatoContr && !!utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente'
   const isMasterRete = ruolo !== 'cliente' && ruolo !== 'agente' && !clienteIdRaw && agenteClienteIds === null
   let db: any = supabase
-  let masterIds: string[] | null = null
-  let subtreeSel: string[] | null = null  // sotto-albero del sotto-master selezionato
-  let reteSubtree: string[] | null = null // filtro rete (paginato): sotto-albero DENTRO la mia rete
+  // `null as ...` (qui, per i contratti posseduti e per il vettore): le assegnano le letture in
+  // parallelo qui sotto, dentro funzioni, e con un `= null` semplice il controllo tipi le crederebbe
+  // nulle per sempre.
+  let masterIds = null as string[] | null
+  let subtreeSel = null as string[] | null  // sotto-albero del sotto-master selezionato
+  let reteSubtree = null as string[] | null // filtro rete (paginato): sotto-albero DENTRO la mia rete
 
   // VISIBILITÀ PER CONTRATTO POSSEDUTO. Un master vede le spedizioni dei DISCENDENTI solo sui
   // contratti che possiede/rivende (stesso nome_contratto). Senza, il filtro "tutto il sotto-albero"
@@ -145,85 +159,102 @@ export async function GET(req: NextRequest) {
   // movimento sulla spedizione) — es. E&A che vedeva "Poste STANDARD I" di Velox. Le proprie
   // spedizioni restano sempre visibili (sono sui suoi stessi contratti). Se un domani un master
   // rivende un contratto a un altro, quel nome compare tra i suoi e torna visibile da solo.
-  let ownedContractNames: string[] | null = null
-  if (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente') {
-    const { contrattiPossedutiNomi } = await import('@/lib/rete-masters')
-    const nn = await contrattiPossedutiNomi(admin, utente.master_id)
-    ownedContractNames = nn.length ? nn : null
-  }
-
-  // Selezione di un sotto-master agganciato: mostro le spedizioni del suo sotto-albero
-  if (masterSel && ruolo !== 'cliente' && ruolo !== 'agente' && utente?.master_id) {
-    const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
-    const adminDb = admin
-    const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)   // solo se privilegiato include i figli
-    if (mieiDiscendenti.includes(masterSel)) {   // autorizzazione: dev'essere un mio discendente
-      subtreeSel = await sottoAlberoMasterIds(adminDb, masterSel)
-      db = adminDb
-    } else {
-      subtreeSel = ['00000000-0000-0000-0000-000000000000']  // non autorizzato -> vuoto
+  let ownedContractNames = null as string[] | null
+  const caricaContrattiPosseduti = async () => {
+    if (utente?.master_id && ruolo !== 'cliente' && ruolo !== 'agente') {
+      const { contrattiPossedutiNomi } = await import('@/lib/rete-masters')
+      const nn = await contrattiPossedutiNomi(admin, utente.master_id)
+      ownedContractNames = nn.length ? nn : null
     }
   }
+
   const primaLineaId = new Map<string, string>()  // master discendente -> id del figlio diretto (prima linea)
   const nomeMaster = new Map<string, string>()     // master id -> nome
-  if (isMasterRete && utente?.master_id) {
-    const mine = utente.master_id
-    const adminDb = admin
-    masterIds = [mine]
-    // La volumetria della rete sotto un master risale sempre a lui (tutti i livelli).
-    // UNA sola query sui masters (tabella piccola) invece di una per livello: il BFS resta identico.
-    const { data: tuttiM } = await adminDb.from('masters').select('id,nome,parent_master_id')
-    const figliDi = new Map<string, any[]>()
-    for (const m of (tuttiM || [])) {
-      const p = (m as any).parent_master_id
-      if (!p) continue
-      if (!figliDi.has(p)) figliDi.set(p, [])
-      figliDi.get(p)!.push(m)
-    }
-    let frontier = [mine]
-    for (let i = 0; i < 20 && frontier.length; i++) {
-      const nuovi: string[] = []
-      for (const f of frontier) for (const c of (figliDi.get(f) || [])) {
-        if (masterIds.includes(c.id)) continue
-        nomeMaster.set(c.id, c.nome)
-        // prima linea = il figlio diretto se il padre sono io, altrimenti eredita quella del padre
-        primaLineaId.set(c.id, c.parent_master_id === mine ? c.id : (primaLineaId.get(c.parent_master_id) || c.id))
-        masterIds.push(c.id); nuovi.push(c.id)
-      }
-      frontier = nuovi
-    }
-    if (masterIds.length > 1) db = adminDb  // servono i permessi cross-master (RLS)
-    segna('rete(' + masterIds.length + ')')
-    // Filtro RETE (paginato): restringo al sotto-albero del sotto-master selezionato, MANTENENDO
-    // l'arricchimento di rete (prima linea/prezzi) — dev'essere un master della mia rete.
-    if (fRete && masterIds.includes(fRete)) {
-      reteSubtree = [fRete]
-      let fr = [fRete]
-      for (let i = 0; i < 20 && fr.length; i++) {
-        const nu: string[] = []
-        for (const f of fr) for (const c of (figliDi.get(f) || [])) {
-          if (!reteSubtree.includes(c.id)) { reteSubtree.push(c.id); nu.push(c.id) }
-        }
-        fr = nu
-      }
-    }
-  }
-
   // Filtro VETTORE per vettore FISICO (BRT PF -> BRT), non per prefisso del nome (PF): risolvo il
   // vettore all'insieme dei NOMI CONTRATTO di quel vettore (i nomi combaciano in tutta la rete) e
   // filtro corrieri.nome_contratto IN (...). Cosi' "PF CE LIGHT"/"Q GLS.." (tipo='gls') stanno sotto GLS.
-  let nomiVettore: string[] | null = null
-  if (fVettore) {
-    const { data: csV } = await db.from('corrieri').select('nome_contratto,tipo').eq('master_id', utente?.master_id)
-    nomiVettore = Array.from(new Set((csV || []).filter((c: any) => vettoreFisico(c) === fVettore).map((c: any) => c.nome_contratto).filter(Boolean)))
-    if (!nomiVettore.length) nomiVettore = ['__NESSUNO__']
+  let nomiVettore = null as string[] | null
+  // ALBERO, poi il filtro vettore: il vettore si legge con `db`, e chi sia `db` (sessione o servizio)
+  // lo decide proprio l'albero. Restano IN FILA fra loro, in parallelo al resto.
+  const caricaAlberoEVettore = async () => {
+    // Selezione di un sotto-master agganciato: mostro le spedizioni del suo sotto-albero
+    if (masterSel && ruolo !== 'cliente' && ruolo !== 'agente' && utente?.master_id) {
+      const { sottoAlberoMasterIds, masterIdsVisibili } = await import('@/lib/rete-masters')
+      const adminDb = admin
+      const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)   // solo se privilegiato include i figli
+      if (mieiDiscendenti.includes(masterSel)) {   // autorizzazione: dev'essere un mio discendente
+        subtreeSel = await sottoAlberoMasterIds(adminDb, masterSel)
+        db = adminDb
+      } else {
+        subtreeSel = ['00000000-0000-0000-0000-000000000000']  // non autorizzato -> vuoto
+      }
+    }
+    if (isMasterRete && utente?.master_id) {
+      const mine = utente.master_id
+      const adminDb = admin
+      const ids = [mine]
+      masterIds = ids
+      // La volumetria della rete sotto un master risale sempre a lui (tutti i livelli).
+      // UNA sola query sui masters (tabella piccola) invece di una per livello: il BFS resta identico.
+      const { data: tuttiM } = await adminDb.from('masters').select('id,nome,parent_master_id')
+      const figliDi = new Map<string, any[]>()
+      for (const m of (tuttiM || [])) {
+        const p = (m as any).parent_master_id
+        if (!p) continue
+        if (!figliDi.has(p)) figliDi.set(p, [])
+        figliDi.get(p)!.push(m)
+      }
+      let frontier = [mine]
+      for (let i = 0; i < 20 && frontier.length; i++) {
+        const nuovi: string[] = []
+        for (const f of frontier) for (const c of (figliDi.get(f) || [])) {
+          if (ids.includes(c.id)) continue
+          nomeMaster.set(c.id, c.nome)
+          // prima linea = il figlio diretto se il padre sono io, altrimenti eredita quella del padre
+          primaLineaId.set(c.id, c.parent_master_id === mine ? c.id : (primaLineaId.get(c.parent_master_id) || c.id))
+          ids.push(c.id); nuovi.push(c.id)
+        }
+        frontier = nuovi
+      }
+      if (ids.length > 1) db = adminDb  // servono i permessi cross-master (RLS)
+      // Filtro RETE (paginato): restringo al sotto-albero del sotto-master selezionato, MANTENENDO
+      // l'arricchimento di rete (prima linea/prezzi) — dev'essere un master della mia rete.
+      if (fRete && ids.includes(fRete)) {
+        const sotto = [fRete]
+        reteSubtree = sotto
+        let fr = [fRete]
+        for (let i = 0; i < 20 && fr.length; i++) {
+          const nu: string[] = []
+          for (const f of fr) for (const c of (figliDi.get(f) || [])) {
+            if (!sotto.includes(c.id)) { sotto.push(c.id); nu.push(c.id) }
+          }
+          fr = nu
+        }
+      }
+    }
+    if (fVettore) {
+      const { data: csV } = await db.from('corrieri').select('nome_contratto,tipo').eq('master_id', utente?.master_id)
+      const nomi = Array.from(new Set((csV || []).filter((c: any) => vettoreFisico(c) === fVettore).map((c: any) => c.nome_contratto).filter(Boolean))) as string[]
+      nomiVettore = nomi.length ? nomi : ['__NESSUNO__']
+    }
   }
 
   // ALBERO + NASCONDI-FORNITORI: su una spedizione condivisa un master non vede le gambe di CHI GLI VENDE
   // (a monte). Quelle hanno come cliente un ledger "(ingrosso)" d'acquisto del master o dei suoi fornitori
   // (risalendo corrieri_condivisi). Calcolato UNA volta qui (scope async); buildBase è sincrona e lo chiude.
-  const ledgerNascosti = (utente?.master_id && utente.ruolo !== 'cliente' && utente.ruolo !== 'agente')
-    ? await ledgerGambeInterne(admin, utente.master_id) : []
+  let ledgerNascosti: string[] = []
+  const caricaLedgerNascosti = async () => {
+    if (utente?.master_id && utente.ruolo !== 'cliente' && utente.ruolo !== 'agente')
+      ledgerNascosti = await ledgerGambeInterne(admin, utente.master_id)
+  }
+
+  // LE LETTURE CHE PRECEDONO LA QUERY, IN PARALLELO (20/10/2026). Contratti posseduti, albero dei
+  // master, ledger dei fornitori e id ordine non dipendono l'uno dall'altro: prima andavano in fila,
+  // una andata e ritorno col database dopo l'altra (su MULTIEXPRESS cinque, sei cercando un id
+  // ordine; ora una). Sono letture FRESCHE a ogni richiesta, non in memoria: decidono cosa vede un
+  // master, e una copia vecchia di un minuto mostrerebbe o nasconderebbe spedizioni per un minuto.
+  await Promise.all([cercaIdOrdine(), caricaContrattiPosseduti(), caricaAlberoEVettore(), caricaLedgerNascosti()])
+  segna(masterIds ? 'rete(' + (masterIds as string[]).length + ')' : 'prima')
 
   // Solo colonne leggere (SPED_COLS): esclusi etichetta_url/raw_response/colli_dettaglio.
   // Costruisco una query FRESCA a ogni chiamata (i builder Supabase sono monouso).
@@ -493,12 +524,17 @@ export async function GET(req: NextRequest) {
     const chunksOrd: string[][] = []
     for (let i = 0; i < ids.length; i += 300) chunksOrd.push(ids.slice(i, i + 300))
     await Promise.all(chunksOrd.map(async (chunk) => {
+      // La lettura degli ordini dei negozi PARTE SUBITO, insieme a quella dei CSV (Promise.resolve la
+      // avvia: la query di Supabase da sola non parte finche' qualcuno non la aspetta). Si APPLICA pero'
+      // dopo i CSV, come prima: a parita' di spedizione vince sempre l'ordine da file.
+      const ecomPronto = Promise.resolve(adminOrd.from('ordini_ecommerce').select('spedizione_id,numero_ordine,ordine_esterno_id').in('spedizione_id', chunk))
+      ecomPronto.catch(() => {})   // la si aspetta dopo i CSV: un rifiuto nel frattempo non deve risultare "non gestito"
       for (let from = 0; ; from += 1000) {
         const { data: imp } = await adminOrd.from('ordini_importati').select('spedizione_id,order_id').in('spedizione_id', chunk).not('order_id', 'is', null).order('id', { ascending: true }).range(from, from + 999)
         for (const o of (imp || [])) { const sid = (o as any).spedizione_id, v = (o as any).order_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
         if (!imp?.length || imp.length < 1000) break
       }
-      const { data: ecom } = await adminOrd.from('ordini_ecommerce').select('spedizione_id,numero_ordine,ordine_esterno_id').in('spedizione_id', chunk)
+      const { data: ecom } = await ecomPronto
       for (const o of (ecom || [])) { const sid = (o as any).spedizione_id, v = (o as any).numero_ordine || (o as any).ordine_esterno_id; if (sid && v && !idOrdine.has(sid)) idOrdine.set(sid, String(v)) }
     }))
   }
@@ -569,31 +605,43 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // I blocchi di arricchimento sono INDIPENDENTI tra loro → girano in PARALLELO (prima in serie).
-  // In LIGHT si saltano del tutto: chi la chiede mostra solo i campi base.
-  if (!light) { await Promise.all([caricaMovimenti(), caricaIdOrdine(), caricaResi(), caricaTicket(), caricaDistinte()]); segna('arricchimento') }
-
   // CAP DELLA PAGINA: i calcolatori qui sotto devono prezzare SOLO queste righe, quindi si portano
   // dietro i loro CAP e leggono le zone mirate invece di tutte quelle del listino (per un master vero
   // sono 19.225 righe, ~20 round-trip in fila: 1.956 ms misurati per prezzarne una).
   const capPagina = Array.from(new Set((spedizioni || []).map((s: any) => s.dest_cap).filter(Boolean)))
 
+  // I MIEI CONTRATTI per nome: servono a entrambi i ripieghi qui sotto, che possono girare insieme.
+  // Una lettura sola, condivisa: prima la faceva il primo dei due e il secondo la saltava.
+  let mieiCorrieriPronti: Promise<void> | null = null
+  const caricaMieiCorrieri = () => (mieiCorrieriPronti ??= (async () => {
+    const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
+    for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
+  })())
+
   // Fallback PIGRI (DOPO i movimenti: dipendono dai prezzi reali): i calcolatori listino (query
   // pesanti su fasce/zone) si costruiscono SOLO se esiste almeno una riga senza prezzo reale.
   // 1) Listino cliente verso la prima linea: serve alle righe di RETE senza movimento del diretto.
-  const serveListinoFallback = !light && isMasterRete && targetIds.size && (spedizioni || []).some((s: any) => {
-    if (!s.master_id || s.master_id === mineId) return false
-    const fl = primaLineaId.get(s.master_id)
-    return !!fl && !costoTarget.has(s.id + '|' + fl)
-  })
-  if (serveListinoFallback) {
-    const { data: tms } = await db.from('masters').select('id,parent_listino_id').in('id', Array.from(targetIds))
+  const ripiegoListino = async () => {
+    const serveListinoFallback = !light && isMasterRete && targetIds.size && (spedizioni || []).some((s: any) => {
+      if (!s.master_id || s.master_id === mineId) return false
+      const fl = primaLineaId.get(s.master_id)
+      return !!fl && !costoTarget.has(s.id + '|' + fl)
+    })
+    if (!serveListinoFallback) return
+    const tL = Date.now()
+    const [{ data: tms }] = await Promise.all([
+      db.from('masters').select('id,parent_listino_id').in('id', Array.from(targetIds)),
+      caricaMieiCorrieri(),
+    ])
     for (const t of (tms || [])) parentListinoOf.set(t.id, (t as any).parent_listino_id || null)
-    const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', utente?.master_id)
-    for (const c of (miei || [])) nomeToMioCorr.set(c.nome_contratto, c.id)
     const listini = Array.from(new Set(Array.from(parentListinoOf.values()).filter(Boolean))) as string[]
-    for (const lid of listini) calcPerListino.set(lid, await creaCalcolatoreListinoCliente(db, lid, capPagina))
-    segna('calc-listino(' + listini.length + ')')
+    // A GRUPPI DI CINQUE, non uno dopo l'altro: su MULTIEXPRESS i listini della prima linea sono una
+    // decina, e costruiti in fila costavano 1,4-2,5 s in produzione (calc-listino(10) 1383-2464 ms il
+    // 20/10). Non tutti insieme: ognuno sono quattro-cinque letture, e cinquanta in un colpo dalla
+    // stessa richiesta non servono.
+    const calcolatori = await aGruppi(listini, 5, (lid) => creaCalcolatoreListinoCliente(db, lid, capPagina))
+    listini.forEach((lid, i) => calcPerListino.set(lid, calcolatori[i]))
+    dettagli.push('calc-listino(' + listini.length + ') ' + (Date.now() - tL))
     // Scalda la cache DOPO la risposta (vedi sotto, stesso motivo del calcolatore corriere).
     after(async () => {
       const tW = Date.now()
@@ -604,10 +652,16 @@ export async function GET(req: NextRequest) {
   // 2) Fallback PREZZO CORRIERE quando manca il MIO movimento (spedizioni vecchie / rete non
   //    tracciata): calcolo il MIO listino corriere. Per le spedizioni di rete il corriere è del
   //    sotto-master -> lo rimappo al MIO corriere con lo stesso nome_contratto.
-  let calcMioCorr: ((s: any) => any) | null = null
-  if (!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id))) {
-    try { calcMioCorr = await creaCalcolatoreCorriere(db, mineId, capPagina) } catch { calcMioCorr = null }
-    segna('calc-corriere')
+  let calcMioCorr = null as ((s: any) => any) | null
+  const ripiegoCorriere = async () => {
+    if (!(!light && mineId && ruolo !== 'cliente' && ruolo !== 'agente' && (spedizioni || []).some((s: any) => !costoMine.has(s.id)))) return
+    const tC = Date.now()
+    const [calc] = await Promise.all([
+      (async () => { try { return await creaCalcolatoreCorriere(db, mineId, capPagina) } catch { return null } })(),
+      caricaMieiCorrieri(),
+    ])
+    calcMioCorr = calc
+    dettagli.push('calc-corriere ' + (Date.now() - tC))
     // SCALDA LA CACHE A RISPOSTA GIA' INVIATA. Quello qui sopra e' MIRATO ai CAP di questa pagina e
     // per forza non entra in cache: senza questo la cache resta vuota per sempre e OGNI richiesta
     // ricostruisce il calcolatore (179-273 ms misurati in produzione). Con after() la versione
@@ -620,17 +674,15 @@ export async function GET(req: NextRequest) {
       // tolto ma spostato addosso alla richiesta successiva: e' l'ipotesi da confermare.
       console.log('[LISTA][SCALDA] corriere', Date.now() - tW + 'ms')
     })
-    if (!nomeToMioCorr.size) {
-      const { data: miei } = await db.from('corrieri').select('id,nome_contratto').eq('master_id', mineId)
-      for (const c of (miei || [])) nomeToMioCorr.set((c as any).nome_contratto, (c as any).id)
-    }
   }
   // AGENTE: il margine è prezzo cliente (costo_totale) − SUO costo dal listino agente assegnato
   // (utenti.listino_agente_id), come nel report guadagno. Senza questo, prezzo_corriere restava
   // null → pareggiato al prezzo cliente → elenco TUTTO a margine 0.
-  let calcAgente: ((s: any) => any) | null = null
-  if (!light && ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
-    try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id, capPagina) } catch { calcAgente = null }
+  let calcAgente = null as ((s: any) => any) | null
+  const caricaCalcAgente = async () => {
+    if (!light && ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
+      try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id, capPagina) } catch { calcAgente = null }
+    }
   }
   // IL COSTO DEL MASTER lo vede solo il master. Cliente e agente MAI: l'agente ha come costo SOLO il
   // listino che gli ha assegnato il master (calcAgente), il cliente nessuno. I rami qui sotto (contratto
@@ -646,29 +698,32 @@ export async function GET(req: NextRequest) {
   // servizio: il grant per-colonna su corrieri puo' negare 'tipo' alla sessione, qui torna solo un flag.
   const corrTipo = new Map<string, string>()
   const corrProprio = new Map<string, boolean>()   // contratto PROPRIO del master? (costo vero = costo_spedizione)
-  if (!light) {
-    const corrIds = Array.from(new Set((spedizioni || []).map((s: any) => s.corriere_id).filter(Boolean)))
-    if (corrIds.length) {
-      const { data: cc } = await admin.from('corrieri').select('id,tipo,proprio').in('id', corrIds as string[])
-      for (const c of (cc || [])) { corrTipo.set((c as any).id, (c as any).tipo); corrProprio.set((c as any).id, !!(c as any).proprio) }
-    }
-  }
   // CONDIVISIONE: costo reale delle MIE gambe-ponte (livelli-codice) = il loro costo_spedizione (= W
   // pagato al fornitore diretto), preso con una fetch MIRATA alle sole gambe-ponte proprie. Non si mette
   // costo_spedizione nelle colonne generali: attiverebbe il ramo "proprio" del calcolo costo su TUTTI i
   // contratti propri. Vuota per i master senza condivisione → zero impatto, zero query in più.
   const costoSpedPonte = new Map<string, number>()
-  if (!light && mineId) {
-    const ponteIds = (spedizioni || [])
-      .filter((s: any) => s.master_id === mineId && corrTipo.get(s.corriere_id) === 'moovexpress')
-      .map((s: any) => s.id)
-    for (let i = 0; i < ponteIds.length; i += 300) {
-      const { data: cs } = await admin.from('spedizioni').select('id,costo_spedizione').in('id', ponteIds.slice(i, i + 300))
-      for (const r of (cs || [])) costoSpedPonte.set((r as any).id, Number((r as any).costo_spedizione) || 0)
+  // Il tipo serve a trovare le gambe-ponte: le due letture restano in fila fra loro.
+  const caricaTipiEPonti = async () => {
+    if (light) return
+    const corrIds = Array.from(new Set((spedizioni || []).map((s: any) => s.corriere_id).filter(Boolean)))
+    if (corrIds.length) {
+      const { data: cc } = await admin.from('corrieri').select('id,tipo,proprio').in('id', corrIds as string[])
+      for (const c of (cc || [])) { corrTipo.set((c as any).id, (c as any).tipo); corrProprio.set((c as any).id, !!(c as any).proprio) }
+    }
+    // Il costo del ponte e' il costo_spedizione del master: a cliente e agente non serve e non va, quindi
+    // per loro non si legge nemmeno. Prima era un `.clear()` dopo la lettura; con le letture in parallelo
+    // quel punto viene PRIMA che la mappa si riempia, e non avrebbe piu' tolto niente.
+    if (mineId && vedeCostoMaster) {
+      const ponteIds = (spedizioni || [])
+        .filter((s: any) => s.master_id === mineId && corrTipo.get(s.corriere_id) === 'moovexpress')
+        .map((s: any) => s.id)
+      for (let i = 0; i < ponteIds.length; i += 300) {
+        const { data: cs } = await admin.from('spedizioni').select('id,costo_spedizione').in('id', ponteIds.slice(i, i + 300))
+        for (const r of (cs || [])) costoSpedPonte.set((r as any).id, Number((r as any).costo_spedizione) || 0)
+      }
     }
   }
-  // Il costo del ponte e' il costo_spedizione del master: a cliente e agente non serve e non va.
-  if (!vedeCostoMaster) costoSpedPonte.clear()
   // CONDIVISIONE — ACQUIRENTE (vista di chi COMPRA all'ingrosso). Se io compro questa spedizione via
   // corrieri_condivisi, il mio costo VERO e' quello che pago al fornitore, sulla GAMBA col MIO ledger
   // d'acquisto (stesso tracking) — NON il mio listino. Senza, la riga ORIGINATRICE di un sotto-master
@@ -676,7 +731,8 @@ export async function GET(req: NextRequest) {
   // comprato DIRETTO: es. 282224J033553 mostrava a MULTI COSTO 18,00 di listino e margine -4,98, mentre
   // paga Wave 11,73 e guadagna +1,29. Vuota per i master senza acquisti-codice → zero impatto.
   const costoIngrossoAcq = new Map<string, number>()   // originator.id -> costo che pago al fornitore
-  if (!light && mineId && vedeCostoMaster && (spedizioni || []).length) {
+  const caricaIngrosso = async () => {
+    if (!(!light && mineId && vedeCostoMaster && (spedizioni || []).length)) return
     const { data: ccAcq } = await admin.from('corrieri_condivisi')
       .select('cliente_ledger_id').eq('master_id', mineId).eq('stato', 'attiva')
     const mieiLedger = Array.from(new Set((ccAcq || []).map((r: any) => r.cliente_ledger_id).filter(Boolean)))
@@ -692,7 +748,43 @@ export async function GET(req: NextRequest) {
       for (const s of (spedizioni || [])) if (s.tracking_number && costoPerTrk.has(s.tracking_number)) costoIngrossoAcq.set(s.id, costoPerTrk.get(s.tracking_number)!)
     }
   }
-  segna('tipo-corriere')
+
+  // COLORE DEL CONTRASSEGNO PER LIVELLO, anticipato. Legge solo campi della riga che l'arricchimento
+  // non tocca (id, master, tracking, stato contrassegno, contratto), quindi puo' partire subito invece
+  // di aspettare la fine: era la fase `fine`, 150-300 ms sulle pagine con contrassegni, e fino a 1,2 s.
+  // Le righe gli arrivano nello STESSO ordine di prima (quello del database); con l'ordine per margine
+  // le righe si riordinano in memoria prima del colore, e allora resta dov'era, in fondo.
+  const statiCod = { pronti: null as Map<string, any> | null }
+  const codPrima = !light && !!mineId && ruolo !== 'cliente' && ruolo !== 'agente' && !ordinaMargine
+  const caricaStatiCod = async () => {
+    if (!codPrima) return
+    const codCod = (spedizioni || []).filter((s: any) => Number(s.contrassegno) > 0)
+    if (!codCod.length) return
+    const { statiCodPerLivello } = await import('@/lib/contrassegni-stato-livello')
+    statiCod.pronti = await statiCodPerLivello(admin, mineId, codCod as any[])
+  }
+
+  // TUTTO L'ARRICCHIMENTO IN PARALLELO (20/10/2026). Prima girava in quattro tempi, uno dopo l'altro:
+  // movimenti/ordini/resi/ticket, poi i ripieghi del prezzo, poi tipo corriere, gambe-ponte e
+  // ingrosso, infine il colore dei contrassegni. Su MULTIEXPRESS una pagina da 10 erano una ventina
+  // di andate e ritorno in fila. Ora l'unica attesa che resta e' quella vera: i ripieghi del prezzo
+  // partono quando ci sono i movimenti, perche' servono solo alle righe che un movimento non ce l'hanno.
+  // In LIGHT si salta tutto, come prima: chi la chiede mostra solo i campi base.
+  // I tempi dei pezzi finiscono fra parentesi quadre nella riga [LISTA][TEMPI].
+  if (!light) {
+    const cron = (nome: string, fn: () => Promise<void>) => async () => {
+      const t = Date.now()
+      await fn()
+      dettagli.push(nome + ' ' + (Date.now() - t))
+    }
+    await Promise.all([
+      (async () => { await cron('movimenti', caricaMovimenti)(); await Promise.all([ripiegoListino(), ripiegoCorriere()]) })(),
+      cron('ordini', caricaIdOrdine)(), cron('resi', caricaResi)(), cron('ticket', caricaTicket)(),
+      cron('tipo-corriere', caricaTipiEPonti)(), cron('ingrosso', caricaIngrosso)(),
+      cron('agente', caricaCalcAgente)(), cron('contrassegni', caricaStatiCod)(), cron('distinte', caricaDistinte)(),
+    ])
+    segna('arricchimento')
+  }
   const OLTRE_15GG = Date.now() - 15 * 24 * 60 * 60 * 1000
   // APPENA NATA: la riga della spedizione si salva PRIMA che la catena addebiti i master (27/10, spedizioni
   // 2000, 050063293084645: riga salvata alle 09:30:41.7, lista letta alle 42.197, movimento del master alle
@@ -830,8 +922,9 @@ export async function GET(req: NextRequest) {
       // Chi ha qualcuno sopra guarda la distinta in ENTRATA, il detentore — che incassa dal corriere —
       // guarda la propria. Sostituisce la precedenza del 13/08, che dava verde a chi aveva pagato il suo
       // cliente anche senza aver ricevuto niente dall'alto: quei soldi lui non ce li ha ancora.
-      const { statiCodPerLivello } = await import('@/lib/contrassegni-stato-livello')
-      const stati = await statiCodPerLivello(admin, mineId, codCod as any[])
+      // Di solito e' gia' pronto (calcolato durante l'arricchimento, vedi `caricaStatiCod`).
+      const stati = statiCod.pronti
+        ?? await (await import('@/lib/contrassegni-stato-livello')).statiCodPerLivello(admin, mineId, codCod as any[])
       for (const r of codCod as any[]) {
         const v = stati.get(r.id)
         if (!v) continue
@@ -888,7 +981,7 @@ export async function GET(req: NextRequest) {
   // capire se i secondi percepiti sono accensioni: un totale basso su istanza appena nata lo dice.
   const eta = Math.round(process.uptime())
   // Si logga quando vale la pena guardare: giro lento OPPURE istanza appena accesa.
-  if (totMs > 500 || eta < 5) console.log('[LISTA][TEMPI]', totMs + 'ms', 'istanza=' + eta + 's', 'pag=' + (pageParam || '-'), 'perPage=' + perPage, 'righe=' + (rowsOut || []).length, '|', tempi.join(' '))
+  if (totMs > 500 || eta < 5) console.log('[LISTA][TEMPI]', totMs + 'ms', 'istanza=' + eta + 's', 'pag=' + (pageParam || '-'), 'perPage=' + perPage, 'righe=' + (rowsOut || []).length, '|', tempi.join(' '), dettagli.length ? '[' + dettagli.join(' · ') + ']' : '')
   if (paged) return NextResponse.json({ rows: rowsOut, total: totalePaginato < 0 ? null : totalePaginato, page: pageParam, perPage })
   return NextResponse.json(rowsOut)
 }

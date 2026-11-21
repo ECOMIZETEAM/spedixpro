@@ -277,9 +277,14 @@ export async function chiudiDistintaBrt(supabase: any, distintaId: string) {
     if (!corriere || corriere.tipo !== 'brt') return { skip: true }
 
     // Riferimenti delle spedizioni della distinta (salvati nel raw_response alla creazione).
+    // Le ANNULLATE non si mandano: BRT le rifiuta ("SHIPMENT NOT CONFIRMABLE Shipment is not found with used
+    // references") e la distinta restava in ERRORE per sempre. Caso vero: 81418 di Wave (16/11/2026), un solo
+    // pacco BRT EXPRESS W annullato. Se lo sono tutte, refs resta vuoto e la distinta si chiude come attestata:
+    // non c'e' niente da affidare a BRT (stessa regola della chiusura GLS, lib/gls chiudiGiornataGls).
     const { data: speds } = await admin
-      .from('spedizioni').select('raw_response').eq('distinta_id', distintaId)
+      .from('spedizioni').select('raw_response, stato').eq('distinta_id', distintaId)
     const refs = (speds || [])
+      .filter((s: any) => s?.stato !== 'annullata')
       .map((s: any) => s?.raw_response)
       .filter((r: any) => r && typeof r === 'object' && r.numericRef)
       .map((r: any) => ({ numericRef: Number(r.numericRef), alphaRef: r.alphaRef || null }))

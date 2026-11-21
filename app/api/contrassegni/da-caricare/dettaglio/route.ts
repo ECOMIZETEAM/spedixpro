@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   }
 
   const lette = await fetchAll(() => filtra(admin.from('cod_da_caricare').select('spedizione_id,importo')).order('spedizione_id', { ascending: true }))
-  // MULTIEXPRESS: i resi stanno nel loro riquadro, non nella tendina del gruppo (lib/cod-resi-fermi.ts).
+  // MULTIEXPRESS e LOGIXIA: i resi stanno nel loro riquadro, non nella tendina del gruppo (lib/cod-resi-fermi.ts).
   const rese = fermaIResi(mio) ? await spedizioniRese(admin, lette.map((r: any) => r.spedizione_id)) : new Set<string>()
   const tutte = lette.filter((r: any) => !rese.has(r.spedizione_id))
   const ids = tutte.map((r: any) => r.spedizione_id).filter(Boolean)

@@ -1,6 +1,16 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import DateRangePicker from '@/app/components/DateRangePicker'
+
+// Giorno della distinta nel formato del selettore date: `data` e' gia' un giorno, il ripiego created_at no.
+const giornoDi = (v: any) => {
+  const s = String(v || '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  const d = new Date(s); if (isNaN(d.getTime())) return ''
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+}
+
 export default function ListaDistinteCliente() {
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
@@ -9,12 +19,32 @@ export default function ListaDistinteCliente() {
   const [busy, setBusy] = useState('')
   const [perPagina, setPerPagina] = useState(10)
   const [pagina, setPagina] = useState(1)
+  // FILTRI DATA, CORRIERE E CONTRATTO (clienti, 20/11/2026: «non fa selezionare la data e il corriere»), come
+  // nell'elenco distinte del master. Il periodo parte dalla distinta piu' vecchia: all'apertura si vede tutto.
+  const [dal, setDal] = useState('')
+  const [al, setAl] = useState('')
+  const [fVettore, setFVettore] = useState('')
+  const [fContratto, setFContratto] = useState('')
   useEffect(() => { carica() }, [])
   function carica() {
     setLoading(true)
-    fetch('/api/cliente/distinte/lista').then(r=>r.json()).then(d=>{setDistinte(Array.isArray(d)?d:[]);setLoading(false)}).catch(()=>setLoading(false))
+    fetch('/api/cliente/distinte/lista').then(r=>r.json()).then(d=>{
+      const arr = Array.isArray(d)?d:[]
+      setDistinte(arr)
+      const oggi = giornoDi(new Date().toISOString())
+      setDal(prev => prev || arr.reduce((m:string, x:any)=>{ const g = giornoDi(x.data); return g && g < m ? g : m }, oggi))
+      setAl(prev => prev || oggi)
+      setLoading(false)
+    }).catch(()=>setLoading(false))
   }
-  const visibili = distinte.filter(d => !cerca || d.numero?.toLowerCase().includes(cerca.toLowerCase()) || (d.contratto||'').toLowerCase().includes(cerca.toLowerCase()))
+  const nelPeriodo = distinte.filter(d => { const g = giornoDi(d.data); return (!dal || g >= dal) && (!al || g <= al) })
+  const vettori = Array.from(new Set(nelPeriodo.map(d => d.vettore || 'Altro'))).sort()
+  const contratti = Array.from(new Set(nelPeriodo.filter(d => !fVettore || (d.vettore || 'Altro') === fVettore).map(d => d.contratto || ''))).filter(Boolean).sort()
+  const q = cerca.trim().toLowerCase()
+  const visibili = nelPeriodo
+    .filter(d => !fVettore || (d.vettore || 'Altro') === fVettore)
+    .filter(d => !fContratto || d.contratto === fContratto)
+    .filter(d => !q || String(d.numero||'').toLowerCase().includes(q) || (d.contratto||'').toLowerCase().includes(q) || (d.vettore||'').toLowerCase().includes(q))
   const totPagine = Math.max(1, Math.ceil(visibili.length / perPagina))
   const paginaCorr = Math.min(pagina, totPagine)
   const paginate = visibili.slice((paginaCorr-1)*perPagina, paginaCorr*perPagina)
@@ -95,13 +125,40 @@ export default function ListaDistinteCliente() {
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',display:'flex',alignItems:'center',gap:'8px'}}>
           <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Lista Distinte</span>
-          <input value={cerca} onChange={e=>setCerca(e.target.value)} placeholder="Cerca..." style={{marginLeft:'auto',padding:'6px 12px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a'}}/>
+          <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="Numero, corriere o contratto..." style={{marginLeft:'auto',padding:'6px 12px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',minWidth:'220px',maxWidth:'100%'}}/>
+        </div>
+        <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',display:'flex',gap:'12px',alignItems:'flex-end',flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Data</div>
+            {/* Montato col periodo gia' deciso: vuoto, il selettore si metterebbe da solo su "oggi". */}
+            {dal && al
+              ? <DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2);setPagina(1)}} />
+              : <div style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#999',minWidth:'190px'}}>Caricamento...</div>}
+          </div>
+          <div>
+            <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Corriere</div>
+            <select value={fVettore} onChange={e=>{setFVettore(e.target.value);setFContratto('');setPagina(1)}} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'160px'}}>
+              <option value="">Tutti</option>
+              {/* La scelta resta in elenco anche se nel periodo non ha distinte: sparendo, la tendina
+                  mostrerebbe "Tutti" con il filtro ancora acceso. */}
+              {fVettore && !vettori.includes(fVettore) && <option value={fVettore}>{fVettore}</option>}
+              {vettori.map(v=><option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',marginBottom:'3px'}}>Contratto</div>
+            <select value={fContratto} onChange={e=>{setFContratto(e.target.value);setPagina(1)}} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'210px',maxWidth:'100%'}}>
+              <option value="">Tutti</option>
+              {fContratto && !contratti.includes(fContratto) && <option value={fContratto}>{fContratto}</option>}
+              {contratti.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
         </div>
         <div style={{padding:'10px 16px',fontSize:'12px',color:'#1a1a1a'}}>Mostra{' '}<select value={perPagina} onChange={e=>{setPerPagina(Number(e.target.value));setPagina(1)}} style={{padding:'4px 8px',border:'1px solid #d1d5db',borderRadius:'5px',color:'#1a1a1a'}}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select>{' '}elementi</div>
         {loading ? (
           <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Caricamento...</div>
         ) : !visibili.length ? (
-          <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>Nessuna distinta creata</div>
+          <div style={{padding:'40px',textAlign:'center',color:'#999',fontSize:'13px'}}>{distinte.length ? 'Nessuna distinta con questi filtri' : 'Nessuna distinta creata'}</div>
         ) : (
           <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse'}}>

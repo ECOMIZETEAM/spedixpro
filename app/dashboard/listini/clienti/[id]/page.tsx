@@ -5,6 +5,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereConSupplementi } from '@/lib/supplementi-corriere'
 import ListinoEditor from './ListinoEditor'
 import { leggiSupplementiMulticollo, type SupplementiMulticollo } from '@/lib/multicollo-zone'
+import { statoIvaListino, type StatoIvaListino } from '@/lib/iva-vendita'
 
 export default async function ModificaListinoPage({
   params, searchParams
@@ -134,6 +135,27 @@ export default async function ModificaListinoPage({
     : 5000
   const conSupplementi = await corriereConSupplementi(createAdminSupabase(), corriereSelezionato?.id)
 
+  // IVA INCLUSA O ESCLUSA (Lorenzo, 20/11/2026): come e' venduto oggi il listino, e chi lo usa (clienti e
+  // sotto-master), da mostrare nel riquadro e nella finestra "Da quando vale?". Le scelte stanno in una
+  // tabella che legge solo il client di servizio: il listino qui sopra e' gia' passato dalla RLS, e i
+  // sotto-master si cercano solo fra quelli del master del listino.
+  // Solo lo staff del master che possiede il listino (chi puo' cambiarla): agli altri il riquadro non si mostra.
+  // Se la lettura non riesce il riquadro dice che non e' disponibile, invece di mostrare "IVA esclusa".
+  const { gestisceLaRete: staffDelMaster } = await import('@/lib/ruoli')
+  let ivaStato: StatoIvaListino | null | undefined = undefined
+  const acquirentiIva: string[] = (clientiAssegnati || []).map((c: any) => String(c.ragione_sociale || '').trim()).filter(Boolean)
+  if (staffDelMaster(utente as any) && listino.master_id === utente?.master_id) {
+    try {
+      const adminIva = createAdminSupabase()
+      ivaStato = await statoIvaListino(adminIva, id)
+      const { data: sotto } = await adminIva.from('masters').select('nome').eq('parent_listino_id', id).eq('parent_master_id', listino.master_id)
+      for (const m of sotto || []) if ((m as any).nome) acquirentiIva.unshift(String((m as any).nome).trim() + ' (sotto-master)')
+    } catch (e: any) {
+      console.error('[LISTINI IVA] stato non letto', id, e?.message || e)
+      ivaStato = null
+    }
+  }
+
   return (
     <>
     {preventivoId && (
@@ -159,6 +181,8 @@ export default async function ModificaListinoPage({
       conSupplementi={conSupplementi}
       costoSupplMC={costoSupplMC}
       tipoListino="cliente"
+      ivaStato={ivaStato}
+      acquirentiIva={acquirentiIva}
     />
     </>
   )

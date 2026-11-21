@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useAppNativa, ABBONAMENTO_NON_IN_APP } from '@/lib/app-nativa'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
+import { pollaSeVisibile } from '@/lib/polling-visibile'
 
 const ACCENT = '#f97316'
 
@@ -30,12 +31,10 @@ export default function CongelatoGate() {
       setS(d?.congelato || d?.oltreLimite ? d : null)
     } catch { }
   }
-  useEffect(() => {
-    carica()
-    // Se paga da un'altra scheda il blocco deve cadere da solo, senza dover ricaricare a mano.
-    const t = setInterval(carica, 60000)
-    return () => clearInterval(t)
-  }, [])
+  // Se paga da un'altra scheda il blocco deve cadere da solo, senza dover ricaricare a mano. Mentre e'
+  // nascosta non gira; tornandoci, se nel frattempo e' passato un giro, ricarica subito, altrimenti al
+  // giro che arriva entro il minuto, come prima (lib/polling-visibile).
+  useEffect(() => pollaSeVisibile(carica, 60000), [])
 
   // La pagina Abbonamento resta raggiungibile: e' l'unico posto dove si risolve. Coprirla
   // significherebbe chiudere qualcuno fuori senza dargli la chiave.

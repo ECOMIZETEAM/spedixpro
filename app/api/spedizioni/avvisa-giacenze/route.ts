@@ -41,13 +41,32 @@ export async function GET(req: NextRequest) {
   // Si legge piu' del tetto perche' gli ordini del collegamento Amazon si scartano dopo (al compratore
   // scrive solo Amazon, lib/compratore-amazon): non avvisati restano in coda, e senza margine
   // finirebbero per occupare i posti del giro.
-  const { data: lette, error } = await admin
+  // UN AVVISO PER PACCO, DALLA RIGA DEL CLIENTE. Un condiviso ha una riga per ogni venditore della fila (le gambe dei
+  // conti d'ingrosso), tutte in giacenza insieme: avvisando ogni riga, il destinatario riceveva un avviso per livello,
+  // quelli delle gambe col numero interno della gamba («…-216b3342») e il marchio del venditore. 466 avvisi da gambe
+  // su 340 pacchi in 7 giorni (21/11/2026). Dal 20/11 la giacenza arriva anche sulla riga del cliente (138 pacchi su 138
+  // nelle 24 ore), quindi l'avviso parte da li', una volta sola; e le gambe non occupano piu' posti nella coda.
+  const { data: ledger, error: errLedger } = await admin.from('clienti').select('id').eq('ledger', true)
+  if (errLedger) {
+    console.error('[GIACENZE][AVVISO] conti d\'ingrosso non letti:', errLedger.message)
+    return NextResponse.json({ error: 'lettura fallita' }, { status: 500 })
+  }
+  const idLedger = (ledger || []).map((c: any) => c.id)
+  // any: con i filtri concatenati il tipo di supabase-js supera la profondita' che TypeScript accetta (TS2589).
+  let q: any = admin
     .from('spedizioni')
     .select('id,numero,master_id,cliente_id,dest_email,dest_nome,mitt_email,mitt_nome,tracking_token,giacenza_motivo,giacenza_stato,corrieri(nome_contratto)')
     .not('giacenza_data', 'is', null)
     .is('giacenza_email_dest_at', null)
     .gte('giacenza_data', dal)
-    .limit(MAX_PER_GIRO * 4)
+  if (idLedger.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${idLedger.join(',')})`)
+  // SOLO GIACENZE ANCORA APERTE. Quando il pacco viene consegnato o torna al mittente il database chiude la giacenza
+  // da solo (chiudi_giacenza_su_stato_terminale: 'chiusa'), e qui si saltava solo la svincolata: un pacco consegnato
+  // nel frattempo riceveva «il tuo pacco e' in giacenza» a cose fatte. Il 21/11/2026, su 540 righe in coda, 111 avevano
+  // la giacenza chiusa (96 consegnate, 5 rese) e 100 erano svincolate. Si tolgono gia' dalla lettura, come le gambe:
+  // altrimenti restano in coda fino alla fine della finestra e occupano i posti del giro.
+  q = q.or('giacenza_stato.is.null,giacenza_stato.not.in.(svincolata,chiusa)').not('stato', 'in', '(consegnata,reso_mittente,annullata)')
+  const { data: lette, error } = await q.limit(MAX_PER_GIRO * 4)
 
   if (error) {
     console.error('[GIACENZE][AVVISO] lettura fallita:', error.message)

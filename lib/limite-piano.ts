@@ -1,4 +1,5 @@
 import { meseCorrente } from '@/lib/piani'
+import { isAgente } from '@/lib/agente'
 
 // LIMITE DEL PIANO — lettura dello stato e regola del blocco.
 //
@@ -120,4 +121,43 @@ export function messaggioBlocco(stato: StatoPiano, puoFareUpgrade: boolean): str
       + 'passa a un piano superiore da Abbonamento per riprendere subito a spedire.'
   }
   return 'Spedizioni temporaneamente sospese: contatta il tuo referente.'
+}
+
+// LA RISPOSTA DI /api/piano/stato, per l'avviso in cima alle pagine.
+//
+// Chi vede cosa: un master vede i suoi numeri (spedizioni sue e di tutta la sua rete: e' il
+// traffico che rivende, ed e' quello che consuma il suo pacchetto). Un cliente o un agente NO —
+// il volume del proprio fornitore non e' un dato loro. A loro arriva solo il fatto che al momento
+// non si puo' spedire, senza dire chi ha superato il limite e quanto.
+//
+// La rotta e' chiesta da ogni scheda aperta (blocco canone ogni minuto, banner ogni 5): il piano e il
+// prezzo del master servono SOLO alla risposta dello staff, quindi per cliente e agente non si leggono
+// piu', e per lo staff si leggono INSIEME alla catena dei limiti invece che prima di lei. Stesse
+// domande al database, stessa risposta: un viaggio in meno in fila, e uno in meno del tutto per il
+// cliente. `utente` e' la riga della sessione (master_id, ruolo), letta e verificata dalla rotta.
+export async function rispostaStatoPiano(admin: any, utente: { master_id?: string | null; ruolo?: string | null } | null | undefined) {
+  if (!utente?.master_id) return { bloccato: false }
+  const staff = utente.ruolo !== 'cliente' && !isAgente(utente)
+
+  if (!staff) {
+    const stato = await statoPiano(admin, utente.master_id)
+    return {
+      bloccato: stato.bloccato,
+      messaggio: stato.bloccato ? messaggioBlocco(stato, false) : null,
+    }
+  }
+  const [{ data: mio }, stato] = await Promise.all([
+    admin.from('masters').select('abbonamento_piano,abbonamento_prezzo').eq('id', utente.master_id).maybeSingle(),
+    statoPiano(admin, utente.master_id),
+  ])
+  return {
+    usato: stato.usato, limite: stato.limite, perc: stato.perc,
+    avviso: stato.avviso, bloccato: stato.bloccato, bloccatoDaMe: stato.bloccatoDaMe,
+    congelato: stato.congelato, oltreLimite: stato.oltreIlMio,
+    motivo: stato.motivo, giorniPerPagare: stato.giorniPerPagare, scadenzaPagamento: stato.scadenzaPagamento,
+    // Servono alla schermata di riattivazione: chi e' congelato non puo' navigare fino ad
+    // Abbonamento, quindi il pagamento deve poter partire da li'.
+    piano: mio?.abbonamento_piano || null, prezzo: Number(mio?.abbonamento_prezzo || 0),
+    messaggio: stato.bloccato ? messaggioBlocco(stato, true) : null,
+  }
 }

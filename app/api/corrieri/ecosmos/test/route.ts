@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   const apiKey = String((credRow as any)?.credenziali?.api_key || '')
   if (!apiKey) return NextResponse.json({ error: 'Chiave API non inserita nel contratto.' }, { status: 400 })
 
-  const { pingEcosmos, serviziEcosmos, coperturaEcosmos } = await import('@/lib/ecosmos')
+  const { pingEcosmos, serviziEcosmos, coperturaEcosmos, chiaveEcosmosDiProva } = await import('@/lib/ecosmos')
   const cred = { api_key: apiKey }
   const servizioContratto = String((c as any)?.settings?.servizio || 'express_24h')
   try {
@@ -43,10 +43,12 @@ export async function POST(req: Request) {
     const cop = await coperturaEcosmos(cred, '00184')
     return NextResponse.json({
       ok: true,
-      account: ping.account, ambiente: ping.ambiente, richiedeConferma: ping.richiedeConferma,
+      account: ping.account, idCliente: ping.idCliente, ambiente: ping.ambiente, richiedeConferma: ping.richiedeConferma,
+      // Chiave di prova: la connessione e' buona ma le spedizioni vere non partono (lib/ecosmos.ts).
+      chiaveDiProva: chiaveEcosmosDiProva(apiKey),
       servizi: srv.servizi.map((s) => s.code), servizioContratto,
       servizioAttivo: srv.servizi.some((s) => s.code === servizioContratto),
-      orarioLimite: srv.orarioLimite, contrassegno: srv.contrassegno, pesoMassimo: srv.pesoMassimo, fasce: srv.fasce,
+      orarioLimite: srv.orarioLimite, contrassegno: srv.contrassegno, pesoMassimo: srv.pesoMassimo,
       coperturaRoma: { cap: '00184', servito: cop.servito, servizi: cop.servizi },
     })
   } catch (e: any) {

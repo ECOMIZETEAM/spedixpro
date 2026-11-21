@@ -1,5 +1,6 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
+import { ricordaNellaRichiesta, chiaveDi } from '@/lib/memo-richiesta'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome, detentoreContratto } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
@@ -111,7 +112,7 @@ export async function accessoriDelLivello(
 // altrove con una copia della logica, le due si allontanerebbero al primo ritocco e la rettifica
 // direbbe una cifra che non e' la differenza fra due prezzi confrontabili.
 // Non scrive niente: costruisce la catena e i prezzi, e basta.
-export async function costruisciCatena(
+async function costruisciCatenaGrezza(
   supabase: any,
   params: {
     masterDirettoId: string
@@ -142,8 +143,11 @@ export async function costruisciCatena(
     mittProvincia?: string
     mittPaese?: string
   }
-): Promise<{ catena: LivelloCatena[]; errore?: string }> {
+): Promise<{ catena: LivelloCatena[]; errore?: string; dipendeDalCosto?: boolean }> {
   const catena: LivelloCatena[] = []
+  // true se un livello ha preso il costo dal fornitore (detentore senza listino): allora la catena vale solo
+  // per QUEL costo, e il riuso nella richiesta (costruisciCatena) non la riusa con un costo diverso.
+  let dipendeDalCosto = false
   let currentId: string | null = params.masterDirettoId
   // RLS: la catena e' cross-tenant per natura -> client admin (auth verificata a monte)
   const adminDb = createAdminSupabase()
@@ -161,15 +165,28 @@ export async function costruisciCatena(
   const { detentore: ownerReale, dichiaratoProprio: contrattoDichiaratoProprio } =
     await detentoreContratto(adminDb, params.corriereOwnerId, params.corriereNome)
 
+  // SALIRE PRIMA, PREZZARE INSIEME (20/11/2026). La creazione costruisce la catena due volte (controllo del
+  // credito prima del corriere, addebiti dopo) e ogni livello costa circa 0,3 s di letture: con tre livelli,
+  // quasi due secondi a creazione su 4-10 (cronometro [CREA][TEMPI]). Il costo di un livello NON dipende dagli
+  // altri — legge il suo listino, il suo contratto, il suo fornitore — quindi: prima si sale la catena (una
+  // lettura per master, serve a sapere chi sta sopra), poi si prezzano tutti i livelli insieme, poi la si
+  // rimonta NELL'ORDINE di prima. Il risultato e' lo stesso anche negli errori: ci si ferma al primo livello
+  // che ne ha uno, e l'eccezione di un livello piu' in alto non scavalca l'errore di uno piu' in basso
+  // (prima quel livello non sarebbe nemmeno stato calcolato). Verificato vecchia contro nuova su spedizioni vere.
+  const saliti: any[] = []
+  let erroreSalita: string | null = null
   for (let i = 0; i < 20 && currentId; i++) {
     const { data: m }: any = await adminDb
       .from('masters')
       .select('id,nome,tipo_contratto,credito,credito_proprio,parent_master_id,parent_listino_id')
       .eq('id', currentId).single()
-    if (!m) {
-      return { catena, errore: 'Catena master non leggibile: impossibile verificare i livelli.' }
-    }
+    if (!m) { erroreSalita = 'Catena master non leggibile: impossibile verificare i livelli.'; break }
+    saliti.push(m)
+    if (m.id === ownerReale) break
+    currentId = m.parent_master_id
+  }
 
+  const prezzaLivello = async (m: any): Promise<{ voce?: LivelloCatena; errore?: string }> => {
     const isProprietario = m.id === ownerReale
     let prezzo = 0
 
@@ -237,9 +254,10 @@ export async function costruisciCatena(
     if (!calcolato) {
       if (isProprietario) {
         prezzo = Number(params.costoSpedizione || 0)
+        dipendeDalCosto = true
       } else {
         if (!m.parent_listino_id) {
-          return { catena, errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato.` }
+          return { errore: `Il master "${m.nome}" non ha un listino corrieri né un listino assegnato.` }
         }
         // IL RIPIEGO SUL LISTINO DEL PADRE DEVE PREZZARE QUESTO CONTRATTO, NON IL PIU' ECONOMICO.
         // Senza corriereId, calcolaPrezzoListino sceglie la tariffa piu' bassa di TUTTO il listino: una
@@ -261,7 +279,7 @@ export async function costruisciCatena(
           zonaForzata: params.zonaForzata,
           mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
         })
-        if (!ris) return { catena, errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
+        if (!ris) return { errore: `Nessuna tariffa nel listino del master "${m.nome}".` }
         prezzo = ris.prezzo
         zonaLivello = ris.zona
         volumeLivello = ris.peso_volume
@@ -279,7 +297,7 @@ export async function costruisciCatena(
     // bloccherebbero le spedizioni di tutti.
     const eVertice = !m.parent_master_id || m.parent_master_id === radiceId
     const pagaDalSuoConto = isProprietario && contrattoDichiaratoProprio && !eVertice
-    catena.push({
+    return { voce: {
       masterId: m.id, nome: m.nome,
       tipoContratto: m.tipo_contratto || 'credito_scalare',
       credito: Number((pagaDalSuoConto ? m.credito_proprio : m.credito) || 0),
@@ -287,11 +305,35 @@ export async function costruisciCatena(
       pagaDalSuoConto,
       contrassegnoOltreMax: codOltreMax, assicurazioneOltreMax: assOltreMax,
       accessoriNonPrezzati: accNonPrezzati,
-    })
-
-    if (isProprietario) break
-    currentId = m.parent_master_id
+    } }
   }
+
+  const esiti = await Promise.all(saliti.map(m => prezzaLivello(m).then(r => ({ r, e: null as any }), (e: any) => ({ r: null as any, e }))))
+  for (const x of esiti) {
+    if (x.e) throw x.e
+    if (x.r.errore) return { catena, errore: x.r.errore }
+    catena.push(x.r.voce!)
+  }
+  if (erroreSalita) return { catena, errore: erroreSalita }
+
+  return { catena, dipendeDalCosto }
+}
+// RIUSO NELLA RICHIESTA (lib/memo-richiesta). La creazione e l'API pubblica chiamano questa funzione due volte con
+// gli stessi ingressi (controllo del credito, poi addebiti): la seconda riusa la catena della prima invece di
+// rileggere tutto (circa mezzo secondo a creazione). Cambia solo `costoSpedizione` (0 al controllo, il costo vero
+// del corriere agli addebiti), che serve al ritocco del detentore qui sotto: si applica ogni volta su una copia.
+// Se la catena l'ha gia' usato per prezzare un livello (detentore senza listino) e il costo e' diverso, si ricalcola.
+// Fuori da una creazione (rettifiche, giri automatici) nessuna memoria: si calcola come sempre.
+export async function costruisciCatena(
+  supabase: any,
+  params: Parameters<typeof costruisciCatenaGrezza>[1],
+): Promise<{ catena: LivelloCatena[]; errore?: string }> {
+  const costo = Number(params.costoSpedizione || 0)
+  const { costoSpedizione: _c, ...ingressi } = params
+  let g = await ricordaNellaRichiesta('catena:' + chiaveDi(ingressi), async () => ({ ...(await costruisciCatenaGrezza(supabase, params)), costoUsato: costo }))
+  if (g.dipendeDalCosto && g.costoUsato !== costo) g = { ...(await costruisciCatenaGrezza(supabase, params)), costoUsato: costo }
+  const catena = g.catena
+  if (g.errore) return { catena, errore: g.errore }
 
   // ── FLOOR ANTI-SOTTO-COSTO: SOLO SUL DETENTORE DEL CONTRATTO ──
   // Il costo reale del provider (`costoSpedizione` = quotation/shipmentCost per SpediamoPro/DVA/Spedisci)
@@ -322,6 +364,7 @@ export async function costruisciCatena(
 
   return { catena }
 }
+
 
 // UN MASTER HA DAVVERO DUE CONTI?
 // Stessa condizione che qui sopra decide su quale conto finisce il costo, tenuta in una funzione
@@ -475,7 +518,13 @@ export async function verificaCreditoCatena(
   return { ok: true }
 }
 
-export async function addebitaCatena(
+// Un addebito sul conto di un master, pronto da scrivere con registraMovimentoMaster (lib/movimenti).
+export type MovimentoMaster = Parameters<typeof registraMovimentoMaster>[1]
+
+// GLI ADDEBITI DELLA CASCATA, CALCOLATI SENZA SCRIVERLI (fase 3 di PONTE-UNICO.md). Erano dentro addebitaCatena,
+// qui sotto, che ora li prende da qui e li scrive come prima. Il ponte unico dei condivisi li prende dalla stessa
+// funzione e li scrive nella sua transazione: una regola sola per chi paga cosa, per tutte e due le strade.
+export async function movimentiCatena(
   supabase: any,
   params: {
     masterDirettoId: string
@@ -504,8 +553,8 @@ export async function addebitaCatena(
     mittProvincia: string
     mittPaese: string
   }
-): Promise<void> {
-  const adminMov = createAdminSupabase()
+): Promise<MovimentoMaster[]> {
+  const movimenti: MovimentoMaster[] = []
   const { catena } = await costruisciCatena(supabase, {
     masterDirettoId: params.masterDirettoId,
     corriereOwnerId: params.corriereOwnerId,
@@ -533,19 +582,30 @@ export async function addebitaCatena(
     // MoovExpress incassa comunque la commissione fissa (trigger fee su spedizioni), che resta a parte.
     // (Il 17/08 un salto aveva spento questa traccia lasciando solo la commissione; ripristinato il
     //  22/09 con l'owner: il detentore deve vedere il suo costo, non €64 di sole commissioni.)
+    movimenti.push({
+      masterOwnerId: liv.masterId,
+      masterTargetId: liv.masterId,
+      tipo: 'spedizione',
+      descrizione: descrizioneSpedizione(params.numero, params.destNome),
+      riferimento: params.numero,
+      importo: -Math.abs(liv.prezzo),
+      spedizioneId: params.spedizioneId,
+      createdBy: params.createdBy,
+    })
+  }
+  return movimenti
+}
+
+export async function addebitaCatena(
+  supabase: any,
+  params: Parameters<typeof movimentiCatena>[1],
+): Promise<void> {
+  const adminMov = createAdminSupabase()
+  for (const m of await movimentiCatena(supabase, params)) {
     try {
-      await registraMovimentoMaster(adminMov, {
-        masterOwnerId: liv.masterId,
-        masterTargetId: liv.masterId,
-        tipo: 'spedizione',
-        descrizione: descrizioneSpedizione(params.numero, params.destNome),
-        riferimento: params.numero,
-        importo: -Math.abs(liv.prezzo),
-        spedizioneId: params.spedizioneId,
-        createdBy: params.createdBy,
-      })
+      await registraMovimentoMaster(adminMov, m)
     } catch (e) {
-      console.error(`Errore addebito cascata su master ${liv.masterId}:`, e)
+      console.error(`Errore addebito cascata su master ${m.masterTargetId}:`, e)
     }
   }
 }

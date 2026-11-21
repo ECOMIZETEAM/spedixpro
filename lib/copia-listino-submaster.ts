@@ -1,4 +1,5 @@
 import { fetchAll } from '@/lib/fetch-all'
+import { leggiZoneCap } from '@/lib/zone-cap'
 import { pontiCodiceDi } from '@/lib/ponti-codice'
 
 // Chiavi di IMPOSTAZIONI DI CONTRATTO che si propagano al sotto-master (NON il mittente,
@@ -221,9 +222,10 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   // round-trip solo per leggere). L'embed annidato non si usa perche' si fermerebbe a 1000 righe.
   const capSrcPerZona = new Map<string, any[]>()
   {
-    const tutti = zonaIds.length
-      ? await fetchAll(() => admin.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds).order('id', { ascending: true }))
-      : []
+    // Una lettura sola, in ordine di id (lib/zone-cap): prima a blocchi da 1.000 in fila.
+    let tutti: any[]
+    try { tutti = await leggiZoneCap(admin, zonaIds as string[], null, { stretto: true }) }
+    catch (e: any) { console.error('[copia-listino]', subMasterId, e?.message); return { ok: false, reason: 'CAP delle zone non leggibili: CAP del sotto-master non toccati' } }
     for (const r of tutti) {
       const k = (r as any).zona_id
       if (!capSrcPerZona.has(k)) capSrcPerZona.set(k, [])
@@ -238,9 +240,9 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const capMieiPerZona = new Map<string, any[]>()
   {
     const idsMiei = (zoneMiei || []).map((z: any) => z.id)
-    const tutti = idsMiei.length
-      ? await fetchAll(() => admin.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', idsMiei).order('id', { ascending: true }))
-      : []
+    let tutti: any[]
+    try { tutti = await leggiZoneCap(admin, idsMiei as string[], null, { stretto: true }) }
+    catch (e: any) { console.error('[copia-listino]', subMasterId, e?.message); return { ok: false, reason: 'CAP delle zone non leggibili: CAP del sotto-master non toccati' } }
     for (const r of tutti) {
       const k = (r as any).zona_id
       if (!capMieiPerZona.has(k)) capMieiPerZona.set(k, [])

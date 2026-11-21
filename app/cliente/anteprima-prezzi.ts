@@ -21,8 +21,10 @@
  * l'elenco di tutti i contratti disponibili, e la scelta si rifa' qui. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Collo } from '@/lib/colli-ordine'
+import type { RegimeIva } from '@/lib/iva-calcolo'
 
-export type TariffaAnteprima = { corriere_id: string; nome: string; prezzo: number }
+// iva / aliquota: come e' scritto il prezzo, per l'etichetta "IVA escl." / "IVA incl." / "Esente IVA" (la mette la rotta).
+export type TariffaAnteprima = { corriere_id: string; nome: string; prezzo: number; iva?: RegimeIva | null; aliquota?: number }
 
 // Cio' che entra nel prezzo di un ordine. La pagina costruisce da QUESTO oggetto sia la riga
 // dell'anteprima sia i dati mandati alla creazione: stessi valori, stesso prezzo.
@@ -56,6 +58,13 @@ const NESSUN_CORRIERE = 'Nessun corriere disponibile per questa spedizione.'
 // Senza un tetto, un server che non risponde verrebbe richiamato all'infinito da ogni pagina aperta.
 const RIPROVE_AUTOMATICHE = 2
 const ATTESA_RIPROVA_MS = 8000
+
+// PAUSA prima di chiedere al server le righe cambiate. Senza, ogni tasto nella casella di ricerca (o
+// in una cella di peso o CAP dell'import) cambiava le righe da prezzare e il primo cambio partiva
+// subito: un blocco da secondi per righe che un tasto dopo non erano piu' a schermo. Il 19/10/2026
+// 4.241 chiamate, mediana 2,67 s. Vale solo per i CAMBI di righe: la prima apertura, "Riprova" e i
+// ritentativi partono subito.
+const ATTESA_CAMBIO_MS = 400
 
 // LA SCELTA DEL CONTRATTO. `scelta` e' il valore della tendina "Spedisci con": 'min' / 'auto' =
 // prezzo minore, altrimenti l'id di un contratto. Le tariffe arrivano gia' ordinate dal server dalla
@@ -96,10 +105,11 @@ const conColloDiPrima = (r: RigaPrezzo) => ({
   collo: { ...r.colli[0], weight: r.colli.reduce((s, c) => s + (Number(c.weight) || 0), 0) },
 })
 
-async function chiediBlocco(righe: RigaPrezzo[], mittente: MittentePrezzo): Promise<Map<string, RispostaRiga>> {
+async function chiediBlocco(righe: RigaPrezzo[], mittente: MittentePrezzo, segnale?: AbortSignal): Promise<Map<string, RispostaRiga>> {
   const res = await fetch('/api/cliente/anteprima-prezzi', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mittente, righe: righe.map(conColloDiPrima) }),
+    signal: segnale,
   })
   const dati = await res.json().catch(() => null)
   if (!res.ok || !dati || !Array.isArray(dati.righe)) {
@@ -182,10 +192,24 @@ export function useAnteprimaPrezzi(righe: RigaPrezzo[], mittente: MittentePrezzo
   // cui e' stato scritto si ricordano, per poterle far ripartire se il rifiuto cade (vedi registra).
   const rifiuto = useRef<{ testo: string; cap: string; provincia: string } | null>(null)
   const rifiutate = useRef(new Set<string>())
+  // RISPOSTE PER DATI, non per ordine: la chiave e' la firma (tutto cio' che entra nel prezzo, mittente
+  // compreso), cioe' tutto cio' che la rotta legge di una riga. Due ordini con gli stessi dati, o lo
+  // stesso ordine riportato a un peso gia' calcolato, prendono la risposta gia' arrivata invece di
+  // richiederla. Solo risposte definitive (un inciampo no); "Spedisci" la azzera (vedi registra).
+  const perFirma = useRef(new Map<string, RispostaRiga>())
+  // Quando sono cambiate per l'ultima volta le righe da prezzare (vedi ATTESA_CAMBIO_MS).
+  const ultimoCambio = useRef(0)
+  const chiavePrima = useRef('')
+  // Il blocco in viaggio, per poterlo annullare quando tutte le sue righe hanno ormai altri dati.
+  const controlloVolo = useRef<AbortController | null>(null)
 
   useEffect(() => {
     vivo.current = true
-    return () => { vivo.current = false; if (sveglia.current) { clearTimeout(sveglia.current); sveglia.current = null } }
+    return () => {
+      vivo.current = false
+      if (sveglia.current) { clearTimeout(sveglia.current); sveglia.current = null }
+      controlloVolo.current?.abort()
+    }
   }, [])
   useEffect(() => { attivaOra.current = attiva }, [attiva])
 
@@ -206,24 +230,48 @@ export function useAnteprimaPrezzi(righe: RigaPrezzo[], mittente: MittentePrezzo
           if (!posto.current.has(v.riga.id)) { ultima.current.delete(v.riga.id); return false }
           return true
         }).sort((a, b) => (posto.current.get(a.riga.id) as number) - (posto.current.get(b.riga.id) as number))
+        // Righe con gli stessi dati di una appena arrivata (stavano in coda dietro di lei): prendono
+        // quella risposta, senza un'altra chiamata.
+        const giaNote: Record<string, Voce> = {}
+        coda.current = coda.current.filter(v => {
+          const r = perFirma.current.get(v.firma)
+          if (!r) return true
+          tentativi.current.delete(v.riga.id)
+          giaNote[v.riga.id] = { firma: v.firma, esito: esitoDi(r) }
+          return false
+        })
+        if (Object.keys(giaNote).length) setVoci(prev => ({ ...prev, ...giaNote }))
         if (!coda.current.length) break
+        // Le righe sono appena cambiate (si sta scrivendo, o girando pagina): si aspetta che si
+        // fermino, poi si riguarda la coda da capo, che nel frattempo puo' essere un'altra.
+        const attesa = ultimoCambio.current + ATTESA_CAMBIO_MS - Date.now()
+        if (attesa > 0) { await new Promise(r => setTimeout(r, attesa)); continue }
 
-        // Un blocco = righe con lo STESSO mittente.
+        // Un blocco = righe con lo STESSO mittente, e una sola riga per firma: le altre con gli
+        // stessi dati restano in coda e al giro dopo prendono la sua risposta (qui sopra).
         const primo = coda.current[0]
         const stessoMittente = (v: InCoda) => v.mittente.cap === primo.mittente.cap && v.mittente.provincia === primo.mittente.provincia
         const blocco: InCoda[] = []
         const resto: InCoda[] = []
+        const firmeNelBlocco = new Set<string>()
         for (const v of coda.current) {
-          if (blocco.length < RIGHE_PER_CHIAMATA && stessoMittente(v)) blocco.push(v)
+          if (blocco.length < RIGHE_PER_CHIAMATA && stessoMittente(v) && !firmeNelBlocco.has(v.firma)) { blocco.push(v); firmeNelBlocco.add(v.firma) }
           else resto.push(v)
         }
         coda.current = resto
         inVolo.current = blocco
+        const controllo = new AbortController()
+        controlloVolo.current = controllo
         let risposte: Map<string, RispostaRiga> | null = null
         let guasto: any = null
-        try { risposte = await chiediBlocco(blocco.map(v => v.riga), primo.mittente) } catch (e) { guasto = e }
+        try { risposte = await chiediBlocco(blocco.map(v => v.riga), primo.mittente, controllo.signal) } catch (e) { guasto = e }
         inVolo.current = []
+        controlloVolo.current = null
         if (!vivo.current) return
+        // ANNULLATO perche' tutte le sue righe erano cambiate (vedi l'effetto qui sotto): non e' un
+        // inciampo e non conta come tentativo. Niente da rimettere in coda: una riga tornata ai dati
+        // di prima l'ha gia' rimessa l'effetto, con una richiesta sua.
+        if (controllo.signal.aborted) continue
         const attuale = (v: InCoda) => !v.superata && ultima.current.get(v.riga.id) === v.firma
         const arrivate: Record<string, Voce> = {}
 
@@ -243,8 +291,11 @@ export function useAnteprimaPrezzi(righe: RigaPrezzo[], mittente: MittentePrezzo
 
         let daRitentare = false
         for (const v of blocco) {
-          if (!attuale(v)) continue                                        // nel frattempo e' cambiata
           const r = risposte?.get(v.riga.id)
+          // Una risposta definitiva vale per QUEI dati anche se nel frattempo la riga e' cambiata:
+          // se ci torna (un peso scritto e poi rimesso com'era), non si richiede.
+          if (r && !r.riprova && !v.superata) perFirma.current.set(v.firma, r)
+          if (!attuale(v)) continue                                        // nel frattempo e' cambiata
           if (r && !r.riprova) {
             tentativi.current.delete(v.riga.id)
             arrivate[v.riga.id] = { firma: v.firma, esito: esitoDi(r) }
@@ -273,6 +324,10 @@ export function useAnteprimaPrezzi(righe: RigaPrezzo[], mittente: MittentePrezzo
   const chiave = attiva && mittente ? 'attiva\n' + righe.map(r => r.id + '|' + firmaRiga(r, mittente)).join('\n') : ''
   useEffect(() => {
     if (!chiave || !mittente) return
+    // Righe CAMBIATE rispetto al giro prima: la richiesta aspetta la pausa (ATTESA_CAMBIO_MS). La
+    // prima apertura e i nuovi giri sulle stesse righe ("Riprova", ritentativi) no.
+    if (chiavePrima.current && chiavePrima.current !== chiave) ultimoCambio.current = Date.now()
+    chiavePrima.current = chiave
     posto.current = new Map(righe.map((r, i) => [r.id, i]))
     const fermo = rifiuto.current && rifiuto.current.cap === mittente.cap && rifiuto.current.provincia === mittente.provincia
       ? rifiuto.current.testo : null
@@ -283,11 +338,27 @@ export function useAnteprimaPrezzi(righe: RigaPrezzo[], mittente: MittentePrezzo
       if (ultima.current.get(riga.id) === firma) continue                  // gia' chiesta cosi'
       ultima.current.set(riga.id, firma)
       if (fermo) { scritte[riga.id] = { firma, esito: { stato: 'errore', errore: fermo } }; rifiutate.current.add(riga.id); continue }
+      const nota = perFirma.current.get(firma)
+      if (nota) { tentativi.current.delete(riga.id); scritte[riga.id] = { firma, esito: esitoDi(nota) }; continue }
       scritte[riga.id] = { firma, esito: { stato: 'calcolo' } }
       nuove.push({ riga, firma, mittente })
     }
     if (Object.keys(scritte).length) setVoci(prev => ({ ...prev, ...scritte }))
     coda.current.push(...nuove)
+    // IL BLOCCO IN VIAGGIO E' SUPERATO se, a scrittura ferma, tutte le sue righe hanno dati diversi
+    // (un peso o un CAP riscritto mentre il server calcolava): lo si annulla, e la coda passa subito
+    // ai dati di adesso invece di aspettare secondi una risposta da buttare. Si decide dopo la pausa,
+    // non al primo tasto: chi riscrive il valore di prima ritrova la risposta in arrivo. Un blocco
+    // con righe solo uscite dallo schermo NON si annulla: i suoi prezzi valgono ancora e servono se
+    // le righe tornano (cancellando la ricerca), e il server il calcolo lo finisce comunque.
+    if (inVolo.current.length) {
+      const volo = controlloVolo.current
+      setTimeout(() => {
+        if (!volo || controlloVolo.current !== volo) return               // quel blocco e' gia' tornato
+        if (Date.now() - ultimoCambio.current < ATTESA_CAMBIO_MS) return   // si scrive ancora: decide il cambio dopo
+        if (inVolo.current.every(v => v.superata || ultima.current.get(v.riga.id) !== v.firma)) volo.abort()
+      }, ATTESA_CAMBIO_MS)
+    }
     // Si chiama anche senza righe nuove: e' cio' che fa ripartire la coda dopo una sospensione, e
     // cio' che la sfoltisce quando la pagina ha cambiato le righe che vuole.
     void svuota()
@@ -308,10 +379,15 @@ export function useAnteprimaPrezzi(righe: RigaPrezzo[], mittente: MittentePrezzo
   // addebitato": i nuovi starebbero solo in una variabile del clic, e niente fa scadere i vecchi.
   const registra = useCallback((righeRegistrate: RigaPrezzo[], mittenteUsato: MittentePrezzo, risposte: Map<string, RispostaRiga>) => {
     const scritte: Record<string, Voce> = {}
+    // Prezzi appena ricalcolati: le risposte tenute per firma possono essere piu' vecchie (un listino
+    // cambiato nel frattempo). Le righe gia' a schermo restano come sono, come prima; quelle che si
+    // chiederanno da qui in poi vanno al server, non a una risposta di prima.
+    perFirma.current.clear()
     for (const riga of righeRegistrate) {
       const r = risposte.get(riga.id)
       if (!r) continue
       const firma = firmaRiga(riga, mittenteUsato)
+      if (!r.riprova) perFirma.current.set(firma, r)
       ultima.current.set(riga.id, firma)
       tentativi.current.delete(riga.id)
       scritte[riga.id] = { firma, esito: esitoDi(r) }

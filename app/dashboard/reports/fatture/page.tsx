@@ -97,18 +97,24 @@ export default function ReportFatturePage() {
         const pC = new URLSearchParams(base); pC.set('clienteId', filtri.clienteId)
         const d = await leggi('/api/reports/fatture?' + pC.toString(), 'Movimenti del cliente')
         testata = ['Data', 'Voce', 'Descrizione', 'Importo €']
-        const voce = new Map<string, string>((d.righe || []).map((r: any) => [r.voce, r.descrizione]))
-        corpo = (d.movimenti || []).map((m: any) => [new Date(m.created_at).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }), voce.get(m.voce) || m.voce, m.descrizione, eur(m.importo)])
+        // Il nome della voce senza «— esente IVA»: la stessa voce puo' avere una riga normale e una esente, e
+        // il movimento dice da se' se e' esente (marchio qui sotto).
+        const voce = new Map<string, string>((d.righe || []).map((r: any) => [r.voce, r.esente ? String(r.descrizione).replace(/ — esente IVA$/, '') : r.descrizione]))
+        corpo = (d.movimenti || []).map((m: any) => [new Date(m.created_at).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }), (voce.get(m.voce) || m.voce) + (m.iva_inclusa ? ' (IVA incl.)' : m.esente ? ' (esente IVA)' : ''), m.descrizione, eur(m.importo)])
         if (corpo.length) {
           corpo.push([], ...(d.righe || []).map((r: any) => ['', r.descrizione, `${r.quantita}`, eur(r.importo)]),
-            ['', '', 'IMPONIBILE', eur(d.imponibile)], ['', '', `IVA (${d.aliquota}%)`, eur(d.iva)], ['', '', 'TOTALE', eur(d.totale)])
+            ['', '', 'IMPONIBILE', eur(d.imponibile)], ['', '', `IVA (${d.aliquota}%)`, eur(d.iva)],
+            // Venduto esente IVA (21/11/2026): fuori dall'imponibile, dentro il totale.
+            ...(d.esente ? [['', '', 'ESENTE IVA', eur(d.esente)]] : []), ['', '', 'TOTALE', eur(d.totale)])
+          // Spedizioni vendute IVA inclusa: nelle voci sono al netto, l'IVA che contenevano e' nel totale IVA.
+          if (d.ivaInclusa?.lordo) corpo.push(['', '', `di cui già pagati IVA compresa: € ${eur(d.ivaInclusa.lordo)} (IVA compresa € ${eur(d.ivaInclusa.iva)}), qui al netto`, ''])
         }
         const fuori = d.aMano || []
         if (fuori.length) {
           corpo.push([], ['', 'VOCI SCRITTE A MANO (non incluse nel totale)', '', ''],
             ...fuori.map((m: any) => [new Date(m.created_at).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }), 'Voce a mano', m.descrizione, eur(m.importo)]))
         }
-        riepilogo = `${(d.movimenti || []).length} movimenti · imponibile € ${eur(d.imponibile)} · IVA € ${eur(d.iva)} · totale € ${eur(d.totale)}`
+        riepilogo = `${(d.movimenti || []).length} movimenti · imponibile € ${eur(d.imponibile)} · IVA € ${eur(d.iva)}` + (d.esente ? ` · esente IVA € ${eur(d.esente)}` : '') + ` · totale € ${eur(d.totale)}`
           + (fuori.length ? ` · ${fuori.length} voci a mano fuori dal totale` : '')
       } else {
         // Sotto-master (e spedizioni senza cliente) dalla lettura di sempre; i clienti dalla regola della proforma.
@@ -122,16 +128,31 @@ export default function ReportFatturePage() {
         ])
         if (!Array.isArray(sped) || !Array.isArray(rett)) throw new Error('Risposta del report spedizioni non valida')
         const diCliente = (id: any) => /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(id || ''))
-        type Riga = { nome: string; n: number; sped: number; rett: number; giac: number; resi: number; servizi: number; aMano: number; rimborsi: number; aliquota: number }
-        const vuota = (nome: string, aliquota: number): Riga => ({ nome, n: 0, sped: 0, rett: 0, giac: 0, resi: 0, servizi: 0, aMano: 0, rimborsi: 0, aliquota })
+        // `esente`: tutto quello venduto esente IVA (21/11/2026), di qualunque voce: fuori dall'imponibile, dentro il totale.
+        type Riga = { nome: string; n: number; sped: number; rett: number; giac: number; resi: number; servizi: number; aMano: number; rimborsi: number; esente: number; aliquota: number }
+        const vuota = (nome: string, aliquota: number): Riga => ({ nome, n: 0, sped: 0, rett: 0, giac: 0, resi: 0, servizi: 0, aMano: 0, rimborsi: 0, esente: 0, aliquota })
         const per = new Map<string, Riga>()
         const riga = (id: string, nome: string, aliquota: any) => { let v = per.get(id); if (!v) { v = vuota(nome || '—', aliq(aliquota)); per.set(id, v) } return v }
-        for (const s of sped) { if (diCliente(s.diretto_id)) continue; const v = riga(s.diretto_id, s.diretto_nome, s.aliquota_iva); v.n++; v.sped += Number(s.costo_totale) || 0 }
-        for (const r of rett) { if (diCliente(r.diretto_id)) continue; riga(r.diretto_id, r.diretto_nome, r.aliquota_iva).rett += Number(r.importo) || 0 }
+        // Le righe vendute IVA inclusa entrano al NETTO (scorporo, lib/iva-calcolo): l'IVA che contengono
+        // torna nel totale IVA calcolato sull'imponibile, come per i clienti (lib/fatture/voci.ts). Quelle
+        // esenti vanno nella colonna «Esente IVA».
+        const { dividiPrezzo, regimeDi } = await import('@/lib/iva-calcolo')
+        const parte = (importo: any, aliquota: any, x: any) => dividiPrezzo(Number(importo) || 0, aliq(aliquota), regimeDi(x.iva_regime ?? x.iva_inclusa))
+        for (const s of sped) {
+          if (diCliente(s.diretto_id)) continue
+          const v = riga(s.diretto_id, s.diretto_nome, s.aliquota_iva); v.n++
+          const d = parte(s.costo_totale, s.aliquota_iva, s); v.sped += d.imponibile; v.esente += d.esente
+        }
+        for (const r of rett) {
+          if (diCliente(r.diretto_id)) continue
+          const v = riga(r.diretto_id, r.diretto_nome, r.aliquota_iva)
+          const d = parte(r.importo, r.aliquota_iva, r); v.rett += d.imponibile; v.esente += d.esente
+        }
         for (const x of perCliente.clienti || []) {
           const v = riga(x.id, x.nome, x.aliquota)
           for (const r of x.righe) {
-            if (r.voce === 'spedizione') { v.sped += r.importo; v.n += r.quantita }
+            if (r.esente) { v.esente += r.importo; if (r.voce === 'spedizione') v.n += r.quantita }
+            else if (r.voce === 'spedizione') { v.sped += r.importo; v.n += r.quantita }
             else if (r.voce === 'rettifica') v.rett += r.importo
             else if (r.voce === 'giacenza') v.giac += r.importo
             else if (r.voce === 'reso') v.resi += r.importo
@@ -143,14 +164,18 @@ export default function ReportFatturePage() {
         // Le voci a mano NON sono nell'imponibile: colonna a parte, per vederle.
         const imp = (v: Riga) => c2(v.sped + v.rett + v.giac + v.resi + v.servizi + v.rimborsi)
         const ivaDi = (v: Riga) => c2(imp(v) * v.aliquota / 100)
-        const voci = [...per.values()].sort((a, b) => imp(b) - imp(a))
+        const es = (v: Riga) => c2(v.esente)
+        const voci = [...per.values()].sort((a, b) => (imp(b) + es(b)) - (imp(a) + es(a)))
         const tot = (f: (v: Riga) => number) => voci.reduce((t, v) => t + f(v), 0)
         const vuotoSeZero = (n: number) => c2(n) ? eur(n) : ''
-        testata = ['Cliente', 'N. spedizioni', 'Spedizioni €', 'Rettifiche €', 'Giacenze €', 'Resi €', 'Servizi €', 'Rimborsi €', 'Voci a mano € (fuori)', 'Imponibile €', 'IVA %', 'IVA €', 'Totale €']
-        corpo = voci.map(v => [v.nome, v.n, eur(v.sped), vuotoSeZero(v.rett), vuotoSeZero(v.giac), vuotoSeZero(v.resi), vuotoSeZero(v.servizi), vuotoSeZero(v.rimborsi), vuotoSeZero(v.aMano), eur(imp(v)), v.aliquota, eur(ivaDi(v)), eur(imp(v) + ivaDi(v))])
-        const imponibile = tot(imp), iva = tot(ivaDi)
-        if (corpo.length) corpo.push(['TOTALE', tot(v => v.n), eur(tot(v => v.sped)), eur(tot(v => v.rett)), eur(tot(v => v.giac)), eur(tot(v => v.resi)), eur(tot(v => v.servizi)), eur(tot(v => v.rimborsi)), eur(tot(v => v.aMano)), eur(imponibile), '', eur(iva), eur(imponibile + iva)])
-        riepilogo = `${tot(v => v.n)} spedizioni · imponibile € ${eur(imponibile)} · IVA € ${eur(iva)} · totale € ${eur(imponibile + iva)}`
+        // La colonna «Esente IVA» c'e' solo se qualcosa e' esente: senza, il report e' quello di ieri.
+        const conEsente = voci.some(v => es(v) !== 0)
+        const colEs = (x: string) => (conEsente ? [x] : [])
+        testata = ['Cliente', 'N. spedizioni', 'Spedizioni €', 'Rettifiche €', 'Giacenze €', 'Resi €', 'Servizi €', 'Rimborsi €', 'Voci a mano € (fuori)', 'Imponibile €', 'IVA %', 'IVA €', ...colEs('Esente IVA €'), 'Totale €']
+        corpo = voci.map(v => [v.nome, v.n, eur(v.sped), vuotoSeZero(v.rett), vuotoSeZero(v.giac), vuotoSeZero(v.resi), vuotoSeZero(v.servizi), vuotoSeZero(v.rimborsi), vuotoSeZero(v.aMano), eur(imp(v)), v.aliquota, eur(ivaDi(v)), ...colEs(vuotoSeZero(es(v))), eur(imp(v) + ivaDi(v) + es(v))])
+        const imponibile = tot(imp), iva = tot(ivaDi), esente = tot(es)
+        if (corpo.length) corpo.push(['TOTALE', tot(v => v.n), eur(tot(v => v.sped)), eur(tot(v => v.rett)), eur(tot(v => v.giac)), eur(tot(v => v.resi)), eur(tot(v => v.servizi)), eur(tot(v => v.rimborsi)), eur(tot(v => v.aMano)), eur(imponibile), '', eur(iva), ...colEs(eur(esente)), eur(imponibile + iva + esente)])
+        riepilogo = `${tot(v => v.n)} spedizioni · imponibile € ${eur(imponibile)} · IVA € ${eur(iva)}` + (conEsente ? ` · esente IVA € ${eur(esente)}` : '') + ` · totale € ${eur(imponibile + iva + esente)}`
       }
       if (!corpo.length) corpo = [['Niente da fatturare nel periodo', ...Array(testata.length - 1).fill('')]]
 

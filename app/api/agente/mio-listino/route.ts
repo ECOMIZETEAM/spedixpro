@@ -115,6 +115,12 @@ export async function GET() {
     return va - vb
   }
 
+  // IVA inclusa o esclusa (Lorenzo, 20/11/2026): come il master di sopra vende oggi ogni contratto al
+  // sotto-master. All'agente no: il suo listino dice quanto vale per lui, non e' una vendita.
+  const { infoIvaPrezzi } = await import('@/lib/iva-vendita')
+  const { ivaDelCorriere, siNoVecchio } = await import('@/lib/iva-calcolo')
+  const { createAdminSupabase: adminIva } = await import('@/lib/supabase-admin')
+  const iva = ruolo === 'agente' ? null : await infoIvaPrezzi(adminIva(), listinoId, 22)
   const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
   const corrieri = Array.from(perCorr.entries())
     .sort((a, b) => ((a[1].pausa ? 1 : 0) - (b[1].pausa ? 1 : 0)) || a[1].nome_contratto.localeCompare(b[1].nome_contratto))
@@ -122,6 +128,8 @@ export async function GET() {
       const sup = supplPerCorr.get(cid) || []
       const perTipo = (t: string) => sup.filter((r: any) => r.tipo === t)
       return {
+        iva: ivaDelCorriere(iva, cid),
+        iva_inclusa: siNoVecchio(ivaDelCorriere(iva, cid)),
         nome_contratto: c.nome_contratto,
         pausa: !!c.pausa,
         pausaMotivo: c.pausaMotivo || null,
@@ -144,6 +152,7 @@ export async function GET() {
     assegnato: true,
     nome: (listino as any)?.nome || 'Listino',
     solo_peso_reale: !!(listino as any)?.solo_peso_reale,
+    aliquota_iva: iva ? iva.aliquota : null,
     corrieri,
   })
 }

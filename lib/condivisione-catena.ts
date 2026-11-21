@@ -1,5 +1,6 @@
 import { calcolaPrezzoCorriereDettaglio, calcolaPrezzoListino } from '@/lib/pricing'
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
+import { ricordaNellaRichiesta, chiaveDi } from '@/lib/memo-richiesta'
 import { accessoriDelLivello } from '@/lib/cascata'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
@@ -404,18 +405,41 @@ export async function pianoAddebitiCondivisione(
     masterOriginante: string; nomeContratto: string
   } & ContestoPrezzoCondivisione,
 ): Promise<MovimentoPianificato[]> {
+  // RIUSO NELLA RICHIESTA (lib/memo-richiesta): il controllo del credito e gli addebiti chiedono lo stesso piano,
+  // con gli stessi campi, nella stessa creazione. La chiave sono SOLO i campi che il piano usa; il piano non legge
+  // saldi, quindi riusarlo non cambia niente di cio' che viene addebitato.
+  const chiave = 'piano-condivisione:' + chiaveDi({
+    masterOriginante: p.masterOriginante, nomeContratto: p.nomeContratto, dest: p.dest, packages: p.packages,
+    contrassegno: p.contrassegno, assicurazione: p.assicurazione, serviziAccessori: p.serviziAccessori,
+    mittCap: p.mittCap, mittProvincia: p.mittProvincia, mittPaese: p.mittPaese,
+  })
+  return ricordaNellaRichiesta(chiave, () => pianoAddebitiCondivisioneCalcolato(admin, p))
+}
+
+async function pianoAddebitiCondivisioneCalcolato(
+  admin: any,
+  p: {
+    masterOriginante: string; nomeContratto: string
+  } & ContestoPrezzoCondivisione,
+): Promise<MovimentoPianificato[]> {
   const catena = await risolviCatenaCondivisione(admin, p.masterOriginante, p.nomeContratto)
   const pesoReale = (p.packages || []).reduce((s: number, x: any) => s + (parseFloat(x?.weight) || 0), 0) || 1
+  // SOLO i livelli d'ALBERO sono addebitati dal NUOVO codice (crea), prezzati dal listino del loro
+  // corriere con la STESSA logica della cascata (COD/assic/mittente/accessori/agevolazione). I livelli
+  // CODICE e l'OWNER li addebita il DISPATCH esistente (ledger lato venditore + credito_proprio
+  // dell'owner), col prezzo autorevole del ledger — NON si riprezzano qui (il listino del ponte può
+  // essere sfasato: vedi Wave 4,48 vs 4,28 reale). Per quelli importo=null (dal dispatch).
+  // I LIVELLI SI PREZZANO INSIEME (20/11/2026): il costo di un livello legge solo il suo listino, e la creazione
+  // di un condiviso costruisce questo piano due volte (credito prima del corriere, addebiti dopo). Si rimonta
+  // nell'ordine di prima, e un'eccezione esce al posto del livello che l'ha data, come quando si andava in fila.
+  const importi = await Promise.all(catena.map(liv => liv.ruolo === 'albero'
+    ? costoLivelloAlbero(admin, liv, p.nomeContratto, pesoReale, p).then(v => ({ ok: true, v, e: null as any }), (e: any) => ({ ok: false, v: null, e }))
+    : Promise.resolve({ ok: true, v: null, e: null as any })))
   const out: MovimentoPianificato[] = []
-  for (const liv of catena) {
-    // SOLO i livelli d'ALBERO sono addebitati dal NUOVO codice (crea), prezzati dal listino del loro
-    // corriere con la STESSA logica della cascata (COD/assic/mittente/accessori/agevolazione). I livelli
-    // CODICE e l'OWNER li addebita il DISPATCH esistente (ledger lato venditore + credito_proprio
-    // dell'owner), col prezzo autorevole del ledger — NON si riprezzano qui (il listino del ponte può
-    // essere sfasato: vedi Wave 4,48 vs 4,28 reale). Per quelli importo=null (dal dispatch).
-    const importo = liv.ruolo === 'albero'
-      ? await costoLivelloAlbero(admin, liv, p.nomeContratto, pesoReale, p)
-      : null
+  for (let k = 0; k < catena.length; k++) {
+    const liv = catena[k]
+    if (!importi[k].ok) throw importi[k].e
+    const importo = importi[k].v
     out.push({
       master: liv.master, conto: liv.conto, ledgerClienteId: liv.ledgerClienteId,
       fornitore: liv.fornitore, ruolo: liv.ruolo, importo,
@@ -439,11 +463,15 @@ export async function verificaCreditoCondivisione(
   // chiamanti): qui non viene mai valorizzato — la guardia COD-non-prezzato è un affinamento ancora da fare.
 ): Promise<{ ok: boolean; errore?: string; masterInsufficiente?: string; servizioNonPrezzato?: boolean }> {
   const piano = await pianoAddebitiCondivisione(admin, p)
-  for (const liv of piano) {
-    if (liv.ruolo !== 'albero' || liv.importo == null) continue
-    const prezzo = Math.abs(liv.importo)
-    if (!(prezzo > 0)) continue
-    const { data: m }: any = await admin.from('masters').select('nome,tipo_contratto,credito').eq('id', liv.master).maybeSingle()
+  // I saldi dei livelli da controllare si leggono insieme e si valutano NELL'ORDINE di prima: vince sempre il
+  // primo livello a secco, come quando si leggevano uno alla volta.
+  const daControllare = piano.filter(liv => liv.ruolo === 'albero' && liv.importo != null && Math.abs(liv.importo) > 0)
+  const saldi = await Promise.all(daControllare.map(liv =>
+    admin.from('masters').select('nome,tipo_contratto,credito').eq('id', liv.master).maybeSingle()))
+  for (let k = 0; k < daControllare.length; k++) {
+    const liv = daControllare[k]
+    const prezzo = Math.abs(liv.importo as number)
+    const m: any = (saldi[k] as any)?.data
     if (!m) continue
     // Stessa regola di verificaCreditoCatena: solo i prepagati (credito_scalare) si bloccano a secco.
     if ((m.tipo_contratto || 'credito_scalare') === 'credito_scalare' && Number(m.credito || 0) < prezzo) {
@@ -463,14 +491,15 @@ export async function verificaCreditoCondivisione(
  * corrieri tipo='moovexpress', DOPO il dispatch, AL POSTO della vecchia addebitaCatena (che faceva il
  * doppio su credito_proprio). La spedizione (spedizioneId) deve ESISTERE: fn_conto_di legge da lì il
  * nome-contratto per decidere il conto. SOLO questa funzione scrive; il resto del modulo è lettura. */
-export async function addebitaTreeCondivisione(
+// GLI ADDEBITI D'ALBERO, CALCOLATI SENZA SCRIVERLI (fase 3 di PONTE-UNICO.md). Erano dentro
+// addebitaTreeCondivisione, qui sotto, che ora li prende da qui e li scrive come prima. Il ponte unico dei
+// condivisi li prende dalla stessa funzione e li scrive nella sua transazione: una regola sola per tutte e due le
+// strade. `nonAddebitati` sono le righe del log [LIVELLO NON ADDEBITATO]: le scrive chi addebita davvero (qui
+// sotto, e il ponte unico quando scrive), una volta per livello; il calcolo in ombra no, o le conterebbe doppie.
+export async function movimentiAlbero(
   admin: any,
-  p: {
-    masterOriginante: string; nomeContratto: string
-    numero: string; destNome?: string
-    spedizioneId: string | null; createdBy?: string | null
-  } & ContestoPrezzoCondivisione,
-): Promise<{ addebitati: number }> {
+  p: Parameters<typeof addebitaTreeCondivisione>[1],
+): Promise<{ movimenti: MovimentoMasterAlbero[]; nonAddebitati: string[] }> {
   // La spedizione DEVE esistere: l'anti-doppione uniq_mov_sped_master ha WHERE spedizione_id IS NOT NULL,
   // quindi senza id due addebiti identici passerebbero entrambi. Meglio non addebitare che addebitare doppio.
   if (!p.spedizioneId) throw new Error('addebitaTreeCondivisione: spedizioneId mancante')
@@ -480,23 +509,59 @@ export async function addebitaTreeCondivisione(
     contrassegno: p.contrassegno, assicurazione: p.assicurazione, serviziAccessori: p.serviziAccessori,
     mittCap: p.mittCap, mittProvincia: p.mittProvincia, mittPaese: p.mittPaese,
   })
-  let addebitati = 0
+  const movimenti: MovimentoMasterAlbero[] = []
+  const nonAddebitati: string[] = []
   for (const liv of piano) {
-    if (liv.ruolo !== 'albero' || !liv.fornitore || liv.importo == null || !(liv.importo < 0)) continue
+    // UN LIVELLO CHE DEVE PAGARE E NON PAGA NON PUO' ESSERE SILENZIOSO. Il `continue` muto ha lasciato
+    // passare 282343J011760 (spedizioni 2000, 15/10) e 282343J009476 (Dg Express, 14/10) senza addebito:
+    // nei log non c'era NIENTE, e in elenco quei master si vedevano il costo del livello sopra (il
+    // prezzo d'acquisto di chi compra a codice) perche' la lista ripiega su costo_spedizione quando il
+    // movimento manca. Due righe su ~20.000, ma invisibili: senza questo log non si trovano.
+    // (Recuperato il 20/11/2026 da una modifica del 16/10 mai rilasciata. La sua seconda parte, che
+    // riscriveva costo_spedizione col costo di chi origina, NON e' entrata: quella colonna sulle righe
+    // d'origine condivise e' il prezzo pagato da chi compra a codice, ed e' su quello che il report di
+    // E&A MULTIEXPRESS quadra 1 a 1 la spesa per fornitore — 71.979 righe in 30 giorni l'avrebbero
+    // cambiata. Le viste dei master usano gia' il movimento quando c'e'.)
+    if (liv.ruolo !== 'albero') continue
+    if (!liv.fornitore || liv.importo == null || !(liv.importo < 0)) {
+      nonAddebitati.push(
+        `[condivisione-catena][LIVELLO NON ADDEBITATO] sped=${p.spedizioneId} numero=${p.numero} master=${liv.master} contratto="${p.nomeContratto}" fornitore=${liv.fornitore || 'n/d'} importo=${liv.importo}`,
+      )
+      continue
+    }
+    movimenti.push({
+      masterOwnerId: liv.fornitore,      // il PADRE (fornitore diretto): dimensione owner del movimento
+      masterTargetId: liv.master,         // chi PAGA (il sub) → scala il SUO masters.credito ('rete')
+      tipo: 'spedizione',
+      descrizione: descrizioneSpedizione(p.numero, p.destNome),
+      riferimento: p.numero,
+      importo: liv.importo,
+      spedizioneId: p.spedizioneId,
+      createdBy: p.createdBy ?? null,
+    })
+  }
+  return { movimenti, nonAddebitati }
+}
+
+export type MovimentoMasterAlbero = Parameters<typeof registraMovimentoMaster>[1]
+
+export async function addebitaTreeCondivisione(
+  admin: any,
+  p: {
+    masterOriginante: string; nomeContratto: string
+    numero: string; destNome?: string
+    spedizioneId: string | null; createdBy?: string | null
+  } & ContestoPrezzoCondivisione,
+): Promise<{ addebitati: number }> {
+  const { movimenti, nonAddebitati } = await movimentiAlbero(admin, p)
+  for (const riga of nonAddebitati) console.error(riga)
+  let addebitati = 0
+  for (const m of movimenti) {
     try {
-      await registraMovimentoMaster(admin, {
-        masterOwnerId: liv.fornitore,      // il PADRE (fornitore diretto): dimensione owner del movimento
-        masterTargetId: liv.master,         // chi PAGA (il sub) → scala il SUO masters.credito ('rete')
-        tipo: 'spedizione',
-        descrizione: descrizioneSpedizione(p.numero, p.destNome),
-        riferimento: p.numero,
-        importo: liv.importo,
-        spedizioneId: p.spedizioneId,
-        createdBy: p.createdBy ?? null,
-      })
+      await registraMovimentoMaster(admin, m)
       addebitati++
     } catch (e) {
-      console.error(`[condivisione-catena] addebito albero ${liv.master}→${liv.fornitore}:`, (e as any)?.message)
+      console.error(`[condivisione-catena] addebito albero ${m.masterTargetId}→${m.masterOwnerId}:`, (e as any)?.message)
     }
   }
   return { addebitati }

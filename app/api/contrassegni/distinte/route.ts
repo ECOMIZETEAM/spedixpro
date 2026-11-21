@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   const al = p.get('al')
 
   let query = supabase.from('distinte_contrassegni')
-    .select('*, clienti(ragione_sociale), distinte_contrassegni_righe(id,numero_spedizione,importo_cod,importo_sistema,spedizioni(dest_nome,rif_destinatario,mitt_nome,created_at,contrassegno_modalita))')
+    .select('*, clienti(ragione_sociale), distinte_contrassegni_righe(id,spedizione_id,numero_spedizione,importo_cod,importo_sistema,spedizioni(dest_nome,rif_destinatario,mitt_nome,created_at,contrassegno_modalita))')
     .eq('master_id', utente?.master_id)
     .order('created_at', { ascending: false })
 
@@ -53,6 +53,23 @@ export async function GET(req: NextRequest) {
     const mMap: Record<string,any> = {}
     ;(masters||[]).forEach((m:any)=>{ mMap[m.id] = m })
     distinte.forEach((d:any)=>{ if (d.target_master_id && mMap[d.target_master_id]) d.target_master = { nome: mMap[d.target_master_id].nome } })
+  }
+  // COME E' STATO INCASSATO (contanti o assegno) anche dove la spedizione non e' della mia rete. Sui contratti
+  // del detentore (LOGIXIA per SDA EXPRESS L) le spedizioni sono dei clienti di altri rami: l'utente vede la
+  // riga della SUA distinta ma non la spedizione, quindi la modalita' arrivava vuota e il modulo di pagamento
+  // proponeva Contanti/SEPA/Compensata/Bonifico anche per una distinta di soli assegni (LOGIXIA, distinta 1007
+  // del 20/11/2026). Il server rifiutava comunque ogni metodo diverso da "assegno" (PUT [id]); qui si legge
+  // SOLO la modalita' delle righe delle mie distinte, nient'altro della spedizione.
+  const nascoste = distinte.flatMap((d: any) => (d.distinte_contrassegni_righe || []).filter((x: any) => !x.spedizioni && x.spedizione_id))
+  if (nascoste.length) {
+    const adminM = createAdminSupabase()
+    const ids = [...new Set(nascoste.map((x: any) => x.spedizione_id))] as string[]
+    const modalita = new Map<string, string | null>()
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data: sp } = await adminM.from('spedizioni').select('id,contrassegno_modalita').in('id', ids.slice(i, i + 300))
+      for (const s of (sp || [])) modalita.set((s as any).id, (s as any).contrassegno_modalita ?? null)
+    }
+    for (const x of nascoste) x.spedizioni = { contrassegno_modalita: modalita.get(x.spedizione_id) ?? null }
   }
   // Distinte "proprie" (nessun cliente né sotto-master): COD del master stesso, già incassato → etichetta
   // esplicita così in elenco non appaiono senza destinatario.

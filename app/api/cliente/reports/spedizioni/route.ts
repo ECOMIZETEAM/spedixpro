@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { confineGiornoRoma } from '@/lib/date-roma'
 import { sessioneCliente, intestazione, erroreReport } from '../comune'
 import { spedizioniReportCliente } from './calcolo'
+import { createAdminSupabase } from '@/lib/supabase-admin'
+import { ivaVendite } from '@/lib/iva-vendita'
 
 export async function GET(req: NextRequest) {
   const s = await sessioneCliente()
@@ -18,7 +20,12 @@ export async function GET(req: NextRequest) {
       provincia: p.get('provincia') || null,
       vettore: p.get('vettore') || null,
     })
-    return NextResponse.json({ spedizioni, aliquotaIva })
+    // Come il master gli ha venduto ogni spedizione, IVA inclusa, esclusa o esente (regola nel database,
+    // lib/iva-vendita). Si chiede col client di servizio perche' le scelte del master non sono
+    // leggibili dal cliente; il cliente e il master vengono dalla sessione, mai da un parametro.
+    // `iva_inclusa` resta per le pagine aperte prima del rilascio del 21/11 (si toglie al prossimo giro).
+    const regime = await ivaVendite(createAdminSupabase(), s.masterId, spedizioni.map((r: any) => ({ t: 'cliente' as const, s: s.clienteId, p: r.id })))
+    return NextResponse.json({ spedizioni: spedizioni.map((r: any, i: number) => ({ ...r, iva_regime: regime[i], iva_inclusa: regime[i] === 'inclusa' })), aliquotaIva })
   } catch (e: any) {
     return erroreReport(e)
   }

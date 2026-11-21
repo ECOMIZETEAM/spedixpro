@@ -100,10 +100,15 @@ export default function ReportSpedizioniPage() {
       const foglio = async (tipo: 'xlsx' | 'csv') => {
         const XLSX = await import('xlsx')
         const { righeReportSpedizioni } = await import('@/lib/report-spedizioni-cols')
+        const { aggiungiColonneIva, totaliColonneIva } = await import('@/lib/report-spedizioni-cols')
         const rows = righeReportSpedizioni(spedizioni, { master: false })
         rows.forEach((r: any, i: number) => { r.status = etichettaStato(spedizioni[i].stato) })
+        const sommaIva = aggiungiColonneIva(rows, spedizioni, aliquota)
         rows.push({} as any)
-        rows.push({ status: 'TOTALE', costo_cliente: Math.round(subtotale * 100) / 100, costo: Math.round(subtotale * 100) / 100 } as any)
+        rows.push({
+          status: 'TOTALE', costo_cliente: Math.round(subtotale * 100) / 100, costo: Math.round(subtotale * 100) / 100,
+          ...totaliColonneIva(sommaIva),
+        } as any)
         if (nAnnullate) rows.push({ status: NOTA_ANNULLATE } as any)
         const ws = XLSX.utils.json_to_sheet(rows)
         const wb = XLSX.utils.book_new()
@@ -139,13 +144,42 @@ export default function ReportSpedizioniPage() {
         })
         // Riepilogo subtotale/IVA/totale. L'aliquota e' quella della scheda del cliente (vuota = 22):
         // prima era 22% per tutti, anche per chi e' allo 0%.
-        const iva = subtotale * aliquota / 100
-        const totale = subtotale + iva
+        // Le spedizioni che il master gli ha venduto IVA INCLUSA hanno gia' l'IVA nel prezzo: si
+        // scorporano invece di aggiungerla sopra (Lorenzo, 20/11/2026). Quelle ESENTI non hanno IVA
+        // (21/11/2026). Senza nessuna delle due i numeri sono quelli di sempre: subtotale, IVA sopra, totale.
+        const { sommaVuota, aggiungiRiga, regimeDi } = await import('@/lib/iva-calcolo')
+        const somma = spedizioni.reduce((t: any, s: any) => aggiungiRiga(t, Number(s.costo_totale || 0), aliquota, regimeDi(s.iva_regime ?? s.iva_inclusa)), sommaVuota())
+        const conInclusa = somma.nInclusa > 0 || somma.nEsente > 0
+        // La riga "di cui esente IVA" solo se qualcosa e' esente: senza, il riquadro e' quello di ieri.
+        const h = somma.nEsente > 0 ? 6 : 0
+        const iva = conInclusa ? somma.iva : subtotale * aliquota / 100
+        const totale = conInclusa ? somma.totale : subtotale + iva
         let finalY = (doc as any).lastAutoTable.finalY + 20
-        if (finalY + 40 > doc.internal.pageSize.getHeight()) { doc.addPage(); finalY = 20 }
+        if (finalY + (conInclusa ? 50 + h : 40) > doc.internal.pageSize.getHeight()) { doc.addPage(); finalY = 20 }
         const pageW = doc.internal.pageSize.getWidth()
         const col1 = pageW - 120
         const col2 = pageW - 20
+        if (conInclusa) {
+          // Pagato dal credito, l'IVA gia' dentro, quella che il master chiede a parte, il totale.
+          doc.setDrawColor(200,200,200)
+          doc.line(col1 - 10, finalY - 4, col2, finalY - 4)
+          doc.setFontSize(9); doc.setTextColor(100,100,100); doc.setFont('helvetica','normal')
+          doc.text('SCALATO DAL CREDITO', col1, finalY); doc.text(eur(somma.scalato), col2, finalY, {align:'right'})
+          doc.setFontSize(8.5)
+          doc.text("di cui IVA gia' compresa", col1 + 4, finalY + 6); doc.text(eur(somma.ivaCompresa), col2, finalY + 6, {align:'right'})
+          if (h) { doc.text('di cui esente IVA', col1 + 4, finalY + 12); doc.text(eur(somma.esente), col2, finalY + 12, {align:'right'}) }
+          doc.setFontSize(9)
+          doc.text('IVA da pagare a parte', col1, finalY + 13 + h); doc.text(eur(somma.ivaDaIncassare), col2, finalY + 13 + h, {align:'right'})
+          doc.setDrawColor(34,197,94); doc.setLineWidth(0.8)
+          doc.line(col1 - 10, finalY + 18 + h, col2, finalY + 18 + h)
+          doc.setFontSize(11); doc.setTextColor(22,163,74); doc.setFont('helvetica','bold')
+          doc.text('TOTALE', col1, finalY + 26 + h); doc.text(eur(totale), col2, finalY + 26 + h, {align:'right'})
+          doc.setFontSize(8); doc.setTextColor(100,100,100); doc.setFont('helvetica','normal')
+          doc.text(`Imponibile ${eur(somma.imponibile)}  ·  Iva (${aliquota}%) ${eur(iva)}` + (h ? `  ·  Esente IVA ${eur(somma.esente)}` : ''), col2, finalY + 32 + h, {align:'right'})
+          if (nAnnullate) doc.text(NOTA_ANNULLATE, 14, finalY + 40 + h)
+          await salvaReport(doc.output('datauristring'), base + '.pdf', 'pdf')
+          return
+        }
         // Linea separatore
         doc.setDrawColor(200,200,200)
         doc.line(col1 - 10, finalY - 4, col2, finalY - 4)

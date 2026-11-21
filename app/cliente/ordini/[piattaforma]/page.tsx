@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { chiaveDestinatario, destinatarioDaEcommerce, gruppiStessoDestinatario } from '@/lib/destinatario-chiave'
+import { aGruppi, CREAZIONI_INSIEME } from '@/lib/a-gruppi'
 import { useParams, useRouter } from 'next/navigation'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
@@ -12,6 +13,9 @@ import { useAnteprimaPrezzi, chiediPrezzi, scegliTariffa, euro, eUnRifiuto, test
 import { descriviColli } from '@/lib/colli-ordine'
 import { colliOrdineNegozio, mappaCatalogo, mappaPacchi } from '@/lib/colli-negozio'
 import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
+import { leggiCondiviso } from '@/lib/richiesta-condivisa'
+import IvaPrezzo from '@/app/components/IvaPrezzo'
+import type { RegimeIva } from '@/lib/iva-calcolo'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
@@ -156,7 +160,8 @@ export default function OrdiniPage() {
     setLoading(true)
     const [ord, integr] = await Promise.all([
       fetch('/api/ordini/lista?piattaforma='+piattaforma).then(r=>r.json()).catch(()=>[]),
-      fetch('/api/integrazioni/lista').then(r=>r.json()).catch(()=>[]),
+      // Il menu laterale chiede la stessa rotta all'apertura: una richiesta sola (lib/richiesta-condivisa).
+      leggiCondiviso('/api/integrazioni/lista').catch(()=>[]),
     ])
     setOrdini(Array.isArray(ord)?ord:[])
     const listaIntegr = Array.isArray(integr) ? integr : (integr?.integrazioni || [])
@@ -458,12 +463,15 @@ export default function OrdiniPage() {
   // TOTALE dei selezionati col contratto scelto. E' la somma di cio' che e' a schermo: al clic i
   // prezzi vengono ricalcolati e, se sono cambiati, lo si chiede prima di spedire.
   let totaleSpedizioni = 0, selInCalcolo = 0, selSenzaPrezzo = 0
+  // Come sono scritti i prezzi del totale (+ IVA / IVA incl.): l'etichetta solo se sono tutti uguali.
+  const ivaSel: (RegimeIva | null | undefined)[] = []
+  let aliquotaSel: number | undefined
   for (const o of selezionatiPrezzabili) {
     if (!nelTotale.has(o.id)) continue
     const e = anteprima.leggi(rigaPrezzoDi(o))
     if (!e || e.stato === 'calcolo') { selInCalcolo++; continue }
     const t = e.stato === 'ok' ? scegliTariffa(e.tariffe, spedisciCon) : null
-    if (t) totaleSpedizioni += t.prezzo; else selSenzaPrezzo++
+    if (t) { totaleSpedizioni += t.prezzo; ivaSel.push(t.iva); aliquotaSel = t.aliquota } else selSenzaPrezzo++
   }
   totaleSpedizioni = Math.round(totaleSpedizioni*100)/100
   const selFuoriTotale = selezionatiPrezzabili.length - nelTotale.size
@@ -491,7 +499,7 @@ export default function OrdiniPage() {
     return (
       <span title={'Calcolato su '+descriviColli(rp.colli)+'.\nÈ l\'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.'
         + (e.tariffe.length>1 ? '\n\nTutti i contratti per questo ordine:\n'+elenco : '')}>
-        <span style={{fontWeight:700,color:'#1a1a1a'}}>{euro(t.prezzo)}</span>
+        <span style={{fontWeight:700,color:'#1a1a1a'}}>{euro(t.prezzo)}<IvaPrezzo regime={t.iva} aliquota={t.aliquota} /></span>
         <span style={{color:'#6b7280',marginLeft:'6px'}}>{t.nome}</span>
         {(()=>{
           // Il peso si vede accanto al prezzo: e' la prima cosa che il cliente controlla ("il peso non
@@ -672,10 +680,14 @@ export default function OrdiniPage() {
   // se il credito basta, oppure dopo "Paga con la carta" (riusa lo stesso lotto, niente ricalcolo).
   async function eseguiCreazioneLotto(preparati: any[], errori: string[], shipFrom: any, cliId: string) {
     setSpedendo(true)
-    let okCount = 0
-    for (let i=0;i<preparati.length;i++){
-      const { id, o, num, arts, packages, shipTo, t } = preparati[i]
-      setMsg('Spedizione '+num+'… ('+(i+1)+'/'+preparati.length+')')
+    let okCount = 0, fatte = 0
+    // QUATTRO ALLA VOLTA, non una (lib/a-gruppi: perche' il credito non corre rischi). Gli errori di ogni
+    // ordine si rimettono poi nell'ordine del lotto, non in quello in cui le risposte arrivano.
+    const erroriPer: string[][] = preparati.map(() => [])
+    setMsg('Spedizioni 0/'+preparati.length+'…')
+    await aGruppi(preparati, CREAZIONI_INSIEME, async (p: any, i: number) => {
+      const { id, o, num, arts, packages, shipTo, t } = p
+      const errori = erroriPer[i]
       // Dogana (estero): il codice HS viene dal CATALOGO tramite lo SKU dell'ordine — lo stesso da cui
       // arrivano peso e misure. Prima merce che ce l'ha; se nessuna, il backend prova l'auto-ricerca TARIC.
       const esteroOrd = String(shipTo?.country || 'IT').toUpperCase() !== 'IT'
@@ -712,9 +724,9 @@ export default function OrdiniPage() {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ ordine_id:id, spedizione_id:creaRes.gia_spedito_id||null })
           }).catch(()=>{})
-          okCount++; continue
+          okCount++; return
         }
-        if (!creaRes || creaRes.error) { errori.push(num+': '+(creaRes?.error||'errore creazione')); continue }
+        if (!creaRes || creaRes.error) { errori.push(num+': '+(creaRes?.error||'errore creazione')); return }
         // SCARICO DAL MAGAZZINO, in automatico. Qui non serve una tendina come nelle pagine di
         // spedizione a mano: l'ordine SA GIA' cosa contiene — SKU e quantita' arrivano da Shopify o
         // da Amazon — e lo SKU e' gia' quello con cui si agganciano peso e misure dal catalogo.
@@ -737,7 +749,9 @@ export default function OrdiniPage() {
         }).catch(()=>{})
         okCount++
       } catch { errori.push(num+': errore imprevisto') }
-    }
+      finally { fatte++; setMsg('Spedizioni '+fatte+'/'+preparati.length+'…') }
+    })
+    for (const e of erroriPer) errori.push(...e)
     lottoRef.current = null
     setSel({})
     setMsg('Spedite '+okCount+' spedizioni'+(errori.length?' — Errori: '+errori.join(' | '):''))
@@ -898,7 +912,7 @@ export default function OrdiniPage() {
           )}
           {anteprimaPronta && selezionatiPrezzabili.length>0 && (
             <span style={{fontSize:'13px',color:'#6b7280'}}>
-              Totale spedizione previsto <b style={{color:'#1a1a1a'}}>{euro(totaleSpedizioni)}</b>
+              Totale spedizione previsto <b style={{color:'#1a1a1a'}}>{euro(totaleSpedizioni)}<IvaPrezzo gruppo={ivaSel} aliquota={aliquotaSel} /></b>
               {selInCalcolo>0 ? <span style={{color:'#9ca3af'}}> (calcolo in corso…)</span> : null}
               {selSenzaPrezzo>0 ? <span style={{color:'#b45309'}}> · {selSenzaPrezzo} senza prezzo</span> : null}
               {selFuoriTotale>0 ? <span style={{color:'#9ca3af'}}> · sui primi {PREZZI_SELEZIONATI}: {selFuoriTotale} ordini non inclusi</span> : null}

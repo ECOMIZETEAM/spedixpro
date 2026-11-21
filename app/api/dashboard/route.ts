@@ -128,17 +128,42 @@ export async function GET() {
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const { sottoAlberoMasterIds, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
   const admin = createAdminSupabase()
-  const reteIds = masterId ? await sottoAlberoMasterIds(admin, masterId) : []
-  // Visibilità rete: le spedizioni della rete che mostro/conto sono SOLO sui contratti che possiedo
-  // (non i privati dei sub). NB: i contatori di VOLUMETRIA (RPC) restano su tutto il sotto-albero:
-  // servono all'abbonamento, non alla vista delle spedizioni.
-  const ownNomi = masterId ? await contrattiPossedutiNomi(admin, masterId) : []
+  // LE LETTURE CHE NON ASPETTANO NIENTE PARTONO SUBITO. I conti di rete (le tre RPC, 1,5 secondi per
+  // MULTIEXPRESS quando non sono gia' in memoria), i crediti negativi e il credito del master dipendono
+  // solo dal master: prima aspettavano in fila l'albero della rete, i contratti posseduti e le gambe
+  // interne, che servono soltanto alle due letture delle spedizioni qui sotto.
+  // Promise.resolve: una lettura di Supabase parte quando la si aspetta, e una volta sola cosi'.
+  const pNumeri = masterId ? numeriRete(admin, masterId) : Promise.resolve(null)
+  // CREDITI DA RECUPERARE: clienti con saldo NEGATIVO. Le due modalita' vanno tenute DISTINTE:
+  // - credito a scalare -> il cliente e' BLOCCATO (non spedisce finche' non ricarica), ma gli
+  //   addebiti di giacenze/resi/rettifiche continuano a scalare: e' denaro da farsi ridare;
+  //   - fattura -> andare sotto zero e' NORMALE, e' semplicemente l'importo da fatturare.
+  const pNegativi = Promise.resolve(admin.from('clienti').select('id,ragione_sociale,credito,tipo_contratto')
+    .eq('master_id', masterId).lt('credito', 0).order('credito', { ascending: true }))
+  // IL CREDITO DEL MASTER stesso: conto RETE (verso il master sopra) + conto PROPRIO (contratti suoi).
+  // Puo' essere negativo — chi fattura va sotto zero ed e' normale (REGOLE.md).
+  const pMioCredito = Promise.resolve(admin.from('masters').select('credito,credito_proprio,parent_master_id').eq('id', masterId).maybeSingle())
+  // Nome del referente (il fornitore diretto), come la pill in topbar: il conto RETE ha un nome,
+  // non è "Credito" generico. Se non ha un referente (radice piattaforma) resta null → etichetta neutra.
+  const pReteLabel: Promise<string | null> = pMioCredito.then(async ({ data: mc }: any) => {
+    if (!mc?.parent_master_id) return null
+    const { data: pm } = await admin.from('masters').select('nome').eq('id', mc.parent_master_id).maybeSingle()
+    return (pm as any)?.nome || null
+  }).catch(() => null)
+
+  const [reteIds, ownNomi, gambeInterne] = await Promise.all([
+    masterId ? sottoAlberoMasterIds(admin, masterId) : Promise.resolve([] as string[]),
+    // Visibilità rete: le spedizioni della rete che mostro/conto sono SOLO sui contratti che possiedo
+    // (non i privati dei sub). NB: i contatori di VOLUMETRIA (RPC) restano su tutto il sotto-albero:
+    // servono all'abbonamento, non alla vista delle spedizioni.
+    masterId ? contrattiPossedutiNomi(admin, masterId) : Promise.resolve([] as string[]),
+    // GAMBE INTERNE: un pacco passato da piu' master della rete ha una riga per ciascuno. Le RPC qui
+    // sotto le tolgono da sole (fn_ledger_nascosti); le due letture dirette le tolgono con la stessa
+    // regola, presa dallo stesso posto (lib/gambe-visibilita.ts). Senza, il 19/11/2026 MULTIEXPRESS
+    // vedeva fra le "ultime spedizioni" lo stesso pacco tre volte.
+    ledgerGambeInterne(admin, masterId),
+  ])
   const filtroContr = ownNomi.length > 0
-  // GAMBE INTERNE: un pacco passato da piu' master della rete ha una riga per ciascuno. Le RPC qui
-  // sotto le tolgono da sole (fn_ledger_nascosti); le due letture dirette le tolgono con la stessa
-  // regola, presa dallo stesso posto (lib/gambe-visibilita.ts). Senza, il 19/11/2026 MULTIEXPRESS
-  // vedeva fra le "ultime spedizioni" lo stesso pacco tre volte.
-  const gambeInterne = await ledgerGambeInterne(admin, masterId)
   const senzaGambe = gambeInterne.length ? `cliente_id.is.null,cliente_id.not.in.(${gambeInterne.join(',')})` : null
   // Contatori + statistiche aggregati nel DB (una query ciascuno) invece di scaricare
   // le righe grezze: le liste PostgREST sono limitate a 1000 righe e falsavano i totali a volume.
@@ -159,7 +184,7 @@ export async function GET() {
     // Via ADMIN (bypassa RLS): le RPC aggregano SOLO il sotto-albero del proprio master (p_master),
     // quindi contano proprie + improprie della rete SOTTO. Con il client user-scoped l'RLS limitava
     // alle sole proprie del master (0 per chi spedisce solo tramite i sotto-master, es. E&A).
-    masterId ? numeriRete(admin, masterId) : Promise.resolve(null),
+    pNumeri,
     // Spedizioni recenti di tutta la rete (sé + discendenza), via admin per i permessi cross-master.
     qUltime.order('created_at',{ascending:false}).limit(10),
     // LDV di TUTTA la rete ancora da chiudere in distinta (era una query in coda: ora nel batch).
@@ -167,15 +192,8 @@ export async function GET() {
       .in('master_id', reteIds.length ? reteIds : [masterId])
       .is('distinta_id', null)
       .not('stato', 'in', '(annullata)'),
-    // CREDITI DA RECUPERARE: clienti con saldo NEGATIVO. Le due modalita' vanno tenute DISTINTE:
-    // - credito a scalare -> il cliente e' BLOCCATO (non spedisce finche' non ricarica), ma gli
-    //   addebiti di giacenze/resi/rettifiche continuano a scalare: e' denaro da farsi ridare;
-    //   - fattura -> andare sotto zero e' NORMALE, e' semplicemente l'importo da fatturare.
-    admin.from('clienti').select('id,ragione_sociale,credito,tipo_contratto')
-      .eq('master_id', masterId).lt('credito', 0).order('credito', { ascending: true }),
-    // IL CREDITO DEL MASTER stesso: conto RETE (verso il master sopra) + conto PROPRIO (contratti suoi).
-    // Puo' essere negativo — chi fattura va sotto zero ed e' normale (REGOLE.md).
-    admin.from('masters').select('credito,credito_proprio,parent_master_id').eq('id', masterId).maybeSingle(),
+    pNegativi,
+    pMioCredito,
   ])
   // Senza i conti di rete non si risponde con degli zeri: la pagina tiene i numeri che aveva.
   if (masterId && !numeri) {
@@ -184,13 +202,7 @@ export async function GET() {
   const contatori = numeri?.contatori
   const statistiche = numeri?.statistiche
   const kpi = numeri?.kpi
-  // Nome del referente (il fornitore diretto), come la pill in topbar: il conto RETE ha un nome,
-  // non è "Credito" generico. Se non ha un referente (radice piattaforma) resta null → etichetta neutra.
-  let reteLabel: string | null = null
-  if ((mioCredito as any)?.parent_master_id) {
-    const { data: pm } = await admin.from('masters').select('nome').eq('id', (mioCredito as any).parent_master_id).maybeSingle()
-    reteLabel = (pm as any)?.nome || null
-  }
+  const reteLabel = await pReteLabel
   // Contatore piano (X/limite) = spedizioni del mese di TUTTA la rete, dalla STESSA RPC (subtree)
   // così coincide con le altre statistiche (niente più discrepanze tipo 98 vs 86).
   const spedMeseRete = (contatori as any)?.spedizioniMese || 0

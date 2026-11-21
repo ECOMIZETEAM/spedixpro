@@ -1,16 +1,52 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
-import ReportGuadagno from '@/app/components/ReportGuadagno'
+import ReportGuadagno, { urlInizialeReport } from '@/app/components/ReportGuadagno'
 import CostiGestioneCard from '@/app/components/CostiGestioneCard'
-import GuadagnoChart from '@/app/components/GuadagnoChart'
-import BannerSms from '@/app/components/BannerSms'
-import GuadagnoAgente from '@/app/components/GuadagnoAgente'
-import DestinazioniWidget from '@/app/components/DestinazioniWidget'
-import ResiReteWidget from '@/app/components/ResiReteWidget'
-import { useContext } from 'react'
+import GuadagnoChart, { urlInizialeGuadagnoChart } from '@/app/components/GuadagnoChart'
+import BannerSms, { URL_STATO_SMS } from '@/app/components/BannerSms'
+import GuadagnoAgente, { urlInizialeGuadagnoAgente } from '@/app/components/GuadagnoAgente'
+import DestinazioniWidget, { URL_DESTINAZIONI, URL_MAPPA_ITALIA } from '@/app/components/DestinazioniWidget'
+import ResiReteWidget, { URL_RESI_RETE, INIT_RESI_RETE } from '@/app/components/ResiReteWidget'
+import { anticipa } from '@/lib/richieste-anticipate'
+import { useProfiloUtente, type ProfiloUtente } from './RuoloUtente'
 import { GraficaNuova } from '@/app/components/grafica/contesto'
 import PlanciaB from '@/app/components/grafica/proposte/b/PlanciaB'
+
+// I report del guadagno: una sola lista per le card e per le chiamate anticipate, cosi' i due
+// indirizzi non possono divergere.
+const REPORT_TOTALE = '/api/reports/guadagno-totale'
+const REPORT_VOCI = [
+  { titolo: 'Rettifiche', endpoint: '/api/reports/guadagno-rettifiche', icona: '⚖️' },
+  { titolo: 'Resi', endpoint: '/api/reports/guadagno-resi', icona: '↩️' },
+  { titolo: 'Giacenze', endpoint: '/api/reports/guadagno-giacenze', icona: '📦' },
+  { titolo: 'Logistica', endpoint: '/api/reports/guadagno-logistica', icona: '🏬' },
+  { titolo: 'Consumabili', endpoint: '/api/reports/guadagno-consumabili', icona: '🧾' },
+]
+
+// I RIQUADRI PARTONO INSIEME A /api/dashboard, NON DOPO. Si montano solo quando la dashboard ha
+// risposto (prima c'e' "Caricamento..."), quindi le loro chiamate facevano una seconda ondata in
+// fila alla prima: il guadagno (mediana 1,47 s, p95 3,75 s il 19/10/2026) cominciava solo dopo.
+// Nessuna di queste chiamate usa un dato di /api/dashboard: gli indirizzi sono fissi o dipendono
+// dal mese corrente. Dalla risposta dipende solo QUALI report si vedono (agente o master), e per
+// quello basta il ruolo che il layout ha gia' letto. Stessi ruoli della rotta: l'agente ha il suo
+// ramo; lo staff del master (master, admin, operatore con un master) tutti i report; chiunque altro
+// riceve un errore e non vede riquadri, quindi non si anticipa niente.
+function anticipaRiquadri(profilo: ProfiloUtente | null) {
+  if (!profilo) return
+  const ruolo = profilo.ruolo.toLowerCase()
+  const agente = ruolo === 'agente'
+  const staff = profilo.haMaster && ['master', 'admin', 'operatore'].includes(ruolo)
+  if (!agente && !staff) return
+  anticipa(URL_STATO_SMS)
+  anticipa(URL_RESI_RETE, INIT_RESI_RETE)
+  anticipa(URL_DESTINAZIONI)
+  anticipa(URL_MAPPA_ITALIA)
+  if (agente) { anticipa(urlInizialeGuadagnoAgente()); return }
+  anticipa(urlInizialeReport(REPORT_TOTALE))
+  anticipa(urlInizialeGuadagnoChart())
+  for (const r of REPORT_VOCI) anticipa(urlInizialeReport(r.endpoint))
+}
 
 // Con la grafica nuova (v11) la Plancia è un'altra pagina, coi numeri delle stesse rotte; con quella di oggi resta
 // questa, identica. L'agente ha la sua plancia confinata ai suoi clienti: finché non è disegnata, resta quella di oggi.
@@ -25,9 +61,13 @@ export default function Dashboard() {
 function DashboardDiOggi() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const profilo = useProfiloUtente()
 
   useEffect(() => {
     let vivo = true
+    // Solo all'apertura: gli aggiornamenti periodici rileggono la dashboard, non i riquadri, che
+    // restano montati e non richiamano.
+    anticipaRiquadri(profilo)
     // ISTANTANEA: mostro subito l'ultima dashboard vista in questa sessione (sessionStorage) e la
     // riverifico in background — i numeri si aggiornano da soli appena arriva la risposta fresca.
     try { const c = sessionStorage.getItem('dash_master_v1'); if (c) { setData(JSON.parse(c)); setLoading(false) } } catch {}
@@ -46,6 +86,7 @@ function DashboardDiOggi() {
     document.addEventListener('visibilitychange', onFocus)
     window.addEventListener('focus', onFocus)
     return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', onFocus); window.removeEventListener('focus', onFocus) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
@@ -400,14 +441,10 @@ function DashboardDiOggi() {
               giacenze + commissioni + accessori + logistica + canone abbonamento. UNA cifra, senza doppi
               conteggi ed esclusi i pass-through (ricarica, cassa COD) — vedi /api/reports/guadagno-totale.
               Il grafico e le card qui sotto sono il DETTAGLIO per voce. */}
-          <ReportGuadagno titolo="Guadagno Totale" endpoint="/api/reports/guadagno-totale" icona="💰" />
+          <ReportGuadagno titolo="Guadagno Totale" endpoint={REPORT_TOTALE} icona="💰" />
           <GuadagnoChart />
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
-            <ReportGuadagno titolo="Rettifiche" endpoint="/api/reports/guadagno-rettifiche" icona="⚖️" />
-            <ReportGuadagno titolo="Resi" endpoint="/api/reports/guadagno-resi" icona="↩️" />
-            <ReportGuadagno titolo="Giacenze" endpoint="/api/reports/guadagno-giacenze" icona="📦" />
-            <ReportGuadagno titolo="Logistica" endpoint="/api/reports/guadagno-logistica" icona="🏬" />
-            <ReportGuadagno titolo="Consumabili" endpoint="/api/reports/guadagno-consumabili" icona="🧾" />
+            {REPORT_VOCI.map(r => <ReportGuadagno key={r.endpoint} titolo={r.titolo} endpoint={r.endpoint} icona={r.icona} />)}
             {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
             {['master', 'admin'].includes(String(data?.ruolo || '').toLowerCase()) && <CostiGestioneCard />}
           </div>

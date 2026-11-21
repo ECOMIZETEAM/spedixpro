@@ -1,4 +1,5 @@
 import { marchioCorriere } from '@/lib/corriere-logo'
+import { dividiPrezzo, sommaVuota, aggiungiRiga, regimeDi, type SommaIva } from '@/lib/iva-calcolo'
 
 // Righe del REPORT SPEDIZIONI con le colonne del template richiesto dai master (34), piu' le nostre extra.
 // UNICO builder per master e cliente/agente cosi' l'ordine e i nomi delle colonne coincidono sempre e il
@@ -106,14 +107,50 @@ export function righeReportSpedizioni(spedizioni: any[], opts?: { master?: boole
 // una riga per spedizione, più una riga TOTALE in fondo (come nel report cliente). Lo usano sia il
 // report cliente (master:false → senza prezzo_corriere) sia il report master (master:true, extra:false
 // → esattamente le 34 colonne, con prezzo_corriere e senza Margine/Rettifica). Torna base64 grezzo.
+// IVA INCLUSA, ESCLUSA O ESENTE NEL DETTAGLIO (Lorenzo, 20/11 e 21/11/2026): se almeno una spedizione e'
+// stata venduta IVA inclusa o esente, in fondo a ogni riga le colonne — come e' stata venduta, imponibile,
+// IVA, e "Esente" se qualcosa e' esente — e i loro totali nella riga TOTALE. Se non ce n'e' nessuna il
+// file resta quello di sempre: le 34 colonne.
+// `aliquota` vale per le righe che non portano la loro (il report del cliente ne ha una sola).
+export function aggiungiColonneIva(rows: any[], spedizioni: any[], aliquota = 22): SommaIva | null {
+  const regime = (s: any) => regimeDi(s?.iva_regime ?? s?.iva_inclusa)
+  if (!(spedizioni || []).some((s: any) => regime(s) !== 'esclusa')) return null
+  const conEsente = spedizioni.some((s: any) => regime(s) === 'esente')
+  const somma = sommaVuota()
+  const c2 = (n: number) => Math.round(n * 100) / 100
+  spedizioni.forEach((s: any, i: number) => {
+    const a = s?.aliquota_iva != null && Number.isFinite(Number(s.aliquota_iva)) ? Number(s.aliquota_iva) : aliquota
+    const prezzo = Number(s?.costo_totale || 0)
+    const r = regime(s)
+    const d = dividiPrezzo(prezzo, a, r)
+    aggiungiRiga(somma, prezzo, a, r)
+    if (rows[i]) {
+      rows[i].Prezzi_IVA = r; rows[i].Imponibile = c2(d.imponibile); rows[i].IVA = c2(d.iva)
+      if (conEsente) rows[i].Esente_IVA = c2(d.esente)
+    }
+  })
+  return somma
+}
+
+// La riga TOTALE delle colonne IVA (vuota se il file e' quello di sempre).
+export function totaliColonneIva(somma: SommaIva | null): Record<string, number> {
+  if (!somma) return {}
+  const c2 = (n: number) => Math.round(n * 100) / 100
+  return { Imponibile: c2(somma.imponibile), IVA: c2(somma.iva), ...(somma.nEsente ? { Esente_IVA: c2(somma.esente) } : {}) }
+}
+
 export async function excelReportSpedizioniB64(
   spedizioni: any[], opts: { master?: boolean; extra?: boolean }, formato: 'xlsx' | 'csv'
 ): Promise<string> {
   const XLSX = await import('xlsx')
   const rows: any[] = righeReportSpedizioni(spedizioni, opts)
   const tot = (spedizioni || []).reduce((a: number, s: any) => a + Number(s.costo_totale || 0), 0)
+  const iva = aggiungiColonneIva(rows, spedizioni)
   rows.push({})   // riga vuota di stacco
-  rows.push({ status: 'TOTALE', costo_cliente: Math.round(tot * 100) / 100, costo: Math.round(tot * 100) / 100 })
+  rows.push({
+    status: 'TOTALE', costo_cliente: Math.round(tot * 100) / 100, costo: Math.round(tot * 100) / 100,
+    ...totaliColonneIva(iva),
+  })
   const ws = XLSX.utils.json_to_sheet(rows)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Spedizioni')

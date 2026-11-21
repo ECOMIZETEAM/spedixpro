@@ -1,13 +1,17 @@
 import { righeSpesa, voceSpesa, VOCI_SPESA, type RigaVoce } from './voci'
 import { inizioGiornoRomaISO, fineGiornoRomaISO, giornoRoma } from '@/lib/date-roma'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
+import { ivaVendite } from '@/lib/iva-vendita'
+import type { RegimeIva } from '@/lib/iva-calcolo'
 
 // LA FATTURA PROFORMA (Lorenzo, 13/11/2026): il master sceglie un cliente e un periodo, e la proforma
 // dice tutto quello che il cliente gli deve per quei giorni — spedizioni, rettifiche, giacenze, resi,
 // servizi, voci scritte a mano, meno i rimborsi — "non importa se credito o fattura a scalare".
 // Non e' una fattura: niente SDI, niente numero fiscale. Ha un suo numero per master e per anno.
 
-export type MovimentoProforma = { created_at: string; voce: string; descrizione: string; importo: number }
+// `iva_inclusa`: il movimento e' di una spedizione venduta IVA inclusa (l'importo contiene l'IVA).
+// `esente`: il movimento e' di una spedizione venduta esente IVA (21/11/2026).
+export type MovimentoProforma = { created_at: string; voce: string; descrizione: string; importo: number; iva_inclusa?: boolean; esente?: true }
 export type Accrediti = { n: number; importo: number }
 // Una voce scritta a mano dal master: entra solo se lui la spunta (lib/fatture/voci.ts, 'a_mano').
 export type VoceAMano = { id: string; created_at: string; descrizione: string; importo: number; inclusa: boolean }
@@ -21,6 +25,11 @@ export type CalcoloProforma = {
   // stati accreditati nello stesso periodo (importi positivi = a favore del cliente).
   ricariche: Accrediti
   contrassegni: Accrediti
+  // Movimenti di spedizioni vendute IVA inclusa: quanto e' uscito dal credito e quanta IVA conteneva.
+  // Nelle righe sono gia' al netto (lib/fatture/voci.ts → righeSpesa).
+  ivaInclusa: { lordo: number; iva: number }
+  // Movimenti venduti esenti IVA: righe loro nel riepilogo, fuori dall'imponibile. Totale = imponibile + IVA + esente.
+  esente: number
 }
 
 // Oltre un anno il PDF diventa un libro, e la lettura tiene occupato il database per niente.
@@ -44,11 +53,12 @@ export function motivoPeriodo(dal: string, al: string): string | null {
 // id): si legge a pagine da 1.000, e un movimento nuovo arriva sempre in fondo, quindi non sposta le
 // pagine gia' lette. `aManoIncluse`: gli id delle voci scritte a mano che il master ha spuntato; un id
 // che non e' una voce a mano di questo cliente in questo periodo non conta.
-export async function calcolaProforma(admin: any, masterId: string, clienteId: string, dal: string, al: string, aManoIncluse: string[] = []): Promise<CalcoloProforma> {
+// `aliquota`: quella del cliente (aliquotaDi), serve a scorporare i movimenti venduti IVA inclusa.
+export async function calcolaProforma(admin: any, masterId: string, clienteId: string, dal: string, al: string, aManoIncluse: string[] = [], aliquota = 22): Promise<CalcoloProforma> {
   const inizio = inizioGiornoRomaISO(dal)
   const fine = fineGiornoRomaISO(al)
   const spuntate = new Set(aManoIncluse)
-  const grezzi: { id: string; created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean }[] = []
+  const grezzi: { id: string; created_at: string; tipo: string; descrizione: string | null; importo: number; con_spedizione: boolean; spedizione_id: string | null; regime: RegimeIva; aliquota_compresa: number | null }[] = []
   for (let da = 0; ; da += 1000) {
     const { data, error } = await admin.from('movimenti')
       .select('id,created_at,tipo,descrizione,importo,spedizione_id')
@@ -62,11 +72,19 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
       .range(da, da + 999)
     if (error) throw new Error('Movimenti non leggibili: ' + error.message)
     for (const m of data || []) {
-      grezzi.push({ id: m.id, created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id })
+      grezzi.push({ id: m.id, created_at: m.created_at, tipo: String(m.tipo || ''), descrizione: m.descrizione, importo: Number(m.importo) || 0, con_spedizione: !!m.spedizione_id, spedizione_id: m.spedizione_id || null, regime: 'esclusa', aliquota_compresa: null })
     }
     if (grezzi.length > MOVIMENTI_MAX) throw new Error('Troppi movimenti per una proforma sola: scegli un periodo più corto')
     if (!data || data.length < 1000) break
   }
+
+  // Come il master ha venduto la spedizione di ogni movimento: IVA inclusa, esclusa o esente. Lo decide il
+  // database (fn_iva_vendita_regime, stessa regola dei report); i tipi che non seguono il listino: esclusa.
+  const regime = await ivaVendite(admin, masterId, grezzi.map(m => m.spedizione_id ? { t: 'cliente' as const, s: clienteId, p: m.spedizione_id, m: m.tipo } : null))
+  grezzi.forEach((m, i) => { m.regime = regime[i] })
+  // Spese aggiunte a mano con l'IVA gia' dentro (Consumabili → Aggiungi spesa): si leggono le loro aliquote.
+  const compresa = await aliquoteCompresa(admin, grezzi.filter(m => m.tipo === 'consumabile').map(m => m.id))
+  for (const m of grezzi) { const a = compresa.get(m.id); if (a) m.aliquota_compresa = a }
 
   const movimenti: MovimentoProforma[] = []
   const aMano: VoceAMano[] = []
@@ -87,13 +105,29 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
       if (!inclusa) continue
     }
     contano.push(m)
-    movimenti.push({ created_at: m.created_at, voce, descrizione, importo: cent(-m.importo) })
+    movimenti.push({ created_at: m.created_at, voce, descrizione, importo: cent(-m.importo), ...(m.regime === 'inclusa' || m.aliquota_compresa ? { iva_inclusa: true } : m.regime === 'esente' ? { esente: true as const } : {}) })
   }
   // Qui dentro ci sono gia' solo le voci a mano spuntate.
-  const { righe, imponibile } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo })), true)
+  const { righe, imponibile, esente, inclusa: ivaInclusa } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo, regime: m.regime, aliquota_compresa: m.aliquota_compresa })), true, aliquota)
   ricariche.importo = cent(ricariche.importo)
   contrassegni.importo = cent(contrassegni.importo)
-  return { righe, imponibile, movimenti, aMano, ricariche, contrassegni }
+  return { righe, imponibile, movimenti, aMano, ricariche, contrassegni, ivaInclusa, esente }
+}
+
+// L'aliquota gia' compresa in ogni movimento segnato (scripts/iva-spese-compresa.sql). A blocchi di 200 id
+// (oltre, l'indirizzo della richiesta diventa troppo lungo). Finche' la tabella non c'e', nessuna spesa e'
+// segnata: tutto come prima. Qualunque altro errore ferma il calcolo, come le altre letture della proforma.
+export async function aliquoteCompresa(admin: any, ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await admin.from('movimenti_iva_compresa').select('movimento_id,aliquota').in('movimento_id', ids.slice(i, i + 200))
+    if (error) {
+      if (['42P01', 'PGRST205'].includes(String(error.code || ''))) return out
+      throw new Error('Spese con IVA compresa non leggibili: ' + error.message)
+    }
+    for (const r of data || []) out.set(r.movimento_id, Number(r.aliquota) || 0)
+  }
+  return out
 }
 
 // ── Chi la emette e a chi va ─────────────────────────────────────────────────────────────────────

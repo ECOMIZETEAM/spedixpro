@@ -10,6 +10,8 @@ export interface Tariffa {
   limiti_collo?: string; avviso_fuori_sagoma?: string; _corriere_id?: string; _corriere_tipo?: string; _brt_assegno?: boolean
   _spedisci_assegno?: boolean; _poste_assegno?: boolean; _spediamopro_quotation?: any; _deposito?: boolean; _consegna_punto?: string
   _email_obbligatoria?: boolean; _inpost_locker?: boolean; corriere_id?: string
+  // come è venduto il listino di chi compra (/api/spedizioni/tariffe, lib/iva-calcolo): null finché il master non sceglie
+  _iva?: 'esclusa' | 'inclusa' | 'esente' | null; _aliquota?: number | null
 }
 
 // La stessa tariffa fra un preventivo e il successivo: il contratto e la zona. Serve a tenere il corriere scelto

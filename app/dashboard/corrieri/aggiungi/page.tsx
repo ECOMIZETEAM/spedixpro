@@ -109,6 +109,12 @@ async function salvaCorriere(formData: FormData) {
     // SERVIZIO (in giornata, 24 ore, 72 ore): ognuno ha copertura e prezzi suoi. Il servizio e' una scelta
     // fra tre codici fissi, non un testo: un codice scritto male fermerebbe tutte le spedizioni.
     credenziali.api_key = ((formData.get('api_key') as string) || '').trim()
+    // La chiave ha una forma fissa (eco_live_… / eco_test_…). Il 19/11 e' stata salvata la password del sito
+    // ecosmos.app al suo posto, e il contratto e' rimasto fermo senza che nessuno lo vedesse: si ferma qui.
+    const { chiaveEcosmosValida } = await import('@/lib/ecosmos')
+    if (!chiaveEcosmosValida(credenziali.api_key)) {
+      redirect('/dashboard/corrieri?error=' + encodeURIComponent('Chiave API Ecosmos non valida: deve iniziare con eco_live_. Non è la password del sito ecosmos.app: la chiave per l\'integrazione te la dà Ecosmos.'))
+    }
     const srvEc = formData.get('servizio_ecosmos') as string
     settings.servizio = ['same_day', 'express_24h', 'standard_72h'].includes(srvEc) ? srvEc : 'express_24h'
   } else if (tipo === 'inpost') {
@@ -284,7 +290,7 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
   },
   ecosmos: {
     titolo: 'Ecosmos',
-    info: 'Consegne con mezzi elettrici a Roma e nei comuni vicini. Incolla la chiave API che ti ha dato Ecosmos (inizia con eco_live_) e scegli il servizio: crea un contratto per ogni servizio che vuoi vendere. Il ritiro lo fa Ecosmos dal mittente, senza prenotarlo: le spedizioni fatte entro le 13 partono in giornata. Ritiro e consegna devono essere entrambi nella zona coperta.',
+    info: 'Consegne con mezzi elettrici a Roma e nei comuni vicini. Incolla la chiave API per l\'integrazione che ti ha dato Ecosmos (inizia con eco_live_: non è la password con cui entri sul sito ecosmos.app) e scegli il servizio: crea un contratto per ogni servizio che vuoi vendere. Il ritiro lo fa Ecosmos dal mittente, senza prenotarlo: le spedizioni fatte entro le 13 partono in giornata. Ritiro e consegna devono essere entrambi nella zona coperta.',
     campi: [
       ['nome_contratto','Nome del contratto','es. Ecosmos 24 ore','text'],
       ['api_key','Chiave API','eco_live_…','password'],

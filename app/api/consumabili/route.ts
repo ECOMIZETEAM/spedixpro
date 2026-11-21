@@ -29,6 +29,37 @@ function nonStaff(utente: any): boolean {
   return !utente?.master_id || !!utente?.cliente_id || !STAFF_MASTER.includes(String(utente?.ruolo || '').toLowerCase())
 }
 
+// L'IVA SCELTA QUI SI SCALA INSIEME AL PREZZO: la spesa contiene gia' l'IVA (Lorenzo, 20/11/2026). Lo si
+// scrive a parte, in movimenti_iva_compresa (scripts/iva-spese-compresa.sql), cosi' proforma e Report
+// Fatture la riportano al netto invece di rimetterci sopra l'aliquota del cliente: prima l'IVA si contava due
+// volte (QUICK → MOI CHERI, 30/10: 240,01 scalati, 292,81 in proforma). Il movimento non cambia.
+// La registrazione non restituisce l'id: si ritrova il movimento appena scritto (stesso conto, tipo,
+// descrizione, dal momento della richiesta) e si segna il piu' recente non ancora segnato. Se non riesce, la
+// spesa resta registrata comunque: si scrive nei log e la risposta lo dice.
+async function segnaIvaCompresa(admin: any, conto: { masterId: string; clienteId?: string; targetMasterId?: string }, descrizione: string, dalle: string, aliquota: number): Promise<string | null> {
+  if (!(aliquota > 0)) return null
+  try {
+    let q = admin.from('movimenti').select('id').eq('tipo', 'consumabile').eq('descrizione', descrizione).gte('created_at', dalle)
+    q = conto.targetMasterId
+      ? q.eq('master_target_id', conto.targetMasterId).is('cliente_id', null)
+      : q.eq('master_id', conto.masterId).eq('cliente_id', conto.clienteId).is('master_target_id', null)
+    const { data: trovati, error } = await q.order('created_at', { ascending: false }).limit(5)
+    if (error) throw new Error(error.message)
+    const ids = (trovati || []).map((m: any) => m.id)
+    if (!ids.length) throw new Error('movimento appena registrato non trovato')
+    const { data: gia } = await admin.from('movimenti_iva_compresa').select('movimento_id').in('movimento_id', ids)
+    const segnati = new Set((gia || []).map((r: any) => r.movimento_id))
+    const id = ids.find((x: string) => !segnati.has(x))
+    if (!id) throw new Error('nessun movimento da segnare')
+    const { error: eIns } = await admin.from('movimenti_iva_compresa').insert({ movimento_id: id, aliquota })
+    if (eIns) throw new Error(eIns.message)
+    return null
+  } catch (e: any) {
+    console.error('[CONSUMABILI][IVA COMPRESA] spesa non segnata', JSON.stringify({ ...conto, descrizione, aliquota, errore: e?.message || String(e) }))
+    return 'Spesa registrata, ma non è stato possibile segnare che contiene già l’IVA: nella proforma potrebbe comparire con l’IVA due volte. Avvisa l’assistenza.'
+  }
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -36,12 +67,29 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
   if (nonStaff(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
-  const { clienteId, descrizione, prezzoUnitario, quantita, iva, vettore, dataAcquisto } = body
+  const { clienteId, descrizione, prezzoUnitario, quantita, iva, vettore, dataAcquisto, prezzoIva } = body
   if (!clienteId) return NextResponse.json({ error: 'Cliente obbligatorio' }, { status: 400 })
   if (!descrizione) return NextResponse.json({ error: 'Descrizione obbligatoria' }, { status: 400 })
-  const importo = parseFloat(prezzoUnitario) * parseInt(quantita)
-  const totaleIva = importo * (parseFloat(iva) / 100)
-  const totale = importo + totaleIva
+  const cent = (x: number) => Math.round(x * 100) / 100
+  const prezzo = cent(parseFloat(prezzoUnitario) * parseInt(quantita))
+  if (!Number.isFinite(prezzo) || prezzo <= 0) return NextResponse.json({ error: 'Prezzo o quantità non validi' }, { status: 400 })
+  const aliquota = Number(parseFloat(iva)) > 0 ? Number(parseFloat(iva)) : 0
+  // IL PREZZO E' IVA ESCLUSA O INCLUSA? (Lorenzo, 20/11/2026) Lo dice il master nel modulo, e il credito
+  // scala SEMPRE il prezzo scritto, come per i listini: IVA esclusa → l'IVA compare solo nei documenti;
+  // IVA inclusa → la spesa si segna con la sua aliquota e i documenti la scorporano.
+  // Una pagina aperta prima di questa versione non manda `prezzoIva`: per lei vale quello che aveva a
+  // schermo, prezzo + IVA scalati e spesa segnata con l'IVA dentro.
+  let totale: number
+  let aliquotaCompresa = 0
+  if (prezzoIva === 'esclusa' || prezzoIva === 'inclusa') {
+    totale = prezzo
+    aliquotaCompresa = prezzoIva === 'inclusa' ? aliquota : 0
+  } else {
+    totale = cent(prezzo * (1 + aliquota / 100))
+    aliquotaCompresa = aliquota
+  }
+  // Un minuto di margine: l'orologio del server e quello del database non sono identici al millisecondo.
+  const dalle = new Date(Date.now() - 60_000).toISOString()
 
   // Spesa addebitata a un SOTTO-MASTER (clienteId = "m:<id>")
   if (typeof clienteId === 'string' && clienteId.startsWith('m:')) {
@@ -54,7 +102,8 @@ export async function POST(req: NextRequest) {
       const { registraMovimentoMaster } = await import('@/lib/movimenti')
       await registraMovimentoMaster(admin, { masterOwnerId: utente!.master_id!, masterTargetId: targetMasterId, tipo: 'consumabile', descrizione, importo: -totale, riferimento: vettore || null })
     } catch (e: any) { return NextResponse.json({ error: e.message || 'Errore movimento' }, { status: 400 }) }
-    return NextResponse.json({ success: true })
+    const avviso = await segnaIvaCompresa(admin, { masterId: utente!.master_id!, targetMasterId }, descrizione, dalle, aliquotaCompresa)
+    return NextResponse.json({ success: true, ...(avviso ? { avviso } : {}) })
   }
 
   // Il cliente addebitato DEVE essere del master che chiama. Finora lo garantiva la RLS, perche'
@@ -70,9 +119,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const { createAdminSupabase: adminSpesa } = await import('@/lib/supabase-admin')
   try {
-    const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    await registraMovimento(createAdminSupabase(), {
+    await registraMovimento(adminSpesa(), {
       masterId: utente?.master_id,
       clienteId,
       tipo: 'consumabile',
@@ -83,7 +132,8 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Errore movimento' }, { status: 400 })
   }
-  return NextResponse.json({ success: true })
+  const avviso = await segnaIvaCompresa(adminSpesa(), { masterId: utente!.master_id!, clienteId }, descrizione, dalle, aliquotaCompresa)
+  return NextResponse.json({ success: true, ...(avviso ? { avviso } : {}) })
 }
 
 export async function GET(req: NextRequest) {

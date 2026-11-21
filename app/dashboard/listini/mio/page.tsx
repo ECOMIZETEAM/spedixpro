@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import SupplementiMulticollo from '@/app/components/SupplementiMulticollo'
 import { normalizzaSupplementiMulticollo } from '@/lib/multicollo-zone'
+import { PrezziIva } from '@/app/components/IvaPrezzo'
 
 const eur = (x: number) => Number(x) > 0 ? '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const pct = (x: number) => Number(x) > 0 ? Number(x).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%' : '—'
@@ -76,7 +77,7 @@ export default function MioListinoPage() {
               const logo = iconaCorriere(c.nome_contratto)
               return (
                 <div key={id} style={{ background: '#fff', borderRadius: '10px', border: aperto ? '1px solid #f97316' : '1px solid #e5e7eb', overflow: 'hidden', boxShadow: aperto ? '0 1px 3px rgba(249,115,22,0.12)' : 'none' }}>
-                  <div onClick={() => toggle(id)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', cursor: 'pointer', userSelect: 'none', background: aperto ? '#fff7ed' : '#fff' }}>
+                  <div onClick={() => toggle(id)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', cursor: 'pointer', userSelect: 'none', background: aperto ? '#fff7ed' : '#fff', flexWrap: 'wrap' }}>
                     {logo ? (
                       <span style={{ width: '56px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <img src={logo} alt={c.nome_contratto} style={{ maxWidth: '56px', maxHeight: '40px', objectFit: 'contain' }} />
@@ -86,6 +87,7 @@ export default function MioListinoPage() {
                     )}
                     <span style={{ flex: 1, fontSize: '14px', fontWeight: 600, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>{c.nome_contratto}
                       {c.pausa && <span title={c.pausaMotivo === 'catena' ? 'Un master superiore lo ha messo in pausa: il cliente non lo vede.' : 'Il master lo ha messo in pausa: il cliente non lo vede.'} style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700, padding: '2px 8px' }}>⏸ {c.pausaMotivo === 'catena' ? 'In pausa da un livello superiore' : 'In pausa'}</span>}</span>
+                    <PrezziIva regime={c.iva} aliquota={d?.aliquota_iva} />
                     <span style={{ fontSize: '18px', color: '#9ca3af', transform: aperto ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>›</span>
                   </div>
 
