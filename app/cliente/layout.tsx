@@ -13,6 +13,7 @@ import { recapitoEmail } from '@/lib/indirizzi-interni'
 import { COLONNE_DATI_NEGOZIO, datiPerLaSchermata, servonoDatiNegozio, versioneDatiNegozio } from '@/lib/dati-negozio'
 import { cookies, headers } from 'next/headers'
 import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
+import { MARCHIO_APP } from '@/lib/app-marchio'
 
 // Mai in cache: dipende dalla sessione (senza questo, Vercel può servire una
 // versione statica "senza utente" → sidebar assente).
@@ -99,9 +100,12 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   // Dashboard ed Elenco spedizioni aperte con «?nuova=1», che il proxy segnala con x-grafica-prova.
   const provaIds = (process.env.GRAFICA_PROVA_MASTER_IDS || '').split(',').map(x => x.trim()).filter(Boolean)
   const provaAperta = process.env.GRAFICA_PROVA_APERTA === '1' || (!!utente.master_id && provaIds.includes(utente.master_id))
-  const provaQui = provaAperta && (await headers()).get('x-grafica-prova') === '1'
-  const graficaScelta = sceltaTema((await cookies()).get('mx_tema')?.value)
-  const grafica = { prova: provaQui, offri: provaAperta && !provaQui, scelta: graficaScelta, luce: provaQui ? luceIniziale(graficaScelta) : undefined }
+  const intestazioni = await headers(), biscotti = await cookies()
+  const provaQui = provaAperta && intestazioni.get('x-grafica-prova') === '1'
+  const graficaScelta = sceltaTema(biscotti.get('mx_tema')?.value)
+  // nell'app degli store «Auto» è il chiaro/scuro del telefono (biscotto mx_scuro), vedi luceIniziale
+  const telefono = { app: (intestazioni.get('user-agent') || '').includes(MARCHIO_APP), scuro: biscotti.get('mx_scuro')?.value }
+  const grafica = { prova: provaQui, offri: provaAperta && !provaQui, scelta: graficaScelta, luce: provaQui ? luceIniziale(graficaScelta, telefono) : undefined }
 
   const shell = (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}

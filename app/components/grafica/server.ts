@@ -15,7 +15,14 @@ function luceNotte(scelta: string): boolean {
 // notte) e, in Auto, l'ora di Roma. Così la pagina arriva già col vetro giusto, senza uno script che la ritocchi prima
 // del disegno (React non lo accetta, e il server e il browser disegnerebbero due pagine diverse). Stesse soglie di
 // luceDellOra in components/grafica/CorniceNuova.tsx.
-export function luceIniziale(scelta: string): string {
+//
+// Nell'app degli store «Auto» segue invece il chiaro/scuro del telefono (Lorenzo 21/11: «ovvio quella del telefono che è
+// automatica, chiaro o scuro»). Il server non vede prefers-color-scheme (nella WebView di iOS non arriva nemmeno il
+// client hint): lo legge dal biscotto mx_scuro (1 scuro, 0 chiaro), che scrivono la pagina (CorniceNuova, a ogni
+// apertura e a ogni cambio del telefono) e il guscio dell'app. Senza biscotto, la prima volta, vale l'ora di Roma e la
+// pagina si corregge appena parte.
+export function luceIniziale(scelta: string, telefono?: { app: boolean; scuro?: string }): string {
+  if (scelta === 'auto' && telefono?.app && (telefono.scuro === '1' || telefono.scuro === '0')) return telefono.scuro === '1' ? 'notte' : 'argilla'
   // 27/10: il giorno è il plastico bianco («argilla», dai riferimenti RoutaX di Lorenzo); la notte resta la notte
   return luceNotte(scelta) ? 'notte' : 'argilla'
 }
