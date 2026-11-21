@@ -14,7 +14,6 @@ import { eTitolareOAdmin } from '@/lib/ruoli'
 import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 import { cookies, headers } from 'next/headers'
 import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
-import { MARCHIO_APP } from '@/lib/app-marchio'
 
 // Mai in cache: dipende dalla sessione. Senza questo Vercel puo' servire una versione resa
 // SENZA utente -> sidebar assente al primo accesso (il portale cliente aveva gia' lo stesso
@@ -97,8 +96,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
       provaNuova: provaAperta && !graficaNuova,
       // l'entrata animata della Plancia, una volta per sessione (biscotto di sessione mx_entrata, lo mette la Plancia)
       graficaEntrata: graficaNuova && !biscotti.get('mx_entrata'),
-      // nell'app degli store «Auto» è il chiaro/scuro del telefono (biscotto mx_scuro), vedi luceIniziale
-      graficaLuce: graficaNuova ? luceIniziale(graficaScelta, { app: (intestazioni.get('user-agent') || '').includes(MARCHIO_APP), scuro: biscotti.get('mx_scuro')?.value }) : undefined,
+      // «Auto» è il chiaro/scuro del dispositivo (biscotto mx_scuro), vedi luceIniziale
+      graficaLuce: graficaNuova ? luceIniziale(graficaScelta, { scuro: biscotti.get('mx_scuro')?.value }) : undefined,
       graficaProposta: graficaNuova && ['a', 'b', 'c', 'd'].includes(biscotti.get('mx_plancia')?.value || '') ? biscotti.get('mx_plancia')!.value : '',
       // Estratto conto: in prova solo su alcuni master, e solo per titolare e admin.
       contabilita: contabilitaAttiva(utente?.master_id) && eTitolareOAdmin(utente),

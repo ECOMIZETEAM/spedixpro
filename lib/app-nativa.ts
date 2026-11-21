@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from 'react'
-import { MARCHIO_APP } from './app-marchio'
 
 // L'APP iOS/ANDROID È UN'ALTRA VETRINA, CON REGOLE SUE.
 //
@@ -12,7 +11,9 @@ import { MARCHIO_APP } from './app-marchio'
 // Non è una regola di soldi né una difesa: chi falsifica il marchio nasconde a sé stesso dei
 // pulsanti, e le rotte di pagamento restano quelle di sempre.
 //
-// L'app si riconosce dal marchio che il guscio aggiunge allo user agent (lib/app-marchio.ts).
+// L'app si riconosce dal marchio che il guscio aggiunge allo user agent (appendUserAgent in
+// capacitor.config.json del progetto moovexpress-app): se lo si cambia là, va cambiato qui.
+const MARCHIO_APP = 'MoovExpressApp/'
 
 export const ABBONAMENTO_NON_IN_APP = 'La gestione dell’abbonamento non è disponibile nell’app.'
 

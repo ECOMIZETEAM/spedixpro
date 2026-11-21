@@ -13,7 +13,6 @@ import { recapitoEmail } from '@/lib/indirizzi-interni'
 import { COLONNE_DATI_NEGOZIO, datiPerLaSchermata, servonoDatiNegozio, versioneDatiNegozio } from '@/lib/dati-negozio'
 import { cookies, headers } from 'next/headers'
 import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
-import { MARCHIO_APP } from '@/lib/app-marchio'
 
 // Mai in cache: dipende dalla sessione (senza questo, Vercel può servire una
 // versione statica "senza utente" → sidebar assente).
@@ -103,9 +102,8 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   const intestazioni = await headers(), biscotti = await cookies()
   const provaQui = provaAperta && intestazioni.get('x-grafica-prova') === '1'
   const graficaScelta = sceltaTema(biscotti.get('mx_tema')?.value)
-  // nell'app degli store «Auto» è il chiaro/scuro del telefono (biscotto mx_scuro), vedi luceIniziale
-  const telefono = { app: (intestazioni.get('user-agent') || '').includes(MARCHIO_APP), scuro: biscotti.get('mx_scuro')?.value }
-  const grafica = { prova: provaQui, offri: provaAperta && !provaQui, scelta: graficaScelta, luce: provaQui ? luceIniziale(graficaScelta, telefono) : undefined }
+  // «Auto» è il chiaro/scuro del dispositivo (biscotto mx_scuro), vedi luceIniziale
+  const grafica = { prova: provaQui, offri: provaAperta && !provaQui, scelta: graficaScelta, luce: provaQui ? luceIniziale(graficaScelta, { scuro: biscotti.get('mx_scuro')?.value }) : undefined }
 
   const shell = (
     <ClienteShell cliente={{ ragione_sociale: cliente?.ragione_sociale, credito: cliente?.credito }} brandLogo={brandLogo} brandNome={brandNome}

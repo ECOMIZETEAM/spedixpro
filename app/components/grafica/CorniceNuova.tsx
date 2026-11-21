@@ -75,14 +75,6 @@ const GRUPPO_CLIENTE: Record<string, string> = {
 
 const RUOLI: Record<string, string> = { master: 'master', admin: 'amministratore', operatore: 'operatore', agente: 'agente', cliente: 'portale cliente' }
 
-// Auto: la luce dell'ora, come nella prova (notte prima delle 7 e dopo le 18:12, mattina fino alle 10, giorno fino alle 17)
-export function luceDellOra(d = new Date()) {
-  const m = d.getHours() * 60 + d.getMinutes()
-  if (m < 7 * 60 || m >= 18 * 60 + 12) return 'notte'
-  if (m < 10 * 60) return 'mattina'
-  if (m < 17 * 60) return 'giorno'
-  return 'tramonto'
-}
 type Scelta = 'auto' | 'giorno' | 'notte'
 
 export default function CorniceNuova({ children, user, path, nav: navDiOggi, portale = 'master', pallinoVoce, pallinoSotto, credito, mostraSms, isMobile, vociProfilo }: {
@@ -131,21 +123,22 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
   const [luce, setLuce] = useState<string>(user?.graficaLuce || 'giorno')
   const tema = luce === 'notte' ? 'notte' : 'giorno'
   // la luce di una scelta: di giorno il plastico bianco («argilla»), di notte la notte
-  // nell'app degli store «Auto» è il chiaro/scuro del telefono, non l'ora (Lorenzo 21/11); sul sito resta l'ora
+  // «Auto» è il chiaro/scuro del dispositivo, non più l'ora di Roma (Lorenzo 21/11: nell'app «ovvio quella del telefono
+  // che è automatica», poi «sì» anche per il sito): telefono, app e computer seguono la loro impostazione di sistema
   const scuroTelefono = () => typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
-  const luceDi = (s: Scelta) => { const l = s === 'auto' ? (app ? (scuroTelefono() ? 'notte' : 'giorno') : luceDellOra()) : s; return l === 'notte' ? 'notte' : 'argilla' }
+  const luceDi = (s: Scelta) => { const l = s === 'auto' ? (scuroTelefono() ? 'notte' : 'giorno') : s; return l === 'notte' ? 'notte' : 'argilla' }
   useEffect(() => {
     const metti = () => setLuce(luceDi(scelta))
     metti()
     const t = setInterval(metti, 60000)
-    // nell'app: il telefono che passa a scuro (anche da solo, al tramonto) cambia la pagina dal vivo, e il biscotto
-    // mx_scuro dice al server come disegnare la prossima pagina (luceIniziale), così all'apertura non c'è il lampo
-    let mq: MediaQueryList | null = null
-    const cambia = () => { document.cookie = `mx_scuro=${mq!.matches ? 1 : 0}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`; metti() }
-    if (app) { mq = window.matchMedia('(prefers-color-scheme: dark)'); cambia(); mq.addEventListener('change', cambia) }
-    return () => { clearInterval(t); mq?.removeEventListener('change', cambia) }
+    // il dispositivo che passa a scuro (anche da solo, al tramonto) cambia la pagina dal vivo, e il biscotto mx_scuro dice
+    // al server come disegnare la prossima pagina (luceIniziale), così all'apertura non c'è il lampo
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const cambia = () => { document.cookie = `mx_scuro=${mq.matches ? 1 : 0}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`; metti() }
+    cambia(); mq.addEventListener('change', cambia)
+    return () => { clearInterval(t); mq.removeEventListener('change', cambia) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scelta, app])
+  }, [scelta])
   // le due luci pronte in memoria: al cambio, la foto nuova c'è già e il passaggio non mostra un buco
   useEffect(() => { for (const l of ['argilla', 'notte']) { const im = new Image(); im.src = `/grafica/luce-${l}.webp` } }, [])
   // anche su <html>: i menu a tendina (campanella, profilo, conti) si aprono in fondo alla pagina, fuori dalla cornice
@@ -328,7 +321,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
           <div className="gx-gruppo-tasti gx-aspetto gx-vetro gx-pillola gx-solo-largo" role="group" aria-label="Aspetto">
             {/* solo le icone (Lorenzo 27/10: «lascerei solo auto, sole e luna»); la parola resta per chi passa sopra e
                 per i lettori di schermo */}
-            <button type="button" aria-pressed={scelta === 'auto'} onClick={e => scegli('auto', e)} title="Auto: segue l'ora del giorno" aria-label="Auto"><Icona id="i-auto" /></button>
+            <button type="button" aria-pressed={scelta === 'auto'} onClick={e => scegli('auto', e)} title="Auto: chiaro o scuro come il dispositivo" aria-label="Auto"><Icona id="i-auto" /></button>
             <button type="button" aria-pressed={scelta === 'giorno'} onClick={e => scegli('giorno', e)} title="Giorno" aria-label="Giorno"><Icona id="i-sole" /></button>
             <button type="button" aria-pressed={scelta === 'notte'} onClick={e => scegli('notte', e)} title="Notte" aria-label="Notte"><Icona id="i-luna" /></button>
           </div>

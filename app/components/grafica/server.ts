@@ -12,17 +12,16 @@ function luceNotte(scelta: string): boolean {
   return m < 7 * 60 || m >= 18 * 60 + 12
 }
 // La luce con cui la pagina nasce, decisa QUI sul server: la scelta di chi guarda (biscotto mx_tema: auto, giorno o
-// notte) e, in Auto, l'ora di Roma. Così la pagina arriva già col vetro giusto, senza uno script che la ritocchi prima
-// del disegno (React non lo accetta, e il server e il browser disegnerebbero due pagine diverse). Stesse soglie di
-// luceDellOra in components/grafica/CorniceNuova.tsx.
+// notte) e, in Auto, il chiaro/scuro del dispositivo (biscotto mx_scuro, qui sotto); l'ora di Roma solo se manca. Così la pagina arriva già col vetro giusto, senza uno script che la ritocchi prima
+// del disegno (React non lo accetta, e il server e il browser disegnerebbero due pagine diverse).
 //
-// Nell'app degli store «Auto» segue invece il chiaro/scuro del telefono (Lorenzo 21/11: «ovvio quella del telefono che è
-// automatica, chiaro o scuro»). Il server non vede prefers-color-scheme (nella WebView di iOS non arriva nemmeno il
-// client hint): lo legge dal biscotto mx_scuro (1 scuro, 0 chiaro), che scrivono la pagina (CorniceNuova, a ogni
-// apertura e a ogni cambio del telefono) e il guscio dell'app. Senza biscotto, la prima volta, vale l'ora di Roma e la
-// pagina si corregge appena parte.
-export function luceIniziale(scelta: string, telefono?: { app: boolean; scuro?: string }): string {
-  if (scelta === 'auto' && telefono?.app && (telefono.scuro === '1' || telefono.scuro === '0')) return telefono.scuro === '1' ? 'notte' : 'argilla'
+// «Auto» segue il chiaro/scuro del dispositivo (Lorenzo 21/11: nell'app «ovvio quella del telefono che è automatica,
+// chiaro o scuro», e sì anche per il sito). Il server non vede prefers-color-scheme (Safari e la WebView di iOS non
+// mandano nemmeno il client hint): lo legge dal biscotto mx_scuro (1 scuro, 0 chiaro), che scrivono la pagina
+// (CorniceNuova, a ogni apertura e a ogni cambio del dispositivo) e il guscio dell'app. Senza biscotto, alla prima
+// visita, vale l'ora di Roma e la pagina si corregge appena parte.
+export function luceIniziale(scelta: string, dispositivo?: { scuro?: string }): string {
+  if (scelta === 'auto' && (dispositivo?.scuro === '1' || dispositivo?.scuro === '0')) return dispositivo.scuro === '1' ? 'notte' : 'argilla'
   // 27/10: il giorno è il plastico bianco («argilla», dai riferimenti RoutaX di Lorenzo); la notte resta la notte
   return luceNotte(scelta) ? 'notte' : 'argilla'
 }
