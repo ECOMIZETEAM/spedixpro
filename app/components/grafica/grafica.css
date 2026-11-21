@@ -434,3 +434,80 @@
 /* sul telefono la tendina con la ricerca larga quanto lo schermo, come quella dei comuni: a 240 px i nomi dei clienti
    andavano su due righe */
 @media (max-width: 720px) { .sc-pannello { left: 10px !important; right: 10px !important; width: auto !important; max-width: none !important; } }
+
+/* ── la barra in basso del telefono, come l'app Shopify (Lorenzo 21/11; CorniceNuova, solo fino a 720 px) ─────────────
+   Lente · [Home Spedizioni Nuova Menu] · Moovy, che galleggiano sopra la pagina. Il Menu è la lista intera a tutto
+   schermo, coi tasti Impostazioni · Chiedi a Moovy · × in fondo al posto della barra. Sopra la fascia di sistema
+   (safe-area; nell'app vale 0, le barre di sistema le colora il guscio col theme-color). Con la tastiera aperta, con
+   la ricerca o col Menu aperti, la barra scende via. Il pannello delle scelte dell'Elenco e il «Crea» della Nuova
+   spedizione salgono sopra la barra; la pagina si allunga in fondo perché l'ultima riga non resti sotto. */
+.gx-sotto, .gx-lato__fondo, .gx-ricerca-velo { display: none; }
+.gx-tondo { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 9px; flex: none;
+  width: 56px; height: 56px; border-radius: 999px; color: var(--gx-inchiostro); font-size: 16px; font-weight: 600;
+  background: rgba(255, 255, 255, .78); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 1px 2px rgba(20, 30, 50, .06), 0 14px 34px -14px rgba(20, 30, 50, .35); }
+[data-luce="notte"] .gx-tondo { background: rgba(44, 43, 42, .82); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 14px 34px -14px rgba(0, 0, 0, .7); }
+.gx-tondo .gx-ico { width: 24px; height: 24px; }
+.gx-tondo--lungo { width: auto; padding: 0 22px; }
+.gx-tondo--spento { opacity: .45; cursor: default; }
+.gx-tondo--moovy .gx-ico { color: var(--gx-accento); }
+.gx-tondo:focus-visible, .gx-sotto__scheda:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+@media (max-width: 720px) {
+  .gx-sotto { position: fixed; z-index: 50; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 8px;
+    transition: transform .28s cubic-bezier(.2, .9, .25, 1), opacity .2s ease; }
+  .gx-sotto--via { transform: translateY(calc(100% + 30px)); opacity: 0; pointer-events: none; }
+  .gx-sotto__schede { flex: 1; display: flex; align-items: center; justify-content: space-around; height: 56px; padding: 0 4px; border-radius: 999px;
+    background: rgba(255, 255, 255, .78); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 1px 2px rgba(20, 30, 50, .06), 0 14px 34px -14px rgba(20, 30, 50, .35); }
+  [data-luce="notte"] .gx-sotto__schede { background: rgba(44, 43, 42, .82); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 14px 34px -14px rgba(0, 0, 0, .7); }
+  .gx-sotto__scheda { all: unset; box-sizing: border-box; cursor: pointer; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 999px; color: var(--gx-attenuato); }
+  .gx-sotto__scheda .gx-ico { width: 24px; height: 24px; }
+  /* la scheda attiva: un tondo pieno e l'icona più scura, come nell'app Shopify */
+  .gx-sotto__scheda--su { background: var(--gx-incavo); color: var(--gx-inchiostro); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+  .gx-sotto__scheda--su .gx-ico { stroke-width: 2.1; }
+  /* in alto non servono più il tasto del menu e la pillola di Moovy: stanno nella barra in basso */
+  .gx-alto__menu, .gx-alto .gx-cerca { display: none !important; }
+  /* la pagina si allunga della barra; il «Crea» fisso della Nuova spedizione si ferma sopra (il suo riquadro che scorre
+     ha il margine in fondo) e la sua ombra copre quello che passa sotto */
+  .gx:has(.gx-sotto) .gx-pagina { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
+  .gx:has(.gx-sotto) .ns-crea { box-shadow: 0 120px 0 var(--gx-fondo); }
+  .gx:has(.gx-sotto:not(.gx-sotto--via)) .gx-elenco .el-blocco { bottom: calc(80px + env(safe-area-inset-bottom)); }
+
+  /* il Menu a tutto schermo, dal basso */
+  .gx-lato.gx-lato--telefono { inset: 0; margin: 0; width: auto; padding: calc(16px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom));
+    overflow-y: auto; overscroll-behavior: contain; border-radius: 0; background: var(--gx-fondo) !important; box-shadow: none !important;
+    -webkit-backdrop-filter: none; backdrop-filter: none; transform: translateY(100%); transition: transform .32s cubic-bezier(.2, .9, .25, 1); }
+  .gx-lato.gx-lato--telefono.gx-lato--aperto { transform: none; }
+  /* un blocco solo che scorre: con la colonna flessibile del menu laterale, «Esci» restava fermo in fondo allo schermo e
+     finiva sopra le voci («Magazzino», «Impostazioni») */
+  .gx-lato.gx-lato--telefono { display: block; }
+  .gx-lato--telefono .gx-marca { display: none; }
+  .gx-lato--telefono .gx-menu { flex: none; min-height: 0; overflow: visible; }
+  .gx-lato--telefono .gx-voce { height: 52px; padding: 0 14px; gap: 16px; border-radius: 16px; font-size: 17px; }
+  .gx-lato--telefono .gx-voce .gx-ico { width: 22px; height: 22px; }
+  .gx-lato--telefono .gx-voce .gx-freccia { width: 18px; height: 18px; margin-left: auto; transform: rotate(90deg); }
+  .gx-lato--telefono .gx-voce--aperta .gx-freccia { transform: rotate(-90deg); }
+  .gx-lato--telefono .gx-gruppo { padding: 22px 14px 6px; font-size: 15px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--gx-inchiostro); }
+  .gx-lato--telefono .gx-rami { padding: 0 0 6px 52px; gap: 0; }
+  .gx-lato--telefono .gx-rami a, .gx-lato--telefono .gx-rami .gx-spenta { display: flex; align-items: center; min-height: 46px; font-size: 16px; }
+  .gx-lato--telefono .gx-piede { margin-top: 10px; }
+  .gx-lato__fondo { position: fixed; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; gap: 10px; padding: 26px 10px calc(10px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--gx-fondo) 55%, transparent); }
+  /* in alto a sinistra, al posto del tasto del menu, il marchio di chi guarda (come il nome del negozio nell'app Shopify) */
+  .gx-alto__marca { display: flex; align-items: center; gap: 8px; min-width: 0; margin-right: auto; color: var(--gx-inchiostro); font-size: 16px; font-weight: 600; }
+  .gx-alto__marca img { max-height: 34px; max-width: 132px; object-fit: contain; object-position: left center; }
+  /* senza logo solo l'iniziale: accanto a credito, assistenza, campanella e profilo il nome restava a 4 lettere («GREE…») */
+  .gx-alto__marca b { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* la ricerca: un campo in alto, il resto velato */
+  .gx-ricerca-velo { display: block; position: fixed; inset: 0; z-index: 1001; background: rgba(15, 20, 27, .28); animation: tl-velo .2s ease both; }
+  [data-luce="notte"] .gx-ricerca-velo { background: rgba(0, 0, 0, .5); }
+  .gx-ricerca { position: absolute; left: 10px; right: 10px; top: calc(10px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 8px 0 18px;
+    border-radius: 999px; background: var(--gx-fondo); color: var(--gx-inchiostro); box-shadow: 0 18px 44px -16px rgba(20, 30, 50, .5), inset 0 0 0 1px var(--gx-filo); }
+  .gx-ricerca > .gx-ico { width: 22px; height: 22px; color: var(--gx-attenuato); }
+  .gx-ricerca input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: 16px; }
+  .gx-ricerca input::-webkit-search-cancel-button { display: none; }
+  .gx-ricerca__x { all: unset; cursor: pointer; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--gx-incavo); color: var(--gx-attenuato); }
+  .gx-ricerca__x .gx-ico { width: 18px; height: 18px; }
+}
+@media (prefers-reduced-motion: reduce) { .gx-sotto, .gx-lato.gx-lato--telefono { transition: none; } }

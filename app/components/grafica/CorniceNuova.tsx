@@ -192,6 +192,29 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
   })
   const [chiuso, setChiuso] = useState(false)
   const [drawer, setDrawer] = useState(false)
+  // ── la barra in basso del telefono, come l'app Shopify (Lorenzo 21/11: «il menu consiglio di farlo come quello di
+  // shopify su app»; studiata dalle sue catture). Solo fino a 720 px: tablet e computer tengono il menu laterale.
+  // A sinistra la lente (cerca una spedizione), al centro Home · Spedizioni · Nuova · Menu, a destra Moovy (come
+  // Sidekick). Il Menu apre la lista intera a tutto schermo, coi tasti Impostazioni · Chiedi a Moovy · × in fondo.
+  // Le voci arrivano dal menu di oggi, già filtrato per ruolo, permessi e app degli store (Layout/ClienteNav).
+  const [telefono, setTelefono] = useState(false)
+  useEffect(() => {
+    const m = window.matchMedia('(max-width: 720px)'), segui = () => setTelefono(m.matches)
+    segui(); m.addEventListener('change', segui); return () => m.removeEventListener('change', segui)
+  }, [])
+  const [cercaAperta, setCercaAperta] = useState(false)
+  const [cercaTesto, setCercaTesto] = useState('')
+  // con la tastiera aperta (si scrive un indirizzo) la barra si toglie: non deve salire a coprire i campi
+  const [tastiera, setTastiera] = useState(false)
+  useEffect(() => {
+    const scrive = (e: Element | null) => !!e && (e instanceof HTMLTextAreaElement || e instanceof HTMLSelectElement || (e as HTMLElement).isContentEditable
+      || (e instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'range', 'color'].includes(e.type)))
+    const dentro = (e: FocusEvent) => { if (scrive(e.target as Element)) setTastiera(true) }
+    const fuori = () => setTimeout(() => setTastiera(scrive(document.activeElement)), 60)
+    document.addEventListener('focusin', dentro); document.addEventListener('focusout', fuori)
+    return () => { document.removeEventListener('focusin', dentro); document.removeEventListener('focusout', fuori) }
+  }, [])
+  useEffect(() => { if (!cercaAperta) return; const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setCercaAperta(false) }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [cercaAperta])
   useEffect(() => { try { if (localStorage.getItem('spx_sidebar_chiusa') === '1') setChiuso(true) } catch {} }, [])
   useEffect(() => { setDrawer(false) }, [path])
   const menu = () => {
@@ -207,6 +230,21 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
 
   const plancia = path === home
   const iniziali = (user?.nome || 'Admin').split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase()
+  const base = cliente ? '/cliente' : '/dashboard'
+  const spedizioni = base + '/spedizioni', nuovaSped = base + '/spedizioni/nuova'
+  const impostazioni = nav.some(v => v.label === 'Impostazioni') ? base + '/impostazioni' : null
+  const schede = [
+    { k: 'home', label: 'Home', href: home, icona: 'i-casa', su: plancia },
+    { k: 'spedizioni', label: 'Spedizioni', href: spedizioni, icona: 'i-pacco', su: path === spedizioni || (path.startsWith(spedizioni + '/') && path !== nuovaSped) },
+    { k: 'nuova', label: 'Nuova spedizione', href: nuovaSped, icona: 'i-piu', su: path === nuovaSped },
+  ]
+  // la ricerca porta all'Elenco col testo nel campo «Cerca» (numero o destinatario): la pagina legge ?cerca=
+  const cerca = (e: React.FormEvent) => {
+    e.preventDefault()
+    const q = cercaTesto.trim(); if (!q) return
+    const u = vai(spedizioni) || spedizioni
+    window.location.href = u + (u.includes('?') ? '&' : '?') + 'cerca=' + encodeURIComponent(q)
+  }
   let gruppoPrima: string | undefined
 
   return (
@@ -219,7 +257,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
       <div className="gx-fondo" aria-hidden="true"><img src={`/grafica/luce-${luce}.webp`} alt="" /></div>
 
       {isMobile && drawer && <div className="gx-velo-menu" onClick={() => setDrawer(false)} />}
-      <nav className={'gx-lato gx-vetro' + (!isMobile && chiuso ? ' gx-lato--chiuso' : '') + (isMobile && drawer ? ' gx-lato--aperto' : '')} aria-label="Menu">
+      <nav className={'gx-lato gx-vetro' + (!isMobile && chiuso ? ' gx-lato--chiuso' : '') + (isMobile && drawer ? ' gx-lato--aperto' : '') + (telefono ? ' gx-lato--telefono' : '')} aria-label="Menu">
         <a className={'gx-marca' + (user?.brandLogo ? ' gx-marca--logo' : '')} href={vai(home)}>
           {user?.brandLogo ? <img className="gx-marca__logo" src={user.brandLogo} alt={user?.brandNome || 'Logo'} /> : (
             <>
@@ -278,6 +316,15 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
         <div className="gx-piede">
           <a className="gx-voce" href="/api/auth/logout"><Icona id="i-esci" />Esci</a>
         </div>
+        {telefono && (
+          <div className="gx-lato__fondo">
+            {impostazioni && (spenta(impostazioni)
+              ? <span className="gx-tondo gx-tondo--spento" aria-disabled="true" aria-label="Impostazioni (arriva presto nella nuova versione)" title="Arriva presto nella nuova versione"><Icona id="i-ingranaggio" /></span>
+              : <a className="gx-tondo" href={vai(impostazioni)} aria-label="Impostazioni"><Icona id="i-ingranaggio" /></a>)}
+            <button type="button" className="gx-tondo gx-tondo--lungo" onClick={() => { setDrawer(false); window.dispatchEvent(new CustomEvent('moovy:apri')) }}><Icona id="i-moovy" />Chiedi a Moovy</button>
+            <button type="button" className="gx-tondo" onClick={() => setDrawer(false)} aria-label="Chiudi il menu"><Icona id="i-x" /></button>
+          </div>
+        )}
       </nav>
 
       <div className="gx-destra">
@@ -300,7 +347,12 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
         )}
         {prova && voto && <Sondaggio pagina={path} uscita={voto === 'esci'} chiudi={() => setVoto(null)} />}
         <header className="gx-alto">
-          <button type="button" className="gx-tasto" onClick={menu} aria-label={isMobile ? 'Menu' : (chiuso ? 'Apri il menu' : 'Chiudi il menu')} title={isMobile ? 'Menu' : (chiuso ? 'Apri il menu' : 'Chiudi il menu')}><Icona id="i-menu" /></button>
+          {telefono && (
+            <a className="gx-alto__marca" href={vai(home)} aria-label={`${user?.brandNome || 'MoovExpress'}: Home`} title={user?.brandNome || 'MoovExpress'}>
+              {user?.brandLogo ? <img src={user.brandLogo} alt={user?.brandNome || 'Logo'} /> : <><span className="gx-marca__v">{(user?.brandNome || 'M').substring(0, 1).toUpperCase()}</span><b>{user?.brandNome || 'MoovExpress'}</b></>}
+            </a>
+          )}
+          <button type="button" className="gx-tasto gx-alto__menu" onClick={menu} aria-label={isMobile ? 'Menu' : (chiuso ? 'Apri il menu' : 'Chiudi il menu')} title={isMobile ? 'Menu' : (chiuso ? 'Apri il menu' : 'Chiudi il menu')}><Icona id="i-menu" /></button>
           <button type="button" className="gx-cerca gx-vetro gx-pillola" onClick={() => window.dispatchEvent(new CustomEvent('moovy:apri'))} title="Moovy, l'assistente">
             <span className="gx-cerca__moovy"><Icona id="i-moovy" /></span>
             <span className="gx-cerca__testo">Chiedi a Moovy</span>
@@ -336,6 +388,27 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
         </main>
       </div>
       <Moovy senzaPulsante aspetto="nuova" />
+      {telefono && (
+        <nav className={'gx-sotto' + (drawer || cercaAperta || tastiera ? ' gx-sotto--via' : '')} aria-label="Navigazione">
+          <button type="button" className="gx-tondo" onClick={() => setCercaAperta(true)} aria-label="Cerca una spedizione"><Icona id="i-cerca" /></button>
+          <div className="gx-sotto__schede">
+            {schede.map(s => (
+              <a key={s.k} href={vai(s.href)} className={'gx-sotto__scheda' + (s.su && !drawer ? ' gx-sotto__scheda--su' : '')} aria-label={s.label} title={s.label} aria-current={s.su ? 'page' : undefined}><Icona id={s.icona} /></a>
+            ))}
+            <button type="button" className={'gx-sotto__scheda' + (drawer ? ' gx-sotto__scheda--su' : '')} onClick={() => setDrawer(true)} aria-label="Menu" aria-expanded={drawer}><Icona id="i-menu" /></button>
+          </div>
+          <button type="button" className="gx-tondo gx-tondo--moovy" onClick={() => window.dispatchEvent(new CustomEvent('moovy:apri'))} aria-label="Moovy, l'assistente"><Icona id="i-moovy" /></button>
+        </nav>
+      )}
+      {telefono && cercaAperta && (
+        <div className="gx-ricerca-velo" onClick={() => setCercaAperta(false)}>
+          <form className="gx-ricerca" role="search" onClick={e => e.stopPropagation()} onSubmit={cerca}>
+            <Icona id="i-cerca" />
+            <input autoFocus type="search" enterKeyHint="search" value={cercaTesto} onChange={e => setCercaTesto(e.target.value)} placeholder="Numero di spedizione o destinatario" aria-label="Cerca una spedizione" />
+            <button type="button" className="gx-ricerca__x" onClick={() => setCercaAperta(false)} aria-label="Chiudi la ricerca"><Icona id="i-x" /></button>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

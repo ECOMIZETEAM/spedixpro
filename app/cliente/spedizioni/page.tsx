@@ -101,6 +101,16 @@ export default function SpedizioniPage() {
   const [trackingTab, setTrackingTab] = useState<'tracking'|'colli'|'ripesature'>('tracking')
   const [eliminando, setEliminando] = useState<string|null>(null)
   const [filtri, setFiltri, azzeraFiltri] = useFiltriPersistenti('spedizioni-cliente:filtri', FILTRI_DEFAULT)
+  // ?cerca= arriva dalla lente della barra in basso del telefono (grafica nuova, 21/11): numero o destinatario nel campo
+  // «Cerca», coi filtri di default; il parametro si toglie dall'indirizzo perché non torni a ogni ricarica
+  useEffect(() => {
+    const testo = new URLSearchParams(window.location.search).get('cerca')
+    if (!testo) return
+    setFiltri({ ...FILTRI_DEFAULT }); setCerca(testo)
+    // il parametro si toglie dopo: React (in sviluppo) ripete l'effetto e la seconda volta deve ancora trovarlo
+    setTimeout(() => window.history.replaceState(null, '', window.location.pathname), 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // I filtri che ho toccato (diversi dal default): il contatore e le caselle accese partono da qui.
   const filtriAttivi = filtriToccati(filtri, FILTRI_DEFAULT)
   const attivo = (k: string) => filtriAttivi.has(k)

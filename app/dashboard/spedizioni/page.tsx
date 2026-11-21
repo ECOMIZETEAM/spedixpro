@@ -121,11 +121,16 @@ export default function SpedizioniPage() {
   // Aperta da un collegamento con ?numero= o ?stato= (la Plancia nuova: la riga del tabellone, «In transito», la
   // ricerca nella barra di Moovy): si parte da quel filtro, sugli altri di default. Dopo il caricamento dei filtri
   // salvati (l'effetto sopra viene prima), e il parametro si toglie dall'indirizzo perché non torni a ogni ricarica.
+  // ?cerca= arriva dalla lente della barra in basso del telefono (grafica nuova, 21/11): numero o destinatario nel
+  // campo «Cerca», coi filtri di default
   useEffect(() => {
-    const u = new URLSearchParams(window.location.search), numero = u.get('numero'), stato = u.get('stato')
-    if (!numero && !stato) return
+    const u = new URLSearchParams(window.location.search), numero = u.get('numero'), stato = u.get('stato'), testo = u.get('cerca')
+    if (!numero && !stato && !testo) return
     setFiltri({ ...FILTRI_DEFAULT, ...(numero ? { numero } : {}), ...(stato ? { stato } : {}) })
-    window.history.replaceState(null, '', window.location.pathname)
+    if (testo) setCerca(testo)
+    // il parametro si toglie dopo: React (in sviluppo) ripete l'effetto e la seconda volta deve ancora trovarlo,
+    // altrimenti il filtro salvato, riletto, vincerebbe sul collegamento
+    setTimeout(() => window.history.replaceState(null, '', window.location.pathname), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [resoModal, setResoModal] = useState(false)
