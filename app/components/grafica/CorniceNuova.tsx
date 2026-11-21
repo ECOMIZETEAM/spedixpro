@@ -13,6 +13,7 @@ import SupportoButton from '../SupportoButton'
 import ContiTendina from '../ContiTendina'
 import { FoglioIcone, Icona, ICONA_VOCE } from './icone'
 import { GraficaNuova } from './contesto'
+import { useAppNativa } from '@/lib/app-nativa'
 import Sondaggio from './Sondaggio'
 import { PAGINE_PROVA } from './pagine-prova'
 import './grafica.css'
@@ -98,6 +99,8 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
   isMobile: boolean
   vociProfilo: { label: string; href: string; icona: string }[]
 }) {
+  // nell'app degli store (lib/app-nativa) gli SMS non si comprano: il titolo del tasto non parla di acquisto, come in Layout
+  const app = useAppNativa()
   const cliente = portale === 'cliente'
   const home = cliente ? '/cliente/dashboard' : '/dashboard'
   const nav = cliente ? navDiOggi : riordina(navDiOggi, user?.ruolo, !!user?.graficaProva)
@@ -301,7 +304,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
             </a>
           )}
           <div className="gx-gruppo-tasti gx-vetro gx-pillola">
-            {mostraSms && <a className="gx-tasto" href="/dashboard/reports/storico-sms" title="SMS — credito e acquisto"><Icona id="i-messaggio" />{!isMobile && <span className="gx-solo-largo">SMS</span>}</a>}
+            {mostraSms && <a className="gx-tasto" href="/dashboard/reports/storico-sms" title={app ? 'SMS' : 'SMS — credito e acquisto'}><Icona id="i-messaggio" />{!isMobile && <span className="gx-solo-largo">SMS</span>}</a>}
             <SupportoButton compatto={isMobile} aspetto="nuova" />
           </div>
           <div className="gx-gruppo-tasti gx-aspetto gx-vetro gx-pillola gx-solo-largo" role="group" aria-label="Aspetto">
