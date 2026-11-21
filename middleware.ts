@@ -59,6 +59,9 @@ export async function middleware(req: NextRequest) {
   // Costa una query solo sulle scritture di chi ha una sessione: le letture e le chiamate con
   // api key (/api/v1, autenticate diversamente) non toccano il database.
   if (pathname.startsWith('/api/')) {
+    // Le segnalazioni CSP (fase Report-Only) arrivano dal browser in QUALUNQUE stato (anche anonimo o
+    // con sessione non ancora verificata): devono raggiungere il raccoglitore senza passare dai controlli.
+    if (pathname === '/api/csp-report') return NextResponse.next()
     const scrittura = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS'
     const consentita = SCRITTURE_AGENTE.some(p => pathname.startsWith(p))
     const conSessione = req.cookies.getAll().some(c => c.name.startsWith('sb-'))

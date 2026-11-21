@@ -29,6 +29,30 @@ const SICUREZZA_GLOBALE = [
 // pubblico e le pagine di tracking NO: alcune vengono incorniciate di proposito.
 const NIENTE_IFRAME = [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }]
 
+// CSP in SOLA SEGNALAZIONE (Report-Only): NON blocca niente, ma il browser segnala a /api/csp-report
+// ogni risorsa che la policy bloccherebbe. Serve a TARARE la policy sui dati veri PRIMA di attivarla
+// (passando poi a 'Content-Security-Policy' senza -Report-Only). Prima bozza: self + le origini note del
+// browser (Supabase, Stripe, mappe/geowidget dei punti, cdnjs). img-src https: resta largo (le foto
+// etichetta/tracking arrivano da molti domini). 'unsafe-inline'/'unsafe-eval' perche' Next e i grafici
+// oggi li usano: si stringeranno coi nonce in un secondo momento, guidati dalle segnalazioni raccolte.
+const CSP_SOLO_SEGNALAZIONE = [{
+  key: 'Content-Security-Policy-Report-Only',
+  value: [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://cdnjs.cloudflare.com https://maps.googleapis.com https://*.easypack24.net",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
+    "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
+    "img-src 'self' data: blob: https:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://*.easypack24.net https://*.inpost-group.com",
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://*.easypack24.net https://maps.google.com https://www.google.com",
+    'report-uri /api/csp-report',
+  ].join('; '),
+}]
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ['pdfjs-dist'],
   poweredByHeader: false,
@@ -48,6 +72,7 @@ const nextConfig: NextConfig = {
       { source: '/:path*', headers: SICUREZZA_GLOBALE },
       { source: '/dashboard/:path*', headers: NIENTE_IFRAME },
       { source: '/cliente/:path*', headers: NIENTE_IFRAME },
+      { source: '/:path*', headers: CSP_SOLO_SEGNALAZIONE },
     ]
   },
 };
