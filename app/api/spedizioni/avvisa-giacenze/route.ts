@@ -52,13 +52,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'lettura fallita' }, { status: 500 })
   }
   const idLedger = (ledger || []).map((c: any) => c.id)
-  let q = admin
+  // any: con i filtri concatenati il tipo di supabase-js supera la profondita' che TypeScript accetta (TS2589).
+  let q: any = admin
     .from('spedizioni')
     .select('id,numero,master_id,cliente_id,dest_email,dest_nome,mitt_email,mitt_nome,tracking_token,giacenza_motivo,giacenza_stato,corrieri(nome_contratto)')
     .not('giacenza_data', 'is', null)
     .is('giacenza_email_dest_at', null)
     .gte('giacenza_data', dal)
   if (idLedger.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${idLedger.join(',')})`)
+  // SOLO GIACENZE ANCORA APERTE. Quando il pacco viene consegnato o torna al mittente il database chiude la giacenza
+  // da solo (chiudi_giacenza_su_stato_terminale: 'chiusa'), e qui si saltava solo la svincolata: un pacco consegnato
+  // nel frattempo riceveva «il tuo pacco e' in giacenza» a cose fatte. Il 21/11/2026, su 540 righe in coda, 111 avevano
+  // la giacenza chiusa (96 consegnate, 5 rese) e 100 erano svincolate. Si tolgono gia' dalla lettura, come le gambe:
+  // altrimenti restano in coda fino alla fine della finestra e occupano i posti del giro.
+  q = q.or('giacenza_stato.is.null,giacenza_stato.not.in.(svincolata,chiusa)').not('stato', 'in', '(consegnata,reso_mittente,annullata)')
   const { data: lette, error } = await q.limit(MAX_PER_GIRO * 4)
 
   if (error) {
