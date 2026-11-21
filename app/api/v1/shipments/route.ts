@@ -796,7 +796,12 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
 
   // EMAIL BRAND MoovExpress a mittente e destinatario (in background, best-effort):
   // al provider e' andata solo l'email schermo; ai clienti finali scriviamo noi.
-  after(async () => {
+  // NON DALLE GAMBE DEI CONDIVISI. Con la chiave di un conto d'ingrosso chiama il ponte di un altro master: il pacco e'
+  // gia' del suo cliente, e la mail (con l'SMS, che parte dalla stessa funzione) la manda la creazione di chi spedisce.
+  // Prima la mandava anche ogni gamba: su SDA EXPRESS L il destinatario riceveva «Un pacco sta arrivando» tre volte
+  // (portale, Wave, LOGIXIA), due col marchio MoovExpress invece di quello del master e col tracciamento della riga
+  // del venditore (21/11/2026: 382 gambe su 382 in 3 ore avevano l'email del destinatario).
+  if (!(cliente as any)?.ledger) after(async () => {
     try {
       const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
       let notificaDest = true

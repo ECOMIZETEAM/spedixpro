@@ -219,31 +219,23 @@ async function creaConPonteUnicoDentro(admin: Admin, p: ParametriPonte, fase: Fa
   }
 
   // Dopo, come la staffetta: il log dei livelli d'albero senza addebito (uno per livello), e per ogni gamba quello
-  // che la sua /api/v1/shipments fa dopo aver scritto (email e webhook del conto d'ingrosso). Il ritiro sulle gambe
+  // che la sua /api/v1/shipments fa dopo aver scritto (il webhook del conto d'ingrosso). Il ritiro sulle gambe
   // non si prenota (conti d'ingrosso), e ponte_richieste non serve: non ci sono richieste HTTP da ritrovare.
   for (const r of [...piano.nonAddebitati, ...origine.nonAddebitati]) console.error(r.split(SEGNO_LDV).join(ldv.numero))
-  // In prova (LDV finta) niente email ne' webhook: andrebbero a destinatari veri.
+  // In prova (LDV finta) niente webhook: andrebbero a destinatari veri.
   if (!p.compraLdv) dopoLeGambe(admin, livelli, ldv.numero)
   console.log('[PONTE][FATTA]', JSON.stringify({ numero: ldv.numero, livelli: n, ms: { ...ms, tutto: Date.now() - t0 } }))
   return { tipo: 'fatta', numero: ldv.numero, spedizioneId: idOrigine, costoCorrente: piano.risposta.prezzo, ms: { ...ms, tutto: Date.now() - t0 } }
 }
 
-// Quello che /api/v1/shipments fa per ogni gamba dopo averla scritta, in background come li': l'email al mittente e
-// al destinatario e il webhook 'shipment.created' del conto d'ingrosso.
-function dopoLeGambe(admin: Admin, livelli: LivelloDaScrivere[], numero: string) {
+// Quello che /api/v1/shipments fa per ogni gamba dopo averla scritta, in background come li': il webhook
+// 'shipment.created' del conto d'ingrosso. L'email no: dalle gambe dei condivisi non parte (la manda la creazione di
+// chi spedisce, una volta sola; vedi la rotta).
+function dopoLeGambe(_admin: Admin, livelli: LivelloDaScrivere[], numero: string) {
   after(async () => {
-    const [{ inviaEmailSpedizioneCreata }, { inviaWebhook }] = await Promise.all([import('@/lib/email'), import('@/lib/webhooks')])
+    const { inviaWebhook } = await import('@/lib/webhooks')
     await Promise.all(livelli.map(async L => {
       const body = L.body
-      try {
-        const { data: cli } = await admin.from('clienti').select('impostazioni').eq('id', L.l.clienteId).maybeSingle()
-        await inviaEmailSpedizioneCreata({
-          mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
-          mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
-          numero, corriere: L.v.corriere.nome_contratto, notificaDest: (cli?.impostazioni as any)?.notifica_email_dest !== false,
-          spedizioneId: L.id,
-        })
-      } catch { /* best-effort, come nella rotta */ }
       inviaWebhook({
         clienteId: L.l.clienteId, corriereId: L.v.corriere.id, evento: 'shipment.created',
         data: { tracking_number: numero, carrier: L.v.corriere.nome_contratto, status: 'in_lavorazione', location: body.shipTo?.city || '', events: [] },
