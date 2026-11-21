@@ -4,8 +4,10 @@ import { conMemoRichiesta } from '@/lib/memo-richiesta'
 import { cronometra, segna, annota } from '@/lib/cronometro'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { verificaCreditoCatena, addebitaCatena } from '@/lib/cascata'
-import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch } from '@/lib/condivisione-catena'
+import { addebitaTreeCondivisione, verificaCreditoCondivisione, risolviChiaveDispatch, movimentiAlbero } from '@/lib/condivisione-catena'
 import { rigaTestaCondivisa } from '@/lib/ponte-riga-origine'
+import { ponteUnicoAcceso, creaConPonteUnico } from '@/lib/ponte-crea'
+import { opsAddebitoClientePortale, opMaster } from '@/lib/ponte-scrittura'
 import { calcolaPrezzoCorriere, calcolaPrezzoCorriereDettaglio, calcolaSupplementiCliente, fattoreVolumeCliente, fattoreVolumeCorriere, calcolaPesoFatturato, calcolaPrezzoListino, motivoPartenzaNonCoperta, type RisultatoPrezzo } from '@/lib/pricing'
 import { isAgente, nomeAgente } from '@/lib/agente'
 import { pudoConfigDaVettore, spediamoproPudoCourier } from '@/lib/punti-poste'
@@ -613,15 +615,15 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
 
   // Helper: registra la detrazione del credito dopo una spedizione riuscita.
   // Non deve mai far fallire la spedizione (è già creata sul corriere + DB).
-  async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
-    segna('addebito')
-    // FULFILLMENT LOGISTICA: se il cliente e' "gestione_logistica", la merce sta nel magazzino del
-    // master detentore, che prepara FISICAMENTE il pacco. Qui — punto UNICO che tutti i 5 rami
-    // corriere attraversano con l'id gia' creato — marco la spedizione 'da_preparare'. Lo staff del
-    // master la vede nella lista "Da preparare" col pallino rosso numerato sul menu (conteggio di rete,
-    // stile ticket): niente riga 'notifiche' da tenere pulita, il badge scala da solo alla preparazione.
-    // Best-effort in after(): non deve MAI bloccare addebito o spedizione. Update via admin: l'evento
-    // puo' partire da un cliente, che per RLS non scriverebbe la colonna.
+  // FULFILLMENT LOGISTICA: se il cliente e' "gestione_logistica", la merce sta nel magazzino del
+  // master detentore, che prepara FISICAMENTE il pacco. Qui — punto UNICO che tutti i 5 rami
+  // corriere attraversano con l'id gia' creato (da addebitaCredito, e dal ponte unico che addebita nella sua
+  // transazione) — marco la spedizione 'da_preparare'. Lo staff del
+  // master la vede nella lista "Da preparare" col pallino rosso numerato sul menu (conteggio di rete,
+  // stile ticket): niente riga 'notifiche' da tenere pulita, il badge scala da solo alla preparazione.
+  // Best-effort in after(): non deve MAI bloccare addebito o spedizione. Update via admin: l'evento
+  // puo' partire da un cliente, che per RLS non scriverebbe la colonna.
+  function segnaDaPreparare(spedizioneId: string | null) {
     if (daPreparare && spedizioneId) {
       const _sid = spedizioneId
       after(async () => {
@@ -632,6 +634,10 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         }
       })
     }
+  }
+  async function addebitaCredito(spedizioneId: string | null, numeroSped: string, costo: number) {
+    segna('addebito')
+    segnaDaPreparare(spedizioneId)
     // Spedizione propria del master: NON addebito qui. Ci pensa addebitaCatena (sotto),
     // che risale la catena fino al proprietario REALE del contratto e registra un
     // movimento 'spedizione' per OGNI master del ramo (incluso questo). Così la
@@ -3368,7 +3374,8 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       // lavoro da fare qui dopo la sua risposta (lib/moovexpress).
       const scadenzaPonte = t0 + maxDuration * 1000 - 3_000
 
-      const ris = await creaSpedizioneMoovexpress(credMv, {
+      // La richiesta al primo venditore: la stessa per la staffetta e per il ponte unico.
+      const dati = {
         packages: packages.map((p: any) => ({
           weight: parseFloat(p?.weight) || 1,
           length: parseFloat(p?.length) || undefined, width: parseFloat(p?.width) || undefined, height: parseFloat(p?.height) || undefined,
@@ -3383,11 +3390,91 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         contenuto: body.contenuto ? String(body.contenuto) : undefined,
         rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
         pickup: _vuoleRitiro ? { requested: true, date: String(body.dataRitiro), time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
-      }, { scadenza: scadenzaPonte })
+      }
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+      // L'email al mittente e al destinatario, dopo la risposta: la stessa per la staffetta e per il ponte unico.
+      const emailCreata = (numero: string, spedizioneId: string | null) => after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      // IL PONTE UNICO (PONTE-UNICO.md), acceso per contratto con PONTE_UNICO_CONTRATTI: tutta la fila dei venditori
+      // in questo processo, e righe e addebiti in una scrittura sola. La riga del cliente e i suoi addebiti sono
+      // quelli di qui (rigaTestaCondivisa, addebitaCredito, addebitaTreeCondivisione), messi nella stessa transazione.
+      // Se non sa farla ('ripiego') non ha prenotato ne' comprato niente: si va con la staffetta, qui sotto.
+      if (ponteUnicoAcceso(corriereRecord.nome_contratto, masterId)) {
+        const esito = await creaConPonteUnico(adminCrea, {
+          masterOrigine: masterId, corriereOrigine: corriereRecord.id, nomeContratto: corriereRecord.nome_contratto,
+          dati, scadenza: scadenzaPonte,
+          origine: {
+            // Gli addebiti di chi crea (addebitaCredito) e dell'albero (addebitaTreeCondivisione), nello stesso ordine.
+            addebiti: async ({ idOrigine, numero }) => {
+              const albero = await movimentiAlbero(adminCrea, {
+                masterOriginante: masterId, nomeContratto: corriereRecord.nome_contratto,
+                dest: { cap: body.shipTo.postalCode, provincia: body.shipTo.state, citta: body.shipTo.city, paese: body.shipTo.country || 'IT' },
+                packages,
+                contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+                serviziAccessori,
+                mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+                numero, destNome: body.shipTo?.name || '', spedizioneId: idOrigine, createdBy: user!.id,
+              })
+              return {
+                ops: [
+                  ...opsAddebitoClientePortale({
+                    isProprio, masterSub, prenotazioneRif, costo: costoCliente, masterId, clienteId, numeroSped: numero,
+                    destNome: body.shipTo?.name, spedizioneId: idOrigine, userId: user!.id,
+                  }),
+                  ...albero.movimenti.map(opMaster),
+                ],
+                nonAddebitati: albero.nonAddebitati,
+              }
+            },
+            riga: ({ risposta, etichettaUrl }) => rigaTestaCondivisa({
+              masterId, clienteId, corriereRecord, numeroFinale: risposta.tracking, body, packages, pesoReale, pesoVolCalc, pesoFattCalc, pkg,
+              ris: risposta, etichettaUrl, costoCorrente: risposta.prezzo, costoCliente, serviziAccessori, _vuoleRitiro, _pomeriggio,
+            }),
+          },
+        })
+        if (esito.tipo === 'fatta') {
+          prenotazioneRif = null   // confermata nella transazione
+          segna('addebito')
+          segnaDaPreparare(esito.spedizioneId)
+          emailCreata(esito.numero, esito.spedizioneId)
+          return NextResponse.json({
+            numero: esito.numero, tracking: esito.numero, costo: esito.costoCorrente.toFixed(2), spedizioneId: esito.spedizioneId,
+          })
+        }
+        if (esito.tipo === 'in_ritardo') {
+          // La LDV c'e' e il credito e' prenotato: le righe le scrive il giro di recupero fra pochi minuti. Non va rifatta.
+          prenotazioneRif = null
+          return NextResponse.json({
+            error: `Spedizione creata (${esito.numero}): la registrazione e' in ritardo e comparira' in elenco entro pochi minuti. Non crearla di nuovo.`,
+            numero: esito.numero,
+          }, { status: 500 })
+        }
+        if (esito.tipo === 'rifiuto') {
+          await stornaPrenotazione()
+          return NextResponse.json({ error: esito.messaggio }, { status: 400 })
+        }
+        console.warn('[CREA][PONTE UNICO] si va con la staffetta:', esito.motivo)
+      }
+
+      const ris = await creaSpedizioneMoovexpress(credMv, dati, { scadenza: scadenzaPonte })
       const numeroFinale = ris.tracking
       // W = quanto il venditore addebita al compratore = il COSTO per questo master.
       const costoCorrente = ris.prezzo
-      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
 
       // Etichetta del venditore (quella del corriere reale, propagata su per ogni salto): scaricata subito e
       // salvata come data URL, così non dipende da una chiamata live dopo. Col suo tipo: UPS è una GIF.
@@ -3449,22 +3536,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         })
       } catch (e) { console.error('[CREA][MOOVEXPRESS] addebito condivisione:', e) }
 
-      after(async () => {
-        try {
-          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
-          let notificaDest = true
-          if (clienteId) {
-            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
-            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
-          }
-          await inviaEmailSpedizioneCreata({
-            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
-            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
-            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
-            notificaDest, spedizioneId: inserted?.id || null, masterId,
-          })
-        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
-      })
+      emailCreata(numeroFinale, inserted?.id || null)
 
       return NextResponse.json({
         numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,

@@ -125,8 +125,12 @@ declare
 begin
   perform public.ponte_solo_servizio();
   if v_id is null then raise exception 'PONTE: piano senza id'; end if;
+  -- Quanto si aspetta una riga occupata da un'altra scrittura. La prova cede presto (200 ms): non deve mai essere lei
+  -- a far annullare una scrittura vera (il database sceglie chi annullare in un blocco incrociato dopo 1 secondo).
+  -- La scrittura vera aspetta di piu', poi riprova o lascia al recupero.
+  perform set_config('lock_timeout', case when p_prova then '200ms' else '3s' end, true);
   if not p_prova and exists (select 1 from public.spedizioni where id = v_id) then
-    update public.ponte_in_corso set stato = 'scritta', aggiornato_il = now() where id = v_id and stato <> 'scritta';
+    update public.ponte_in_corso set stato = 'scritta', piano = '{}'::jsonb, aggiornato_il = now() where id = v_id and stato <> 'scritta';
     return jsonb_build_object('gia_scritta', true);
   end if;
 
@@ -188,7 +192,8 @@ begin
         into v_letto;
       raise exception 'PONTE_PROVA' using errcode = 'PP001';
     end if;
-    update public.ponte_in_corso set stato = 'scritta', aggiornato_il = now() where id = v_id;
+    -- Scritta: il piano non serve piu' (le righe e i movimenti sono lo storico) e ne conteneva una copia degli indirizzi.
+    update public.ponte_in_corso set stato = 'scritta', piano = '{}'::jsonb, aggiornato_il = now() where id = v_id;
   exception when sqlstate 'PP001' then
     return v_letto;   -- tutto annullato: in prova non resta scritto niente
   end;

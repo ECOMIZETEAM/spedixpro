@@ -31,6 +31,9 @@ const ATTESA_MIN = 4             // la staffetta deve aver finito: righe e addeb
 const PER_GIRO = 150             // tetto di condivisi per giro
 const INSIEME = 4                // condivisi controllati in parallelo: letture leggere, ma non tutte insieme
 const TEMPO_MS = 230_000         // oltre, si chiude il giro e si lascia il resto al prossimo
+// Quanti condivisi per giro anche con la scrittura a vuoto. La prova tiene per pochi decimi di secondo le righe dei
+// conti che tocca (cliente, conti d'ingrosso, master), le stesse delle spedizioni vere: 40 ogni dieci minuti bastano.
+const PER_GIRO_SCRITTURA = 40
 
 export async function GET(req: NextRequest) {
   const _b = bloccaCronNonAutorizzato(req); if (_b) return _b
@@ -72,6 +75,7 @@ export async function GET(req: NextRequest) {
   const esiti: EsitoOmbra[] = []
   const scrittura = process.env.PONTE_OMBRA_SCRITTURA !== 'spento'
   let scritturaAssente = false
+  let provate = 0
   // La prova della scrittura nella riga del registro: le sue differenze con «scrittura:» davanti, il suo esito che
   // peggiora quello della riga, i suoi numeri nel dettaglio.
   const conScrittura = (e: EsitoOmbra, s: EsitoScrittura | null): EsitoOmbra => {
@@ -93,7 +97,7 @@ export async function GET(req: NextRequest) {
       const nome = nomePonte.get(o.corriere_id)!
       const [e, s] = await Promise.all([
         confrontaInOmbra(admin, o, nome),
-        scrittura && !scritturaAssente ? provaScritturaInOmbra(admin, o, nome) : Promise.resolve(null),
+        scrittura && !scritturaAssente && provate++ < PER_GIRO_SCRITTURA ? provaScritturaInOmbra(admin, o, nome) : Promise.resolve(null),
       ])
       return conScrittura(e, s)
     }))

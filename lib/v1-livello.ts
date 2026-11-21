@@ -23,13 +23,14 @@ import { modalitaConsegna, trovaPuntoDaCodice, puntoDichiarato, depositoDaRichie
 // la regola resta UNA, questa, e la usano tutte e due le strade.
 //
 // Restituisce la risposta d'errore, identica a prima, oppure tutto quello che il resto della creazione usa.
+// `libere`: chi chiama riceve qui come liberare l'ordine "in creazione" (il ponte unico, se ripiega sulla staffetta).
 // `soloValuta`: nessuna scrittura. Salta la guardia doppioni, che legge le spedizioni gia' nate (e chi valuta in
 // ombra lo fa mentre la spedizione vera nasce) e prenota l'ordine in creazione. Il resto e' sola lettura.
 export async function valutaLivelloV1(
   admin: ReturnType<typeof createAdminSupabase>,
   ctx: Pick<ApiContext, 'clienteId' | 'corriereId'>,
   body: any,
-  opz: { soloValuta?: boolean } = {},
+  opz: { soloValuta?: boolean; libere?: Array<() => Promise<void>> } = {},
 ) {
   if (!body.shipTo?.state?.toString().trim() && (body.shipTo?.country || 'IT') === 'IT')
     return NextResponse.json({ error: 'Provincia destinatario obbligatoria (shipTo.state)' }, { status: 400 })
@@ -95,6 +96,8 @@ export async function valutaLivelloV1(
     })
     if (inCreazione === 'occupato') return NextResponse.json({ error: MSG_ORDINE_IN_CORSO, in_corso: true }, { status: 409 })
     if (inCreazione) after(inCreazione.libera)
+    // Il ponte unico la vuole poter liberare subito, se ripiega sulla staffetta: lei la ritroverebbe occupata.
+    if (inCreazione) opz.libere?.push(inCreazione.libera)
   }
 
   // Nessun blocco per limite o canone: chi si integra e' un CLIENTE, e non deve subire i conti

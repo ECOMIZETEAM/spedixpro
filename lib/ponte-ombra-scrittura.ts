@@ -173,13 +173,15 @@ export async function provaScritturaInOmbra(admin: Admin, o: { id: string; track
         numero: SEGNO_LDV, destNome: corpoPortale.shipTo.name || '', spedizioneId: idOrigine, createdBy: userId,
       })
 
-      const ops: OpPonte[] = [
+      const prenotazioni: OpPonte[] = [
         ...(prenotazioneOrigine && costoOrigine > 0 ? [{
           op: 'prenota' as const, livello: 0, master_id: R.master_id, cliente_id: R.cliente_id,
           descrizione: `Prenotazione ${String(corpoPortale.shipTo.name || '').slice(0, 40)}`.trim(), importo: -Math.abs(costoOrigine),
           riferimento: prenotazioneOrigine, created_by: userId,
         }] : []),
         ...prenotazioniDellaFila(livelli),
+      ]
+      const tutte: OpPonte[] = [
         ...piano.ops,
         { op: 'spedizione', riga: JSON.parse(JSON.stringify({ id: idOrigine, ...rigaOrigine })) },
         ...opsAddebitoClientePortale({
@@ -188,6 +190,15 @@ export async function provaScritturaInOmbra(admin: Admin, o: { id: string; track
         }),
         ...albero.movimenti.map(opMaster),
       ]
+      // Ogni prenotazione subito prima della sua conferma: la prova tocca le righe dei conti nello stesso ordine della
+      // scrittura vera (dal detentore in su, come la staffetta). Tutte all'inizio, dall'alto, il 21/11 una prova si e'
+      // incrociata (deadlock) con un'altra scrittura del ponte: due transazioni che prendono le stesse righe in ordine
+      // diverso possono bloccarsi a vicenda.
+      const ops: OpPonte[] = []
+      for (const o of tutte) {
+        if (o.op === 'conferma') { const pr = prenotazioni.find((x: any) => x.riferimento === o.riferimento); if (pr) ops.push(pr) }
+        ops.push(o)
+      }
       const detentore = gambe[gambe.length - 1]
       const completo = completaPiano({ id: idOrigine, ops }, { numero: o.tracking_number, etichettaUrl: ETICHETTA_FINTA, raw: detentore.raw_response })
 

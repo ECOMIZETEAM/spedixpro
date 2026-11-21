@@ -17,6 +17,7 @@ type Admin = ReturnType<typeof createAdminSupabase>
 
 export type LivelloPonte = {
   chiaveId: string
+  chiave: string             // la chiave del ponte, come la presenta la staffetta: mai nei log ne' nei registri
   clienteId: string          // il cliente d'ingrosso presso il venditore (il conto di chi compra)
   venditoreId: string        // il master che vende a questo livello
   corriereId: string         // il contratto del venditore su cui arriva la richiesta
@@ -66,7 +67,7 @@ export async function filaSaltoPerSalto(
     if (!cli || (cli as any).attivo === false) return { fila, errore: `salto ${salto}: cliente d'ingrosso disattivato` }
     if (cor && (cor as any).attivo === false) return { fila, errore: `salto ${salto}: contratto del venditore spento` }
     fila.push({
-      chiaveId: (k as any).id, clienteId: (k as any).cliente_id, venditoreId: (cli as any).master_id,
+      chiaveId: (k as any).id, chiave: String(cred.api_key), clienteId: (k as any).cliente_id, venditoreId: (cli as any).master_id,
       corriereId: (k as any).corriere_id, tipo: String((cor as any)?.tipo || ''),
       nomeContratto: String((cor as any)?.nome_contratto || ''), corriereMasterId: String((cor as any)?.master_id || ''),
     })
@@ -112,7 +113,7 @@ async function filaDaiPuntatori(admin: Admin, corriereOrigine: string): Promise<
     const ultimo = n === salti.length - 1
     if ((cor.tipo === 'moovexpress') === ultimo) return null
     fila.push({
-      chiaveId: k.id, clienteId: k.cliente_id, venditoreId: cli.master_id, corriereId: k.corriere_id,
+      chiaveId: k.id, chiave: String(chiave), clienteId: k.cliente_id, venditoreId: cli.master_id, corriereId: k.corriere_id,
       tipo: String(cor.tipo || ''), nomeContratto: String(cor.nome_contratto || ''), corriereMasterId: String(cor.master_id || ''),
     })
   }

@@ -19,6 +19,14 @@ export function modalitaCodPosteV1(corriere: any, body: any): ModalitaCod | null
   return Number(body.codValue || 0) > 0 ? modalitaCodPoste(body.incassoModalita, settingsPo.modalita_pagamento_cod) : null
 }
 
+// Le credenziali KSync del contratto, come le compone il ramo Poste. Fuori da ldvPosteV1 perche' le usa anche il
+// recupero del ponte unico per riprendere l'etichetta di una LDV gia' comprata.
+export function credenzialiKsyncV1(corriere: any, cred: any) {
+  const settingsPo = (corriere as any)?.settings || {}
+  // wsUtente/wsPassword: con questi la lettera si crea direttamente sul web service di KSync (lib/ksync).
+  return { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode || settingsPo.cost_center_code, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope, wsUtente: cred.wsUtente, wsPassword: cred.wsPassword, wsHost: cred.wsHost }
+}
+
 export async function ldvPosteV1(p: {
   corriere: any; cred: any; body: any; packages: any[]
   conPresso: (via: string, presso: string) => string; pressoFrom: string; pressoTo: string
@@ -29,8 +37,7 @@ export async function ldvPosteV1(p: {
   // POSTE Delivery Business diretto via KSync/ParcelPilot: diretto (costoCorrente=0). Il prodotto è nel
   // `product` (settings). Etichetta dal downloadURL. Niente annullo via API (come gli altri Poste).
   const settingsPo = (corriere as any)?.settings || {}
-  // wsUtente/wsPassword: con questi la lettera si crea direttamente sul web service di KSync (lib/ksync).
-  const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode || settingsPo.cost_center_code, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope, wsUtente: cred.wsUtente, wsPassword: cred.wsPassword, wsHost: cred.wsHost }
+  const credPo = credenzialiKsyncV1(corriere, cred)
   const productPo = String(settingsPo.product || '').trim()
   if (!productPo) return { errore: 'Contratto non configurato correttamente' }
   try {
