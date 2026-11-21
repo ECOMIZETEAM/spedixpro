@@ -2,6 +2,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { risolviChiaveDispatch, pianoAddebitiCondivisione } from '@/lib/condivisione-catena'
 import { costruisciCatena } from '@/lib/cascata'
 import { valutaLivelloV1 } from '@/lib/v1-livello'
+import { createHash } from 'node:crypto'
 
 // IL PONTE UNICO DEI CONTRATTI CONDIVISI: il lavoro di tutta la fila dei venditori in un posto solo (PONTE-UNICO.md).
 //
@@ -57,8 +58,10 @@ export async function filaSaltoPerSalto(
   for (let salto = 1; salto <= SALTI_MASSIMI; salto++) {
     const cred = await risolviChiaveDispatch(admin, master, nome)
     if (!cred?.api_key) return { fila, errore: `salto ${salto}: contratto non configurato (nessuna chiave)` }
+    // Lookup per hash, non per valore: la chiave del ponte non deve finire nell'URL/log (come autenticaChiave).
+    const hChiave = createHash('sha256').update(cred.api_key).digest('hex')
     const { data: k } = await admin.from('api_keys')
-      .select('id,cliente_id,master_id,corriere_id,attivo').eq('chiave', cred.api_key).maybeSingle()
+      .select('id,cliente_id,master_id,corriere_id,attivo').eq('chiave_hash', hChiave).maybeSingle()
     if (!k || (k as any).attivo === false) return { fila, errore: `salto ${salto}: chiave ${k ? 'revocata' : 'sconosciuta'}` }
     const [{ data: cli }, { data: cor }] = await Promise.all([
       admin.from('clienti').select('attivo,master_id').eq('id', (k as any).cliente_id).maybeSingle(),

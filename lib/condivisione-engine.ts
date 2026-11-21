@@ -306,7 +306,7 @@ async function materializzaContratto(
         String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)))[0]
       if (primo.id !== nc.id) {
         await admin.from('corrieri').delete().eq('id', nc.id)
-        if (!keyEsist) await admin.from('api_keys').delete().eq('chiave', chiave).eq('cliente_id', ledgerId)
+        if (!keyEsist) await admin.from('api_keys').delete().eq('chiave_hash', createHash('sha256').update(chiave).digest('hex')).eq('cliente_id', ledgerId)
         console.info(`[condivisione] ponte doppio evitato: "${corr.nome_contratto}" per ${buyer}, resta ${primo.id}`)
         const propagazione = await propaga(primo.id)
         if (propagazione.ok) await admin.from('corrieri').update({ attivo: true, settings: {} }).eq('id', primo.id).eq('settings->>in_attesa_costo', 'true')
