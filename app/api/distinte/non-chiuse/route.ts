@@ -3,6 +3,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { distinteClientiNonChiuse } from '@/lib/distinte-non-chiuse'
 import { nomeClientePulito } from '@/lib/numero-spedizione'
+import { escapeHtml } from '@/lib/escape-html'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -50,7 +51,9 @@ export async function GET(req: NextRequest) {
   const nuove = aperte.filter(d => !gia.has(link(d))).slice(0, MAX_AVVISI_PER_GIRO)
   let avvisiNuovi = 0
   for (const d of nuove) {
-    const messaggio = `La distinta N. ${d.numero} di ${nomeClientePulito(d.cliente) || 'un cliente'} (${d.contratto}), creata il `
+    // Nome cliente e contratto finiscono in notifiche.messaggio, reso con dangerouslySetInnerHTML nella
+    // campanella: si SPENGONO (un cliente puo' mettersi una ragione sociale con HTML -> XSS verso il master).
+    const messaggio = `La distinta N. ${d.numero} di ${escapeHtml(nomeClientePulito(d.cliente)) || 'un cliente'} (${escapeHtml(String(d.contratto || ''))}), creata il `
       + `${quando(d.creata_il)}, non risulta confermata dal corriere: ${d.ferme === 1 ? '1 spedizione è ancora ferma' : d.ferme + ' spedizioni sono ancora ferme'}. `
       + `Senza conferma il corriere potrebbe non passare a ritirare. Dall'Elenco distinte selezionala e premi "Conferma Selezionate"; se non passa, apri un ticket.`
     const riga: Record<string, unknown> = mittente
