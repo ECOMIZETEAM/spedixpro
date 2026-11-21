@@ -1,4 +1,5 @@
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { createHash } from 'crypto'
 
 // Freno di frequenza per chiave: generoso per l'uso vero (anche import in blocco), ma ferma il
 // martellamento di una chiave — anche trapelata a un terzo — sugli endpoint, tracking in testa
@@ -46,10 +47,16 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
 // chiave usata, il pacchetto e il freno contano e fermano come prima.
 export async function autenticaChiave(token: string): Promise<ApiContext | null> {
   const admin = createAdminSupabase()
+  // Si cerca per HASH, non per valore. .eq('chiave', token) metteva la chiave nell'URL, e PostgREST/
+  // Supabase lo scrivono nei log edge: la chiave dei conti all'ingrosso finiva in chiaro, a ogni
+  // chiamata (244.051 volte in 24h). Con l'hash nell'URL finisce solo l'hash (inutile); la chiave
+  // resta nell'header. sha256 Node == Postgres (extensions.digest). RICHIEDE scripts/api-keys-hash.sql
+  // applicato PRIMA (colonna chiave_hash + trigger + backfill), altrimenti nessuna chiave viene trovata.
+  const chiaveHash = createHash('sha256').update(token).digest('hex')
   const { data, error: errChiave } = await admin
     .from('api_keys')
     .select('id,cliente_id,master_id,corriere_id,attivo,last_used_at')
-    .eq('chiave', token)
+    .eq('chiave_hash', chiaveHash)
     .maybeSingle()
   // Un guasto nella lettura non e' una chiave sbagliata: non si registra come rifiuto.
   if (!data && !errChiave) await registraRifiuto(admin, 'chiave_sconosciuta', null)
