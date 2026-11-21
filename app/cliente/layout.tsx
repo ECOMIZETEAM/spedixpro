@@ -12,6 +12,8 @@ import { pagaSoloEtichette, masterDeiNegoziShopify } from '@/lib/conti-shopify'
 import { recapitoEmail } from '@/lib/indirizzi-interni'
 import { COLONNE_DATI_NEGOZIO, datiPerLaSchermata, servonoDatiNegozio, versioneDatiNegozio } from '@/lib/dati-negozio'
 import { cookies, headers } from 'next/headers'
+import { after } from 'next/server'
+import { segnaVisitaGrafica } from '@/lib/grafica-visite'
 import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
 
 // Mai in cache: dipende dalla sessione (senza questo, Vercel può servire una
@@ -101,6 +103,8 @@ export default async function ClienteLayout({ children }: { children: React.Reac
   const provaAperta = process.env.GRAFICA_PROVA_APERTA === '1' || (!!utente.master_id && provaIds.includes(utente.master_id))
   const intestazioni = await headers(), biscotti = await cookies()
   const provaQui = provaAperta && intestazioni.get('x-grafica-prova') === '1'
+  // chi apre la prova (registro grafica_visite, Lorenzo 21/11: «controllate chi la visualizza»): dopo la risposta
+  if (provaQui) { const ua = intestazioni.get('user-agent') || ''; after(() => segnaVisitaGrafica({ utente: user.id, master: utente.master_id, cliente: utente.cliente_id, ruolo: utente.ruolo, userAgent: ua })) }
   const graficaScelta = sceltaTema(biscotti.get('mx_tema')?.value)
   // «Auto» è il chiaro/scuro del dispositivo (biscotto mx_scuro), vedi luceIniziale
   const grafica = { prova: provaQui, offri: provaAperta && !provaQui, scelta: graficaScelta, luce: provaQui ? luceIniziale(graficaScelta, { scuro: biscotti.get('mx_scuro')?.value }) : undefined }

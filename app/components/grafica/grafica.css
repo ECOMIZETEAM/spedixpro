@@ -266,6 +266,16 @@
 .sv-campo textarea:focus { outline: none; border-color: var(--gx-accento); }
 /* sul telefono il commento a 16 px: sotto, l'iPhone ingrandisce la pagina quando lo si tocca */
 @media (max-width: 720px) { .sv-campo textarea { font-size: 16px; } }
+/* le domande della finestra del voto (21/11: tutte insieme, ognuna col suo voto e commento): la finestra scorre se è
+   più alta dello schermo */
+.sv { max-height: calc(100dvh - 40px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; }
+.sv-domanda { margin: 0 0 18px; padding: 16px 0 0; border: 0; border-top: 1px solid var(--gx-filo); min-width: 0; }
+.sv-domanda legend { display: flex; align-items: center; gap: 10px; padding: 0; margin-bottom: 12px; font-size: 15px; font-weight: 600; color: var(--gx-inchiostro); }
+.sv-domanda legend em { font-style: normal; font-weight: 400; font-size: 12.5px; color: var(--gx-attenuato); }
+.sv-n { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--gx-incavo); font-size: 12.5px; font-weight: 600; color: var(--gx-inchiostro); }
+.sv-domanda .sv-campo { margin-top: 12px; }
+.sv-domanda .sv-campo textarea { min-height: 56px; }
+.sv-manca { margin-top: 4px; font-size: 12.5px; color: var(--gx-attenuato); }
 .sv-errore { margin-top: 12px; padding: 10px 12px; border-radius: 12px; font-size: 13px; color: var(--gx-problema); background: color-mix(in srgb, var(--gx-problema) 9%, transparent); }
 .sv-piede { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .sv-piede button { all: unset; cursor: pointer; height: 42px; padding: 0 18px; border-radius: 999px; font-size: 13.5px; font-weight: 600; }

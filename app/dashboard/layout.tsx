@@ -13,6 +13,8 @@ import { contabilitaAttiva } from '@/lib/contabilita-banca'
 import { eTitolareOAdmin } from '@/lib/ruoli'
 import { AvvisoVerifica } from '../components/VerificaDuePassaggi'
 import { cookies, headers } from 'next/headers'
+import { after } from 'next/server'
+import { segnaVisitaGrafica } from '@/lib/grafica-visite'
 import { outfit, luceIniziale, sceltaTema } from '@/app/components/grafica/server'
 import { RuoloUtente } from './RuoloUtente'
 
@@ -74,6 +76,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const provaQui = provaAperta && !graficaPiena && intestazioni.get('x-grafica-prova') === '1'
   // «?versione=oggi» (dalla Nuova spedizione su una pagina): quella pagina tutta nella versione di oggi, cornice compresa
   const graficaNuova = (graficaPiena || provaQui) && intestazioni.get('x-grafica-oggi') !== '1'
+  // chi apre la prova (registro grafica_visite, Lorenzo 21/11: «controllate chi la visualizza»): dopo la risposta
+  if (graficaNuova) { const ua = intestazioni.get('user-agent') || ''; after(() => segnaVisitaGrafica({ utente: user.id, master: utente?.master_id, ruolo: utente?.ruolo, userAgent: ua })) }
   const graficaScelta = sceltaTema(biscotti.get('mx_tema')?.value)
   const pagina = (
     <DashboardLayout user={{

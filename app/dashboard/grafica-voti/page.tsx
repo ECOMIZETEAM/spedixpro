@@ -6,7 +6,8 @@ import { ARGOMENTI, type Argomento } from '@/app/components/grafica/argomenti'
 
 type Voto = { argomento: string; voto: number; commento: string | null; pagina: string | null; quando: string; chi: string; ruolo: string | null; master: string | null; cliente: string | null }
 type Conti = { totale: number; media: number | null; conti: number[] }
-type Risposta = { per: Record<string, Conti>; voti: Voto[] }
+type Visita = { chi: string; ruolo: string | null; dispositivo: string | null; master: string | null; cliente: string | null; prima: string; ultima: string; pagine: number; votato: string[] }
+type Risposta = { per: Record<string, Conti>; voti: Voto[]; visite?: Visita[] }
 
 const DICITURE = ['Per niente', 'Poco', 'Così così', 'Mi piace', 'Moltissimo']
 const testo = '#1a1a1a', grigio = '#6b7280', filo = '#e5e7eb', arancio = '#FF4F00'
@@ -27,6 +28,11 @@ export default function GraficaVoti() {
   const c: Conti = d.per[arg] || { totale: 0, media: null, conti: [0, 0, 0, 0, 0] }
   const max = Math.max(1, ...c.conti)
   const lista = d.voti.filter(v => v.argomento === arg && (!soloCommenti || v.commento))
+  // chi ha aperto la prova (Lorenzo 21/11: «controllate chi la visualizza e chi vota»)
+  const visite = d.visite || []
+  const quando = (t: string) => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const nVotato = visite.filter(v => v.votato.length > 0).length
+  const nClienti = visite.filter(v => v.cliente).length
   return (
     <div style={{ maxWidth: '980px', color: testo }}>
       <h1 style={{ fontSize: '26px', fontWeight: 600, margin: '0 0 4px' }}>Voti sulla nuova versione</h1>
@@ -55,6 +61,27 @@ export default function GraficaVoti() {
             </div>
           ))}
         </div>
+      </div>
+
+      <h2 style={{ fontSize: '17px', fontWeight: 600, margin: '4px 0 4px' }}>Chi l’ha aperta</h2>
+      <p style={{ margin: '0 0 10px', color: grigio, fontSize: '13.5px' }}>
+        {visite.length} {visite.length === 1 ? 'persona' : 'persone'} ({visite.length - nClienti} dai master, {nClienti} clienti) · {nVotato} {nVotato === 1 ? 'ha votato' : 'hanno votato'}
+      </p>
+      <div style={{ background: '#fff', border: `1px solid ${filo}`, borderRadius: '18px', overflow: 'hidden', marginBottom: '26px' }}>
+        {visite.length === 0 && <div style={{ padding: '24px', color: grigio, fontSize: '14px' }}>Ancora nessuna visita registrata.</div>}
+        {visite.map((v, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 120px 110px 120px', gap: '14px', padding: '12px 18px', borderTop: i ? `1px solid ${filo}` : 'none', alignItems: 'center', fontSize: '13px' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '14px', fontWeight: 600 }}>{v.cliente ? `${v.cliente} · cliente di ${v.master}` : v.master || '—'}</div>
+              <div style={{ color: grigio }}>{v.chi}{v.ruolo ? ` · ${v.ruolo}` : ''}</div>
+            </div>
+            <div style={{ color: grigio }}>{v.pagine} {v.pagine === 1 ? 'pagina' : 'pagine'} · {v.dispositivo || '—'}</div>
+            <div style={{ color: grigio, fontVariantNumeric: 'tabular-nums' }}>dal {quando(v.prima)}<br />ultima {quando(v.ultima)}</div>
+            <div style={{ textAlign: 'right', fontWeight: 600, color: v.votato.length ? '#12805a' : grigio }}>
+              {v.votato.length ? 'Ha votato: ' + v.votato.map(a => (ARGOMENTI as any)[a]?.nome || a).join(', ') : 'Non ha votato'}
+            </div>
+          </div>
+        ))}
       </div>
 
       <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: grigio, marginBottom: '10px', cursor: 'pointer' }}>
