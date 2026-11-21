@@ -1,10 +1,14 @@
 'use client'
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { Icona } from './grafica/icone'
 
 // `attivo`: la data e' stata cambiata rispetto al default della pagina -> il pulsante si accende
 // come le altre caselle filtro (vedi app/components/filtri-attivi.ts).
-type Props = { dal: string, al: string, onChange: (dal: string, al: string) => void, attivo?: boolean }
+// `vestito`: solo la grafica nuova (Elenco spedizioni, 21/11) lo passa. Mette le classi drp-* su campo, pannello, mesi,
+// giorni e scelte rapide: grafica.css le colora di giorno e di notte e sul telefono fa del pannello un foglio in basso
+// con un mese solo (largo 619 px su uno schermo di 390, «Applica» restava fuori). Senza, nessuna classe: identico a oggi.
+type Props = { dal: string, al: string, onChange: (dal: string, al: string) => void, attivo?: boolean, vestito?: boolean }
 
 const MESI = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre']
 const GIORNI = ['Lu','Ma','Me','Gi','Ve','Sa','Do']
@@ -28,7 +32,8 @@ function inRange(d: Date, s: Date | null, e: Date | null) {
   return t > Math.min(s.getTime(),e.getTime()) && t < Math.max(s.getTime(),e.getTime())
 }
 
-export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
+export default function DateRangePicker({ dal, al, onChange, attivo, vestito = false }: Props) {
+  const k = (c: string) => vestito ? c : undefined
   const oggi = new Date()
   const [open, setOpen] = useState(false)
   const [start, setStart] = useState<Date | null>(fromStr(dal) || oggi)
@@ -134,23 +139,23 @@ export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
     for (let i=0;i<startDay;i++) celle.push(null)
     for (let g=1;g<=giorniMese;g++) celle.push(new Date(anno, m, g))
     return (
-      <div style={{ padding: '8px' }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
-          {isSx ? <button onClick={()=>{ setMeseSx(new Date(anno,m-1,1)); setMeseDx(new Date(anno,m,1)) }} style={navBtn}>‹</button> : <span style={{width:'22px'}}></span>}
-          <div style={{ fontWeight:'700', color:'#1a1a1a', fontSize:'13px' }}>{MESI[m]} {anno}</div>
-          {!isSx ? <button onClick={()=>{ setMeseDx(new Date(anno,m+1,1)); setMeseSx(new Date(anno,m,1)) }} style={navBtn}>›</button> : <span style={{width:'22px'}}></span>}
+      <div className={k('drp-mese ' + (isSx ? 'drp-mese--sx' : 'drp-mese--dx'))} style={{ padding: '8px' }}>
+        <div className={k('drp-testa')} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
+          {isSx ? <button className={k('drp-nav')} aria-label={vestito ? 'Mese prima' : undefined} onClick={()=>{ setMeseSx(new Date(anno,m-1,1)); setMeseDx(new Date(anno,m,1)) }} style={navBtn}>‹</button> : <span className={k('drp-vuoto')} style={{width:'22px'}}></span>}
+          <div className={k('drp-titolo')} style={{ fontWeight:'700', color:'#1a1a1a', fontSize:'13px' }}>{MESI[m]} {anno}</div>
+          {!isSx ? <button className={k('drp-nav')} aria-label={vestito ? 'Mese dopo' : undefined} onClick={()=>{ setMeseDx(new Date(anno,m+1,1)); setMeseSx(new Date(anno,m,1)) }} style={navBtn}>›</button> : <span className={k('drp-vuoto')} style={{width:'22px'}}></span>}
         </div>
-        <table style={{ borderCollapse:'separate', borderSpacing:'2px', tableLayout:'fixed', width:'224px' }}>
+        <table className={k('drp-griglia')} style={{ borderCollapse:'separate', borderSpacing:'2px', tableLayout:'fixed', width:'224px' }}>
           <thead><tr>{GIORNI.map(g => <th key={g} style={{ width:'30px', height:'26px', fontSize:'11px', color:'#1a1a1a', fontWeight:'600', textAlign:'center' }}>{g}</th>)}</tr></thead>
           <tbody>
             {Array.from({length: Math.ceil(celle.length/7)}).map((_, r) => (
               <tr key={r}>
                 {celle.slice(r*7, r*7+7).map((d, i) => {
-                  if (!d) return <td key={i} style={{ width:'30px', height:'28px' }}></td>
+                  if (!d) return <td key={i} className={k('drp-giorno drp-giorno--vuoto')} style={{ width:'30px', height:'28px' }}></td>
                   const sel = sameDay(d,start) || sameDay(d,end)
                   const range = inRange(d, start, end)
                   return (
-                    <td key={i} onClick={()=>clickGiorno(d)} style={{
+                    <td key={i} className={k('drp-giorno')} data-scelto={vestito && sel ? '1' : undefined} data-dentro={vestito && range ? '1' : undefined} onClick={()=>clickGiorno(d)} style={{
                       width:'30px', height:'28px', textAlign:'center', fontSize:'12px', cursor:'pointer', borderRadius:'4px',
                       background: sel ? '#f97316' : range ? '#ffedd5' : 'transparent',
                       color: sel ? '#fff' : '#1a1a1a', fontWeight: sel ? '700' : '400'
@@ -168,27 +173,27 @@ export default function DateRangePicker({ dal, al, onChange, attivo }: Props) {
   const labelText = (fromStr(dal) ? fmtIt(fromStr(dal)) : fmtIt(oggi)) + ' - ' + (fromStr(al) ? fmtIt(fromStr(al)) : fmtIt(oggi))
 
   return (
-    <div ref={ref} style={{ position:'relative', display:'inline-block' }}>
-      <div onClick={()=> setOpen(o=>!o)} style={{
+    <div ref={ref} className={k('drp')} style={{ position:'relative', display:'inline-block' }}>
+      <div className={k('drp-campo')} onClick={()=> setOpen(o=>!o)} style={{
         padding:'7px 12px', border:'1px solid ' + (attivo ? '#f97316' : '#d1d5db'), borderRadius:'6px', fontSize:'13px',
         color: attivo ? '#9a3412' : '#1a1a1a', background: attivo ? '#fff7ed' : '#fff', fontWeight: attivo ? 600 : 400,
         cursor:'pointer', display:'flex', alignItems:'center', gap:'8px', whiteSpace:'nowrap'
       }}>
-        <span>📅</span><span style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>{labelText}</span><span style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>▾</span>
+        {vestito ? <Icona id="i-calendario" className="drp-ico" /> : <span>📅</span>}<span className={k('drp-testo')} style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>{labelText}</span>{vestito ? <Icona id="i-chevron" className="drp-freccia" /> : <span style={{ color: attivo ? '#9a3412' : '#1a1a1a' }}>▾</span>}
       </div>
       {open && montato && pos && createPortal(
-        <div ref={pannelloRef} style={{ position:'fixed', ...(pos.bottom!=null ? { bottom: pos.bottom } : { top: pos.top }), ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), maxHeight: pos.maxH, overflowY:'auto', zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
-          <div style={{ display:'flex' }}>
+        <div ref={pannelloRef} className={k('drp-pannello')} style={{ position:'fixed', ...(pos.bottom!=null ? { bottom: pos.bottom } : { top: pos.top }), ...(pos.right!=null ? { right: pos.right } : { left: pos.left }), maxHeight: pos.maxH, overflowY:'auto', zIndex:1000000, background:'#fff', border:'1px solid #d1d5db', borderRadius:'8px', boxShadow:'0 8px 24px rgba(0,0,0,0.15)', display:'flex' }}>
+          <div className={k('drp-mesi')} style={{ display:'flex' }}>
             {calendario(meseSx, setMeseSx, true)}
             {calendario(meseDx, setMeseDx, false)}
           </div>
-          <div style={{ borderLeft:'1px solid #eee', padding:'8px', display:'flex', flexDirection:'column', gap:'4px', minWidth:'130px' }}>
+          <div className={k('drp-scelte')} style={{ borderLeft:'1px solid #eee', padding:'8px', display:'flex', flexDirection:'column', gap:'4px', minWidth:'130px' }}>
             {[['oggi','Oggi'],['ieri','Ieri'],['3g','Ultimi 3 giorni'],['7g','Ultimi 7 giorni'],['30g','Ultimi 30 giorni'],['mese','Questo mese'],['meseScorso','Ultimo mese']].map(([k,lab]) => (
-              <button key={k} onClick={()=>preset(k)} style={presetBtn}>{lab}</button>
+              <button key={k} className={vestito ? 'drp-scelta' : undefined} onClick={()=>preset(k)} style={presetBtn}>{lab}</button>
             ))}
-            <div style={{ marginTop:'auto', display:'flex', gap:'6px', paddingTop:'8px' }}>
-              <button onClick={()=>setOpen(false)} style={{ ...presetBtn, flex:1, textAlign:'center' as const }}>Annulla</button>
-              <button onClick={applica} style={{ flex:1, padding:'6px', background:'#f97316', color:'#fff', border:'none', borderRadius:'5px', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>Applica</button>
+            <div className={k('drp-piede')} style={{ marginTop:'auto', display:'flex', gap:'6px', paddingTop:'8px' }}>
+              <button className={k('drp-annulla')} onClick={()=>setOpen(false)} style={{ ...presetBtn, flex:1, textAlign:'center' as const }}>Annulla</button>
+              <button className={k('drp-applica')} onClick={applica} style={{ flex:1, padding:'6px', background:'#f97316', color:'#fff', border:'none', borderRadius:'5px', fontSize:'12px', fontWeight:'700', cursor:'pointer' }}>Applica</button>
             </div>
           </div>
         </div>, document.body)}

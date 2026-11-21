@@ -240,26 +240,7 @@
 .gx button.ns-campo__val .sc-testo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--gx-inchiostro); }
 .gx button.ns-campo__val .sc-testo--vuoto { color: var(--gx-attenuato); }
 .gx button.ns-campo__val .sc-freccia { flex-shrink: 0; font-size: 0; width: 7px; height: 7px; margin-right: 4px; border-right: 1.6px solid var(--gx-attenuato); border-bottom: 1.6px solid var(--gx-attenuato); transform: translateY(-2px) rotate(45deg); }
-/* Il pannello vestito non ha colori in linea (SelectCercabile, 20/11): li decide tutti questo blocco, di giorno e di
-   notte, in ogni stato — voce sotto il mouse, voce scelta, voce spenta, nessun risultato. Prima il vestito notte
-   rendeva bianco il testo ma lo sfondo della voce sotto il mouse restava #f7f7f7 in linea: bianco su bianco. */
-.sc-pannello { border-radius: 12px; overflow: hidden; background: #fff; color: #141413; font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif;
-  box-shadow: 0 18px 40px -18px rgba(15, 20, 27, .35), 0 0 0 1px rgba(15, 20, 27, .08); }
-[data-luce="notte"] .sc-pannello { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
-.sc-cerca { display: block; width: 100%; box-sizing: border-box; padding: 11px 12px; border: 0; border-bottom: 1px solid rgba(30, 28, 25, .08);
-  outline: 0; background: transparent; font: inherit; font-size: 13.5px; color: inherit; }
-.sc-cerca::placeholder { color: rgba(70, 67, 62, .62); opacity: 1; }
-[data-luce="notte"] .sc-cerca { border-bottom-color: rgba(255, 255, 255, .1); }
-[data-luce="notte"] .sc-cerca::placeholder { color: rgba(226, 224, 220, .64); }
-.sc-voci { max-height: 260px; overflow-y: auto; }
-.sc-voce { padding: 9px 12px; font-size: 13.5px; cursor: pointer; word-break: break-word; }
-.sc-voce:hover { background: rgba(255, 79, 0, .08); }
-.sc-voce--su, .sc-voce--su:hover { background: rgba(255, 79, 0, .14); color: #B83A00; font-weight: 600; }
-[data-luce="notte"] .sc-voce:hover { background: rgba(255, 255, 255, .08); }
-[data-luce="notte"] .sc-voce--su, [data-luce="notte"] .sc-voce--su:hover { background: rgba(255, 79, 0, .22); color: #fff; }
-.sc-voce--spenta { cursor: default; opacity: .45; }
-.sc-voce--spenta:hover { background: transparent; }
-.sc-vuoto { padding: 14px; font-size: 12.5px; text-align: center; opacity: .6; }
+/* il pannello della tendina con la ricerca (.sc-*) è in grafica.css: lo usano anche i filtri dell'Elenco */
 .ns-tendina { position: fixed; z-index: 1000000; overflow-y: auto; border-radius: 12px; background: #fff; color: #141413;
   box-shadow: 0 18px 40px -18px rgba(20, 30, 50, .35), 0 0 0 1px rgba(30, 28, 25, .08); font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif; }
 [data-luce="notte"] .ns-tendina { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
@@ -278,7 +259,6 @@
      andava su due righe */
 @media (max-width: 720px) {
   .gx .ns-campo__val, .gx button.ns-campo__val { font-size: 16px; }
-  .sc-cerca { font-size: 16px !important; }
   .gx .ns-link { padding: 10px 0; margin: -10px 0; }
   .ns-tendina { left: 10px !important; right: 10px !important; width: auto !important; }
   .ns-tendina__voce { display: flex; align-items: baseline; gap: 8px; padding: 11px 14px; font-size: 15px; }

@@ -358,3 +358,79 @@
 }
 @keyframes mv-sale { from { opacity: 0; transform: translateY(24px); } }
 @media (prefers-reduced-motion: reduce) { .mv, .mv-scrive i, .mv-mic--su { animation: none; } }
+
+/* ── la tendina con la ricerca (app/components/SelectCercabile) vestita: la usano «Spedisci per» della Nuova spedizione e
+   il filtro Cliente dell'Elenco (21/11, spostata qui da nuova-spedizione.css perché valga in tutte e due le pagine) ── */
+/* Il pannello vestito non ha colori in linea (SelectCercabile, 20/11): li decide tutti questo blocco, di giorno e di
+   notte, in ogni stato — voce sotto il mouse, voce scelta, voce spenta, nessun risultato. Prima il vestito notte
+   rendeva bianco il testo ma lo sfondo della voce sotto il mouse restava #f7f7f7 in linea: bianco su bianco. */
+.sc-pannello { border-radius: 12px; overflow: hidden; background: #fff; color: #141413; font-family: var(--font-outfit, 'Outfit'), 'Outfit Fallback', system-ui, sans-serif;
+  box-shadow: 0 18px 40px -18px rgba(15, 20, 27, .35), 0 0 0 1px rgba(15, 20, 27, .08); }
+[data-luce="notte"] .sc-pannello { background: #2A2928; color: #fff; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .1); }
+.sc-cerca { display: block; width: 100%; box-sizing: border-box; padding: 11px 12px; border: 0; border-bottom: 1px solid rgba(30, 28, 25, .08);
+  outline: 0; background: transparent; font: inherit; font-size: 13.5px; color: inherit; }
+.sc-cerca::placeholder { color: rgba(70, 67, 62, .62); opacity: 1; }
+[data-luce="notte"] .sc-cerca { border-bottom-color: rgba(255, 255, 255, .1); }
+[data-luce="notte"] .sc-cerca::placeholder { color: rgba(226, 224, 220, .64); }
+.sc-voci { max-height: 260px; overflow-y: auto; }
+.sc-voce { padding: 9px 12px; font-size: 13.5px; cursor: pointer; word-break: break-word; }
+.sc-voce:hover { background: rgba(255, 79, 0, .08); }
+.sc-voce--su, .sc-voce--su:hover { background: rgba(255, 79, 0, .14); color: #B83A00; font-weight: 600; }
+[data-luce="notte"] .sc-voce:hover { background: rgba(255, 255, 255, .08); }
+[data-luce="notte"] .sc-voce--su, [data-luce="notte"] .sc-voce--su:hover { background: rgba(255, 79, 0, .22); color: #fff; }
+.sc-voce--spenta { cursor: default; opacity: .45; }
+.sc-voce--spenta:hover { background: transparent; }
+.sc-vuoto { padding: 14px; font-size: 12.5px; text-align: center; opacity: .6; }
+@media (max-width: 720px) { .sc-cerca { font-size: 16px !important; } }
+
+/* ── il calendario delle date (DateRangePicker con «vestito», 21/11: per ora i filtri dell'Elenco) ────────────────────
+   Il pannello è portato sul body, fuori da .gx: per questo le regole partono da [data-grafica] su <html>. Di oggi era
+   bianco anche di notte; qui vetro coi colori del tema, giorni scelti pieni d'arancio, quelli in mezzo tinti. */
+[data-grafica="nuova"] .drp-campo .drp-ico { width: 16px; height: 16px; color: var(--gx-attenuato); }
+[data-grafica="nuova"] .drp-campo .drp-freccia { width: 14px; height: 14px; margin-left: auto; color: var(--gx-attenuato); transform: rotate(90deg); }
+[data-grafica="nuova"] .drp-pannello { padding: 6px; border: 0 !important; border-radius: 20px !important; background: rgba(255, 255, 255, .97) !important; color: var(--gx-inchiostro);
+  font-family: var(--font-outfit), system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .9), 0 1px 2px rgba(20, 30, 50, .06), 0 22px 50px -18px rgba(20, 30, 50, .4) !important; }
+[data-grafica="nuova"][data-luce="notte"] .drp-pannello { background: rgba(44, 43, 42, .97) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 22px 50px -18px rgba(0, 0, 0, .7) !important; }
+[data-grafica="nuova"] .drp-titolo { color: var(--gx-inchiostro) !important; font-size: 14px !important; font-weight: 600 !important; }
+[data-grafica="nuova"] .drp-griglia th { color: var(--gx-attenuato) !important; font-weight: 500 !important; }
+[data-grafica="nuova"] .drp-giorno { color: var(--gx-testo) !important; border-radius: 9px !important; transition: background .12s ease; }
+[data-grafica="nuova"] .drp-giorno:not(.drp-giorno--vuoto):hover { background: var(--gx-incavo) !important; }
+[data-grafica="nuova"] .drp-giorno[data-dentro] { background: color-mix(in srgb, var(--gx-accento) 15%, transparent) !important; color: var(--gx-inchiostro) !important; }
+[data-grafica="nuova"] .drp-giorno[data-scelto] { background: var(--gx-accento-pieno) !important; color: #fff !important; font-weight: 600 !important; }
+[data-grafica="nuova"] .drp-nav { width: 30px !important; height: 30px !important; border-radius: 50% !important; background: var(--gx-incavo) !important; color: var(--gx-inchiostro) !important; font-size: 17px !important; line-height: 1; }
+[data-grafica="nuova"] .drp-vuoto { width: 30px !important; }
+[data-grafica="nuova"] .drp-scelte { border-left-color: var(--gx-filo) !important; }
+[data-grafica="nuova"] .drp-scelta { padding: 7px 10px !important; border-radius: 10px !important; color: var(--gx-testo) !important; font-family: inherit; font-size: 13px !important; }
+[data-grafica="nuova"] .drp-scelta:hover { background: var(--gx-incavo) !important; color: var(--gx-inchiostro) !important; }
+[data-grafica="nuova"] .drp-annulla, [data-grafica="nuova"] .drp-applica { height: 34px; border-radius: 999px !important; font-family: inherit; font-size: 13px !important; font-weight: 600 !important; }
+[data-grafica="nuova"] .drp-annulla { background: var(--gx-incavo) !important; color: var(--gx-inchiostro) !important; }
+[data-grafica="nuova"] .drp-applica { background: var(--gx-accento-pieno) !important; }
+/* sul telefono: il pannello era largo 619 px (due mesi affiancati e le scelte rapide accanto) su uno schermo di 390, e
+   «Applica», il secondo mese e la freccia «›» restavano fuori. Qui un foglio in basso largo lo schermo, un mese solo
+   (quello di destra: all'apertura è il mese di oggi) coi giorni da 40 px, e le scelte rapide sotto, come bottoni.
+   Del mese di sinistra resta solo la freccia «‹»: il suo riquadro sta sopra quello di destra, trasparente ai tocchi,
+   e la freccia cade nel posto che la testata del mese di destra le lascia vuoto */
+@media (max-width: 720px) {
+  [data-grafica="nuova"] .drp-pannello { left: 10px !important; right: 10px !important; top: auto !important; bottom: 10px !important;
+    max-height: calc(100dvh - 20px) !important; flex-direction: column; padding: 8px 8px 12px; border-radius: 26px !important; }
+  [data-grafica="nuova"] .drp-mesi { position: relative; }
+  [data-grafica="nuova"] .drp-mese--dx { flex: 1; min-width: 0; }
+  [data-grafica="nuova"] .drp-mese--sx { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; }
+  [data-grafica="nuova"] .drp-mese--sx .drp-titolo, [data-grafica="nuova"] .drp-mese--sx .drp-griglia, [data-grafica="nuova"] .drp-mese--sx .drp-vuoto { visibility: hidden; }
+  [data-grafica="nuova"] .drp-mese--sx .drp-nav { pointer-events: auto; }
+  [data-grafica="nuova"] .drp-nav, [data-grafica="nuova"] .drp-vuoto { width: 40px !important; height: 40px !important; }
+  [data-grafica="nuova"] .drp-titolo { font-size: 16px !important; }
+  /* display: table: sotto i 700 px globals.css fa di ogni tabella un blocco che scorre, e i giorni restavano larghi 17 px */
+  [data-grafica="nuova"] .drp-griglia { display: table !important; width: 100% !important; }
+  [data-grafica="nuova"] .drp-griglia th { width: auto !important; font-size: 12px !important; }
+  [data-grafica="nuova"] .drp-giorno { width: auto !important; height: 40px !important; font-size: 15px !important; }
+  [data-grafica="nuova"] .drp-scelte { min-width: 0 !important; flex-direction: row !important; flex-wrap: wrap; gap: 6px !important; padding: 12px 8px 0 !important;
+    border-left: 0 !important; border-top: 1px solid var(--gx-filo); }
+  [data-grafica="nuova"] .drp-scelta { width: auto !important; padding: 9px 14px !important; border-radius: 999px !important; background: var(--gx-incavo) !important; font-size: 14px !important; }
+  [data-grafica="nuova"] .drp-piede { flex-basis: 100%; gap: 8px !important; padding-top: 10px !important; }
+  [data-grafica="nuova"] .drp-annulla, [data-grafica="nuova"] .drp-applica { height: 46px; font-size: 15px !important; }
+}
+/* sul telefono la tendina con la ricerca larga quanto lo schermo, come quella dei comuni: a 240 px i nomi dei clienti
+   andavano su due righe */
+@media (max-width: 720px) { .sc-pannello { left: 10px !important; right: 10px !important; width: auto !important; max-width: none !important; } }

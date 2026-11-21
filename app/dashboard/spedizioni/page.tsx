@@ -487,6 +487,10 @@ async function apriTracking(s: any) {
 
   const btnFiltri = {padding:'7px 18px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700' as const,cursor:'pointer',whiteSpace:'nowrap' as const}
 
+  // il numero delle spedizioni scelte nei tasti della barra: nella grafica nuova sta in un suo pezzo, che sul telefono si
+  // nasconde (il numero è già in testa al pannello, e con «(10)» i tasti non stavano più due per riga)
+  const quante = selectedIds.length > 0 ? (nuova ? <span className="el-quante">{` (${selectedIds.length})`}</span> : ` (${selectedIds.length})`) : ''
+
   return (
     <div className={nuova ? 'gx-elenco' : undefined}>
       {notifica && (
@@ -504,7 +508,7 @@ async function apriTracking(s: any) {
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr',gap:'8px',marginBottom:'8px'}}>
           <div><label style={lbl}>Cliente</label>
-            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={stileFiltro(sel, attivo('clienteId'))}>
+            <SelectCercabile value={filtri.clienteId} onChange={e=>setF('clienteId',e.target.value)} style={stileFiltro(sel, attivo('clienteId'))} className={nuova ? 'el-sc' : undefined}>
               <option value="">Tutti</option>
               {clienti.map((c:any)=><option key={c.id} value={c.id}>{c.ragione_sociale}</option>)}
             </SelectCercabile>
@@ -543,17 +547,17 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>N. Spedizione</label>
             <input value={filtri.numero} onChange={e=>setF('numero',e.target.value)} style={stileFiltro(inp, attivo('numero'))}/>
           </div>
-          <div className="el-f-largo"><label style={lbl}>Data Spedizione:</label>
-            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} />
+          <div className="el-f-largo"><label style={lbl}>Data Spedizione{nuova ? '' : ':'}</label>
+            <DateRangePicker dal={filtri.dal} al={filtri.al} onChange={(dal,al)=>setFiltri(f=>({...f,dal,al}))} attivo={attivo('data')} vestito={nuova} />
           </div>
-          <div><label style={lbl}>Contrassegno:</label>
+          <div><label style={lbl}>Contrassegno{nuova ? '' : ':'}</label>
             <select value={filtri.contrassegno} onChange={e=>setF('contrassegno',e.target.value)} style={stileFiltro(sel, attivo('contrassegno'))}>
               <option value="">Qualsiasi</option>
               <option value="si">Con contrassegno</option>
               <option value="no">Senza</option>
             </select>
           </div>
-          <div><label style={lbl}>Stato Contrassegni:</label>
+          <div><label style={lbl}>Stato Contrassegni{nuova ? '' : ':'}</label>
             <select value={filtri.stato_contrassegni} onChange={e=>setF('stato_contrassegni',e.target.value)} style={stileFiltro(sel, attivo('stato_contrassegni'))}>
               <option value="">Qualsiasi</option>
               <option value="da_pagare">Da pagare</option>
@@ -561,7 +565,7 @@ async function apriTracking(s: any) {
               <option value="pagato">Pagato</option>
             </select>
           </div>
-          <div><label style={lbl}>Assicurazione:</label>
+          <div><label style={lbl}>Assicurazione{nuova ? '' : ':'}</label>
             <select value={filtri.assicurazione} onChange={e=>setF('assicurazione',e.target.value)} style={stileFiltro(sel, attivo('assicurazione'))}>
               <option value="">Qualsiasi</option>
               <option value="si">Con assicurazione</option>
@@ -581,7 +585,7 @@ async function apriTracking(s: any) {
           <div><label style={lbl}>Contenuto</label>
             <input value={filtri.contenuto} onChange={e=>setF('contenuto',e.target.value)} style={stileFiltro(inp, attivo('contenuto'))}/>
           </div>
-          <div><label style={lbl}>Fatturato:</label>
+          <div><label style={lbl}>Fatturato{nuova ? '' : ':'}</label>
             <select value={filtri.fatturato} onChange={e=>setF('fatturato',e.target.value)} style={stileFiltro(sel, attivo('fatturato'))}>
               <option value="">Qualsiasi</option>
               <option value="si">Fatturato</option>
@@ -617,24 +621,24 @@ async function apriTracking(s: any) {
             </select>{' '}elementi
             </span>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+          <div className="el-comandi" style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
             <div className={nuova ? 'el-blocco' + (selectedIds.length > 0 ? ' el-blocco--su' : '') : undefined} style={nuova ? undefined : {display:'contents'}}>
             {nuova && <span className="el-blocco-n"><b>{selectedIds.length}</b> {selectedIds.length === 1 ? 'selezionata' : 'selezionate'}</span>}
             <button onClick={stampaSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#f97316':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              {nuova ? <Icona id="i-scarica" /> : '⬇ '}Scarica Selezionati{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-scarica" /> : '⬇ '}Scarica Selezionati{quante}
             </button>
             {zplOn && <button onClick={stampaZebraSelezionati} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#111827':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              {nuova ? <Icona id="i-stampa" /> : '🖨️ '}Stampa Zebra{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-stampa" /> : '🖨️ '}Stampa Zebra{quante}
             </button>}
             <button onClick={eliminaSelezionate} disabled={selectedIds.length===0||eliminandoBulk}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#dc2626':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0&&!eliminandoBulk?'pointer':'not-allowed',opacity:eliminandoBulk?0.6:1}}>
-              {eliminandoBulk?'Eliminazione…':`${nuova ? '' : '🗑️ '}Elimina Selezionate${selectedIds.length>0?` (${selectedIds.length})`:''}`}
+              {eliminandoBulk?'Eliminazione…':<>{nuova ? '' : '🗑️ '}Elimina Selezionate{quante}</>}
             </button>
             <button onClick={()=>setResoModal(true)} disabled={selectedIds.length===0}
               style={{padding:'6px 14px',background:selectedIds.length>0?'#0d9488':'#e5e7eb',color:selectedIds.length>0?'#fff':'#9ca3af',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:selectedIds.length>0?'pointer':'not-allowed'}}>
-              {nuova ? <Icona id="i-resi" /> : '↩︎ '}Etichetta di reso{selectedIds.length>0?` (${selectedIds.length})`:''}
+              {nuova ? <Icona id="i-resi" /> : '↩︎ '}Etichetta di reso{quante}
             </button>
             {nuova && <button type="button" className="el-blocco-x" onClick={()=>setSelectedIds([])} title="Togli la scelta" aria-label="Togli la scelta">×</button>}
             </div>
@@ -657,7 +661,7 @@ async function apriTracking(s: any) {
               <button onClick={()=>setFiltri(f=>({...f,dir:f.dir==='asc'?'desc':'asc'}))} title="Inverti ordine (crescente/decrescente)"
                 style={{padding:'5px 9px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',background:'#fff',color:'#1a1a1a',cursor:'pointer'}}>{filtri.dir==='asc'?'↑':'↓'}</button>
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+            <div className="el-cerca" style={{display:'flex',alignItems:'center',gap:'6px'}}>
               <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
               <input value={cerca} onChange={e=>setCerca(e.target.value)}
                 placeholder="N. spedizione o destinatario..."
@@ -670,7 +674,7 @@ async function apriTracking(s: any) {
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : !spedizioniVisibili.length ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>
-            <div style={{fontSize:'36px',marginBottom:'12px'}}>📦</div>
+            {nuova ? <div className="el-vuota-ico"><Icona id="i-pacco" /></div> : <div style={{fontSize:'36px',marginBottom:'12px'}}>📦</div>}
             <div style={{fontWeight:'500'}}>Nessuna spedizione trovata</div>
           </div>
         ) : (
@@ -679,7 +683,9 @@ async function apriTracking(s: any) {
               <thead>
                 <tr style={{background:'#f9fafb'}}>
                   <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
-                    <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>
+                    {nuova
+                      ? <label className="el-tutte"><input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/><span className="el-tutte__testo">Seleziona tutta la pagina</span></label>
+                      : <input type="checkbox" checked={selectedIds.length===spedizioniPaginate.length&&spedizioniPaginate.length>0} onChange={toggleAll}/>}
                   </th>
                   {['N. Spedizione','Cliente','Destinatario','Data e Ora','Stato','Azioni'].map(h=>{
                     const key = ORDINABILE[h]
