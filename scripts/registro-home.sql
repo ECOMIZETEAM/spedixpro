@@ -107,7 +107,9 @@ as $$
 declare k integer;
 begin
   with tolte as (
-    delete from public.riepilogo_spedizioni_variazioni
+    -- «where true»: le chiamate dall'API passano da safeupdate (Supabase), che rifiuta ogni DELETE senza
+    -- WHERE anche dentro una funzione. Il 21/11 il primo giro e' fallito proprio cosi'.
+    delete from public.riepilogo_spedizioni_variazioni where true
     returning master_id, cliente_id, corriere_id, giorno, stato, n, costo, cod_aperto
   ), somme as (
     select master_id, cliente_id, corriere_id, giorno, stato,
