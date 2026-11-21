@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { wooGet, motivoCollegamentoWoo } from '@/lib/woo'
+import { verificaUrlPubblico } from '@/lib/url-sicuro'
+
+export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -26,6 +29,11 @@ export async function POST(req: NextRequest) {
   if (!ck.startsWith('ck_') || !cs.startsWith('cs_')) {
     return NextResponse.json({ error: 'I codici non sono quelli della chiave WooCommerce: la «Chiave Utente» (Consumer key) inizia con ck_ e l\'«Utente nascosto» (Consumer secret) con cs_. Copiali dalla pagina che compare dopo «Genera chiave API».' }, { status: 400 })
   }
+
+  // SSRF: l'indirizzo lo scrive il cliente e lo chiamiamo noi. Non deve poter puntare alla rete interna.
+  const sic = await verificaUrlPubblico(url)
+  if (!sic.ok) return NextResponse.json({ error: sic.errore }, { status: 400 })
+  url = sic.url.replace(/\/+$/, '')
 
   // test connessione
   try {

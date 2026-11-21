@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { bloccaAgente } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { chiudiBorderoSpedisci } from '@/lib/spedisci'
 import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
@@ -23,6 +24,10 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg   // agente = no scrittura / no rete
+  // Trasmettere una distinta al corriere e' lavoro dello staff del master. Il cliente ha la SUA strada
+  // (/api/cliente/distinte/conferma); qui passava solo perche' aveva un master_id, e il perimetro per
+  // sotto-albero gli lasciava toccare le distinte dell'intera rete del suo master.
+  if (!gestisceLaRete(utente as any)) return NextResponse.json({ error: 'Operazione riservata allo staff del master' }, { status: 403 })
   const body = await req.json()
   const { distinteIds } = body
   if (!distinteIds?.length) return NextResponse.json({ error: 'Nessuna distinta selezionata' }, { status: 400 })

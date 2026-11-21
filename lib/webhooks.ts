@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { verificaUrlPubblico } from '@/lib/url-sicuro'
 
 // Eventi notificati ai sistemi collegati.
 export type EventoWebhook =
@@ -23,6 +24,12 @@ export function generaSecretWebhook(): string {
 
 // Consegna con retry a backoff progressivo (come i webhook dei corrieri).
 async function consegna(url: string, secret: string, payload: any, tentativi = 3) {
+  // SSRF: l'URL del webhook lo sceglie il cliente. Si verifica a OGNI consegna (non solo alla
+  // registrazione) che non risolva a un IP della rete interna: cosi' si copre anche il DNS rebinding
+  // (URL registrato pubblico, poi fatto risolvere interno). Un URL legittimo risolve pubblico e passa;
+  // uno interno viene saltato con errore, come un recapito non riuscito (i retry/stato lo gestiscono).
+  const sic = await verificaUrlPubblico(url)
+  if (!sic.ok) return { stato: 0, errore: 'url non consegnabile (punta alla rete interna): ' + sic.errore }
   const body = JSON.stringify(payload)
   const timestamp = Math.floor(Date.now() / 1000)
   const firma = firmaWebhook(secret, timestamp, body)

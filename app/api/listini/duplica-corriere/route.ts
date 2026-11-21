@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { normalizzaMarkup, creaApplicaMarkup } from '@/lib/markup-fasce'
 import { propagaListinoModificato } from '@/lib/listino-modificato'
@@ -12,7 +13,10 @@ export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  // Solo staff del master: duplicare un contratto in un listino di VENDITA (con cascata ai sotto-master)
+  // non e' un'azione da cliente ne' da agente. Prima non c'era alcun controllo di ruolo.
+  if (!gestisceLaRete(utente as any)) return NextResponse.json({ error: 'Operazione riservata allo staff del master' }, { status: 403 })
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
   const { sourceListinoId, corriereId, targetListinoId, nuovoNome, maggiorazione, markup } = await req.json()

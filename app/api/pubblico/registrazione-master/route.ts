@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { pianoById } from '@/lib/piani'
 import { inviaRichiestaPartner } from '@/lib/email'
 import { MASTER_VETRINA } from '@/lib/vetrina'
+import { escapeHtml } from '@/lib/escape-html'
 
 /* AUTO-REGISTRAZIONE MASTER dal SITO PUBBLICO (www.moovexpress.com/prezzi → "Attiva questo piano").
  *
@@ -136,7 +137,10 @@ export async function POST(req: NextRequest) {
   try {
     const { data: vetrina } = await admin.from('masters').select('parent_master_id').eq('id', MASTER_VETRINA).maybeSingle()
     const destinatari = [MASTER_VETRINA, vetrina?.parent_master_id].filter(Boolean) as string[]
-    const messaggio = `${ragioneSociale} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : contrattiPreferenza === 'misto' ? 'MISTI (nostri+suoi)' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + volume + '/mese' : ''}. Da approvare.`
+    // ragioneSociale e volume arrivano dal corpo di una POST pubblica (anonima): si SPENGONO prima
+    // di finire in un messaggio reso come HTML nella campanella dell'admin. piano.nome viene dal
+    // nostro catalogo e contrattiPreferenza/corrieri da liste chiuse: non sono scrivibili da fuori.
+    const messaggio = `${escapeHtml(ragioneSociale)} — piano ${piano.nome}, listini ${contrattiPreferenza === 'propri' ? 'PROPRI' : contrattiPreferenza === 'misto' ? 'MISTI (nostri+suoi)' : 'MoovExpress'}${corrieri.length ? ', corrieri: ' + corrieri.join(', ') : ''}${volume ? ', ~' + escapeHtml(volume) + '/mese' : ''}. Da approvare.`
     await admin.from('notifiche').insert(destinatari.map(m => ({
       master_id: m, cliente_id: null, gruppi: ['Amministratore'],
       oggetto: 'Nuova richiesta rivenditore', link: '/dashboard/clienti/master', messaggio,

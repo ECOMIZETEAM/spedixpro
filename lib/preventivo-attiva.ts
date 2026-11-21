@@ -1,6 +1,7 @@
 import { randomInt } from 'crypto'
 import { inserisciClienteConCodice, codiceGiaPreso, indirizzoInternoRifiutato } from '@/lib/codice-cliente'
 import { generaPassword } from '@/lib/password'
+import { escapeHtml } from '@/lib/escape-html'
 
 // ATTIVAZIONE di un preventivo accettato: crea la POSIZIONE (cliente o sotto-master, nuovo o esistente)
 // + le credenziali d'accesso + aggancia il listino-bozza come listino reale, e mette stato='accettato'.
@@ -27,7 +28,9 @@ async function finalizza(admin: any, p: any, draftId: string, clienteCreatoId: s
   try {
     await admin.from('notifiche').insert({
       master_id: p.master_id, cliente_id: null, gruppi: ['Amministratore', 'Operatore'],
-      oggetto: 'Preventivo attivato', messaggio: `Posizione attivata per ${p.dest_nome || ''}${p.oggetto ? ' — ' + p.oggetto : ''}`.trim(),
+      // dest_nome/oggetto vengono dal preventivo (anche pubblico): si SPENGONO prima di finire in
+      // notifiche.messaggio, reso come HTML nella campanella (stesso sink dell'XSS, come accetta/rifiuta).
+      oggetto: 'Preventivo attivato', messaggio: `Posizione attivata per ${escapeHtml(p.dest_nome || '')}${p.oggetto ? ' — ' + escapeHtml(p.oggetto) : ''}`.trim(),
       link: '/dashboard/preventivi', created_by: p.created_by,
     })
   } catch {}
