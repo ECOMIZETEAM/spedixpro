@@ -960,7 +960,11 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
       dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: body.shipTo.country || 'IT',
       dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
-      colli: packages.length, peso_reale: packages[0]?.weight || null,
+      // Peso reale = SOMMA dei colli, come negli altri rami. Qui c'era il peso del solo primo collo: dal primo
+      // giorno, sulle multicollo Spedisci il portale mostrava meno della metà del peso (1.596 su 1.831 negli
+      // ultimi 30 giorni al 21/11/2026) e il ritiro si prenotava con quel totale. I soldi no: prezzo, cascata e
+      // rettifiche si fanno sui colli e sul peso fatturato.
+      colli: packages.length, peso_reale: pesoReale,
       peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
       lunghezza: packages[0]?.length || null, larghezza: packages[0]?.width || null, altezza: packages[0]?.height || null,
       contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
