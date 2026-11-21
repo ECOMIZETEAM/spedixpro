@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { escapeHtml } from '@/lib/escape-html'
 
 // ACCETTA PREVENTIVO (pubblico, per token). Il destinatario accetta → il preventivo va IN ATTESA di
 // attivazione (stato='accettato_da_confermare') e il master viene notificato. Qui NON si crea più nulla:
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     await admin.from('notifiche').insert({
       master_id: p.master_id, cliente_id: null, gruppi: ['Amministratore', 'Operatore'],
       oggetto: 'Preventivo accettato — da confermare',
-      messaggio: `${p.dest_nome || ''} ha accettato il preventivo${p.oggetto ? ' — ' + p.oggetto : ''}. Conferma dal portale per attivare la posizione.`.trim(),
+      messaggio: `${escapeHtml(p.dest_nome || '')} ha accettato il preventivo${p.oggetto ? ' — ' + escapeHtml(p.oggetto) : ''}. Conferma dal portale per attivare la posizione.`.trim(),
       link: '/dashboard/preventivi', created_by: p.created_by,
     })
   } catch {}

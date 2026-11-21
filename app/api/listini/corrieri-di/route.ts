@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 
 // Corrieri presenti in un LISTINO CLIENTE del master, con le fasce (prezzo minimo per fascia).
@@ -9,7 +10,10 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  // Legge i prezzi (vendita e costo-minimo) dei listini del master: e' una sorgente per l'editor dei
+  // markup, lavoro dello staff. Un cliente non deve poter sfogliare i listini di vendita del master.
+  if (!gestisceLaRete(utente as any)) return NextResponse.json({ error: 'Operazione riservata allo staff del master' }, { status: 403 })
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
 
   const listinoId = req.nextUrl.searchParams.get('listino')

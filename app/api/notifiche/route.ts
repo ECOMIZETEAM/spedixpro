@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { caricaAllegati } from '@/lib/allegati-ticket'
+import { gestisceLaRete } from '@/lib/ruoli'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
+  // Comporre una notifica e' lavoro dello staff (la pagina invia e' solo nel dashboard). Senza questo,
+  // un cliente poteva creare via API una notifica nel PROPRIO master con messaggio HTML arbitrario e
+  // gruppi=['Amministratore']: finiva nella campanella dell'admin resa con dangerouslySetInnerHTML
+  // (stesso sink dell'XSS pubblico) -> XSS cliente verso l'admin del suo master. L'HTML ricco resta a
+  // chi lo scrive davvero, lo staff.
+  if (!gestisceLaRete(utente as any)) return NextResponse.json({ error: 'Operazione riservata allo staff del master' }, { status: 403 })
 
   const body = await req.json()
   const { oggetto, messaggio, gruppi, allegati, reteModo } = body

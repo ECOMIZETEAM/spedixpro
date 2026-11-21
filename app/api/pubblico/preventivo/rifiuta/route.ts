@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { escapeHtml } from '@/lib/escape-html'
 
 // RIFIUTA PREVENTIVO (pubblico, per token): il destinatario dice no. Mette stato='rifiutato' e avvisa
 // il master. Speculare all'accettazione; non crea/tocca nulla d'altro. Idempotente.
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
   try {
     await admin.from('notifiche').insert({
       master_id: p.master_id, cliente_id: null, gruppi: ['Amministratore', 'Operatore'],
-      oggetto: 'Preventivo rifiutato', messaggio: `${p.dest_nome || ''} ha rifiutato il preventivo${p.oggetto ? ' — ' + p.oggetto : ''}`.trim(),
+      oggetto: 'Preventivo rifiutato', messaggio: `${escapeHtml(p.dest_nome || '')} ha rifiutato il preventivo${p.oggetto ? ' — ' + escapeHtml(p.oggetto) : ''}`.trim(),
       link: '/dashboard/preventivi', created_by: p.created_by,
     })
   } catch {}

@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { vedeLaRete } from '@/lib/ruoli'
 
 // Toglie UNA spedizione da una distinta (distinta_id -> null), rimettendola nel pool "senza distinta"
 // cosi' e' riassegnabile a un'altra distinta. Scelta condivisa 9/9: e' SOLO riorganizzazione, NON
@@ -16,6 +17,11 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+  // Riorganizzare le distinte della rete e' cosa dello staff (master/admin/operatore) o dell'agente
+  // sui propri clienti (gestito sotto). Un CLIENTE ha master_id come tutti: senza questo gli bastava
+  // per sfilare dalle distinte qualunque spedizione del sotto-albero del suo master. vedeLaRete lascia
+  // passare staff e agente, ferma cliente e autista.
+  if (!vedeLaRete(utente as any)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
 
   const body = await req.json().catch(() => ({}))
   const spedizioneId = body?.spedizioneId

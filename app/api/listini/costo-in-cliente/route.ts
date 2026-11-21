@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
+import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { normalizzaMarkup, creaApplicaMarkup } from '@/lib/markup-fasce'
 import { propagaListinoModificato } from '@/lib/listino-modificato'
@@ -20,6 +21,11 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const { data: utente } = await supabase.from('utenti').select('master_id,ruolo').eq('id', user.id).single()
   const _bloccoAg = bloccaAgente(utente as any); if (_bloccoAg) return _bloccoAg
+  // Costruire il listino di VENDITA dal proprio costo e' lavoro dello staff del master. Un cliente ha
+  // master_id come tutti (non e' un permesso): senza questo passava bloccaAgente e si riscriveva da solo
+  // i prezzi di vendita, con cascata sui sotto-master. La via diretta all'API non deve fare cio' che la
+  // UI (solo dashboard staff) non offre.
+  if (!gestisceLaRete(utente as any)) return NextResponse.json({ error: 'Operazione riservata allo staff del master' }, { status: 403 })
   if (!utente?.master_id) return NextResponse.json({ error: 'Master non trovato' }, { status: 400 })
   const masterId = utente.master_id
 

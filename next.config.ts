@@ -16,8 +16,22 @@ const SENZA_TRACCIA = [
   { key: 'Cache-Control', value: 'no-store' },
 ]
 
+// Header di sicurezza validi OVUNQUE, aggiunti a ogni risposta (non sostituiscono SENZA_TRACCIA sui
+// percorsi Shopify: Next applica tutte le regole che combaciano). nosniff ferma lo sniffing del
+// tipo di contenuto (un .json servito come HTML che diventa pagina); HSTS impone https. Nessuna CSP
+// qui: su quest'app (script inline di Next, Stripe, recharts...) va tarata e provata, altrimenti
+// rompe pagine — resta un passo a parte.
+const SICUREZZA_GLOBALE = [
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
+]
+// Solo i portali interni non devono poter finire in un <iframe> altrui (clickjacking). Il sito
+// pubblico e le pagine di tracking NO: alcune vengono incorniciate di proposito.
+const NIENTE_IFRAME = [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }]
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ['pdfjs-dist'],
+  poweredByHeader: false,
   turbopack: {
     root: __dirname,
   },
@@ -31,6 +45,9 @@ const nextConfig: NextConfig = {
     return [
       { source: '/api/integrazioni/shopify/:path*', headers: SENZA_TRACCIA },
       { source: '/shopify', headers: SENZA_TRACCIA },
+      { source: '/:path*', headers: SICUREZZA_GLOBALE },
+      { source: '/dashboard/:path*', headers: NIENTE_IFRAME },
+      { source: '/cliente/:path*', headers: NIENTE_IFRAME },
     ]
   },
 };

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { psPermessiMancanti } from '@/lib/prestashop'
 import { COME_SI_COLLEGA_SHOPIFY } from '@/lib/shopify-scheda-app'
+import { verificaUrlPubblico } from '@/lib/url-sicuro'
+
+export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -17,6 +20,11 @@ export async function POST(req: NextRequest) {
   const key = (body.webservice_key || '').trim()
   if (!url || !key) return NextResponse.json({ error: 'URL e Webservice Key obbligatori' }, { status: 400 })
   if (!/^https?:\/\//.test(url)) url = 'https://' + url
+
+  // SSRF: l'indirizzo lo scrive il cliente e lo chiamiamo noi. Non deve poter puntare alla rete interna.
+  const sic = await verificaUrlPubblico(url)
+  if (!sic.ok) return NextResponse.json({ error: sic.errore }, { status: 400 })
+  url = sic.url.replace(/\/+$/, '')
 
   let avviso: string | null = null
   try {
