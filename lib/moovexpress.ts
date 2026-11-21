@@ -275,7 +275,7 @@ export async function etichettaMoovexpress(cred: MoovexpressCred, labelUrl: stri
   return { buffer, mime: mimeDaiByte(buffer) || dichiarato || 'application/pdf' }
 }
 
-function mimeDaiByte(b: Buffer): string | null {
+export function mimeDaiByte(b: Buffer): string | null {
   if (b.length < 4) return null
   const testa = b.subarray(0, 8).toString('latin1')
   if (testa.startsWith('%PDF')) return 'application/pdf'

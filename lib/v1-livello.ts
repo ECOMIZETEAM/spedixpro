@@ -1,4 +1,5 @@
 import { NextResponse, after } from 'next/server'
+import { pressoDelCorpo, colliDelCorpo, ritiroDelCorpo } from '@/lib/v1-riga'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { segna, annota } from '@/lib/cronometro'
 import type { ApiContext } from '@/lib/api-auth'
@@ -61,9 +62,8 @@ export async function valutaLivelloV1(
   // "Presso" (c/o): seconda riga dell'indirizzo. Accetto `presso` e, come alias, `street2`
   // (così chi arriva da altre piattaforme non deve cambiare payload). Su Spedisci finisce in
   // street2; su SpediamoPro non esiste un campo dedicato -> viene accodato all'indirizzo.
-  const pressoFrom = String(body.shipFrom?.presso || body.shipFrom?.street2 || '').trim()
-  const pressoTo = String(body.shipTo?.presso || body.shipTo?.street2 || '').trim()
-  const conPresso = (via: string, presso: string) => (presso ? `${via} c/o ${presso}`.trim() : via)
+  // Le regole stanno in lib/v1-riga (pressoDelCorpo): le usa anche il ponte unico per la richiesta al livello sotto.
+  const { pressoFrom, pressoTo, conPresso } = pressoDelCorpo(body)
 
   const { data: cliente } = await admin.from('clienti')
     .select('master_id,ragione_sociale,listino_cliente_id,tipo_contratto,credito,ledger').eq('id', ctx.clienteId).single()
@@ -120,9 +120,7 @@ export async function valutaLivelloV1(
   // corpo si sarebbe visto addebitare un chilo, e la differenza la mettevamo noi. Oggi non lo usa
   // nessuno (zero spedizioni in 90 giorni sul collo predefinito), ma le due porte devono
   // rispondere allo stesso corpo nello stesso modo.
-  const packages = Array.isArray(body.packages) && body.packages.length
-    ? body.packages
-    : [{ weight: Number(body.weight) || 1, length: 20, width: 15, height: 10 }]
+  const packages = colliDelCorpo(body)
   if (packages.length > 1 && (corriere as any).multicollo === false)
     return NextResponse.json({ error: 'Il contratto non prevede il multicollo' }, { status: 400 })
   const pkg = packages[0]
@@ -155,10 +153,7 @@ export async function valutaLivelloV1(
   // IL RITIRO CHIESTO DA CHI INTEGRA.
   // Si accettano due forme perche' l'API pubblica parla inglese ma i client italiani mandano gia'
   // i nomi del portale: meglio leggere tutte e due che rispondere 200 OK ignorando la richiesta.
-  const _vuoleRitiro = (body.pickup?.requested === true || body.richiediRitiro === true)
-    && !!(body.pickup?.date || body.dataRitiro)
-  const _dataRitiro = String(body.pickup?.date || body.dataRitiro || '')
-  const _pomeriggio = String(body.pickup?.time || body.orarioRitiro || '').toLowerCase().startsWith('pom')
+  const { _vuoleRitiro, _dataRitiro, _pomeriggio } = ritiroDelCorpo(body)
 
   // CONSEGNA A UN PUNTO (PuntoPoste, Ufficio Postale, Fermopoint, locker).
   // Fino al 09/11/2026 questa porta non leggeva nessun punto: sui contratti a punto il fornitore

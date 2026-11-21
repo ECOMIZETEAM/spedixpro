@@ -21,6 +21,8 @@ import { EMAIL_PER_CORRIERE,
 import { depositoInRisposta } from '@/lib/punti-consegna'
 import { PONTE_HDR_RICHIESTA, scadenzaRichiesta, MINIMO_CREAZIONE_MS } from '@/lib/moovexpress'
 import { valutaLivelloV1 } from '@/lib/v1-livello'
+import { ldvPosteV1 } from '@/lib/v1-poste'
+import { corpoPerIlVenditoreV1, rigaV1, parametriAlberoV1, parametriCatenaV1 } from '@/lib/v1-riga'
 import { apriRichiestaPonte, chiudiRichiestaPonte, leggiRichiestaPonte, codiceRichiestaValido, type RegistroPonte } from '@/lib/ponte-richieste'
 
 // IL TETTO DI DURATA, che qui non c'era.
@@ -550,40 +552,10 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       return errore(e?.ecosmos ? e.message : erroreCorrierePulito(e?.message))
     }
   } else if (corriere.tipo === 'poste') {
-    // POSTE Delivery Business diretto via KSync/ParcelPilot: diretto (costoCorrente=0). Il prodotto è nel
-    // `product` (settings). Etichetta dal downloadURL. Niente annullo via API (come gli altri Poste).
-    const settingsPo = (corriere as any)?.settings || {}
-    // wsUtente/wsPassword: con questi la lettera si crea direttamente sul web service di KSync (lib/ksync).
-    const credPo = { clientId: cred.clientId, secretId: cred.secretId, costCenterCode: cred.costCenterCode || settingsPo.cost_center_code, ambiente: (cred.ambiente === 'demo' ? 'demo' : 'prod') as 'prod' | 'demo', baseUrl: cred.baseUrl, scope: cred.scope, wsUtente: cred.wsUtente, wsPassword: cred.wsPassword, wsHost: cred.wsHost }
-    const productPo = String(settingsPo.product || '').trim()
-    if (!productPo) return errore('Contratto non configurato correttamente')
-    try {
-      const { creaKsync, etichettaKsync } = await import('@/lib/ksync')
-      // Contanti, assegno bancario o circolare: lo sceglie chi spedisce (lib/contrassegno-modalita).
-      codModeUsata = Number(body.codValue || 0) > 0 ? modalitaCodPoste(body.incassoModalita, settingsPo.modalita_pagamento_cod) : null
-      const risPo = await creaKsync(credPo, {
-        product: productPo,
-        clientReferenceId: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
-        contenuto: body.contenuto ? String(body.contenuto) : undefined,
-        note: body.notes ? String(body.notes) : undefined,
-        mittente: { ragioneSociale: body.shipFrom.name, indirizzo: conPresso(body.shipFrom.street1 || '', pressoFrom), citta: body.shipFrom.city, cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT', telefono: body.shipFrom.phone || undefined, email: body.shipFrom.email || undefined },
-        destinatario: { ragioneSociale: body.shipTo.name, indirizzo: conPresso(body.shipTo.street1 || '', pressoTo), citta: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state, paese: body.shipTo.country || 'IT', telefono: body.shipTo.phone || undefined, email: body.shipTo.email || undefined },
-        colli: packages.map((p: any) => ({ altezza: parseFloat(p?.height) || undefined, larghezza: parseFloat(p?.width) || undefined, profondita: parseFloat(p?.length) || undefined, peso: parseFloat(p?.weight) || 1 })),
-        contrassegno: body.codValue ? Number(body.codValue) : undefined,
-        codiceContrassegno: settingsPo.codice_contrassegno ? String(settingsPo.codice_contrassegno) : undefined,
-        modalitaPagamentoCod: codModeUsata || undefined,
-        assicurata: body.insuranceValue ? Number(body.insuranceValue) : undefined,
-        codiceAssicurazione: settingsPo.codice_assicurazione ? String(settingsPo.codice_assicurazione) : undefined,
-      })
-      numero = risPo.ldv
-      costoCorrente = 0
-      // KSync diretto manda l'etichetta nella risposta; col ponte si scarica dal downloadURL.
-      try { const lab = risPo.pdf?.length ? { bytes: risPo.pdf } : await etichettaKsync(credPo, risPo.downloadUrl, 'pdf'); if (lab.bytes?.length) etichettaUrl = `data:application/pdf;base64,${lab.bytes.toString('base64')}` } catch (e) { console.error('[V1][POSTE] etichetta:', (e as any)?.message) }
-      raw = { _ksync: true, ldv: numero, downloadUrl: risPo.downloadUrl, ambiente: credPo.ambiente, ...(risPo.raw?.diretto ? { diretto: true, uuid: risPo.raw.uuid } : {}) }
-    } catch (e: any) {
-      console.error('[V1][POSTE]', e?.message)
-      return errore(erroreCorrierePulito(e?.message))
-    }
+    // Il ramo Poste sta in lib/v1-poste (lo usa anche il ponte unico): stesso codice, stesse risposte.
+    const po = await ldvPosteV1({ corriere, cred, body, packages, conPresso, pressoFrom, pressoTo })
+    if ('errore' in po) return errore(po.errore)
+    ;({ numero, costoCorrente, codModeUsata, etichettaUrl, raw } = po)
   } else if (corriere.tipo === 'inpost') {
     // INPOST diretto (Global API): diretto (costoCorrente=0). Creazione sincrona. Verso locker se il body
     // porta un pointId (inpostPointId/pointId), altrimenti a domicilio. Niente annullo via API.
@@ -716,25 +688,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     if (!credMv?.api_key) return errore('Contratto non configurato correttamente')
     try {
       const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')
-      const risMv = await creaSpedizioneMoovexpress(credMv, {
-        packages: packages.map((p: any) => ({ weight: parseFloat(p?.weight) || 1, length: parseFloat(p?.length) || undefined, width: parseFloat(p?.width) || undefined, height: parseFloat(p?.height) || undefined })),
-        shipFrom: { ...body.shipFrom, street1: conPresso(body.shipFrom.street1 || '', pressoFrom) },
-        shipTo: { ...body.shipTo, street1: conPresso(body.shipTo.street1 || '', pressoTo) },
-        codValue: body.codValue ? Number(body.codValue) : undefined,
-        // Contanti o assegno: lo usa il contratto vero, che sta dal venditore (per SDA EXPRESS L, Poste).
-        ...(Number(body.codValue || 0) > 0 && body.incassoModalita ? { incassoModalita: String(body.incassoModalita) } : {}),
-        insuranceValue: body.insuranceValue ? Number(body.insuranceValue) : undefined,
-        valoreMerce: body.valoreMerce ? Number(body.valoreMerce) : undefined,
-        notes: body.notes ? String(body.notes) : undefined,
-        contenuto: body.contenuto ? String(body.contenuto) : undefined,
-        rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || undefined,
-        pickup: _vuoleRitiro ? { requested: true, date: _dataRitiro, time: _pomeriggio ? 'pomeriggio' : 'mattina' } : undefined,
-        // Consegna a un punto: il contratto vero sta dal venditore, che controlla e usa questi campi.
-        // Solo se arrivati: sulle spedizioni a domicilio la chiamata resta identica a prima.
-        ...(body.deliveryPoint != null ? { deliveryPoint: body.deliveryPoint } : {}),
-        ...(body.dropoffType ? { dropoffType: String(body.dropoffType) } : {}),
-        ...(body.inpostPointId ? { inpostPointId: String(body.inpostPointId) } : {}),
-      }, { scadenza })
+      const risMv = await creaSpedizioneMoovexpress(credMv, corpoPerIlVenditoreV1({ body, packages, conPresso, pressoFrom, pressoTo, _vuoleRitiro, _dataRitiro, _pomeriggio }), { scadenza })
       numero = risMv.tracking
       costoCorrente = risMv.prezzo   // W: costo esterno (come spedisci), NON 0
       codModeUsata = modalitaCodDaRichiesta(risMv.codMode)   // quella che il venditore ha davvero mandato
@@ -761,49 +715,11 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   // Quindi il LEDGER salva un numero unico (LDV + suo id); il `tracking_number` resta la LDV VERA (non è
   // unico, e serve condiviso: il tracking a salire interroga il venditore con quel numero). La LDV pulita
   // resta così libera per il compratore FINALE (master reale), che la vede come suo numero.
-  const numeroDb = (cliente as any)?.ledger && numero ? `${numero}-${String(ctx.clienteId).slice(0, 8)}` : numero
-  const riga = {
-    master_id: masterId, cliente_id: ctx.clienteId, corriere_id: corriere.id, numero: numeroDb,
-    mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_presso: pressoFrom || null, mitt_citta: body.shipFrom.city,
-    mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: 'IT',
-    mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
-    // Consegna a un PUNTO sui contratti SpediamoPro: sulla scheda l'indirizzo e' quello del punto,
-    // come nel portale (che su DVA invece tiene quello di casa: qui lo stesso).
-    ...(puntoConsegna && corriere.tipo === 'spediamopro' ? {
-      dest_nome: body.shipTo.name,
-      dest_indirizzo: puntoConsegna.address ? [puntoConsegna.name, puntoConsegna.address].filter(Boolean).join(' - ').slice(0, 100) : body.shipTo.street1,
-      dest_presso: pressoTo || null,
-      dest_citta: puntoConsegna.city || body.shipTo.city,
-      dest_provincia: puntoConsegna.province || body.shipTo.state,
-      dest_cap: puntoConsegna.postalCode || body.shipTo.postalCode,
-    } : {
-      dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_presso: pressoTo || null, dest_citta: body.shipTo.city,
-      dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode,
-    }),
-    dest_paese: body.shipTo.country || 'IT',
-    dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
-    colli: packages.length, peso_reale: pesoReale,
-    peso_volume: ris?.peso_volume || null, peso_fatturato: ris?.peso_fatturato || null,
-    lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
-    // IL RIFERIMENTO D'ORDINE SI SALVA. Arrivava nel body (`rifOrdine`), veniva passato al corriere e
-    // usato dalla guardia anti-doppione, ma NON finiva nella riga: 21.846 spedizioni create via API
-    // avevano `rif_ordine` a NULL. Due conseguenze vere: chi si integra non poteva riagganciare la
-    // spedizione al proprio ordine (ne' qui ne' nel portale), e soprattutto la guardia
-    // (lib/guardia-doppione) e l'indice uniq_sped_ordine_attivo_v2 confrontano proprio questa
-    // colonna — con NULL non trovavano mai niente, quindi l'API era l'unica porta SENZA protezione
-    // contro il doppio addebito dello stesso ordine (vedi CONTROLLORE-SUPREMO.md).
-    rif_ordine: (body.rifOrdine ? String(body.rifOrdine).trim() : '') || null,
-    contrassegno: body.codValue || 0, contrassegno_modalita: codModeUsata, assicurazione: body.insuranceValue || 0,
-    tracking_number: numero, etichetta_url: etichettaUrl, colli_dettaglio: colliDettaglio, raw_response: raw, stato: 'in_lavorazione',
-    costo_spedizione: costoCorrente, costo_totale: costoCliente, note: body.notes || null, contenuto: body.contenuto || null,
-    // Il ritiro si segna sulla spedizione solo se e' stato prenotato: il portale mostra "Ritiro
-    // richiesto" da questo campo, e un ritiro mai partito faceva credere al master che il corriere
-    // sarebbe passato (TK-06400, 18/10/2026).
-    richiedi_ritiro: ritiroPrenotato,
-    data_ritiro: ritiroPrenotato ? _dataRitiro : null,
-    intervallo_ritiro: ritiroPrenotato ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
-    canale: 'api',
-  }
+  // La riga e il suo numero: lib/v1-riga (li usa anche il ponte unico), stesso codice di quando stavano qui.
+  const { numeroDb, riga } = rigaV1({
+    cliente, ctx, numero, masterId, corriere, body, pressoFrom, pressoTo, puntoConsegna, packages, pesoReale, ris, pkg,
+    codModeUsata, etichettaUrl, colliDettaglio, raw, costoCorrente, costoCliente, ritiroPrenotato, _dataRitiro, _pomeriggio,
+  })
   const scriviRiga = () => admin.from('spedizioni').insert(riga).select('id').single()
   let inserted: any = null, insErr: any = null
   if (corriere.tipo === 'moovexpress' && numero) {
@@ -936,16 +852,9 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     if (corriere.tipo === 'moovexpress') {
       // CONDIVISIONE: SOLO i livelli-ALBERO (il resto l'ha addebitato il dispatch del venditore, a ogni
       // salto). NON addebitaCatena, che risalirebbe l'albero fino all'owner = doppio su credito_proprio.
-      await addebitaTreeCondivisione(admin, {
-        masterOriginante: masterId, nomeContratto: corriere.nome_contratto,
-        dest: { cap: body.shipTo.postalCode, provincia: body.shipTo.state, citta: body.shipTo.city, paese: body.shipTo.country || 'IT' },
-        packages,
-        contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-        mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT',
-        numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null,
-      })
+      await addebitaTreeCondivisione(admin, parametriAlberoV1({ masterId, corriere, body, packages, numero, spedizioneId: inserted?.id || null }))
     } else {
-      await addebitaCatena(admin, { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT', numero, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: null })
+      await addebitaCatena(admin, parametriCatenaV1({ masterId, corriere, body, packages, costoCorrente, numero, spedizioneId: inserted?.id || null }))
     }
   } catch (e) { console.error('API cascata:', e) }
 

@@ -518,7 +518,13 @@ export async function verificaCreditoCatena(
   return { ok: true }
 }
 
-export async function addebitaCatena(
+// Un addebito sul conto di un master, pronto da scrivere con registraMovimentoMaster (lib/movimenti).
+export type MovimentoMaster = Parameters<typeof registraMovimentoMaster>[1]
+
+// GLI ADDEBITI DELLA CASCATA, CALCOLATI SENZA SCRIVERLI (fase 3 di PONTE-UNICO.md). Erano dentro addebitaCatena,
+// qui sotto, che ora li prende da qui e li scrive come prima. Il ponte unico dei condivisi li prende dalla stessa
+// funzione e li scrive nella sua transazione: una regola sola per chi paga cosa, per tutte e due le strade.
+export async function movimentiCatena(
   supabase: any,
   params: {
     masterDirettoId: string
@@ -547,8 +553,8 @@ export async function addebitaCatena(
     mittProvincia: string
     mittPaese: string
   }
-): Promise<void> {
-  const adminMov = createAdminSupabase()
+): Promise<MovimentoMaster[]> {
+  const movimenti: MovimentoMaster[] = []
   const { catena } = await costruisciCatena(supabase, {
     masterDirettoId: params.masterDirettoId,
     corriereOwnerId: params.corriereOwnerId,
@@ -576,19 +582,30 @@ export async function addebitaCatena(
     // MoovExpress incassa comunque la commissione fissa (trigger fee su spedizioni), che resta a parte.
     // (Il 17/08 un salto aveva spento questa traccia lasciando solo la commissione; ripristinato il
     //  22/09 con l'owner: il detentore deve vedere il suo costo, non €64 di sole commissioni.)
+    movimenti.push({
+      masterOwnerId: liv.masterId,
+      masterTargetId: liv.masterId,
+      tipo: 'spedizione',
+      descrizione: descrizioneSpedizione(params.numero, params.destNome),
+      riferimento: params.numero,
+      importo: -Math.abs(liv.prezzo),
+      spedizioneId: params.spedizioneId,
+      createdBy: params.createdBy,
+    })
+  }
+  return movimenti
+}
+
+export async function addebitaCatena(
+  supabase: any,
+  params: Parameters<typeof movimentiCatena>[1],
+): Promise<void> {
+  const adminMov = createAdminSupabase()
+  for (const m of await movimentiCatena(supabase, params)) {
     try {
-      await registraMovimentoMaster(adminMov, {
-        masterOwnerId: liv.masterId,
-        masterTargetId: liv.masterId,
-        tipo: 'spedizione',
-        descrizione: descrizioneSpedizione(params.numero, params.destNome),
-        riferimento: params.numero,
-        importo: -Math.abs(liv.prezzo),
-        spedizioneId: params.spedizioneId,
-        createdBy: params.createdBy,
-      })
+      await registraMovimentoMaster(adminMov, m)
     } catch (e) {
-      console.error(`Errore addebito cascata su master ${liv.masterId}:`, e)
+      console.error(`Errore addebito cascata su master ${m.masterTargetId}:`, e)
     }
   }
 }

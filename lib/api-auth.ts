@@ -37,6 +37,14 @@ export async function autenticaApiKey(req: Request): Promise<ApiContext | null> 
   const auth = req.headers.get('authorization') || req.headers.get('Authorization') || ''
   const token = auth.replace(/^Bearer\s+/i, '').trim()
   if (!token) return null
+  return autenticaChiave(token)
+}
+
+// La stessa autenticazione a partire dalla chiave, con gli stessi controlli e le stesse scritture (ultimo uso,
+// pacchetto, freno di frequenza). La usa anche il ponte unico dei condivisi (fase 3 di PONTE-UNICO.md), che a
+// ogni salto della fila presenta la chiave del ponte come faceva la staffetta via HTTP: chi vende vede la sua
+// chiave usata, il pacchetto e il freno contano e fermano come prima.
+export async function autenticaChiave(token: string): Promise<ApiContext | null> {
   const admin = createAdminSupabase()
   const { data, error: errChiave } = await admin
     .from('api_keys')
