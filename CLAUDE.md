@@ -1,7 +1,25 @@
 # MoovExpress
 
-Gestionale di spedizioni multi-cliente, **in produzione**: ~1.500 spedizioni al giorno, ~600
-clienti, 25 master. Next.js (App Router) + Supabase, rilascio su Vercel.
+Gestionale di spedizioni multi-cliente, **in produzione**. Next.js (App Router) + Supabase, rilascio su
+Vercel.
+
+**Quanto lavora (misurato il 21/11/2026, su giovedì 19/11):** ~8.100 pacchi al giorno dei clienti, più
+~7.600 righe di gambe interne dei condivisi (quasi 16.000 righe nuove in `spedizioni` ogni giorno
+feriale); 745 clienti hanno spedito quel giorno, su 2.325 registrati; 36 master attivi su 63 (52 sono
+sotto-master). Il volume è cresciuto in fretta (un mercoledì di luglio: 291 righe; di novembre: 15.878)
+e sta ancora crescendo: **un numero qui sopra vecchio di più di un mese è sbagliato**.
+
+Per aggiornarlo, senza pesare sul database: si conta **un giorno solo** sull'indice di `created_at`,
+separando le gambe (clienti con `ledger = true`). Mai un conteggio di tutta la tabella.
+
+```sql
+select count(*) filter (where not coalesce(c.ledger, false)) as pacchi_clienti,
+       count(*) filter (where coalesce(c.ledger, false))     as gambe_interne,
+       count(distinct s.cliente_id) filter (where not coalesce(c.ledger, false)) as clienti_attivi,
+       count(distinct s.master_id) as master_attivi
+from spedizioni s left join clienti c on c.id = s.cliente_id
+where s.created_at >= '<giorno feriale>' and s.created_at < '<giorno dopo>';
+```
 
 Ogni modifica tocca pacchi veri e soldi veri di aziende terze. Non esiste un ambiente di prova:
 quello che si rilascia va addosso a chi sta lavorando in quel momento.
