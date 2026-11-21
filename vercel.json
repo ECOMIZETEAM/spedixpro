@@ -99,6 +99,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/cron/registro-home",
+      "schedule": "*/2 * * * *"
+    },
+    {
       "path": "/api/spedizioni/tmp-recupero",
       "schedule": "*/15 * * * *"
     },
