@@ -15,6 +15,7 @@ import { colliOrdineNegozio, mappaCatalogo, mappaPacchi } from '@/lib/colli-nego
 import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/cliente/CompletaDatiNegozio'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 import IvaPrezzo from '@/app/components/IvaPrezzo'
+import type { RegimeIva } from '@/lib/iva-calcolo'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
@@ -463,14 +464,14 @@ export default function OrdiniPage() {
   // prezzi vengono ricalcolati e, se sono cambiati, lo si chiede prima di spedire.
   let totaleSpedizioni = 0, selInCalcolo = 0, selSenzaPrezzo = 0
   // Come sono scritti i prezzi del totale (+ IVA / IVA incl.): l'etichetta solo se sono tutti uguali.
-  const ivaSel: (boolean | null | undefined)[] = []
+  const ivaSel: (RegimeIva | null | undefined)[] = []
   let aliquotaSel: number | undefined
   for (const o of selezionatiPrezzabili) {
     if (!nelTotale.has(o.id)) continue
     const e = anteprima.leggi(rigaPrezzoDi(o))
     if (!e || e.stato === 'calcolo') { selInCalcolo++; continue }
     const t = e.stato === 'ok' ? scegliTariffa(e.tariffe, spedisciCon) : null
-    if (t) { totaleSpedizioni += t.prezzo; ivaSel.push(t.iva_inclusa); aliquotaSel = t.aliquota } else selSenzaPrezzo++
+    if (t) { totaleSpedizioni += t.prezzo; ivaSel.push(t.iva); aliquotaSel = t.aliquota } else selSenzaPrezzo++
   }
   totaleSpedizioni = Math.round(totaleSpedizioni*100)/100
   const selFuoriTotale = selezionatiPrezzabili.length - nelTotale.size
@@ -498,7 +499,7 @@ export default function OrdiniPage() {
     return (
       <span title={'Calcolato su '+descriviColli(rp.colli)+'.\nÈ l\'importo che ti verrà addebitato alla creazione. Se il corriere rileva peso o misure diversi può seguire un conguaglio.'
         + (e.tariffe.length>1 ? '\n\nTutti i contratti per questo ordine:\n'+elenco : '')}>
-        <span style={{fontWeight:700,color:'#1a1a1a'}}>{euro(t.prezzo)}<IvaPrezzo inclusa={t.iva_inclusa} aliquota={t.aliquota} /></span>
+        <span style={{fontWeight:700,color:'#1a1a1a'}}>{euro(t.prezzo)}<IvaPrezzo regime={t.iva} aliquota={t.aliquota} /></span>
         <span style={{color:'#6b7280',marginLeft:'6px'}}>{t.nome}</span>
         {(()=>{
           // Il peso si vede accanto al prezzo: e' la prima cosa che il cliente controlla ("il peso non

@@ -4,7 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { conMemoria, type ContatoreLetture } from '@/lib/db-memoria'
 import { prezziPerRighe, type RigaDaPrezzare } from '@/lib/anteprima-prezzi'
 import { infoIvaPrezzi, aliquotaCliente } from '@/lib/iva-vendita'
-import { ivaDelCorriere } from '@/lib/iva-calcolo'
+import { ivaDelCorriere, siNoVecchio } from '@/lib/iva-calcolo'
 import { MAX_COLLI_PER_RIGA, type Collo } from '@/lib/colli-ordine'
 
 export const runtime = 'nodejs'
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
     // "+ IVA" / "IVA incl." accanto a ogni prezzo (Lorenzo, 20/11/2026): come e' venduto oggi il suo
     // listino su quel contratto. Il prezzo non cambia; se la lettura non riesce l'etichetta non c'e'.
     const iva = await infoIvaPrezzi(createAdminSupabase(), (cliente as any).listino_cliente_id, aliquotaCliente((cliente as any).aliquota_iva))
-    if (iva) for (const e of esiti as any[]) for (const t of (e?.tariffe || [])) { t.iva_inclusa = ivaDelCorriere(iva, t.corriere_id); t.aliquota = iva.aliquota }
+    if (iva) for (const e of esiti as any[]) for (const t of (e?.tariffe || [])) { t.iva = ivaDelCorriere(iva, t.corriere_id); t.iva_inclusa = siNoVecchio(t.iva); t.aliquota = iva.aliquota }
     return NextResponse.json({ righe: esiti })
   } catch (e: any) {
     console.error('[ANTEPRIMA] calcolo fallito', { cliente: utente.cliente_id, righe: righe.length, errore: e?.message || String(e) })

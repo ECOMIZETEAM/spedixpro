@@ -10,7 +10,7 @@
 // Il DETTAGLIO Excel/CSV usa il tracciato "foto" a 34 colonne (builder condiviso col report cliente),
 // non le 6 colonne corte: ri-esportato qui così la pagina master lo chiama come le altre funzioni gen.*.
 export { excelReportSpedizioniB64, righeReportSpedizioni } from '@/lib/report-spedizioni-cols'
-import { dividiPrezzo, sommaVuota, aggiungiRiga, unisciSomme, modoGruppo, type SommaIva } from '@/lib/iva-calcolo'
+import { dividiPrezzo, sommaVuota, aggiungiRiga, unisciSomme, modoGruppo, regimeDi, type SommaIva, type RegimeIva } from '@/lib/iva-calcolo'
 
 export type Intestazione = { nome: string; indirizzo: string; email: string; piva: string; logo_url?: string | null }
 export type SpedRow = {
@@ -20,8 +20,10 @@ export type SpedRow = {
   // A chi il master fattura la riga (cliente diretto o sotto-master di prima linea) e la sua aliquota:
   // li mette la rotta del report. Senza (righe di altre fonti) si ragiona sul cliente della riga, al 22%.
   diretto_id?: string; diretto_nome?: string; aliquota_iva?: number | null
-  // Come il master ha venduto la riga al diretto (rotta, regola nel database): IVA inclusa = il prezzo
-  // contiene gia' l'IVA e si scorpora; assente o false = IVA esclusa, come i report di sempre.
+  // Come il master ha venduto la riga al diretto (rotta, regola nel database): 'inclusa' = il prezzo
+  // contiene gia' l'IVA e si scorpora; 'esente' = niente IVA (21/11/2026); assente = IVA esclusa, come i
+  // report di sempre. `iva_inclusa` e' il si'/no di prima, per le righe arrivate da una rotta di ieri.
+  iva_regime?: RegimeIva
   iva_inclusa?: boolean
 }
 
@@ -29,12 +31,14 @@ const IVA_PREDEFINITA = 22
 // IVA fissa al 22% per tutti: gli 82 clienti allo 0% che hanno spedito fra il 15/09 e il 14/10/2026 si
 // vedevano 12.010 € di IVA nei PDF. L'aliquota e' quella del diretto, riga per riga.
 const aliquotaDi = (s: SpedRow) => (s.aliquota_iva != null && Number.isFinite(Number(s.aliquota_iva))) ? Number(s.aliquota_iva) : IVA_PREDEFINITA
-// IVA della riga: sopra il prezzo se venduta IVA esclusa, scorporata se venduta IVA inclusa (lib/iva-calcolo).
-const ivaDi = (s: SpedRow) => dividiPrezzo(Number(s.costo_totale) || 0, aliquotaDi(s), !!s.iva_inclusa).iva
-const sommaDi = (righe: SpedRow[]) => righe.reduce((t, s) => aggiungiRiga(t, Number(s.costo_totale) || 0, aliquotaDi(s), !!s.iva_inclusa), sommaVuota())
-// I file cambiano forma SOLO se c'e' almeno una riga venduta IVA inclusa: chi non usa la scelta riceve
-// gli stessi file di prima, colonna per colonna.
-const conInclusa = (righe: SpedRow[]) => righe.some(s => !!s.iva_inclusa)
+const regimeRiga = (s: SpedRow): RegimeIva => regimeDi(s.iva_regime ?? s.iva_inclusa)
+// IVA della riga: sopra il prezzo se venduta IVA esclusa, scorporata se venduta IVA inclusa, zero se
+// esente (lib/iva-calcolo).
+const ivaDi = (s: SpedRow) => dividiPrezzo(Number(s.costo_totale) || 0, aliquotaDi(s), regimeRiga(s)).iva
+const sommaDi = (righe: SpedRow[]) => righe.reduce((t, s) => aggiungiRiga(t, Number(s.costo_totale) || 0, aliquotaDi(s), regimeRiga(s)), sommaVuota())
+// I file cambiano forma SOLO se c'e' almeno una riga venduta IVA inclusa o esente: chi non usa la scelta
+// riceve gli stessi file di prima, colonna per colonna.
+const conInclusa = (righe: SpedRow[]) => righe.some(s => regimeRiga(s) !== 'esclusa')
 const eur = (n: number) => '€ ' + (Math.round(n * 100) / 100).toFixed(2)
 const nCli = (s: SpedRow) => (s.clienti?.ragione_sociale || s.mitt_nome || '—').trim()
 // Il DIRETTO (riepilogo e file divisi per cliente): per un master e' a chi fattura, non il cliente finale.
@@ -74,12 +78,14 @@ export function aggregaPerCliente(speds: SpedRow[]): RigaRiepilogo[] {
     r.colli += Number(s.colli) || 0
     r.prezzo += Number(s.costo_totale) || 0
     r.iva += ivaDi(s)
-    aggiungiRiga(r.somma, Number(s.costo_totale) || 0, aliquotaDi(s), !!s.iva_inclusa)
+    aggiungiRiga(r.somma, Number(s.costo_totale) || 0, aliquotaDi(s), regimeRiga(s))
     m.set(k, r)
   }
   return [...m.values()].sort((a, b) => b.prezzo - a.prezzo)
 }
-const riepilogoConInclusa = (righe: RigaRiepilogo[]) => righe.some(r => r.somma?.nInclusa > 0)
+const riepilogoConInclusa = (righe: RigaRiepilogo[]) => righe.some(r => r.somma?.nInclusa > 0 || r.somma?.nEsente > 0)
+// La colonna "Esente" c'e' solo se qualcosa e' esente: il riepilogo IVA inclusa di ieri resta uguale.
+const riepilogoConEsente = (righe: RigaRiepilogo[]) => righe.some(r => r.somma?.nEsente > 0)
 const sommaRiepilogo = (righe: RigaRiepilogo[]) => righe.reduce((t, r) => unisciSomme(t, r.somma || sommaVuota()), sommaVuota())
 
 // ── RAGGRUPPAMENTO per la SUDDIVISIONE ──
@@ -144,28 +150,32 @@ function totaliPDF(doc: any, prezzoNetto: number, iva: number, etichetta: string
   doc.text('TOTALE', x1, y + 21); doc.text(eur(tot), x2, y + 21, { align: 'right' })
 }
 
-// Il riquadro quando c'e' almeno una riga venduta IVA inclusa (decisione di Lorenzo, 20/11/2026):
-// quanto e' uscito dal credito, quanta IVA c'era gia' dentro, quanta va incassata a parte, il totale
-// del documento. Sotto, imponibile e IVA come andranno in fattura.
+// Il riquadro quando c'e' almeno una riga venduta IVA inclusa o esente (decisione di Lorenzo, 20/11/2026):
+// quanto e' uscito dal credito, quanta IVA c'era gia' dentro, quanto era esente, quanta IVA va incassata a
+// parte, il totale del documento. Sotto, imponibile, IVA ed esente come andranno in fattura.
+// La riga "di cui esente IVA" c'e' solo se qualcosa e' esente: senza, il riquadro e' quello di ieri.
 function totaliIvaPDF(doc: any, s: SommaIva, etichetta: string, finalY: number) {
   const W = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
+  const conEsente = s.nEsente > 0
+  const h = conEsente ? 6 : 0
   let y = finalY + 12
-  if (y + 44 > pageH - 12) { doc.addPage(); y = 24 }
+  if (y + 44 + h > pageH - 12) { doc.addPage(); y = 24 }
   const x1 = 20, x2 = W - 20
   doc.setDrawColor(210, 210, 210); doc.line(x1, y - 4, x2, y - 4)
   doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(60, 60, 60)
   doc.text('SCALATO DAL CREDITO', x1, y); doc.text(eur(s.scalato), x2, y, { align: 'right' })
   doc.setFontSize(9); doc.setTextColor(110, 110, 110)
   doc.text('di cui IVA gia\' compresa', x1 + 6, y + 6); doc.text(eur(s.ivaCompresa), x2, y + 6, { align: 'right' })
-  doc.line(x1, y + 9, x2, y + 9)
+  if (conEsente) { doc.text('di cui esente IVA', x1 + 6, y + 12); doc.text(eur(s.esente), x2, y + 12, { align: 'right' }) }
+  doc.line(x1, y + 9 + h, x2, y + 9 + h)
   doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(194, 65, 12)
-  doc.text('IVA DA INCASSARE A PARTE', x1, y + 15); doc.text(eur(s.ivaDaIncassare), x2, y + 15, { align: 'right' })
-  doc.setDrawColor(34, 163, 74); doc.line(x1, y + 19, x2, y + 19)
+  doc.text('IVA DA INCASSARE A PARTE', x1, y + 15 + h); doc.text(eur(s.ivaDaIncassare), x2, y + 15 + h, { align: 'right' })
+  doc.setDrawColor(34, 163, 74); doc.line(x1, y + 19 + h, x2, y + 19 + h)
   doc.setFontSize(12); doc.setTextColor(34, 163, 74)
-  doc.text('TOTALE DOCUMENTO', x1, y + 26); doc.text(eur(s.totale), x2, y + 26, { align: 'right' })
+  doc.text('TOTALE DOCUMENTO', x1, y + 26 + h); doc.text(eur(s.totale), x2, y + 26 + h, { align: 'right' })
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(110, 110, 110)
-  doc.text(`Imponibile ${eur(s.imponibile)}  ·  ${etichetta} ${eur(s.iva)}`, x2, y + 32, { align: 'right' })
+  doc.text(`Imponibile ${eur(s.imponibile)}  ·  ${etichetta} ${eur(s.iva)}` + (conEsente ? `  ·  Esente IVA ${eur(s.esente)}` : ''), x2, y + 32 + h, { align: 'right' })
 }
 
 async function nuovoDoc() {
@@ -180,13 +190,16 @@ export async function pdfRiepilogoB64(intest: Intestazione, periodo: string, rig
   const doc = await nuovoDoc()
   const startY = await headerPDF(doc, intest, '', periodo)
   if (riepilogoConInclusa(righe)) {
+    // Con righe esenti, una colonna "Esente" dopo l'imponibile; senza, la tabella IVA inclusa di ieri.
+    const es = riepilogoConEsente(righe)
+    const destra = es ? [4, 5, 6, 7, 8] : [4, 5, 6, 7]
     autoTable(doc, {
       startY,
-      head: [['Cliente', 'Spedizioni', 'Colli', 'Prezzi', 'Prezzo', 'Imponibile', 'Iva', 'Totale']],
-      body: righe.map(r => [r.cliente, String(r.spedizioni), String(r.colli), modoGruppo(r.somma), eur(r.somma.scalato), eur(r.somma.imponibile), eur(r.somma.iva), eur(r.somma.totale)]),
+      head: [['Cliente', 'Spedizioni', 'Colli', 'Prezzi', 'Prezzo', 'Imponibile', ...(es ? ['Esente'] : []), 'Iva', 'Totale']],
+      body: righe.map(r => [r.cliente, String(r.spedizioni), String(r.colli), modoGruppo(r.somma), eur(r.somma.scalato), eur(r.somma.imponibile), ...(es ? [eur(r.somma.esente)] : []), eur(r.somma.iva), eur(r.somma.totale)]),
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [245, 245, 245], textColor: [80, 80, 80], fontStyle: 'bold' },
-      columnStyles: { 1: { halign: 'center' }, 2: { halign: 'center' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' } },
+      columnStyles: { 1: { halign: 'center' }, 2: { halign: 'center' }, ...Object.fromEntries(destra.map(i => [i, { halign: 'right' }])) },
       theme: 'plain',
     })
     totaliIvaPDF(doc, sommaRiepilogo(righe), etichettaIva(righe.map(r => r.aliquota)), (doc as any).lastAutoTable.finalY)
@@ -217,7 +230,7 @@ export async function pdfDettaglioB64(intest: Intestazione, periodo: string, tit
       body: righe.map(s => [
         s.numero || '', dataIt(s.created_at), s.mitt_nome || '',
         [s.dest_nome, s.dest_citta, s.dest_provincia].filter(Boolean).join(', '),
-        String(Number(s.colli) || 0), s.iva_inclusa ? 'inclusa' : 'esclusa', eur(Number(s.costo_totale) || 0),
+        String(Number(s.colli) || 0), regimeRiga(s), eur(Number(s.costo_totale) || 0),
       ]),
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [245, 245, 245], textColor: [80, 80, 80], fontStyle: 'bold' },
@@ -255,12 +268,13 @@ async function foglioB64(intestazioni: string[], corpo: (string | number)[][], t
 export function riepilogoRighe(righe: RigaRiepilogo[]) {
   const c2 = (n: number) => Math.round(n * 100) / 100
   if (riepilogoConInclusa(righe)) {
-    const corpo = righe.map(r => [r.cliente, r.spedizioni, r.colli, modoGruppo(r.somma), c2(r.somma.scalato), c2(r.somma.imponibile), c2(r.somma.iva), c2(r.somma.totale), c2(r.somma.ivaDaIncassare)])
+    const es = riepilogoConEsente(righe)
+    const corpo = righe.map(r => [r.cliente, r.spedizioni, r.colli, modoGruppo(r.somma), c2(r.somma.scalato), c2(r.somma.imponibile), ...(es ? [c2(r.somma.esente)] : []), c2(r.somma.iva), c2(r.somma.totale), c2(r.somma.ivaDaIncassare)])
     const t = sommaRiepilogo(righe)
     return {
-      intestazioni: ['Cliente', 'Spedizioni', 'Colli', 'Prezzi', 'Prezzo (scalato)', 'Imponibile', 'Iva', 'Totale', 'Iva da incassare a parte'],
+      intestazioni: ['Cliente', 'Spedizioni', 'Colli', 'Prezzi', 'Prezzo (scalato)', 'Imponibile', ...(es ? ['Esente IVA'] : []), 'Iva', 'Totale', 'Iva da incassare a parte'],
       corpo,
-      tot: ['TOTALE', righe.reduce((a, r) => a + r.spedizioni, 0), righe.reduce((a, r) => a + r.colli, 0), '', c2(t.scalato), c2(t.imponibile), c2(t.iva), c2(t.totale), c2(t.ivaDaIncassare)],
+      tot: ['TOTALE', righe.reduce((a, r) => a + r.spedizioni, 0), righe.reduce((a, r) => a + r.colli, 0), '', c2(t.scalato), c2(t.imponibile), ...(es ? [c2(t.esente)] : []), c2(t.iva), c2(t.totale), c2(t.ivaDaIncassare)],
     }
   }
   const corpo = righe.map(r => [r.cliente, r.spedizioni, r.colli, c2(r.prezzo), c2(r.iva), c2(r.prezzo + r.iva)])

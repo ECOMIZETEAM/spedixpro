@@ -21,9 +21,10 @@
  * l'elenco di tutti i contratti disponibili, e la scelta si rifa' qui. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Collo } from '@/lib/colli-ordine'
+import type { RegimeIva } from '@/lib/iva-calcolo'
 
-// iva_inclusa / aliquota: come e' scritto il prezzo, per l'etichetta "+ IVA" / "IVA incl." (la mette la rotta).
-export type TariffaAnteprima = { corriere_id: string; nome: string; prezzo: number; iva_inclusa?: boolean | null; aliquota?: number }
+// iva / aliquota: come e' scritto il prezzo, per l'etichetta "IVA escl." / "IVA incl." / "Esente IVA" (la mette la rotta).
+export type TariffaAnteprima = { corriere_id: string; nome: string; prezzo: number; iva?: RegimeIva | null; aliquota?: number }
 
 // Cio' che entra nel prezzo di un ordine. La pagina costruisce da QUESTO oggetto sia la riga
 // dell'anteprima sia i dati mandati alla creazione: stessi valori, stesso prezzo.

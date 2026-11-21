@@ -15,7 +15,7 @@ import { PAESI_MONDO } from '@/lib/paesi-elenco'
 import { OPZIONI_INCASSO_POSTE } from '@/lib/contrassegno-modalita'
 import { useRicercaSuggerimenti } from '@/lib/use-ricerca-suggerimenti'
 import IvaPrezzo from '@/app/components/IvaPrezzo'
-import { testoIva } from '@/lib/iva-calcolo'
+import { testoIva, type RegimeIva } from '@/lib/iva-calcolo'
 
 function iconaCorriere(nome:string): string | null {
   const n = (nome||'').toUpperCase()
@@ -36,7 +36,7 @@ function iconaCorriere(nome:string): string | null {
 }
 
 interface Cliente { id:string; ragione_sociale:string; so_indirizzo:string|null;so_citta:string|null; so_provincia:string|null; so_cap:string|null; email:string; telefono:string|null }
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; _spediamopro_quotation?:any; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean; _iva_inclusa?:boolean|null; _aliquota?:number }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string;zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; corriere_nome?:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; _spediamopro_quotation?:any; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean; _iva?:RegimeIva|null; _aliquota?:number }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -939,7 +939,7 @@ export default function NuovaSpedizionePage() {
                       <div style={{fontSize:'11px',color:'#1a1a1a',marginTop:'1px'}}>{r.peso_fatturato}kg · {r.zona}{parseFloat(r.peso_volume)>r.peso_reale?' (vol.)':''}</div>
                     </div>
                     <div style={{textAlign:'right',flexShrink:0}}>
-                      <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316'}}>€{r.total_price}<IvaPrezzo inclusa={r._iva_inclusa} aliquota={r._aliquota} /></div>
+                      <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316'}}>€{r.total_price}<IvaPrezzo regime={r._iva} aliquota={r._aliquota} /></div>
                     </div>
                   </div>
                 )
@@ -947,7 +947,7 @@ export default function NuovaSpedizionePage() {
               {selected && (
                 <button onClick={creaSpedizione} disabled={creating}
                   style={{width:'100%',marginTop:'4px',padding:'11px',background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13.5px',fontWeight:'700',cursor:'pointer',opacity:creating?0.7:1}}>
-                  {creating?'Creazione...':'✓ Crea Spedizione — €'+selected.total_price+(testoIva(selected._iva_inclusa, selected._aliquota) ? ' '+testoIva(selected._iva_inclusa, selected._aliquota) : '')}
+                  {creating?'Creazione...':'✓ Crea Spedizione — €'+selected.total_price+(testoIva(selected._iva, selected._aliquota) ? ' '+testoIva(selected._iva, selected._aliquota) : '')}
                 </button>
               )}
             </div>
@@ -986,7 +986,7 @@ export default function NuovaSpedizionePage() {
                       <div style={{fontSize:'10.5px',color:'#b45309',marginTop:'2px'}}>⚠ {r.avviso_fuori_sagoma}</div>
                     )}
                   </div>
-                  <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',flexShrink:0}}>€ {r.total_price}<IvaPrezzo inclusa={r._iva_inclusa} aliquota={r._aliquota} /></div>
+                  <div style={{fontSize:'18px',fontWeight:'800',color:'#f97316',flexShrink:0}}>€ {r.total_price}<IvaPrezzo regime={r._iva} aliquota={r._aliquota} /></div>
                 </div>
               )
             })}
@@ -1071,11 +1071,11 @@ export default function NuovaSpedizionePage() {
                   {Number(selected.costo_contrassegno||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>Costo Contrassegno</span><span>€ {selected.costo_contrassegno}</span></div>}
                   {Number(selected.costo_assicurazione||0)>0 && <div style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',background:'#fff',fontSize:'13px',color:'#000'}}><span>Costo Assicurazione</span><span>€ {selected.costo_assicurazione}</span></div>}
                   {extraScelti.map((e,i)=>(<div key={i} style={{display:'flex',justifyContent:'space-between',padding:'9px 14px',fontSize:'13px',color:'#000'}}><span>{e.nome}</span><span>€ {e.importo.toFixed(2)}</span></div>))}
-                  <div style={{display:'flex',justifyContent:'space-between',padding:'11px 14px',borderTop:'1px solid #000',fontSize:'14px',fontWeight:'800',color:'#f97316'}}><span>Costo Totale</span><span>€ {totaleConExtra.toFixed(2)}<IvaPrezzo inclusa={selected._iva_inclusa} aliquota={selected._aliquota} /></span></div>
+                  <div style={{display:'flex',justifyContent:'space-between',padding:'11px 14px',borderTop:'1px solid #000',fontSize:'14px',fontWeight:'800',color:'#f97316'}}><span>Costo Totale</span><span>€ {totaleConExtra.toFixed(2)}<IvaPrezzo regime={selected._iva} aliquota={selected._aliquota} /></span></div>
                 </div>
                 <button onClick={creaSpedizione} disabled={creating}
                   style={{width:'100%',padding:'12px',background:'#1a1a1a',color:'#fff',border:'none',borderRadius:'7px',fontSize:'13.5px',fontWeight:'700',cursor:'pointer',opacity:creating?0.7:1}}>
-                  {creating?'Creazione...':'✓ Crea Spedizione — € '+totaleConExtra.toFixed(2)+(testoIva(selected?._iva_inclusa, selected?._aliquota) ? ' '+testoIva(selected?._iva_inclusa, selected?._aliquota) : '')}
+                  {creating?'Creazione...':'✓ Crea Spedizione — € '+totaleConExtra.toFixed(2)+(testoIva(selected?._iva, selected?._aliquota) ? ' '+testoIva(selected?._iva, selected?._aliquota) : '')}
                 </button>
               </div>
             )}

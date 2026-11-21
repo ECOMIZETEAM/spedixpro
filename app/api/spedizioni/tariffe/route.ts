@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { infoIvaPrezzi, aliquotaCliente } from '@/lib/iva-vendita'
-import { ivaDelCorriere } from '@/lib/iva-calcolo'
+import { ivaDelCorriere, siNoVecchio } from '@/lib/iva-calcolo'
 import { createServerSupabase } from '@/lib/supabase'
 import { calcolaTariffeCliente, ZONE_MAP, PAESI, superaMisureMax, descriviLimiti } from '@/lib/tariffe-motore'
 import { calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
@@ -187,6 +187,6 @@ export async function POST(req: NextRequest) {
   // "+ IVA" / "IVA incl." accanto a ogni prezzo (Lorenzo, 20/11/2026): come e' venduto oggi, su quel
   // contratto, il listino di chi compra (cliente o sotto-master). Il prezzo non cambia: e' solo come leggerlo.
   const iva = await infoIvaPrezzi(createAdminSupabase(), cliente?.listino_cliente_id, subMatch ? 22 : aliquotaCliente(cliente?.aliquota_iva))
-  if (iva) for (const r of risultati) { r._iva_inclusa = ivaDelCorriere(iva, r._corriere_id || r.corriere_id); r._aliquota = iva.aliquota }
+  if (iva) for (const r of risultati) { r._iva = ivaDelCorriere(iva, r._corriere_id || r.corriere_id); r._iva_inclusa = siNoVecchio(r._iva); r._aliquota = iva.aliquota }
   return NextResponse.json(soloDomicilio(risultati))
 }

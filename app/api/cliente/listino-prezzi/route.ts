@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { infoIvaPrezzi, aliquotaCliente } from '@/lib/iva-vendita'
-import { ivaDelCorriere } from '@/lib/iva-calcolo'
+import { ivaDelCorriere, siNoVecchio } from '@/lib/iva-calcolo'
 import { createServerSupabase } from '@/lib/supabase'
 
 // Listino PREZZI del cliente (quello che paga lui), in SOLA LETTURA.
@@ -125,8 +125,9 @@ export async function GET() {
       const perTipo = (t: string) => sup.filter((r: any) => r.tipo === t)
       return {
         nome_contratto: c.nome_contratto,
-        // Come sono scritti i prezzi di questo contratto: "+ IVA" o "IVA incl." (null = non letto).
-        iva_inclusa: ivaDelCorriere(iva, cid),
+        // Come sono scritti i prezzi di questo contratto: inclusa / esclusa / esente (null = non scelto o non letto).
+        iva: ivaDelCorriere(iva, cid),
+        iva_inclusa: siNoVecchio(ivaDelCorriere(iva, cid)),
         fattore: c.fattore,
         zone: Array.from(c.zoneSet).sort(ordZona as any),
         zoneMittente: Array.from(c.zoneMittenteSet),

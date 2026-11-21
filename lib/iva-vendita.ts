@@ -9,7 +9,7 @@
 // compratore il giorno della spedizione, e come era venduto su quel listino il contratto del venditore
 // in quel giorno. I movimenti non c'entrano: il credito ha scalato il prezzo del listino comunque.
 
-import type { InfoIvaPrezzi } from '@/lib/iva-calcolo'
+import type { InfoIvaPrezzi, RegimeIva } from '@/lib/iva-calcolo'
 
 export type ChiestaIva = {
   t: 'cliente' | 'master'   // chi ha comprato
@@ -39,29 +39,37 @@ export async function venditoreUsaIva(admin: any, venditore: string | null | und
 
 // COME E' VENDUTO OGGI UN LISTINO, per l'editor e per le etichette: la scelta del listino e quella di ogni
 // contratto impostato a parte (null = "come il listino"). Vale l'ultima scelta fatta, come in
-// fn_iva_inclusa_al: le scelte partono sempre da oggi o da inizio mese, quindi l'ultima fatta e' quella in
+// fn_iva_regime_al: le scelte partono sempre da oggi o da inizio mese, quindi l'ultima fatta e' quella in
 // vigore adesso. `listino` null = IL MASTER NON HA ANCORA SCELTO (decisione di Lorenzo, 20/11/2026: finche'
 // non sceglie, i suoi clienti vedono i prezzi come prima; i report restano IVA esclusa come sempre).
-export type StatoIvaListino = { listino: boolean | null; corrieri: Record<string, boolean | null> }
+// Esente (21/11/2026) = iva_inclusa false + iva_esente true (scripts/iva-esente.sql).
+export type StatoIvaListino = { listino: RegimeIva | null; corrieri: Record<string, RegimeIva | null> }
+
+// Una riga di scelta: null = "come il listino" (solo sui contratti).
+const regimeRiga = (r: any): RegimeIva | null =>
+  r.iva_inclusa == null ? null : r.iva_esente === true ? 'esente' : r.iva_inclusa === true ? 'inclusa' : 'esclusa'
 
 export async function statoIvaListino(admin: any, listinoId: string): Promise<StatoIvaListino> {
   const stato: StatoIvaListino = { listino: null, corrieri: {} }
-  const { data, error } = await admin.from('listini_iva')
-    .select('corriere_id,iva_inclusa,creato_il,id').eq('listino_id', listinoId)
+  const leggi = (campi: string) => admin.from('listini_iva')
+    .select(campi).eq('listino_id', listinoId)
     .order('creato_il', { ascending: false }).order('id', { ascending: false }).limit(1000)
+  let { data, error } = await leggi('corriere_id,iva_inclusa,iva_esente,creato_il,id')
+  // Finche' scripts/iva-esente.sql non e' lanciato la colonna non c'e': nessuno ha scelto esente.
+  if (error && String(error.code || '') === '42703') ({ data, error } = await leggi('corriere_id,iva_inclusa,creato_il,id'))
   if (error) {
     if (TABELLA_ASSENTE.has(String(error.code || ''))) return stato
     throw new Error('Impostazioni IVA del listino non leggibili: ' + error.message)
   }
   let listinoVisto = false
   for (const r of data || []) {
-    if (!r.corriere_id) { if (!listinoVisto) { stato.listino = r.iva_inclusa === true; listinoVisto = true } continue }
-    if (!(r.corriere_id in stato.corrieri)) stato.corrieri[r.corriere_id] = r.iva_inclusa == null ? null : r.iva_inclusa === true
+    if (!r.corriere_id) { if (!listinoVisto) { stato.listino = regimeRiga(r) ?? 'esclusa'; listinoVisto = true } continue }
+    if (!(r.corriere_id in stato.corrieri)) stato.corrieri[r.corriere_id] = regimeRiga(r)
   }
   return stato
 }
 
-// PER L'ETICHETTA "+ IVA / IVA incl." accanto ai prezzi: come e' venduto OGGI il listino di chi compra,
+// PER L'ETICHETTA "IVA escl. / IVA incl. / Esente IVA" accanto ai prezzi: come e' venduto OGGI il listino di chi compra,
 // con la sua aliquota. Se la lettura non riesce torna null e le pagine non mostrano l'etichetta: un
 // prezzo senza etichetta e' meglio di un prezzo che non si carica.
 //
@@ -88,25 +96,47 @@ export function aliquotaCliente(v: any): number {
   return Number.isFinite(n) && n >= 0 ? n : 22
 }
 
-// Una risposta per riga, nello stesso ordine. null = riga senza compratore (spedizioni proprie): esclusa.
-export async function ivaVendite(admin: any, venditore: string | null | undefined, righe: (ChiestaIva | null)[]): Promise<boolean[]> {
-  const out = righe.map(() => false)
+// Una risposta per riga, nello stesso ordine: 'inclusa', 'esclusa' o 'esente'. null = riga senza
+// compratore (spedizioni proprie): esclusa.
+export async function ivaVendite(admin: any, venditore: string | null | undefined, righe: (ChiestaIva | null)[]): Promise<RegimeIva[]> {
+  const out: RegimeIva[] = righe.map(() => 'esclusa')
   if (!venditore || !righe.some(Boolean)) return out
-  // Chi non ha mai toccato l'interruttore non paga niente: nessuna chiamata in piu'.
+  // Chi non ha mai toccato la scelta non paga niente: nessuna chiamata in piu'.
   if (!(await venditoreUsaIva(admin, venditore))) return out
   const elenco = righe
     .map((r, i) => (r && r.s && r.p ? { i, t: r.t, s: r.s, p: r.p, m: r.m || 'spedizione' } : null))
     .filter(Boolean) as { i: number; t: string; s: string; p: string; m: string }[]
   const blocchi: typeof elenco[] = []
   for (let k = 0; k < elenco.length; k += BLOCCO) blocchi.push(elenco.slice(k, k + BLOCCO))
-  // Quattro blocchi alla volta, come le altre letture a blocchi dei report.
-  for (let k = 0; k < blocchi.length; k += 4) {
-    await Promise.all(blocchi.slice(k, k + 4).map(async (b) => {
-      const { data, error } = await admin.rpc('iva_vendite_spedizioni', { p_venditore: venditore, p_righe: b })
-      if (error) throw new Error('IVA delle vendite non leggibile: ' + error.message)
-      if (!Array.isArray(data) || data.length !== b.length) throw new Error(`IVA delle vendite incompleta: ${data?.length ?? 0} risposte su ${b.length}`)
-      for (const r of data) out[Number(r.i)] = r.iva_inclusa === true
+  // iva_vendite_regime nasce con scripts/iva-esente.sql. Finche' non c'e' nessuno ha scelto esente, e
+  // quella di ieri (si'/no IVA inclusa) da' le stesse risposte.
+  let nuova = true
+  const chiedi = async (b: typeof elenco) => {
+    if (nuova) {
+      const { data, error } = await admin.rpc('iva_vendite_regime', { p_venditore: venditore, p_righe: b })
+      if (!error) return (data || []).map((r: any) => ({ i: Number(r.i), v: regimeDaDb(r.regime) }))
+      if (String(error.code || '') !== 'PGRST202') throw new Error('IVA delle vendite non leggibile: ' + error.message)
+      nuova = false
+    }
+    const { data, error } = await admin.rpc('iva_vendite_spedizioni', { p_venditore: venditore, p_righe: b })
+    if (error) throw new Error('IVA delle vendite non leggibile: ' + error.message)
+    return (data || []).map((r: any) => ({ i: Number(r.i), v: (r.iva_inclusa === true ? 'inclusa' : 'esclusa') as RegimeIva }))
+  }
+  // Il primo blocco da solo: dice se la funzione nuova c'e'. Poi quattro alla volta, come le altre letture a blocchi.
+  for (let k = 0; k < blocchi.length; k += k === 0 ? 1 : 4) {
+    const gruppo = k === 0 ? [blocchi[0]] : blocchi.slice(k, k + 4)
+    await Promise.all(gruppo.map(async (b) => {
+      const risposte = await chiedi(b)
+      if (risposte.length !== b.length) throw new Error(`IVA delle vendite incompleta: ${risposte.length} risposte su ${b.length}`)
+      for (const r of risposte) out[r.i] = r.v
     }))
   }
   return out
+}
+
+// Il database risponde con una di tre parole; qualunque altra cosa ferma il report invece di diventare
+// "IVA esclusa" in silenzio.
+function regimeDaDb(v: any): RegimeIva {
+  if (v === 'inclusa' || v === 'esclusa' || v === 'esente') return v
+  throw new Error('IVA delle vendite: risposta non riconosciuta (' + String(v) + ')')
 }

@@ -20,11 +20,12 @@ export async function GET(req: NextRequest) {
       provincia: p.get('provincia') || null,
       vettore: p.get('vettore') || null,
     })
-    // Come il master gli ha venduto ogni spedizione, IVA inclusa o esclusa (regola nel database,
+    // Come il master gli ha venduto ogni spedizione, IVA inclusa, esclusa o esente (regola nel database,
     // lib/iva-vendita). Si chiede col client di servizio perche' le scelte del master non sono
     // leggibili dal cliente; il cliente e il master vengono dalla sessione, mai da un parametro.
-    const inclusa = await ivaVendite(createAdminSupabase(), s.masterId, spedizioni.map((r: any) => ({ t: 'cliente' as const, s: s.clienteId, p: r.id })))
-    return NextResponse.json({ spedizioni: spedizioni.map((r: any, i: number) => ({ ...r, iva_inclusa: inclusa[i] })), aliquotaIva })
+    // `iva_inclusa` resta per le pagine aperte prima del rilascio del 21/11 (si toglie al prossimo giro).
+    const regime = await ivaVendite(createAdminSupabase(), s.masterId, spedizioni.map((r: any) => ({ t: 'cliente' as const, s: s.clienteId, p: r.id })))
+    return NextResponse.json({ spedizioni: spedizioni.map((r: any, i: number) => ({ ...r, iva_regime: regime[i], iva_inclusa: regime[i] === 'inclusa' })), aliquotaIva })
   } catch (e: any) {
     return erroreReport(e)
   }

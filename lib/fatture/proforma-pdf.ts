@@ -45,6 +45,8 @@ export async function pdfProforma(p: {
   movimenti: MovimentoProforma[]
   // Spedizioni vendute IVA inclusa: gia' al netto nelle righe; qui quanto e' uscito dal credito e l'IVA dentro.
   ivaInclusa?: { lordo: number; iva: number }
+  // Venduto esente IVA (21/11/2026): righe a parte nel riepilogo, fuori dall'imponibile, dentro il totale.
+  esente?: number
 }): Promise<Uint8Array> {
   const { default: jsPDF } = await import('jspdf')
   const { default: autoTable } = await import('jspdf-autotable')
@@ -111,6 +113,7 @@ export async function pdfProforma(p: {
     foot: [
       ['Imponibile', '', eur(p.imponibile)],
       [ivaTesto, '', eur(p.iva)],
+      ...(p.esente ? [['Esente IVA', '', eur(p.esente)]] : []),
       ['Totale', '', eur(p.totale)],
     ],
     styles: { fontSize: 9, cellPadding: 2 },
@@ -157,7 +160,7 @@ export async function pdfProforma(p: {
     autoTable(doc, {
       startY: 20,
       head: [['Data', 'Voce', 'Descrizione', 'Importo €']],
-      body: p.movimenti.map(m => [dataIt(m.created_at), etichettaVoce(m.voce) + (m.iva_inclusa ? ' (IVA incl.)' : ''), m.descrizione, eur(m.importo)]),
+      body: p.movimenti.map(m => [dataIt(m.created_at), etichettaVoce(m.voce) + (m.iva_inclusa ? ' (IVA incl.)' : m.esente ? ' (esente IVA)' : ''), m.descrizione, eur(m.importo)]),
       styles: { fontSize: 7, cellPadding: 1 },
       headStyles: { fillColor: ARANCIO },
       columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 34 }, 3: { halign: 'right', cellWidth: 20 } },

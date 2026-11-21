@@ -118,7 +118,7 @@ export async function GET() {
   // IVA inclusa o esclusa (Lorenzo, 20/11/2026): come il master di sopra vende oggi ogni contratto al
   // sotto-master. All'agente no: il suo listino dice quanto vale per lui, non e' una vendita.
   const { infoIvaPrezzi } = await import('@/lib/iva-vendita')
-  const { ivaDelCorriere } = await import('@/lib/iva-calcolo')
+  const { ivaDelCorriere, siNoVecchio } = await import('@/lib/iva-calcolo')
   const { createAdminSupabase: adminIva } = await import('@/lib/supabase-admin')
   const iva = ruolo === 'agente' ? null : await infoIvaPrezzi(adminIva(), listinoId, 22)
   const ordZona = (a: string, b: string) => (a === 'Italia' ? -1 : b === 'Italia' ? 1 : a.localeCompare(b))
@@ -128,7 +128,8 @@ export async function GET() {
       const sup = supplPerCorr.get(cid) || []
       const perTipo = (t: string) => sup.filter((r: any) => r.tipo === t)
       return {
-        iva_inclusa: ivaDelCorriere(iva, cid),
+        iva: ivaDelCorriere(iva, cid),
+        iva_inclusa: siNoVecchio(ivaDelCorriere(iva, cid)),
         nome_contratto: c.nome_contratto,
         pausa: !!c.pausa,
         pausaMotivo: c.pausaMotivo || null,

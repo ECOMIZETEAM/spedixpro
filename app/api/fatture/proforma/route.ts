@@ -61,12 +61,13 @@ export async function POST(req: NextRequest) {
   let calc
   try { calc = await calcolaProforma(admin, acc.masterId, clienteId, dal, al, aMano, aliquota) }
   catch (e: any) { return NextResponse.json({ error: e?.message || 'Calcolo non riuscito' }, { status: 500 }) }
+  // L'IVA solo sull'imponibile: le righe esenti (21/11/2026) ne stanno fuori e si sommano al totale.
   const iva = ivaDi(calc.imponibile, aliquota)
-  const totale = cent(calc.imponibile + iva)
+  const totale = cent(calc.imponibile + iva + calc.esente)
   const riepilogo = {
     righe: calc.righe, imponibile: calc.imponibile, aliquota, natura: (c as any).natura_iva || null, iva, totale,
     ricariche: calc.ricariche, contrassegni: calc.contrassegni, movimenti: calc.movimenti.length,
-    ivaInclusa: calc.ivaInclusa,
+    ivaInclusa: calc.ivaInclusa, esente: calc.esente,
   }
   if (!body?.crea) return NextResponse.json({ anteprima: true, ...riepilogo, aMano: calc.aMano })
 
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
     pdf = await pdfProforma({
       numero: `${numero}/${anno}`, data: oggi, dal, al, emittente, destinatario,
       righe: calc.righe, imponibile: calc.imponibile, aliquota, natura: riepilogo.natura, iva, totale,
-      ricariche: calc.ricariche, contrassegni: calc.contrassegni, movimenti: calc.movimenti, ivaInclusa: calc.ivaInclusa,
+      ricariche: calc.ricariche, contrassegni: calc.contrassegni, movimenti: calc.movimenti, ivaInclusa: calc.ivaInclusa, esente: calc.esente,
     })
   } catch (e: any) { return NextResponse.json({ error: 'PDF non riuscito: ' + (e?.message || '') }, { status: 500 }) }
 
@@ -103,7 +104,8 @@ export async function POST(req: NextRequest) {
     emittente, intestazione: destinatario, righe: calc.righe,
     imponibile: calc.imponibile, aliquota, natura_iva: riepilogo.natura, iva, totale,
     // iva_inclusa: quanto di questa proforma era venduto IVA inclusa (gia' al netto nelle righe).
-    accrediti: { ricariche: calc.ricariche, contrassegni: calc.contrassegni, ...(calc.ivaInclusa.lordo ? { iva_inclusa: calc.ivaInclusa } : {}) },
+    // esente: quanto era venduto esente IVA (righe a parte, dentro il totale, fuori dall'imponibile).
+    accrediti: { ricariche: calc.ricariche, contrassegni: calc.contrassegni, ...(calc.ivaInclusa.lordo ? { iva_inclusa: calc.ivaInclusa } : {}), ...(calc.esente ? { esente: calc.esente } : {}) },
     movimenti: calc.movimenti.length, file_path: path, creata_da: acc.userId,
     a_mano_incluse: calc.aMano.filter(v => v.inclusa).map(v => v.id),
   }).select('id').single()

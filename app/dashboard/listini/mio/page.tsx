@@ -87,7 +87,7 @@ export default function MioListinoPage() {
                     )}
                     <span style={{ flex: 1, fontSize: '14px', fontWeight: 600, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>{c.nome_contratto}
                       {c.pausa && <span title={c.pausaMotivo === 'catena' ? 'Un master superiore lo ha messo in pausa: il cliente non lo vede.' : 'Il master lo ha messo in pausa: il cliente non lo vede.'} style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700, padding: '2px 8px' }}>⏸ {c.pausaMotivo === 'catena' ? 'In pausa da un livello superiore' : 'In pausa'}</span>}</span>
-                    <PrezziIva inclusa={c.iva_inclusa} aliquota={d?.aliquota_iva} />
+                    <PrezziIva regime={c.iva} aliquota={d?.aliquota_iva} />
                     <span style={{ fontSize: '18px', color: '#9ca3af', transform: aperto ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>›</span>
                   </div>
 
