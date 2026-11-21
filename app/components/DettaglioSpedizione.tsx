@@ -107,9 +107,13 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
     finally { setSalvando(false) }
   }
   if (!sRiga) return null
-  const eur = (x: any) => '€ ' + Number(x || 0).toFixed(2)
+  // soldi e date all'italiana, in tutte e due le grafiche (Lorenzo 21/11: «si certo italiana»): il dettaglio scriveva
+  // «€ 5.00» e il ritiro «2026-11-23 09:00-13:00» mentre il resto del portale scrive «€ 5,00» e «23/11/2026». Cambia
+  // solo la scrittura, i valori sono gli stessi
+  const eur = (x: any) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const giorno = (d?: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : (d || '') }
   const dims = [s.lunghezza, s.larghezza, s.altezza].every((x: any) => Number(x) > 0) ? `${s.lunghezza} × ${s.larghezza} × ${s.altezza} cm` : '—'
-  const accessori = (s.servizi_accessori || []).map((e: any) => `${e.nome}${e.importo ? ' (€' + Number(e.importo).toFixed(2) + ')' : ''}`).join(', ')
+  const accessori = (s.servizi_accessori || []).map((e: any) => `${e.nome}${e.importo ? ' (' + eur(e.importo) + ')' : ''}`).join(', ')
   const colliDett = Array.isArray(dett?.colli_dettaglio) ? dett.colli_dettaglio : []
   const multicollo = Number(s.colli) > 1
   // IL PESO SU CUI SI PAGA, non solo il reale (regola di Lorenzo: la schermata deve spiegare il prezzo). Sulle multicollo
@@ -217,7 +221,7 @@ export default function DettaglioSpedizione({ s: sRiga, onClose, etichettaHref, 
             <div className="ds-sezione" style={cardH}>Costo</div>
             <div style={cardB}>
               <F label="Prezzo" value={<span style={{ fontWeight: 800, color: '#16a34a', fontSize: '15px' }}>{eur(s.costo_totale)}</span>} />
-              {s.richiedi_ritiro ? <F label="Ritiro richiesto" value={`${s.data_ritiro || ''} ${s.intervallo_ritiro || ''}`.trim() || 'Sì'} /> : <div />}
+              {s.richiedi_ritiro ? <F label="Ritiro richiesto" value={[giorno(s.data_ritiro), String(s.intervallo_ritiro || '').replace('-', '–')].filter(Boolean).join(', ') || 'Sì'} /> : <div />}
             </div>
           </div>
 
