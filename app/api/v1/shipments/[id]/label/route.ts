@@ -85,15 +85,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       label_base64: et.buffer.toString('base64'),
     })
   }
-  // inline (non attachment): così il PDF si APRE nel visualizzatore di chi si integra (browser o gestionale),
-  // non solo scaricato. Con attachment un viewer incorporato lo mostrava bianco / "Impossibile caricare il
-  // documento PDF" (CONTORNO SRL, 22/11/2026) — provato in un browser vero: stesso PDF, inline si vede,
-  // attachment no. Chi invece lo SCARICA lo salva lo stesso (col filename qui sotto), e chi lo prende via
-  // software legge i byte e la Content-Disposition non conta: così vale per entrambi i modi di usarlo.
+  // attachment: come prima di sabato 21/11 (era così da luglio). Chi scarica l'etichetta per aprirla/stamparla
+  // riceve un file da salvare. Quello che rompeva Contorno non era la disposition (uguale da mesi) ma gli header
+  // di sicurezza aggiunti sull'API il 21/11 (vedi next.config, ora esclusi da /api/v1).
   return new NextResponse(et.buffer as any, {
     headers: {
       'Content-Type': et.mime,
-      'Content-Disposition': `inline; filename="${nomeFile}"`,
+      'Content-Disposition': `attachment; filename="${nomeFile}"`,
     },
   })
 }
