@@ -26,17 +26,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // leggiEtichettaCompleta sa dove vive il PDF (Storage o base64) ED è MULTICOLLO: su una spedizione
   // a più colli unisce tutte le etichette in un unico PDF, così chi si integra via API non riceve il
   // solo primo collo. Prima usava leggiEtichetta (singola) e non leggeva nemmeno colli_dettaglio.
-  // SDA EXPRESS L: la resa pulita va a chi si integra davvero via API (i partner). La catena della
-  // condivisione invece chiama con la chiave di un cliente-LEDGER (il master compratore, es.
-  // "MULTIEXPRESS (ingrosso)") e SALVA quello che riceve sulla riga a valle (lib/moovexpress): a lei la
-  // 1011 com'e'. Servita gia' riscritta, il cliente finale avrebbe avuto la resa coi dati della gamba a
-  // monte invece che della sua riga (la resa la fa il portale di chi stampa, sulla sua riga). Se il
-  // cliente non si legge, la 1011: mai una resa salvata dalla catena per sbaglio.
-  const resaSda = async () => {
-    const { data: cl } = await admin.from('clienti').select('ledger').eq('id', ctx.clienteId).maybeSingle()
-    return !!cl && cl.ledger !== true
-  }
-  let et = await leggiEtichettaCompleta(admin, s as any, { resaSda })
+  // SDA EXPRESS L: via API si serve SEMPRE l'etichetta ORIGINALE del corriere (resaSda:false), mai la
+  // resa pulita (il PDF rigenerato da pdf-lib). Dal 9/11/2026 ai partner (ledger=false) si dava la resa,
+  // ma il software di CONTORNO SRL apre l'originale e NON il PDF rigenerato -> "file non supportato",
+  // fermo dal rilascio del 21/11 (reclamo 22/11/2026). La resa pulita resta disponibile dai portali di
+  // stampa. La catena della condivisione (clienti-ledger) ha sempre voluto l'originale: lo SALVA sulla
+  // riga a valle (lib/moovexpress), e una resa pre-riscritta avrebbe portato i dati della gamba a monte.
+  let et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
 
   // SPEDIZIONE NATA PROVVISORIA (DVA, "TMP-<ordine>"): invece di rispondere subito che l'etichetta non
   // c'e', la si va a chiedere al fornitore e si aspetta qualche secondo (lib/tmp-completa, attendiTmp).
@@ -48,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     await attendiTmp(admin, s.id)
     const { data: riletta } = await admin.from('spedizioni').select(CAMPI).eq('id', id).maybeSingle()
     if (riletta) s = riletta
-    et = await leggiEtichettaCompleta(admin, s as any, { resaSda })
+    et = await leggiEtichettaCompleta(admin, s as any, { resaSda: false })
   }
   // ETICHETTA NON SALVATA ALLA CREAZIONE (GLS che la genera in ritardo, o un ponte), o MULTICOLLO GLS
   // con dei colli senza: la si riprende ora (lib/etichette, recuperaEtichettaMancante; senza un caso GLS
