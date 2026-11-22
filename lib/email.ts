@@ -237,7 +237,7 @@ export async function inviaControlloGiornaliero(to: string, righe: { area: strin
         <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 16px">
           ${allarmi.length
             ? `<strong style="color:#b91c1c">${allarmi.length} ${allarmi.length === 1 ? 'punto' : 'punti'} da guardare</strong>, in cima all'elenco.`
-            : 'Nessun problema: soldi, tracking e ripesature hanno lavorato tutti nelle ultime 24 ore.'}
+            : 'Nessun problema: soldi, tracking, ripesature, pesi e resi hanno lavorato tutti nelle ultime 24 ore.'}
         </p>
         <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #eee;border-radius:8px">
           ${[...allarmi, ...righe.filter(r => !r.allarme)].map(riga).join('')}

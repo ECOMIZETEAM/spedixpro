@@ -36,13 +36,19 @@ export async function GET(req: NextRequest) {
   if (!(await autorizzato(req))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
   const admin = createAdminSupabase()
 
-  // Tre parti, una dopo l'altra: il database ferma ogni chiamata dopo 8 secondi, e tutta insieme la
+  // Le parti vanno una dopo l'altra: il database ferma ogni chiamata dopo 8 secondi, e tutta insieme la
   // Sentinella li ha sforati (dal 14/10, poi il 10 e 11/11). Se una parte salta, l'email parte lo
-  // stesso con l'altra e con una riga che dice quale manca: un'email che non arriva non si nota.
+  // stesso con le altre e con una riga che dice quale manca: un'email che non arriva non si nota.
   const righe: any[] = []
   // La terza parte e' la sicurezza: il giro degli allarmi (/api/controllo/allarmi) e' vivo, la verifica
   // in due passaggi e' accesa nel database.
-  for (const [n, funzione] of [[1, 'controllo_giornaliero_1'], [2, 'controllo_giornaliero_2'], [3, 'controllo_giornaliero_3']] as const) {
+  // La quarta e' pesi e resi (22/11/2026). Pesi: le multicollo Spedisci dal portale salvavano come peso
+  // reale quello del PRIMO collo (4.418 spedizioni, riallineate il 22/11): ora si guarda ogni giorno che
+  // peso reale = somma dei colli, e che nessuna sia fatturata sotto il peso reale. Resi: un reso che il
+  // fornitore ci fa pagare e che il cliente non paga e' una perdita che non lascia errori, quindi si
+  // guarda la coda degli addebiti, i resi senza addebito, i resi fatturati su pacchi non a reso e il
+  // titolare pagato due volte.
+  for (const [n, funzione] of [[1, 'controllo_giornaliero_1'], [2, 'controllo_giornaliero_2'], [3, 'controllo_giornaliero_3'], [4, 'controllo_giornaliero_4']] as const) {
     const { data, error } = await admin.rpc(funzione)
     if (error || !data) {
       console.error('[SENTINELLA] controllo non eseguito:', funzione, error?.message)
