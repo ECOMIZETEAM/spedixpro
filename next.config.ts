@@ -69,10 +69,14 @@ const nextConfig: NextConfig = {
     return [
       { source: '/api/integrazioni/shopify/:path*', headers: SENZA_TRACCIA },
       { source: '/shopify', headers: SENZA_TRACCIA },
-      { source: '/:path*', headers: SICUREZZA_GLOBALE },
+      // NON su /api/v1: sono header pensati per le PAGINE del browser. Sull'API di integrazione (quella
+      // che chiamano i software dei clienti) rompevano lo scarico del portale di CONTORNO SRL: aggiunti il
+      // 21/11 alle 19:41 CET, prima quell'ora l'etichetta si scaricava. Il PDF era IDENTICO prima e dopo
+      // (provato col diff: resa invariata), cambiavano SOLO questi header -> fuori dall'API, dentro al portale.
+      { source: '/((?!api/v1/).*)', headers: SICUREZZA_GLOBALE },
       { source: '/dashboard/:path*', headers: NIENTE_IFRAME },
       { source: '/cliente/:path*', headers: NIENTE_IFRAME },
-      { source: '/:path*', headers: CSP_SOLO_SEGNALAZIONE },
+      { source: '/((?!api/v1/).*)', headers: CSP_SOLO_SEGNALAZIONE },  // idem: niente CSP sull'API di integrazione
     ]
   },
 };
