@@ -355,7 +355,12 @@ export async function riscriviEtichettaSdaExpressL(buffer: Buffer, dati: DatiEti
     const reg = await out.embedFont(Buffer.from(FONT_REGULAR_B64, 'base64'), { subset: true })
     const logo = await out.embedPng(Buffer.from(LOGO_HEADER_B64, 'base64'))
     for (const pg of pagine) await disegnaPagina(out, pg.src, pg.codici, pg.datiPag, bold, reg, logo)
-    return Buffer.from(await out.save())
+    // useObjectStreams:false -> xref CLASSICA (niente object stream/xref stream, strutture PDF 1.5+). Il
+    // salvataggio di default di pdf-lib esce in 1.7 con object stream, e un visualizzatore vecchio o stretto
+    // non li regge: CONTORNO SRL (via API, 22/11/2026) dava "Impossibile caricare il documento PDF" SOLO sulle
+    // SDA (le Poste, originali 1.4, le apriva). Verificato sulla struttura del file: resa = /ObjStm, Poste = no.
+    // Stesso contenuto, ma leggibile ovunque come le 1.4 di Poste.
+    return Buffer.from(await out.save({ useObjectStreams: false }))
   } catch (e: any) {
     console.error('[RESA-SDA] originale: errore', dati.ldv, e?.message)
     return buffer // qualunque errore → etichetta originale, mai una rotta
@@ -384,7 +389,7 @@ export async function resaSdaPerZebra(buffer: Buffer, dati: DatiEtichettaSda): P
     const out = await PDFDocument.create()
     const emb = await out.embedPages(pagine)
     for (const e of emb) out.addPage([e.height, e.width]).drawPage(e, { x: e.height, y: 0, rotate: degrees(90) })
-    return Buffer.from(await out.save())
+    return Buffer.from(await out.save({ useObjectStreams: false }))  // xref classica 1.4, vedi riscriviEtichettaSdaExpressL
   } catch (e: any) {
     console.error('[RESA-SDA] zebra: originale', dati.ldv, e?.message)
     return buffer

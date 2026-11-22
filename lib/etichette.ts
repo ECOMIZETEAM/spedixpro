@@ -337,7 +337,11 @@ async function leggiEtichettaGrezza(
         const pagine = await out.copyPages(pdf, pdf.getPageIndices())
         pagine.forEach(p => out.addPage(p))
       }
-      return { buffer: Buffer.from(await out.save()), mime: 'application/pdf', ext: 'pdf' }
+      // useObjectStreams:false -> xref CLASSICA (PDF 1.4), come la resa SDA. Senza, l'unione multicollo esce
+      // con object stream (PDF 1.5+) e un visualizzatore vecchio/stretto non la carica: CONTORNO SRL (via API,
+      // 22/11/2026) non apriva le Poste V multicollo (2 colli = 2 pagine unite qui), mentre le mono-collo
+      // (servite com'e', 1.4) si'. Stesse pagine, struttura leggibile ovunque.
+      return { buffer: Buffer.from(await out.save({ useObjectStreams: false })), mime: 'application/pdf', ext: 'pdf' }
     } catch (e: any) {
       console.error('[ETICHETTE] unione colli fallita, ripiego su etichetta unica:', e?.message)
     }
