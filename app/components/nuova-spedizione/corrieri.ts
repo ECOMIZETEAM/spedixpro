@@ -10,6 +10,11 @@ export interface Tariffa {
   limiti_collo?: string; avviso_fuori_sagoma?: string; _corriere_id?: string; _corriere_tipo?: string; _brt_assegno?: boolean
   _spedisci_assegno?: boolean; _poste_assegno?: boolean; _spediamopro_quotation?: any; _deposito?: boolean; _consegna_punto?: string
   _email_obbligatoria?: boolean; _inpost_locker?: boolean; corriere_id?: string
+  // dal fornitore (lib/tariffe-offerte, annotaRegoleServizioSp): il corriere non passa a ritirare, e i modelli che
+  // accetta per i telefoni (InPost: solo cellulare)
+  _senza_ritiro?: boolean; _tel_modelli?: { mittente: string[]; destinatario: string[] }
+  // InPost diretto: il corriere passa da solo all'indirizzo del mittente, il ritiro non si prenota
+  _ritiro_automatico?: boolean
   // come è venduto il listino di chi compra (/api/spedizioni/tariffe, lib/iva-calcolo): null finché il master non sceglie
   _iva?: 'esclusa' | 'inclusa' | 'esente' | null; _aliquota?: number | null
 }
@@ -86,6 +91,28 @@ export function motivoSpento(t: Tariffa, nColli: number, contrassegno: boolean):
   if (!t._inpost_locker) return ''
   if (nColli > 1) return 'Il locker accetta un collo solo'
   if (contrassegno) return 'Il locker non accetta il contrassegno'
+  return ''
+}
+
+// IL CORRIERE NON PASSA A RITIRARE (InPost: il fornitore lo dichiara, `_senza_ritiro`). Il mittente porta il
+// pacco, con l'etichetta, in un punto del corriere. Prima il modulo offriva il ritiro e la richiesta falliva
+// sempre (21 su 21 fino al 23/11/2026): il cliente restava col pacco in mano e un «ritiro NON prenotato».
+export function avvisoSenzaRitiro(t: { _consegna_punto?: string } | null | undefined): string {
+  const dove = t?._consegna_punto === 'inpost' ? 'in un punto InPost (locker o negozio)' : 'in un punto del corriere'
+  return `Con questo corriere non c'è il ritiro: porta il pacco, con l'etichetta, ${dove}.`
+}
+
+// INPOST DIRETTO: IL RITIRO E' AUTOMATICO (`_ritiro_automatico`). La spedizione parte dall'indirizzo del mittente
+// e InPost manda il corriere da solo: 116 pacchi su 127 presi cosi', senza nessuna prenotazione nostra (mediana 2,8
+// giorni). La data non si sceglie: in Italia InPost non ha una chiamata per prenotare il ritiro (solo in Polonia).
+// Prima chi spuntava "ritiro" riceveva "Impossibile recuperare il corriere dalla spedizione". Testo deciso da
+// Lorenzo il 23/11/2026.
+export const AVVISO_RITIRO_AUTOMATICO = "Con InPost il ritiro è automatico: il corriere passa all'indirizzo del mittente, la data la fissa InPost."
+
+// L'avviso sul ritiro della tariffa scelta, se il ritiro non si prenota da qui.
+export function avvisoRitiro(t: { _senza_ritiro?: boolean; _ritiro_automatico?: boolean; _consegna_punto?: string } | null | undefined): string {
+  if (t?._senza_ritiro) return avvisoSenzaRitiro(t)
+  if (t?._ritiro_automatico) return AVVISO_RITIRO_AUTOMATICO
   return ''
 }
 

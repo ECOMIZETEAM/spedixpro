@@ -376,6 +376,15 @@ async function creaRitiro(req: NextRequest, traccia: { tipo?: string; contratto?
     }, { status: 400 })
   }
 
+  // INPOST DIRETTO: il ritiro e' automatico. La spedizione nasce con l'indirizzo del mittente come origine e
+  // InPost manda il corriere da solo (116 pacchi su 127 presi cosi'); in Italia non c'e' una chiamata per
+  // prenotarlo (l'API dei ritiri InPost vale solo in Polonia). Prima si cadeva nel ramo Spedisci qui sotto:
+  // "Impossibile recuperare il corriere dalla spedizione". Stesso testo del modulo di creazione.
+  if (corriere.tipo === 'inpost') {
+    const { AVVISO_RITIRO_AUTOMATICO } = await import('@/app/components/nuova-spedizione/corrieri')
+    return NextResponse.json({ error: AVVISO_RITIRO_AUTOMATICO + ' Non serve prenotarlo.' }, { status: 400 })
+  }
+
   // ══════════════════════════════════════════════════════
   // POSTE Delivery Business (KSync/ParcelPilot): ritiro ON-DEMAND via /pickup/booking (come FedEx).
   // bookingType RIT0001/2/3 dal contratto (settings, default RIT0003). Torna un bookingId.

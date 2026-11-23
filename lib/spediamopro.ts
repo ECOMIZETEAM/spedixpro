@@ -4,7 +4,8 @@
  * Units: weight in grams, dimensions in mm, prices in euro cents
  */
 import { testoIndicaReso } from './spedisci'
-import { telefonoValido } from './dati-negozio'
+import { telefonoValido, telefonoSecondoModelli, modelliSoloCellulare } from './dati-negozio'
+import { messaggioTelefono } from './errore-corriere'
 
 const BASE_URL = 'https://core.spediamopro.com/api/v2'
 
@@ -155,6 +156,95 @@ export function telValidoSp(v: any): boolean { return telefonoValido(v) }
 // corriere. Serve sulle consegne a un PUNTO, dove il codice di ritiro viaggia per email.
 export function emailValidaSp(v: any): boolean { return !!pulisciEmail(v) }
 
+// ── REGOLE DEL SERVIZIO, COME LE DICHIARA IL FORNITORE ───────────────────────────────────────────
+// Il fornitore pubblica servizio per servizio cosa accetta (POST /services/search): se il corriere
+// passa a ritirare (`limits.pickupAllowed`) e la forma di ogni campo (`limits.addressRules.shipment`).
+// Le regole si leggono da li', non si ricopiano qui: se il fornitore le cambia, le seguiamo.
+//
+// GUASTO VERO (23/11/2026): InPost vuole il CELLULARE italiano di mittente e destinatario
+// (`^(?:(\+|00)39)?3\d{8,9}$`), gli altri servizi qualsiasi numero. Da noi il controllo era "6-15 cifre"
+// per tutti: un fisso (0644243215) passava, il fornitore rispondeva "sender.phone: Not a valid value" e il
+// cliente leggeva "telefono non valido, solo cifre" su un numero di sole cifre. 16 creazioni fallite in tre
+// giorni; delle 148 InPost partite, 148 col cellulare. E InPost non prevede il ritiro: le 21 richieste di
+// ritiro su InPost sono fallite tutte, perche' il mittente deve portare il pacco in un punto InPost.
+// `modelli` sono le espressioni del fornitore come testo: cosi' passano anche al modulo di creazione nel
+// browser (dentro la tariffa), che avvisa prima di comprare con la stessa funzione della creazione.
+export type RegolaTelefonoSp = { obbligatorio: boolean; modelli: string[] }
+export type RegoleServizioSp = {
+  ritiro: boolean
+  telefono: { mittente: RegolaTelefonoSp; destinatario: RegolaTelefonoSp }
+}
+
+const REGOLE_TTL_MS = 6 * 3600_000
+const REGOLE_KO_TTL_MS = 5 * 60_000
+const _regole = new Map<string, { scade: number; perServizio: Map<number, RegoleServizioSp> | null }>()
+
+function regolaTelefono(regole: any[], campo: string): RegolaTelefonoSp {
+  const r = (regole || []).find((x: any) => x?.field === campo)
+  const modelli: string[] = []
+  for (const p of r?.patterns || []) {
+    // Solo modelli senza flag (cosi' sono oggi) e leggibili: uno illeggibile non si usa.
+    if (p?.flags) continue
+    try { new RegExp(String(p.source)); modelli.push(String(p.source)) } catch { /* illeggibile */ }
+  }
+  return { obbligatorio: r?.presence === 'required', modelli }
+}
+
+// Le regole di un servizio (id della quotation, es. 18). null = non si sa (fornitore irraggiungibile o
+// servizio non elencato): chi chiama prosegue come prima, e sara' il fornitore a rispondere.
+export async function regoleServizioSp(authcode: string, serviceId: number | string | null | undefined): Promise<RegoleServizioSp | null> {
+  const id = Number(String(serviceId ?? '').split(',')[0])
+  if (!authcode || !Number.isFinite(id) || id <= 0) return null
+  const now = Date.now()
+  let c = _regole.get(authcode)
+  if (!c || c.scade < now) {
+    let perServizio: Map<number, RegoleServizioSp> | null = null
+    try {
+      const token = await getSpediamoproToken(authcode)
+      const res = await fetch(`${BASE_URL}/services/search`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(5000),
+      })
+      const j: any = res.ok ? await res.json() : null
+      if (Array.isArray(j?.data)) {
+        perServizio = new Map()
+        for (const s of j.data) {
+          const regole = s?.limits?.addressRules?.shipment || []
+          const voce: RegoleServizioSp = {
+            // Un servizio col deposito del mittente a un punto non accetta il ritiro (dalla documentazione).
+            ritiro: s?.limits?.pickupAllowed !== false && s?.senderPudo !== true,
+            telefono: { mittente: regolaTelefono(regole, 'sender.phone'), destinatario: regolaTelefono(regole, 'consignee.phone') },
+          }
+          for (const sid of s?.ids || []) perServizio.set(Number(sid), voce)
+        }
+      }
+    } catch (e: any) {
+      console.warn('[SPEDIAMOPRO][regole servizi] non lette:', String(e?.message || e).slice(0, 120))
+    }
+    c = { scade: now + (perServizio ? REGOLE_TTL_MS : REGOLE_KO_TTL_MS), perServizio }
+    _regole.set(authcode, c)
+  }
+  return c.perServizio?.get(id) || null
+}
+
+// Applica le regole del servizio ai due telefoni PRIMA di comprare. Torna i numeri nella forma accettata
+// o solleva col messaggio per l'utente. Senza regole (fornitore non raggiungibile) restano come sono.
+export function telefoniPerServizio(regole: RegoleServizioSp | null, mitt: any, dest: any): { mittente?: string; destinatario?: string } {
+  if (!regole) return { mittente: pulisciTel(mitt), destinatario: pulisciTel(dest) }
+  const uno = (v: any, regola: RegolaTelefonoSp, chi: 'mittente' | 'destinatario') => {
+    if (!pulisciTel(v)) {
+      if (regola.obbligatorio) throw new Error(messaggioTelefono(chi, 'mancante'))
+      return undefined
+    }
+    const ok = telefonoSecondoModelli(v, regola.modelli)
+    if (!ok) throw new Error(messaggioTelefono(chi, modelliSoloCellulare(regola.modelli) ? 'cellulare' : 'formato'))
+    return ok
+  }
+  return { mittente: uno(mitt, regole.telefono.mittente, 'mittente'), destinatario: uno(dest, regole.telefono.destinatario, 'destinatario') }
+}
+
 export interface SpediamoproParcel {
   weight: number
   length: number
@@ -283,9 +373,17 @@ export async function spediamoproCreateShipment(
 }> {
   const token = await getSpediamoproToken(authcode)
 
+  // TELEFONI SECONDO LE REGOLE DEL SERVIZIO, prima dell'acquisto e qui, dove passano tutte le creazioni
+  // (portale, API pubblica, import). Un numero che il servizio non accetta ferma la creazione con un
+  // messaggio che dice quale numero e perche' (es. InPost: serve il cellulare), invece del 422 tecnico.
+  const regole = await regoleServizioSp(authcode, params.quotation.service)
+  const tel = telefoniPerServizio(regole, params.sender?.phone, params.consignee?.phone)
+  const senderTel: SpediamoproAddress = { ...params.sender, phone: tel.mittente }
+  const consigneeTel: SpediamoproAddress = { ...params.consignee, phone: tel.destinatario }
+
   const payloadAccept = JSON.stringify({
       parcels: params.parcels.map(p => ({ type: 0, weight: p.weight, length: p.length, width: p.width, height: p.height })),
-      sender: sanitizzaIndirizzoSp(params.sender, { emailObbligatoria: true }),
+      sender: sanitizzaIndirizzoSp(senderTel, { emailObbligatoria: true }),
       // CONSEGNA A UN PUNTO (Fermopoint BRT / Locker InPost): il codice per ritirare il pacco o aprire
       // l'armadietto lo genera e lo manda il CORRIERE all'email del destinatario, e l'API non lo
       // restituisce. Con l'email schermo il destinatario non lo riceve mai. GUASTO VERO: dal 12/09 il
@@ -293,7 +391,7 @@ export async function spediamoproCreateShipment(
       // schermo; il 14/10 i clienti BRT Fermopoint hanno segnalato che il PIN non arrivava (52 su 52
       // Fermopoint e 54 su 54 Locker partiti con l'email schermo). La regola sta qui, dove passano
       // tutte le creazioni SpediamoPro, non nel chiamante.
-      consignee: sanitizzaIndirizzoSp(params.consignee, { emailObbligatoria: true, emailVera: !!params.deliveryPudo }),
+      consignee: sanitizzaIndirizzoSp(consigneeTel, { emailObbligatoria: true, emailVera: !!params.deliveryPudo }),
       quotation: {
         service: params.quotation.service,
         expectedDeliveryDate: params.quotation.expectedDeliveryDate,

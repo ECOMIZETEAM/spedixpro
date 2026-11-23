@@ -28,6 +28,30 @@ export function telefonoValido(v: unknown): boolean {
   return d.length >= 6 && d.length <= 15
 }
 
+// Il numero nella forma che i MODELLI di un corriere accettano (le espressioni che il corriere pubblica
+// per il campo telefono), o undefined. Nessun modello = basta la soglia qui sopra. Le cifre "pulite"
+// perdono il +: "+39 333 1234567" diventa "393331234567", che un modello col prefisso solo +39/0039
+// rifiuta, percio' si prova anche senza il prefisso italiano. La stessa funzione la usano il modulo di
+// creazione (per avvisare prima) e la creazione (per fermarsi prima di comprare): una regola sola.
+export function telefonoSecondoModelli(v: unknown, modelli: (RegExp | string)[] | null | undefined): string | undefined {
+  const d = String(v ?? '').replace(/[^0-9]/g, '')
+  if (d.length < 6 || d.length > 15) return undefined
+  const re: RegExp[] = []
+  for (const m of modelli || []) { try { re.push(m instanceof RegExp ? m : new RegExp(m)) } catch { /* modello illeggibile */ } }
+  if (!re.length) return d
+  const candidati = [d]
+  const senzaPrefisso = d.match(/^(?:0039|39)(\d{6,})$/)
+  if (senzaPrefisso) candidati.push(senzaPrefisso[1])
+  return candidati.find(c => re.some(m => m.test(c)))
+}
+
+// I modelli chiedono un CELLULARE italiano? Lo si chiede ai modelli stessi: accettano un cellulare e
+// rifiutano un fisso. Serve solo a scrivere il messaggio giusto ("serve il cellulare").
+export function modelliSoloCellulare(modelli: (RegExp | string)[] | null | undefined): boolean {
+  if (!modelli?.length) return false
+  return !!telefonoSecondoModelli('3331234567', modelli) && !telefonoSecondoModelli('0612345678', modelli)
+}
+
 // Si salva come lo leggono i corrieri: il + iniziale (se c'e') e le cifre, nient'altro.
 export function normalizzaTelefono(v: unknown): string {
   const s = String(v ?? '').trim()

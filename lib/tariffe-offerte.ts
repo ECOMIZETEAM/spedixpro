@@ -35,6 +35,9 @@ export async function annotaPuntoPoste(admin: any, risultati: any[]) {
     // La regola sta in lib/punti-consegna: la legge anche l'API pubblica, che spedisce a un punto
     // con gli stessi contratti. Qui si traduce solo nei flag che il form del portale si aspetta.
     const m = modalitaConsegna(c)
+    // InPost diretto (Domicilio e Locker): il ritiro all'indirizzo del mittente e' automatico, non si prenota.
+    // Il form lo dice invece di chiamare /api/ritiri/crea (vedi avvisoRitiro, nuova-spedizione/corrieri).
+    if (c.tipo === 'inpost') r._ritiro_automatico = true
     if (m.inpostLocker) {
       // InPost LOCKER: consegna a un LOCKER/PUDO (non a domicilio). Flag distinto dal PuntoPoste perché
       // usa il SUO selettore (InpostLockerPicker) e la SUA ricerca punti. Il Domicilio InPost (stesso
@@ -55,6 +58,29 @@ export async function annotaPuntoPoste(admin: any, risultati: any[]) {
   // L'assegno e' solo una voce in piu' nella tendina: se non si riesce a capirlo, si resta a contanti.
   // Non deve mai far fallire l'elenco ne' l'anteprima dei prezzi degli import, che non catturano.
   try { await annotaAssegnoPoste(admin, risultati, perId) } catch { /* resta solo contanti */ }
+  // Stessa cosa per ritiro e telefoni: sono avvisi del modulo, la creazione ricontrolla da sola.
+  try { await annotaRegoleServizioSp(risultati, perId) } catch { /* nessun avviso in anticipo */ }
+}
+
+// RITIRO E TELEFONI COME LI VUOLE IL SERVIZIO (regole pubblicate dal fornitore, lib/spediamopro).
+//   _senza_ritiro: il corriere non passa a ritirare, il mittente porta il pacco in un suo punto (InPost).
+//     Il modulo non prenota il ritiro e lo dice; prima lo provava e falliva sempre (21 su 21 su InPost).
+//   _tel_modelli: le espressioni che il corriere accetta per il telefono di mittente e destinatario (InPost:
+//     solo cellulare). Il modulo avvisa prima di comprare, con la funzione che usa la creazione.
+async function annotaRegoleServizioSp(risultati: any[], perId: Map<string, any>) {
+  const sp = risultati.filter(r => perId.get(r._corriere_id)?.tipo === 'spediamopro')
+  if (!sp.length) return
+  const { regoleServizioSp } = await import('@/lib/spediamopro')
+  for (const r of sp) {
+    const cred = perId.get(r._corriere_id)?.credenziali || {}
+    const regole = await regoleServizioSp(cred.authcode, cred.service_id)
+    if (!regole) continue
+    if (!regole.ritiro) r._senza_ritiro = true
+    const { mittente, destinatario } = regole.telefono
+    if (mittente.modelli.length || destinatario.modelli.length) {
+      r._tel_modelli = { mittente: mittente.modelli, destinatario: destinatario.modelli }
+    }
+  }
 }
 
 // ASSEGNO SUI CONTRATTI POSTE (SDA EXPRESS L). La tendina "Modalità di incasso" offre contanti, assegno

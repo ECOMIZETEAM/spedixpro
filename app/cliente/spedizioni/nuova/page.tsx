@@ -9,6 +9,9 @@ import SelettoreArticoli, { type RigaArticolo, type ArticoloCat } from '@/app/co
 import { isExtraUe } from '@/lib/paesi-ue'
 import PuntoPosteSelettore, { type PuntoScelto } from '@/app/components/PuntoPosteSelettore'
 import InpostLockerPicker, { type InpostPuntoScelto } from '@/app/components/InpostLockerPicker'
+import { telefonoSecondoModelli, modelliSoloCellulare } from '@/lib/dati-negozio'
+import { messaggioTelefono } from '@/lib/errore-corriere'
+import { avvisoRitiro } from '@/app/components/nuova-spedizione/corrieri'
 
 // Deposito PuntoPoste preferito (FMP/APT): ricordato per comodità, come i filtri persistenti.
 const depSalvato = (): 'FMP'|'APT'|'' => { try { const v = localStorage.getItem('puntoposte:deposito'); return v === 'FMP' || v === 'APT' ? v : '' } catch { return '' } }
@@ -24,7 +27,7 @@ import { testoIva, type RegimeIva } from '@/lib/iva-calcolo'
 // il TIPO del contratto, cioe' il provider tecnico — stamparlo tale e quale lo mostrerebbe
 // all'utente ('EASYPARCEL'). Ogni provider ha la sua sigla neutra.
 const codiceProv = (t?:string) => t==='spediamopro'?'SP':t==='spedisci'?'SO':t==='easyparcel'?'V':(t||'').toUpperCase()
-interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean; _iva?:RegimeIva|null; _aliquota?:number }
+interface Tariffa { carrierCode:string; contractCode:string; total_price:string; zona:string; peso_fatturato:string; peso_reale:number; peso_volume:string; prezzo_spedizione?:string; weight_price?:string; costo_sponda?:string; costo_fuel?:string; fuel_pct?:number; costo_contrassegno?:string; costo_assicurazione?:string; accessori_disponibili?:{nome:string;prezzo:number;perc:number}[]; limiti_collo?:string; avviso_fuori_sagoma?:string; _corriere_id?:string; _corriere_tipo?:string; _brt_assegno?:boolean; _spedisci_assegno?:boolean; _poste_assegno?:boolean; corriere_nome?:string; _deposito?:boolean; _consegna_punto?:string; _email_obbligatoria?:boolean; _inpost_locker?:boolean; _senza_ritiro?:boolean; _ritiro_automatico?:boolean; _tel_modelli?:{mittente:string[];destinatario:string[]}; _iva?:RegimeIva|null; _aliquota?:number }
 interface Collo { lunghezza:string; larghezza:string; altezza:string; peso?:string }
 
 const inp = {width:'100%',padding:'8px 11px',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff',boxSizing:'border-box' as const}
@@ -201,7 +204,7 @@ function NuovaSpedizioneCliente() {
   const [creating, setCreating] = useState(false)
   const [errore, setErrore] = useState('')
   const [vista, setVista] = useState<'dati'|'contratto'>('dati')
-  const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string,avviso?:string}}|null>(null)
+  const [successo, setSuccesso] = useState<{numero:string,id:string,ritiro?:{ok?:boolean,pickupId?:string,errore?:string,avviso?:string},deposito?:string}|null>(null)
   // SICUREZZA LDV: appena si comincia una NUOVA spedizione (si compila il destinatario) dopo una
   // creazione, si toglie il banner con "Scarica LDV" della spedizione PRECEDENTE, così non si stampa
   // per abitudine la LDV vecchia sul pacco nuovo (due colli con la stessa lettera di vettura). Il form
@@ -395,6 +398,20 @@ function NuovaSpedizioneCliente() {
     // Fermopoint/Locker: il codice di ritiro arriva al destinatario per EMAIL (il server ricontrolla).
     if (selected._email_obbligatoria && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest.email.trim())) { setErrore("Inserisci l'email del destinatario: per la consegna al punto il corriere gli manda lì il codice per ritirare il pacco."); setVista('dati'); return }
     if (selected._inpost_locker && !inpostPunto) { setErrore('Seleziona il locker InPost dove sarà consegnato il pacco.'); return }
+    // Telefoni come li vuole il corriere (InPost: solo cellulare), con la funzione che usa la creazione:
+    // detto qui, il cliente corregge il numero giusto prima di comprare (il server ricontrolla).
+    const tm = selected._tel_modelli
+    if (tm) {
+      for (const [chi, numero, modelli] of [['mittente', mitt.telefono, tm.mittente], ['destinatario', dest.telefono, tm.destinatario]] as const) {
+        if (modelli?.length && !telefonoSecondoModelli(numero, modelli)) {
+          setErrore(messaggioTelefono(chi, modelliSoloCellulare(modelli) ? 'cellulare' : 'formato')); setVista('dati'); return
+        }
+      }
+    }
+    // Il ritiro non si prenota da qui: InPost via fornitore non passa (il pacco si porta in un suo punto),
+    // InPost diretto passa da solo all'indirizzo del mittente.
+    const ritiroDaPrenotare = !selected._senza_ritiro && !selected._ritiro_automatico
+    const ritiroPossibile = !selected._deposito && ritiroDaPrenotare
     setCreating(true); setCreditoKO(null); setErrore('')
     const res = await fetch('/api/spedizioni/crea', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -423,7 +440,7 @@ function NuovaSpedizioneCliente() {
         puntoArrivoCorriereId: puntoArrivo?.corriereId || undefined,
         // Ritiro: sui contratti DVA si prenota SOLO insieme all'ordine (il corriere non ha una
         // chiamata per aggiungerlo dopo), quindi la richiesta va passata gia' qui.
-        richiediRitiro, dataRitiro:ritiroData, orarioRitiro:ritiroOrario
+        richiediRitiro: richiediRitiro && ritiroDaPrenotare, dataRitiro:ritiroData, orarioRitiro:ritiroOrario
       })
     })
     const data = await res.json()
@@ -452,7 +469,8 @@ function NuovaSpedizioneCliente() {
     // Ritiro: mostro l'esito all'utente (niente più silenzio se fallisce).
     // PuntoPoste (contratti a deposito): niente ritiro a domicilio — il pacco si porta al punto. Non
     // chiamo /api/ritiri/crea (lo rifiuterebbe): eviterei solo un falso "ritiro non prenotato".
-    const conRitiro = richiediRitiro && !selected?._deposito
+    // InPost: stessa cosa (_senza_ritiro / _ritiro_automatico); prima la richiesta partiva e falliva sempre.
+    const conRitiro = richiediRitiro && ritiroPossibile
     let ritiroEsito: {ok?:boolean,pickupId?:string,errore?:string,avviso?:string}|undefined
     if (conRitiro && data.spedizioneId) {
       try {
@@ -482,7 +500,7 @@ function NuovaSpedizioneCliente() {
     // Il numero provvisorio non si mostra: e' un riferimento interno che il corriere non conosce,
     // e vederlo comparire per poi cambiare da solo sembra un errore. Meglio dire com'e': sta
     // arrivando. Appena c'e' quello vero il messaggio si completa.
-    setSuccesso({numero: data.provvisorio ? '' : (data.numero||'—'), id:data.spedizioneId||'', ritiro: ritiroEsito})
+    setSuccesso({numero: data.provvisorio ? '' : (data.numero||'—'), id:data.spedizioneId||'', ritiro: ritiroEsito, deposito: avvisoRitiro(selected) || undefined})
     // Alcuni corrieri preparano la lettera di vettura qualche secondo dopo aver accettato l'ordine.
     // Finché non c'è, la spedizione porta un numero provvisorio: mostrarlo qui vorrebbe dire dare
     // all'utente un numero che il corriere non conosce. Quindi lo si richiede finché non arriva
@@ -535,6 +553,7 @@ function NuovaSpedizioneCliente() {
       {successo?.ritiro && (successo.ritiro.ok
         ? <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#166534'}}>📦 Ritiro prenotato{successo.ritiro.pickupId?<> — <strong>{successo.ritiro.pickupId}</strong></>:''}{successo.ritiro.avviso?<div style={{marginTop:'4px',color:'#92400e'}}>{successo.ritiro.avviso}</div>:null}</div>
         : <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#b91c1c'}}>⚠️ Spedizione creata, ma <strong>ritiro NON prenotato</strong>: {successo.ritiro.errore}</div>)}
+      {successo?.deposito && <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'10px 16px',marginBottom:'16px',fontSize:'13px',color:'#9a3412'}}>📦 {successo.deposito}</div>}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',alignItems:'start'}}>
 
@@ -960,6 +979,11 @@ function NuovaSpedizioneCliente() {
 
             {selected && (
               <div style={{marginTop:'8px',borderTop:'1px solid #eee',paddingTop:'14px'}}>
+                {avvisoRitiro(selected) && (
+                  <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'6px',padding:'8px 12px',marginBottom:'12px',fontSize:'12.5px',color:'#9a3412'}}>
+                    📦 {avvisoRitiro(selected)}{richiediRitiro ? (selected._ritiro_automatico ? ' Non serve prenotarlo.' : ' Il ritiro che hai chiesto non verrà prenotato.') : ''}
+                  </div>
+                )}
                 {(selected._deposito || selected._consegna_punto) && selected._corriere_id && (
                   <div style={{display:'flex',flexDirection:'column',gap:'10px',marginBottom:'14px'}}>
                     {selected._deposito && (

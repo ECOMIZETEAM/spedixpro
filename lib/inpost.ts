@@ -180,26 +180,73 @@ export async function etichettaInpost(c: InpostCred, trackingNumber: string, for
 }
 
 // ── STATI (tracking events) ──────────────────────────────────────────────────
-// La Tracking API torna `eventCode` (prefissi: CRE creazione, FMD primo miglio, MMD mid-mile, LMD ultimo
-// miglio, HAN handover, FUL magazzino, INF informativo, EOL fine vita, RTS reso, CC dogana). Si mappa sul
-// PREFISSO + i codici terminali noti (EOL.1xxx=consegnata, EOL.9xxx=terminale negativo, RTS=reso). Il campo
-// `status` testuale è spesso null → si usa l'eventCode. NB: da affinare col catalogo completo (~114 codici).
-export function mapStatoInpost(eventCode: string, statusTesto?: string): string | null {
-  const e = String(eventCode || '').toUpperCase().trim()
-  const s = String(statusTesto || '').toLowerCase()
-  if (!e && !s) return null
-  if (e.startsWith('RTS') || /return.*sender|reso/.test(s)) return 'reso_mittente'
-  if (/^EOL\.1\d/.test(e) || (s.includes('deliver') && !s.includes('out for'))) return 'consegnata'
-  if (/^EOL\.900?4/.test(e) || s.includes('cancel')) return 'annullata'
-  if (e.startsWith('EOL.9') || /lost|damaged|destroyed|prohibited|rejected|undeliver/.test(s)) return 'non_consegnato'
-  if (/^LMD\.9/.test(e)) return 'non_consegnato'                                  // fallback ultimo miglio
-  if (e.startsWith('LMD') || /ready_to_pickup|out_for_delivery|in consegna/.test(s)) return 'in_consegna'
-  if (e.startsWith('MMD') || e.startsWith('HAN') || e.startsWith('CC')) return 'in_transito'
-  if (e.startsWith('FMD')) return 'spedita'
-  if (e.startsWith('CRE')) return 'in_lavorazione'
-  return null   // FUL/INF e ignoti: nessun cambio stato
+// Si legge l'`eventCode` (il campo `status` testuale arriva sempre vuoto). La mappa segue il catalogo
+// ufficiale di InPost, 108 codici (developers.inpost-group.com/tracking-events, letto il 23/11/2026), codice
+// per codice: il prefisso da solo non basta.
+//
+// GUASTO VERO (23/11/2026). La vecchia mappa andava per prefisso e leggeva ogni LMD come "in consegna".
+// Ma LMD.3014 vuol dire "il destinatario ha chiesto il locker", e InPost lo emette anche subito dopo la
+// creazione: 870023025621049560607425 (2/10) ha solo CRE.1001 e LMD.3014, InPost non l'ha mai ritirato, e da
+// noi era "In consegna" da sette settimane (come altri due Locker e un Domicilio fermo a "Spedita" per FMD).
+// E i promemoria del locker (LMD.9001, "il pacco ti aspetta") diventavano "Non consegnato" mentre il pacco
+// era li' da ritirare. Il ciclo del tracking fa solo avanzare lo stato: un evento letto troppo avanti non
+// torna indietro da solo, percio' un codice che non dice dove sta il pacco qui torna null.
+const STATO_INPOST: Record<string, string | null> = {
+  // primo miglio: solo il ritiro vero fa partire il pacco
+  'FMD.1002': 'spedita',
+  // centri di smistamento, passaggi di mano, dogana
+  'MMD.1001': 'in_transito', 'MMD.1002': 'in_transito', 'MMD.1003': 'in_transito', 'MMD.1004': 'in_transito',
+  'MMD.1006': 'in_transito', 'MMD.1008': 'in_transito', 'HAN.1001': 'in_transito', 'HAN.1002': 'in_transito',
+  'CC.001': 'in_transito', 'CC.002': 'in_transito', 'CC.003': 'in_transito',
+  // ultimo miglio: in giro per la consegna o arrivato al punto, che aspetta il destinatario
+  'LMD.1001': 'in_consegna', 'LMD.1002': 'in_consegna', 'LMD.1009': 'in_consegna',
+  'LMD.1003': 'in_consegna', 'LMD.1004': 'in_consegna', 'LMD.1005': 'in_consegna', 'LMD.1010': 'in_consegna',
+  'LMD.3004': 'in_consegna', 'LMD.3007': 'in_consegna', 'LMD.9012': 'in_consegna', 'LMD.9013': 'in_consegna',
+  'LMD.9001': 'in_consegna', 'LMD.9032': 'in_consegna', 'LMD.9033': 'in_consegna', 'LMD.9035': 'in_consegna',
+  // consegna non riuscita o non ritirato in tempo (il reso, se parte, arriva coi codici RTS)
+  'LMD.9002': 'non_consegnato', 'LMD.3009': 'non_consegnato', 'LMD.9003': 'non_consegnato',
+  'LMD.9004': 'non_consegnato', 'LMD.9005': 'non_consegnato', 'LMD.9006': 'non_consegnato',
+  'LMD.9007': 'non_consegnato', 'LMD.9008': 'non_consegnato', 'LMD.9009': 'non_consegnato',
+  'LMD.9010': 'non_consegnato', 'LMD.9014': 'non_consegnato', 'LMD.9015': 'non_consegnato',
+  'LMD.9016': 'non_consegnato', 'LMD.9017': 'non_consegnato', 'LMD.9018': 'non_consegnato',
+  'LMD.9019': 'non_consegnato', 'LMD.9027': 'non_consegnato', 'LMD.9028': 'non_consegnato',
+  'LMD.9030': 'non_consegnato',
+  // esito finale. EOL.1009 e' un passaggio a un altro vettore, non una consegna.
+  'EOL.1001': 'consegnata', 'EOL.1002': 'consegnata', 'EOL.1003': 'consegnata', 'EOL.1004': 'consegnata',
+  'EOL.1005': 'consegnata', 'EOL.1006': 'consegnata', 'EOL.1007': 'consegnata', 'EOL.1008': 'consegnata',
+  'EOL.9001': 'non_consegnato', 'EOL.9002': 'non_consegnato', 'EOL.9003': 'non_consegnato', 'EOL.9004': 'annullata',
+  'RTS.1001': 'reso_mittente', 'RTS.1002': 'reso_mittente',
+  // tutto il resto (CRE, FMD.1001 "da ritirare", i dirottamenti LMD.30xx, INF, FUL, EOL.1009, i codici
+  // operativi dei punti) non sposta lo stato
+}
+export function mapStatoInpost(eventCode: string): string | null {
+  return STATO_INPOST[String(eventCode || '').toUpperCase().trim()] ?? null
 }
 
+// Le descrizioni in italiano dei codici che InPost usa in Italia (nomi del catalogo ufficiale). Gli altri
+// ripiegano sul prefisso.
+const DESCR_INPOST: Record<string, string> = {
+  'CRE.1001': 'Spedizione registrata',
+  'FMD.1001': 'In attesa del ritiro del corriere', 'FMD.1002': 'Ritirata dal corriere',
+  'MMD.1001': 'Arrivata al centro di smistamento', 'MMD.1002': 'Lavorata al centro di smistamento',
+  'MMD.1003': 'Partita dal centro di smistamento', 'MMD.1004': 'In viaggio',
+  'LMD.1001': 'In consegna', 'LMD.1002': 'Arrivata a destinazione', 'LMD.1003': 'Pronta per il ritiro',
+  'LMD.1004': 'Pronta per il ritiro al punto InPost', 'LMD.1005': 'Pronta per il ritiro nel locker',
+  'LMD.3001': 'Assegnato un altro punto di ritiro', 'LMD.3006': 'Consegna spostata a un nuovo indirizzo o punto',
+  'LMD.3013': 'Il destinatario ha scelto il ritiro in un punto InPost', 'LMD.3014': 'Il destinatario ha scelto il ritiro in un locker',
+  'LMD.9001': 'Promemoria: pacco in attesa di ritiro', 'LMD.9002': 'Tempo per il ritiro scaduto',
+  'LMD.9004': 'Tentativo di consegna non riuscito', 'LMD.9005': 'Non consegnabile',
+  'LMD.9006': 'Rifiutata dal destinatario', 'LMD.9007': 'Dati di consegna errati', 'LMD.9008': 'Destinatario sconosciuto',
+  'LMD.9012': 'Pronta per il ritiro in un locker temporaneo', 'LMD.9013': 'Pronta per il ritiro al punto dopo il tentativo di consegna',
+  'LMD.9014': 'Non ritirata: avviato il ritorno al mittente',
+  'LMD.9015': 'Tentativo non riuscito: indirizzo errato', 'LMD.9016': 'Tentativo non riuscito: luogo non accessibile',
+  'LMD.9017': 'Tentativo non riuscito: nessuno ha risposto',
+  'INF.9001': 'Possibile ritardo nella consegna',
+  'EOL.1001': 'Consegnata', 'EOL.1002': 'Ritirata dal destinatario', 'EOL.1003': 'Consegnata in luogo sicuro',
+  'EOL.1004': 'Consegnata a un vicino', 'EOL.1005': 'Consegnata con verifica del destinatario',
+  'EOL.9001': 'Smarrita', 'EOL.9002': 'Danneggiata', 'EOL.9003': 'Distrutta', 'EOL.9004': 'Annullata',
+  'RTS.1001': 'In ritorno al mittente', 'RTS.1002': 'Tornata al mittente',
+}
 const DESCR_PREFIX: Record<string, string> = {
   CRE: 'Spedizione registrata', FMD: 'Ritiro / primo miglio', MMD: 'In transito', HAN: 'Presa in carico',
   LMD: 'Consegna', FUL: 'In magazzino', INF: 'Aggiornamento', EOL: 'Esito finale', RTS: 'Reso al mittente', CC: 'Dogana',
@@ -215,10 +262,10 @@ export async function trackingInpost(c: InpostCred, trackingNumber: string): Pro
   const eventi: { data: string; descrizione: string; luogo: string }[] = []
   for (const ev of eventiRaw) {
     const code = String(ev?.eventCode || '')
-    const st = mapStatoInpost(code, ev?.status)
+    const st = mapStatoInpost(code)
     if (st) stati.push(st)
     const quando = String(ev?.eventTimestamp || '').trim()   // ISO con fuso → istanteDaTesto lo gestisce
-    const descr = String(ev?.status || DESCR_PREFIX[code.split('.')[0]] || code || '').trim()
+    const descr = String(DESCR_INPOST[code.toUpperCase()] || ev?.status || DESCR_PREFIX[code.split('.')[0]] || code || '').trim()
     const luogo = String(ev?.location?.name || ev?.location?.city || '').trim()
     if (quando && descr) eventi.push({ data: quando, descrizione: descr, luogo })
   }

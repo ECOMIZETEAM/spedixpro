@@ -12,7 +12,7 @@ import { isoGiorno, primoGiornoDiRitiro } from '@/lib/festivi'
 import Calendario from './Calendario'
 import Tendina from './Tendina'
 import PagaConCarta from '@/app/cliente/PagaConCarta'
-import { type Tariffa, chiaveTariffa, codiceProv, iconaCorriere, tesseraCorriere, perchePeso, opzioniIncasso, motivoSpento, euro, kg } from './corrieri'
+import { type Tariffa, chiaveTariffa, codiceProv, iconaCorriere, tesseraCorriere, perchePeso, opzioniIncasso, motivoSpento, avvisoRitiro, euro, kg } from './corrieri'
 import './nuova-spedizione.css'
 import { testoIva } from '@/lib/iva-calcolo'
 
@@ -577,9 +577,12 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
               </div>
             ))}
 
-            {/* Il ritiro: col contratto «a deposito» (PuntoPoste) il pacco si porta al punto, e il ritiro non c'è. */}
+            {/* Il ritiro: col contratto «a deposito» (PuntoPoste) il pacco si porta al punto, e il ritiro non c'è.
+                Lo stesso con InPost: via fornitore non passa a ritirare (_senza_ritiro), diretto passa da solo (_ritiro_automatico). */}
             {selMostrata?._deposito ? (
               <p className="ns-nota">Con questo contratto il pacco si porta in un Punto Poste o in un Ufficio Postale: il ritiro non serve.</p>
+            ) : avvisoRitiro(selMostrata) ? (
+              <p className="ns-nota">{avvisoRitiro(selMostrata)}</p>
             ) : (
               <div className="ns-gruppo">
                 <label className="ns-spunta">
@@ -852,7 +855,7 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
             <div className="ns-rotta">
               <span className="ns-rotta__da" aria-hidden="true" />
               <div><small>Da</small><b>{mitt.nome || '—'}</b><span>{mitt.citta ? `${mitt.citta}${mitt.provincia ? ` (${mitt.provincia})` : ''}` : ''}</span>
-                {richiediRitiro && !selMostrata?._deposito && <span>Ritiro {new Date(ritiroData + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })} · {ritiroOrario}</span>}</div>
+                {richiediRitiro && !selMostrata?._deposito && !avvisoRitiro(selMostrata) && <span>Ritiro {new Date(ritiroData + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })} · {ritiroOrario}</span>}</div>
               <span className="ns-rotta__a" aria-hidden="true" />
               <div><small>{consegnaA === 'punto' ? 'A (ritiro in un punto)' : 'A'}</small><b>{dest.nome || '—'}</b>
                 <span>{consegnaA === 'punto' ? (dest.cap ? `CAP ${dest.cap}` : '') : [dest.citta, !estero && dest.provincia ? `(${dest.provincia})` : '', estero ? dest.paese : ''].filter(Boolean).join(' ')}</span></div>

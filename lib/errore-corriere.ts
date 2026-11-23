@@ -18,6 +18,15 @@ export const MSG_TENTATIVO_IN_ANNULLO = 'Il tentativo precedente di questo ordin
 export const MSG_PONTE_NON_REGISTRATA = 'Spedizione non creata per un errore temporaneo: il credito è stato restituito. Riprova.'
 const MSG_PONTE = [MSG_PONTE_NON_CONCLUSO, MSG_TENTATIVO_IN_ANNULLO, MSG_PONTE_NON_REGISTRATA]
 
+// TELEFONO CHE IL CORRIERE NON ACCETTA: dice QUALE dei due numeri e PERCHE'. Lo usa la creazione
+// (lib/spediamopro, regole del servizio) e lo riconosce erroreCorrierePulito, che lo restituisce identico
+// ai salti di condivisione. Sta qui perche' questo modulo non importa nulla.
+export function messaggioTelefono(chi: 'mittente' | 'destinatario', motivo: 'mancante' | 'cellulare' | 'formato'): string {
+  if (motivo === 'mancante') return `Telefono del ${chi} mancante: il corriere lo richiede. Inseriscilo e riprova.`
+  if (motivo === 'cellulare') return `Telefono del ${chi} non accettato: per questo corriere serve un numero di cellulare italiano (es. 333 1234567), i numeri fissi non sono ammessi. Correggilo e riprova.`
+  return `Telefono del ${chi} non accettato dal corriere: controlla il numero (solo cifre, col prefisso se estero) e riprova.`
+}
+
 // SVINCOLO GIACENZA: l'errore del corriere arrivava all'utente come JSON grezzo
 // ('release : {"processId":"<jmkc…>","error":{"id":"err_…","status":500,…}}') — illeggibile e
 // inutile. Qui si estrae la causa e la si traduce in un'indicazione operativa.
@@ -204,6 +213,18 @@ export function erroreCorrierePulito(raw: any): string {
   const nostro = MSG_PONTE.find(m => String(raw || '').includes(m))
   if (nostro) return nostro
   const t = String(raw || '').toLowerCase()
+  // TELEFONO: QUALE dei due e PERCHE'. La regola generica piu' sotto diceva "mittente o destinatario ...
+  // solo cifre" anche su un numero di sole cifre: il 23/11/2026 i clienti InPost con un fisso (InPost vuole
+  // il cellulare) correggevano il numero sbagliato o riprovavano identico. Va prima della regola dei punti,
+  // che leggerebbe "locker" come punto sbagliato. Riconosce l'errore grezzo del fornitore
+  // ("sender.phone: Not a valid value") e il messaggio gia' tradotto, che esce identico.
+  const telChi = /sender\.phone|telefono del mittente/.test(t) ? 'mittente' as const
+    : /consignee\.phone|telefono del destinatario/.test(t) ? 'destinatario' as const : null
+  if (telChi) {
+    if (/must be of type string|mancante|required/.test(t)) return messaggioTelefono(telChi, 'mancante')
+    if (/cellulare/.test(t)) return messaggioTelefono(telChi, 'cellulare')
+    return messaggioTelefono(telChi, 'formato')
+  }
   // CAMPO TROPPO LUNGO. GLS Europa: "Indirizzo maggiore di 40 caratteri" (e il nostro controllo prima di
   // chiamarlo, lib/gls erroreParcelGls). Senza questa regola diventava "Indirizzo non valido: controlla
   // nome, indirizzo, citta', provincia e CAP", che manda a cercare l'errore dove non c'e': il 18/11/2026
