@@ -30,6 +30,24 @@ export async function masterIdsVisibili(adminDb: any, masterId: string): Promise
   return sottoAlberoMasterIds(adminDb, masterId)
 }
 
+// LA PIATTAFORMA DI UN MASTER: si risale la catena dei padri fino a chi non ne ha.
+//
+// Non "il primo master senza padre": anche i master demo sono radici, e quale esca per primo lo decide
+// l'ordine fisico delle righe, che cambia a ogni aggiornamento. Il 18/11/2026 il canone di MOVENGO
+// (139 €, pagato con carta) e' finito attribuito a "Demo — castellanomassimo@hotmail.it" e mancava
+// dagli incassi di MoovExpress; e la catena delle spedizioni (lib/cascata.ts) non riconosceva piu'
+// MULTIEXPRESS come attaccata alla piattaforma.
+export async function radiceDi(adminDb: any, masterId: string | null | undefined): Promise<string | null> {
+  let cur: string | null = masterId || null
+  for (let i = 0; i < 20 && cur; i++) {
+    const { data } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
+    if (!data) return null
+    if (!data.parent_master_id) return cur
+    cur = data.parent_master_id
+  }
+  return null
+}
+
 // Sotto-albero di un master: [masterId, figli, nipoti, ...] (id). Serve per filtrare
 // TUTTE le spedizioni che passano sotto quel master.
 // UNA sola query: la tabella masters è piccola (decine di righe); prima si faceva una query PER

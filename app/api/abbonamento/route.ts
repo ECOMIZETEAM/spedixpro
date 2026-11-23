@@ -327,14 +327,8 @@ export async function POST(req: NextRequest) {
     .select('nome,abbonamento_piano,abbonamento_prezzo,abbonamento_mese,abbonamento_esente,stripe_subscription_id,stripe_stato,piani_visibili').eq('id', payer).single()
 
   // Trova il SUPERROOT (M1): risalgo la catena fino al master senza padre.
-  let rootId = payer
-  { let cur: string | null = payer
-    for (let i = 0; i < 20 && cur; i++) {
-      const { data: mm } = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-      if (!mm?.parent_master_id) { rootId = cur; break }
-      cur = mm.parent_master_id
-    }
-  }
+  const { radiceDi } = await import('@/lib/rete-masters')
+  const rootId = (await radiceDi(admin, payer)) || payer
   const isRoot = rootId === payer  // il master principale è la piattaforma: esente
 
   // PIANO NASCOSTO (riservato): non ci si assegna da soli un piano fuori listino indovinandone l'id.

@@ -467,7 +467,7 @@ export default function AbbonamentoPage() {
           <div style={{...card, borderColor: nCongelati>0 ? '#fecaca' : '#e8e8e8'}}>
             <div style={{fontSize:'12px',color:'#777'}}>Congelati</div>
             <div style={{fontSize:'22px',fontWeight:800,color:nCongelati>0?'#b91c1c':'#16a34a'}}>{nCongelati}</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>rete ferma finché non pagano</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>portale chiuso finché non pagano · la loro rete spedisce</div>
           </div>
           <div style={{...card, cursor:'pointer', borderColor: filtro==='senza_piano'?'#c7d2fe':'#e8e8e8'}} onClick={()=>setFiltro('senza_piano')}>
             <div style={{fontSize:'12px',color:'#777'}}>Senza piano</div>

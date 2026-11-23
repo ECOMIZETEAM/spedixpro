@@ -3,6 +3,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { stripeConfigurato, stripeClient, pianoDaPrezzo, pianoApiDaPrezzo, primoAllineamentoCiclo } from '@/lib/stripe'
 import { pianoById, meseCorrente } from '@/lib/piani'
 import { COSTO_SMS_EUR } from '@/lib/sms'
+import { radiceDi } from '@/lib/rete-masters'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,11 +50,9 @@ export async function POST(req: NextRequest) {
     return data || null
   }
 
-  // Il master principale della rete: e' lui che incassa i canoni di tutti.
-  async function rootId(): Promise<string | null> {
-    const { data } = await admin.from('masters').select('id').is('parent_master_id', null).limit(1)
-    return data?.[0]?.id || null
-  }
+  // Il master principale della rete di chi paga: e' lui che incassa il canone. Si risale la catena
+  // di quel master (lib/rete-masters.ts): "il primo master senza padre" poteva essere un demo.
+  const rootId = (masterId: string) => radiceDi(admin, masterId)
 
   // ── I PACCHETTI API DEI CLIENTI ───────────────────────────────────────────
   // Passano dallo stesso circuito e quindi dalla stessa porta, ma sono un'altra cosa dai canoni
@@ -246,7 +245,7 @@ export async function POST(req: NextRequest) {
             }).eq('id', m.id)
             try {
               await admin.from('abbonamenti_pagamenti').upsert({
-                master_id: m.id, root_id: await rootId(), piano: pUna.id, mese,
+                master_id: m.id, root_id: await rootId(m.id), piano: pUna.id, mese,
                 importo: pUna.prezzo, pagato: true, pagato_il: new Date().toISOString(),
                 metodo: 'carta', stripe_invoice_id: String(o?.payment_intent || o?.id),
               }, { onConflict: 'stripe_invoice_id' })
@@ -291,7 +290,7 @@ export async function POST(req: NextRequest) {
             inv.id, typeof inv.customer === 'string' ? inv.customer : inv.customer?.id, Number(inv.amount_paid ?? 0) / 100)
           break
         }
-        const root = await rootId()
+        const root = await rootId(m.id)
         // Da quale piano viene questo incasso. Il punto in cui il circuito espone il prezzo della
         // riga e' cambiato fra le versioni della sua interfaccia: si provano le forme note e, se
         // nessuna risponde, si va a leggerlo direttamente sull'abbonamento — che e' la fonte sicura.

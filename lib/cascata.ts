@@ -4,6 +4,7 @@ import { ricordaNellaRichiesta, chiaveDi } from '@/lib/memo-richiesta'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome, detentoreContratto } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
+import { radiceDi } from '@/lib/rete-masters'
 
 export type LivelloCatena = {
   masterId: string
@@ -157,8 +158,9 @@ async function costruisciCatenaGrezza(
   // lo paga il proprietario del contratto; i livelli sotto pagano il loro prezzo di rivendita.
   // Il vertice della catena: chi sta attaccato alla piattaforma non ha un master a cui deve, quindi
   // per lui i due conti non esistono e resta tutto su quello unico.
-  const { data: radice }: any = await adminDb.from('masters').select('id').is('parent_master_id', null).limit(1).maybeSingle()
-  const radiceId: string | null = radice?.id || null
+  // La piattaforma e' la radice DI QUESTA catena, non "il primo master senza padre": anche i demo sono
+  // radici, e dal 18/11/2026 quella lettura restituiva un demo (lib/rete-masters.ts, radiceDi).
+  const radiceId: string | null = await radiceDi(adminDb, params.masterDirettoId)
 
   // IL DETENTORE SI DICHIARA (copia marcata `proprio`), altrimenti è il più in alto che ha lo stesso
   // contratto. La regola sta in lib/contratto-per-nome.ts: la usa anche l'anticipo dei contrassegni.
