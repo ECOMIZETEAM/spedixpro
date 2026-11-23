@@ -52,6 +52,41 @@ export async function chiudiDistintaMoovexpress(supabase: any, distintaId: strin
 // la loro API non ha una chiusura di giornata.
 export const TIPI_SENZA_MANIFEST = ['easyparcel', 'interno', 'inpost', 'poste', 'dielle', 'ecosmos']
 
+// Stati in cui una spedizione NON va affidata al corriere: annullata, o in coda di annullo (per Dielle
+// l'annullo lo fa a mano il detentore: confermarla nel frattempo la farebbe partire).
+const STATI_NON_DA_AFFIDARE = ['annullata', 'annullamento_pending', 'annullamento_manuale']
+
+// Le credenziali Dielle del contratto. Oggi le copie dei sotto-master le hanno copiate; se una copia non
+// le ha (le chiavi restano del detentore) si risale la catena dei fornitori fino a chi le ha.
+async function credenzialiDielle(admin: any, corriereId: string): Promise<any | null> {
+  let id: string | null = corriereId
+  for (let giro = 0; id && giro < 10; giro++) {
+    const { data: c }: { data: any } = await admin.from('corrieri').select('id, credenziali, fornitore_corriere_id').eq('id', id).maybeSingle()
+    if (!c) return null
+    const cr = c.credenziali || {}
+    if (cr.username && cr.password) return { username: String(cr.username), password: String(cr.password), ambiente: cr.ambiente === 'staging' ? 'staging' : 'prod' }
+    id = c.fornitore_corriere_id || null
+  }
+  return null
+}
+
+// DIELLE: è l'unico dei "senza manifest" che una trasmissione ce l'ha. Le spedizioni create via API
+// restano NUOVA sul fornitore e non partono finché non si confermano (lib/dielle, confermaSpedizioniDielle).
+// Si fa qui, alla chiusura della distinta, così vale per tutte le porte: portale master e cliente, giro
+// serale, conferma e ritentativo, API pubblica.
+async function confermaGruppoDielle(admin: any, corriereId: string, spedizioni: any[]): Promise<{ ok: boolean; errore?: string }> {
+  const ldv = spedizioni
+    .filter((s: any) => !STATI_NON_DA_AFFIDARE.includes(String(s.stato || '')))
+    .map((s: any) => String(s.raw_response?.ldv || s.tracking_number || s.numero || '').trim())
+    .filter(Boolean)
+  if (!ldv.length) return { ok: true }
+  const cred = await credenzialiDielle(admin, corriereId)
+  if (!cred) return { ok: false, errore: 'contratto senza credenziali: conferma al corriere non inviata' }
+  const { confermaSpedizioniDielle } = await import('@/lib/dielle')
+  const r = await confermaSpedizioniDielle(cred, ldv)
+  return r.ok ? { ok: true } : { ok: false, errore: 'conferma al corriere: ' + (r.errore || 'non riuscita') }
+}
+
 export async function chiudiDistintaSenzaManifest(supabase: any, distintaId: string) {
   try {
     const { data: distinta } = await supabase
@@ -59,9 +94,22 @@ export async function chiudiDistintaSenzaManifest(supabase: any, distintaId: str
     if (!distinta || !distinta.corriere_id) return { skip: true }
     if (distinta.bordero_id && !String(distinta.bordero_id).startsWith('ERRORE')) return { skip: true }
     const { createAdminSupabase } = await import('@/lib/supabase-admin')
-    const { data: corriere } = await createAdminSupabase()
+    const admin = createAdminSupabase()
+    const { data: corriere } = await admin
       .from('corrieri').select('id, tipo').eq('id', distinta.corriere_id).maybeSingle()
     if (!corriere || !TIPI_SENZA_MANIFEST.includes(corriere.tipo)) return { skip: true }
+    if (corriere.tipo === 'dielle') {
+      const { data: speds } = await admin
+        .from('spedizioni').select('id, numero, tracking_number, raw_response, stato').eq('distinta_id', distintaId)
+      const r = await confermaGruppoDielle(admin, corriere.id, speds || [])
+      if (!r.ok) {
+        // La distinta resta da ritentare (le guardie lasciano ripassare gli ERRORE) e il problema si vede:
+        // attestarla come le altre vorrebbe dire pacchi mai affidati con la distinta in verde.
+        console.error('[DISTINTE][DIELLE] conferma non riuscita', distintaId, r.errore)
+        await supabase.from('distinte').update({ bordero_id: 'ERRORE: ' + String(r.errore).slice(0, 200) }).eq('id', distintaId)
+        return { errore: r.errore }
+      }
+    }
     await supabase.from('distinte').update({
       bordero_id: 'N/A', confermata_vettore: true, data_conferma: new Date().toISOString(),
     }).eq('id', distintaId)
@@ -125,6 +173,10 @@ export async function chiudiDistintaMista(supabase: any, distintaId: string) {
           .map((r: any) => ({ numericRef: Number(r.numericRef), alphaRef: r.alphaRef || null }))
         const r = await confermaSpedizioniBrt(cred, refs)
         if (!r.ok) errori.push('BRT: ' + (r.errore || 'conferma non riuscita'))
+      } else if (corr.tipo === 'dielle') {
+        // Dielle va confermato anche dentro una mista: senza conferma le spedizioni restano NUOVA e non partono.
+        const r = await confermaGruppoDielle(admin, cid, gruppo)
+        if (!r.ok) errori.push(r.errore || 'conferma al corriere non riuscita')
       } else if (corr.tipo === 'fedex') {
         // FedEx auto-conferma alla creazione e il ritiro è programmato a parte sul conto: nessuna
         // trasmissione da fare qui, il gruppo è già "chiuso" lato corriere (come SDA).

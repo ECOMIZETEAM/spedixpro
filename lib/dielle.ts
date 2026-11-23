@@ -251,6 +251,53 @@ export async function etichettaDielle(c: DielleCred, ldv: string, formato: 'pdf'
   return { contentType: 'application/pdf', bytes }
 }
 
+// Giorno di ROMA in yyyyMMdd. Il server gira in UTC: una chiusura fatta a mano fra mezzanotte e l'una
+// italiana cadrebbe sul giorno prima.
+export function giornoRomaYmd(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(d).replace(/-/g, '')
+}
+
+// CONFERMA = affido al vettore. Una spedizione creata via API nasce "NUOVA" sul fornitore e NON parte
+// finché qualcuno non la conferma (è il "Conferma ed invio spedizioni al vettore" del loro portale). Fino
+// al 23/11/2026 non lo faceva nessuno: il primo giorno di PDB L, alle 13, 46 spedizioni su 47 erano
+// ancora NUOVA. Si conferma alla CHIUSURA DELLA DISTINTA (decisione di Lorenzo, 23/11), come un manifesto:
+// la chiama lib/distinte-chiusura, dove passano tutte le porte che chiudono una distinta.
+// Provato sullo staging il 23/11: risposta "OK" e lo stato diventa CONFERMATA; riconfermare la stessa LDV
+// risponde ancora "OK" (si può ritentare senza danni); se nell'elenco c'è una LDV che il fornitore non
+// conosce risponde errore 149 ("le seguenti Ldv non sono state trovate"), MA conferma comunque le altre.
+// L'elenco fra parentesi di quel messaggio NON è affidabile (lo staging rispondeva sempre la stessa LDV,
+// qualunque numero si mandasse): non lo leggiamo, il messaggio va com'è a chi deve guardare.
+export async function confermaSpedizioniDielle(
+  c: DielleCred, ldv: string[], dataManifest: string = giornoRomaYmd(),
+): Promise<{ ok: boolean; errore?: string }> {
+  const elenco = Array.from(new Set(ldv.map(x => String(x || '').trim()).filter(Boolean)))
+  const scarti: string[] = []
+  // A blocchi: la guida non dice un massimo per chiamata, e una distinta serale può averne centinaia.
+  for (let i = 0; i < elenco.length; i += 100) {
+    const blocco = elenco.slice(i, i + 100)
+    const { ok, status, j } = await chiama(c, 'confirmSped', { ldv: blocco, dataManifest, tipoGestione: 'CT' })
+    if (!ok) return { ok: false, errore: j?.errorMessage || `conferma non riuscita (HTTP ${status})` }
+    // 149: le altre del blocco sono confermate, si va avanti coi blocchi successivi e lo si dice in fondo.
+    if (String(j?.errorCode || '') === '149') { scarti.push(String(j?.errorMessage || 'spedizioni non trovate dal corriere')); continue }
+    if (j?.errorCode) return { ok: false, errore: j?.errorMessage || `conferma non riuscita (codice ${j.errorCode})` }
+  }
+  return scarti.length ? { ok: false, errore: 'alcune spedizioni non risultano al corriere (le altre sono confermate): ' + scarti.join(' | ') } : { ok: true }
+}
+
+// Il corriere VERO dietro una LDV (PTI = Poste, UPS, BRT…): `spedizioneStatus` sotto la ROOT, in
+// form-urlencoded e non nel JSON degli altri servizi (verificato il 24/9 e il 12/11). Serve alla presa:
+// in produzione una presa SENZA vettore risponde "errore generico di sistema" (prova del 12/11).
+export async function vettoreDielle(c: DielleCred, ldv: string): Promise<string | null> {
+  try {
+    const body = new URLSearchParams({ username: c.username, password: hashPasswordDielle(c.username, c.password), ldv })
+    const r = await fetch(`${root(c)}/extracking/spedizioneStatus`, { method: 'POST', body, signal: AbortSignal.timeout(20000) })
+    const j: any = await r.json().catch(() => null)
+    const v = String(j?.vettore || '').trim().toUpperCase()
+    return v || null
+  } catch { return null }
+}
+
 // Mappa la DESCRIZIONE dello stato Dielle sui nostri stati. Si mappa sul TESTO (`stato`), non sul
 // `codiceStato`: i codici sono 816, duplicati fra i corrieri dentro l'aggregatore (BRT/GLS/UPS…) e non
 // verificabili live, mentre la descrizione è in chiaro e autoesplicativa. Stesso impianto di

@@ -6,6 +6,7 @@ import { chiudiBordereauSpediamopro } from '@/lib/spediamopro'
 import { chiudiGiornataGls } from '@/lib/gls'
 import { chiudiDistintaBrt } from '@/lib/brt'
 import { chiudiDistintaFedex } from '@/lib/fedex'
+import { chiudiDistintaSenzaManifest } from '@/lib/distinte-chiusura'
 import { erroreCorrierePulito } from '@/lib/errore-corriere'
 
 // Conferma (= trasmetti/ritenta la chiusura al provider) di UNA distinta del cliente loggato.
@@ -34,9 +35,12 @@ export async function POST(req: NextRequest) {
   const r3: any = await chiudiGiornataGls(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
   const r4: any = await chiudiDistintaBrt(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
   const r4b: any = await chiudiDistintaFedex(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
+  // Senza manifest (lib/distinte-chiusura): per Dielle è la CONFERMA al corriere. Mancava qui: una distinta
+  // Dielle in errore, riconfermata dal cliente, sarebbe finita attestata in fondo senza ritentare l'invio.
+  const r4d: any = await chiudiDistintaSenzaManifest(admin, d.id).catch((e: any) => ({ errore: String(e?.message || e) }))
   const { data: dopo } = await admin.from('distinte').select('confermata_vettore').eq('id', d.id).maybeSingle()
   if (dopo?.confermata_vettore) return NextResponse.json({ success: true })
-  const err = r1?.errore || r2?.errore || r3?.errore || r4?.errore || r4b?.errore
+  const err = r1?.errore || r2?.errore || r3?.errore || r4?.errore || r4b?.errore || r4d?.errore
   // Il messaggio del provider NON esce cosi' com'e': arrivava al cliente in un popup e conteneva
   // il nome del sistema tecnico dietro le quinte ("authcode spediamopro mancante", "credenziali
   // spedisci mancanti", "HTTP 401: <risposta grezza>"). Il cliente deve vedere solo il marchio del
