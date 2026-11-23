@@ -78,6 +78,18 @@ export async function prenotaRitiroDielle(admin: any, p: {
     return { ok: false, motivo: 'corriere', errore: erroreRitiroPulito(esito.errore) }
   }
 
+  // LE SPEDIZIONI DEL RITIRO SI CONFERMANO SUBITO (Lorenzo, 23/11): di regola la conferma al corriere parte
+  // alla chiusura della distinta (lib/distinte-chiusura), ma un ritiro per oggi arriverebbe prima della
+  // chiusura serale e il corriere passerebbe per pacchi che non conosce. Se non riesce il ritiro resta
+  // valido: la chiusura della distinta la ritenta (riconfermare non fa danni, lib/dielle).
+  try {
+    const { confermaSpedizioniDielle } = await import('@/lib/dielle')
+    const conf = await confermaSpedizioniDielle(cred, p.ldv)
+    if (!conf.ok) console.error('[RITIRO][DIELLE] presa ok, conferma delle spedizioni non riuscita (la ritenta la distinta):', String(conf.errore).slice(0, 200))
+  } catch (e: any) {
+    console.error('[RITIRO][DIELLE] presa ok, conferma delle spedizioni non raggiungibile (la ritenta la distinta):', String(e?.message || e).slice(0, 200))
+  }
+
   const { data: r, error } = await admin.from('ritiri').insert({
     master_id: p.masterId, cliente_id: p.clienteId, corriere_id: p.corriere.id,
     pickup_id: null, tracking_ritiro: esito.codice, cod_ritiro: esito.codice,
