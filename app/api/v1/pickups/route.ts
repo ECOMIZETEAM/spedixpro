@@ -9,7 +9,7 @@ import { pickupTimeSpedisci } from '@/lib/spedisci'
 import { ritiroPrenotabileConPickups, messaggioRitiroNonPrenotabileViaApi } from '@/lib/ritiro-api'
 
 // API pubblica MoovExpress — richiede un ritiro per spedizioni del contratto della API key
-// (SpediamoPro, Spedisci, Poste diretto e i ponti che finiscono su Poste diretto, come SDA EXPRESS L).
+// (SpediamoPro, Spedisci, Poste diretto, Dielle e i ponti che finiscono su uno di questi due, come SDA EXPRESS L e PDB L).
 // Auth: Authorization: Bearer <api_key>
 // Body: { shipmentIds:[uuid], date:'YYYY-MM-DD' (giorno LAVORATIVO, no sab/dom), timeFrom?, timeTo?, from:{name,street1,city,state,postalCode,phone,email?}, notes? }
 // NB: from.phone è OBBLIGATORIO (>=6 cifre): i corrieri lo richiedono per prenotare il ritiro.
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   // ── POSTE DIRETTO, anche attraverso un ponte di condivisione (SDA EXPRESS L) ──
   // Le stesse funzioni del portale (lib/ritiro-poste): sul ponte prenota il contratto vero dello stesso
   // pacco. Se quel contratto non e' Poste diretto, qui non c'e' un ramo e lo si dice.
-  if (corriere.tipo === 'poste' || corriere.tipo === 'moovexpress') {
+  if (corriere.tipo === 'poste' || corriere.tipo === 'moovexpress' || corriere.tipo === 'dielle') {
     const { contrattoCheRitira, prenotaRitiroPoste } = await import('@/lib/ritiro-poste')
     // Un secondo invio dello stesso lotto (risposta persa, nuovo tentativo) prenoterebbe presso il
     // corriere un secondo ritiro per gli stessi pacchi: quelli gia' in un ritiro restano fuori.
@@ -104,8 +104,22 @@ export async function POST(req: NextRequest) {
     }
     const ritira = await contrattoCheRitira(admin, corriere, (daRitirare[0] as any).tracking_number)
     if ('errore' in ritira) return NextResponse.json({ error: messaggioRitiroNonPrenotabileViaApi(corriere.tipo) }, { status: 400 })
-    if (ritira.corriere?.tipo !== 'poste') return NextResponse.json({ error: messaggioRitiroNonPrenotabileViaApi(corriere.tipo) }, { status: 400 })
-    const esito = await prenotaRitiroPoste(admin, {
+    if (ritira.corriere?.tipo !== 'poste' && ritira.corriere?.tipo !== 'dielle') return NextResponse.json({ error: messaggioRitiroNonPrenotabileViaApi(corriere.tipo) }, { status: 400 })
+    // DIELLE (PDB L e gli altri "L"), anche dietro un ponte: la stessa prenotazione del portale.
+    // Il numero presso il fornitore è lo stesso tracking su tutte le gambe del pacco.
+    const fasciaDl = fasciaOraria(body.timeFrom, body.timeTo)
+    const esito = ritira.corriere.tipo === 'dielle'
+      ? await (await import('@/lib/ritiro-dielle')).prenotaRitiroDielle(admin, {
+        corriere: ritira.corriere, masterId: ctx.masterId, clienteId: ctx.clienteId, spedizioni: daRitirare as any[],
+        ldv: daRitirare.map((s: any) => String(s.raw_response?.ldv || s.tracking_number || s.numero || '')).filter(Boolean),
+        mittente: {
+          nome: from.name, indirizzo: from.street1, citta: from.city, cap: from.postalCode,
+          provincia: from.state, paese: from.country, telefono: pulisciTelefono(from.phone), email: from.email,
+        },
+        data: String(body.date), orario: { da: fasciaDl.from, a: fasciaDl.to },
+        note: body.notes, contenuto: body.notes,
+      })
+      : await prenotaRitiroPoste(admin, {
       corriere: ritira.corriere, masterId: ctx.masterId, clienteId: ctx.clienteId, spedizioni: daRitirare as any[],
       mittente: {
         nome: from.name, indirizzo: from.street1, citta: from.city, cap: from.postalCode,

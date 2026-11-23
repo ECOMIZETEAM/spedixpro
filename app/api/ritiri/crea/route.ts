@@ -401,6 +401,33 @@ async function creaRitiro(req: NextRequest, traccia: { tipo?: string; contratto?
   }
 
   // ══════════════════════════════════════════════════════
+  // DIELLE (PDB L e gli altri "L"): presa prenotata davvero sul fornitore (lib/ritiro-dielle, la stessa
+  // dell'API pubblica). Prima mancava e la richiesta finiva nel ramo Spedisci qui sotto: "Impossibile
+  // recuperare il corriere dalla spedizione" (23/11/2026, primo giorno di PDB L).
+  // ══════════════════════════════════════════════════════
+  if (corriere.tipo === 'dielle') {
+    const { prenotaRitiroDielle } = await import('@/lib/ritiro-dielle')
+    const fascia = fasciaOraria(body.orarioRitiro)
+    const ris = await prenotaRitiroDielle(admin, {
+      corriere, masterId, clienteId, spedizioni,
+      // Sul ponte i numeri del fornitore stanno sulla gamba vera (`riferimenti`); è lo stesso numero.
+      ldv: riferimenti.map((r: any) => String(r.raw_response?.ldv || r.tracking_number || r.numero || '')).filter(Boolean),
+      mittente: {
+        nome: body.mittNome, indirizzo: body.mittIndirizzo, citta: body.mittCitta, cap: body.mittCap,
+        provincia: body.mittProvincia, paese: body.mittPaese, telefono: body.mittTelefono, email: body.mittEmail,
+      },
+      data: body.dataRitiro, orario: { da: fascia.from, a: fascia.to },
+      note: body.istruzioni, contenuto: body.contenuto,
+    })
+    if (ris.ok) {
+      const avviso = avvisoDataSpostata(String(body.dataRitiro), ris.data)
+      return NextResponse.json({ id: ris.ritiroId, pickupId: ris.codice, ...(avviso ? { avviso } : {}) })
+    }
+    if (ris.motivo === 'registrazione') return NextResponse.json({ error: `Ritiro creato (${ris.codice}) ma errore DB: ${ris.errore}` }, { status: 500 })
+    return NextResponse.json({ error: ris.errore }, { status: 400 })
+  }
+
+  // ══════════════════════════════════════════════════════
   // RAMO SPEDISCI.ONLINE (flusso esistente)
   // ══════════════════════════════════════════════════════
   const carrierCode = raw?._carrierCode

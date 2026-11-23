@@ -56,20 +56,6 @@ export const TIPI_SENZA_MANIFEST = ['easyparcel', 'interno', 'inpost', 'poste', 
 // l'annullo lo fa a mano il detentore: confermarla nel frattempo la farebbe partire).
 const STATI_NON_DA_AFFIDARE = ['annullata', 'annullamento_pending', 'annullamento_manuale']
 
-// Le credenziali Dielle del contratto. Oggi le copie dei sotto-master le hanno copiate; se una copia non
-// le ha (le chiavi restano del detentore) si risale la catena dei fornitori fino a chi le ha.
-async function credenzialiDielle(admin: any, corriereId: string): Promise<any | null> {
-  let id: string | null = corriereId
-  for (let giro = 0; id && giro < 10; giro++) {
-    const { data: c }: { data: any } = await admin.from('corrieri').select('id, credenziali, fornitore_corriere_id').eq('id', id).maybeSingle()
-    if (!c) return null
-    const cr = c.credenziali || {}
-    if (cr.username && cr.password) return { username: String(cr.username), password: String(cr.password), ambiente: cr.ambiente === 'staging' ? 'staging' : 'prod' }
-    id = c.fornitore_corriere_id || null
-  }
-  return null
-}
-
 // DIELLE: è l'unico dei "senza manifest" che una trasmissione ce l'ha. Le spedizioni create via API
 // restano NUOVA sul fornitore e non partono finché non si confermano (lib/dielle, confermaSpedizioniDielle).
 // Si fa qui, alla chiusura della distinta, così vale per tutte le porte: portale master e cliente, giro
@@ -80,9 +66,9 @@ async function confermaGruppoDielle(admin: any, corriereId: string, spedizioni: 
     .map((s: any) => String(s.raw_response?.ldv || s.tracking_number || s.numero || '').trim())
     .filter(Boolean)
   if (!ldv.length) return { ok: true }
-  const cred = await credenzialiDielle(admin, corriereId)
+  const { confermaSpedizioniDielle, credenzialiDielleContratto } = await import('@/lib/dielle')
+  const cred = await credenzialiDielleContratto(admin, corriereId)
   if (!cred) return { ok: false, errore: 'contratto senza credenziali: conferma al corriere non inviata' }
-  const { confermaSpedizioniDielle } = await import('@/lib/dielle')
   const r = await confermaSpedizioniDielle(cred, ldv)
   return r.ok ? { ok: true } : { ok: false, errore: 'conferma al corriere: ' + (r.errore || 'non riuscita') }
 }

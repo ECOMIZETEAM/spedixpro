@@ -285,6 +285,20 @@ export async function confermaSpedizioniDielle(
   return scarti.length ? { ok: false, errore: 'alcune spedizioni non risultano al corriere (le altre sono confermate): ' + scarti.join(' | ') } : { ok: true }
 }
 
+// Le credenziali Dielle di un contratto. Le copie dei sotto-master oggi le hanno copiate; se una copia non
+// le ha (le chiavi restano del detentore) si risale la catena dei fornitori fino a chi le ha.
+export async function credenzialiDielleContratto(admin: any, corriereId: string): Promise<DielleCred | null> {
+  let id: string | null = corriereId
+  for (let giro = 0; id && giro < 10; giro++) {
+    const { data: c }: { data: any } = await admin.from('corrieri').select('id, credenziali, fornitore_corriere_id').eq('id', id).maybeSingle()
+    if (!c) return null
+    const cr = c.credenziali || {}
+    if (cr.username && cr.password) return { username: String(cr.username), password: String(cr.password), ambiente: cr.ambiente === 'staging' ? 'staging' : 'prod' }
+    id = c.fornitore_corriere_id || null
+  }
+  return null
+}
+
 // Il corriere VERO dietro una LDV (PTI = Poste, UPS, BRT…): `spedizioneStatus` sotto la ROOT, in
 // form-urlencoded e non nel JSON degli altri servizi (verificato il 24/9 e il 12/11). Serve alla presa:
 // in produzione una presa SENZA vettore risponde "errore generico di sistema" (prova del 12/11).
@@ -296,6 +310,72 @@ export async function vettoreDielle(c: DielleCred, ldv: string): Promise<string 
     const v = String(j?.vettore || '').trim().toUpperCase()
     return v || null
   } catch { return null }
+}
+
+// Ripiego se spedizioneStatus non risponde: il corriere si deduce dal codice servizio del contratto
+// (provati il 12/11: CAMIONISTICOPTI = Poste PDB, ESPRESSOBRT, STANDARD/SAVER = UPS, ESPRESSODHL…).
+export function vettoreDaServizioDielle(servizio: string | null | undefined): string | null {
+  const s = String(servizio || '').toUpperCase().trim()
+  if (!s) return null
+  if (s.endsWith('PTI') || s === 'CRONO' || s === 'REVERSE') return 'PTI'
+  if (s.endsWith('BRT')) return 'BRT'
+  if (s.endsWith('DHL') || s === 'DOCUMENTI') return 'DHL'
+  if (s.endsWith('TNT')) return 'TNT'
+  if (s === 'STANDARD' || s === 'SAVER') return 'UPS'
+  if (s === 'LOCKER' || s === 'HOMEDELIVERY') return 'INPOST'
+  if (s === 'ESPRESSO' || s === 'CAMIONISTICO' || s === 'GOLDEN') return 'SDA'
+  return null
+}
+
+export type DiellePresaInput = {
+  recapito: DielleRecapito
+  data: string                          // AAAA-MM-GG
+  mattina: { da: string; a: string } | null   // null = niente fascia di mattina (00:00)
+  pomeriggio: { da: string; a: string }       // la guida la vuole SEMPRE, da 13:00 in poi
+  pacchi: number
+  pesoKg: number
+  vettore: string
+  internazionale?: boolean
+  note?: string | null
+}
+
+// PRESA (ritiro) — /pk/bookPickUp, sotto la ROOT. Regole viste nella guida e nelle prove:
+// - tipoPresa "Nazionale"/"Internazionale": "Domestic" della guida risponde 146 (prova del 12/11);
+// - vettore OBBLIGATORIO in produzione: senza, "errore generico di sistema" (12/11);
+// - una presa per indirizzo e giorno: chiederla di nuovo restituisce la STESSA (refNumber uguale, staging
+//   23/11), quindi un secondo invio non ne crea un'altra;
+// - pesoTotale col PUNTO ("1.0"), a differenza dei pesi della spedizione;
+// - la coppia di orari del pomeriggio è obbligatoria (minimo 13:00), quella del mattino può essere 00:00;
+// - il numero di conferma per le nazionali arriva DOPO: subito c'è solo il refNumber.
+// Una presa vera NON si annulla da qui: va chiesto al fornitore.
+export async function prenotaPresaDielle(c: DielleCred, p: DiellePresaInput): Promise<
+  { ok: true; codice: string; refNumber: string; confNumber: string | null; data: string; stato: string } | { ok: false; errore: string }
+> {
+  const r = p.recapito
+  const data = {
+    recapito: {
+      ragione_sociale: r.ragione_sociale, indirizzo: r.indirizzo, civico: r.civico || '', nazione: nazione(r.nazione),
+      comune: r.comune, cap: String(r.cap || ''), provincia: (r.provincia || '').toUpperCase(),
+      referente: r.referente || r.ragione_sociale, email: r.email || '', telefono: cifre(r.telefono),
+    },
+    dataPresa: String(p.data).replace(/-/g, ''),
+    orarioMatMin: p.mattina?.da || '00:00', orarioMatMax: p.mattina?.a || '00:00',
+    orarioPomMin: p.pomeriggio.da, orarioPomMax: p.pomeriggio.a,
+    numBuste: '0', numPacchi: String(Math.max(1, Math.min(999, Math.round(p.pacchi) || 1))), numPallets: '0',
+    pesoTotale: Math.max(0.1, Number(p.pesoKg) || 0.1).toFixed(2),
+    note: String(p.note || '').slice(0, 200),
+    vettore: p.vettore,
+    tipoPresa: p.internazionale ? 'Internazionale' : 'Nazionale',
+  }
+  const { ok, status, j } = await chiama(c, 'pk/bookPickUp', data, true)
+  if (!ok) return { ok: false, errore: j?.errorMessage || `ritiro non riuscito (HTTP ${status})` }
+  const resp = j?.response
+  if (j?.errorCode || !resp?.refNumber) return { ok: false, errore: j?.errorMessage || 'ritiro non riuscito' }
+  // dataRitiro arriva GG-MM-AAAA: può essere un giorno diverso da quello chiesto.
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(resp.dataRitiro || resp['dataRitiro '] || '').trim())
+  const giorno = m ? `${m[3]}-${m[2]}-${m[1]}` : p.data
+  const conf = resp.confNumber ? String(resp.confNumber) : null
+  return { ok: true, codice: conf || String(resp.refNumber), refNumber: String(resp.refNumber), confNumber: conf, data: giorno, stato: String(resp.stato || '') }
 }
 
 // Mappa la DESCRIZIONE dello stato Dielle sui nostri stati. Si mappa sul TESTO (`stato`), non sul

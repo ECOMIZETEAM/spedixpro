@@ -12,8 +12,9 @@
 // Su quali contratti /api/v1/pickups sa prenotare un ritiro. Poste diretto e i ponti di condivisione
 // dal 06/11/2026 (lib/ritiro-poste): sul ponte vale se il contratto vero dello stesso pacco e' Poste
 // diretto (SDA EXPRESS L), e la rotta lo verifica sulle spedizioni prima di chiamare il corriere.
+// Dielle (PDB L e gli altri "L") dal 23/11/2026 (lib/ritiro-dielle), anche dietro un ponte.
 export function ritiroPrenotabileConPickups(tipo: string | null | undefined): boolean {
-  return tipo === 'spediamopro' || tipo === 'spedisci' || tipo === 'poste' || tipo === 'moovexpress'
+  return tipo === 'spediamopro' || tipo === 'spedisci' || tipo === 'poste' || tipo === 'moovexpress' || tipo === 'dielle'
 }
 
 // Cosa deve fare chi integra quando il ritiro chiesto alla creazione NON e' stato prenotato.
