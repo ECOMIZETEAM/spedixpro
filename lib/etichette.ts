@@ -381,6 +381,20 @@ export async function recuperaEtichettaMancante(
   attuale: EtichettaLetta | null = null,
 ): Promise<EtichettaLetta | null> {
   const raw = (sped?.raw_response || {}) as any
+  // DIELLE: una LDV = un PDF unico (anche multicollo); il provider lo genera con qualche secondo di ritardo
+  // dopo insSped, percio' alla creazione la chiamata etichetta puo' tornare "errore generico di sistema" e il
+  // PDF non viene salvato. Se c'e' gia', va bene cosi'; se manca, lo si scarica ORA e lo si salva. Fuori dalla
+  // logica multicollo-per-collo qui sotto (quella vale solo per GLS/ponti). Caso vero 23/11/2026: 6 etichette
+  // di infostore srl (PDB L di LOGISTIC ADVENTURE) su una raffica.
+  if (raw._dielle) {
+    if (attuale) return attuale
+    try {
+      const { recuperaEtichettaDielleSalvando } = await import('@/lib/dielle')
+      const buf = await recuperaEtichettaDielleSalvando(admin, sped)
+      if (buf?.length) return { buffer: buf, mime: 'application/pdf', ext: 'pdf' }
+    } catch (e: any) { console.error('[ETICHETTE] recupero dielle', sped?.id, e?.message) }
+    return attuale
+  }
   if (!raw._gls && !raw._moovexpress) return attuale
   const nColli = Math.max(1, Math.round(Number(sped?.colli) || 1))
   let pagineAttuale = 0

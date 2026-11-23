@@ -345,3 +345,41 @@ export async function trackingDielle(
   const consegnata = stati.some(str => mapStatoDielle(str) === 'consegnata')
   return { stati, consegnata, eventi }
 }
+
+// RECUPERO ON-DEMAND dell'etichetta Dielle, con salvataggio. Come GLS, Dielle genera il PDF con qualche
+// secondo di ritardo dopo insSped: alla creazione la chiamata etichetta puo' tornare "errore generico di
+// sistema" perche' troppo presto, e il PDF non viene salvato. Per dielle non c'era il ripiego on-demand che
+// GLS/DVA hanno, quindi la spedizione restava "non disponibile" per sempre. Quando manca, la si scarica ORA
+// e la si salva (etichetta_url + per-collo), come fa la creazione. Torna il PDF o null. `admin` deve avere
+// il service role (legge le credenziali del contratto, anche quelle della copia condivisa).
+//   CASO VERO 23/11/2026: 6 etichette di infostore srl (PDB L di LOGISTIC ADVENTURE), create su una raffica
+//   e arrivate senza etichetta proprio per questa tempistica.
+export async function recuperaEtichettaDielleSalvando(
+  admin: any,
+  sped: { id: string; corriere_id?: string | null; numero?: string | null; raw_response?: any; colli_dettaglio?: any },
+): Promise<Buffer | null> {
+  const raw = (sped?.raw_response || {}) as any
+  if (!raw._dielle || !sped?.corriere_id || !sped?.id) return null
+  const ldv = String(raw.ldv || sped.numero || '')
+  if (!ldv) return null
+  const { data: corr } = await admin.from('corrieri').select('tipo,credenziali').eq('id', sped.corriere_id).maybeSingle()
+  if (corr?.tipo !== 'dielle') return null
+  const cred = (corr.credenziali || {}) as DielleCred
+  if (!cred.username || !cred.password) return null
+
+  let bytes: Buffer | undefined
+  try {
+    const lab = await etichettaDielle({ username: cred.username, password: cred.password, ambiente: cred.ambiente === 'prod' ? 'prod' : 'staging' }, ldv, 'pdf')
+    bytes = lab.bytes
+  } catch { return null }   // ancora non pronta: la riprende la prossima apertura (niente errore all'utente)
+  if (!bytes?.length) return null
+
+  // Dielle: UNA LDV, un PDF per l'intera spedizione (anche multicollo), come alla creazione.
+  const etichettaUrl = `data:application/pdf;base64,${bytes.toString('base64')}`
+  const colli = Array.isArray(sped.colli_dettaglio) ? (sped.colli_dettaglio as any[]) : null
+  const nuoviColli = colli && colli.length ? colli.map((c: any) => ({ ...c, etichetta_url: etichettaUrl })) : null
+  try {
+    await admin.from('spedizioni').update({ etichetta_url: etichettaUrl, ...(nuoviColli ? { colli_dettaglio: nuoviColli } : {}) }).eq('id', sped.id)
+  } catch { /* best-effort: l'importante e' restituire il PDF adesso */ }
+  return bytes
+}
