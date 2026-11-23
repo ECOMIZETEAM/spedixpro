@@ -38,7 +38,25 @@ tracking_24h as (select count(*) n from tracking_events where created_at > now()
 stati_24h as (select count(*) n from spedizioni where updated_at > now() - interval '24 hours' and stato <> 'in_lavorazione'),
 misure_20h as (select count(*) n from ripesature_misure where letto_il > now() - interval '20 hours'),
 valutate_24h as (select count(*) n from ripesature_check where controllato_il > now() - interval '24 hours'),
-rettifiche_ferme as (select count(*) n from rettifiche where stato='da_rettificare' and created_at < now() - interval '7 days'),
+-- Le rettifiche ferme contano solo se c'e' qualcuno SOTTO da far pagare. Le "solo a tuo carico" (intestate a se'
+-- stessi) confermate scrivono solo il costo del fornitore sul conto di chi le ha caricate: nessun soldo da o verso
+-- altri. Il 22/11/2026 erano 1.920 su 2.942 (tutte di MULTI, mai confermate dal 30/10) e tenevano l'allarme rosso
+-- per sempre. Restano quelle dove chi sta sopra ha gia' pagato e sotto non e' stato ancora chiesto niente: si
+-- dicono numero ed euro, e suona quando in un giorno se ne fermano tante di nuove (un master che smette di
+-- confermare), non per lo stock vecchio che il master ha deciso di lasciare.
+-- Importo = quello che la Conferma addebita: differenza (negativa = addebito) piu' il fuori sagoma.
+rettifiche_da_far_pagare as (
+  select r.created_at, (-coalesce(r.differenza,0) + coalesce(r.fuori_sagoma,0)) importo
+  from rettifiche r
+  where r.stato='da_rettificare' and r.created_at < now() - interval '7 days'
+    and r.target_master_id is distinct from r.master_id
+    and (-coalesce(r.differenza,0) + coalesce(r.fuori_sagoma,0)) > 0.005
+),
+rettifiche_ferme as (
+  select count(*) n, coalesce(round(sum(importo)),0) euro,
+         count(*) filter (where created_at >= now() - interval '8 days') nuove_24h
+  from rettifiche_da_far_pagare
+),
 senza_cronologia as (
   select count(*) n from spedizioni s where s.stato='consegnata' and s.created_at > now() - interval '48 hours'
      and not exists (select 1 from tracking_events t where t.spedizione_id=s.id)
@@ -61,8 +79,14 @@ select 'ripesature', 'consegnate valutate nelle ultime 24h', (select n from valu
 union all
 select 'ripesature', 'in coda, ancora da valutare', (select n from coda)::numeric, 'cala da sola', (select n from coda) > 5000
 union all
-select 'ripesature', 'rettifiche in attesa di conferma da oltre 7 giorni', (select n from rettifiche_ferme)::numeric,
-       'da guardare se cresce', (select n from rettifiche_ferme) > 200
+select 'ripesature', 'rettifiche da far pagare sotto, ferme da oltre 7 giorni', (select n from rettifiche_ferme)::numeric,
+       'informativo (le decide il master)', false
+union all
+select 'ripesature', 'euro di quelle rettifiche: gia'' pagati sopra, non ancora chiesti sotto', (select euro from rettifiche_ferme)::numeric,
+       'informativo', false
+union all
+select 'ripesature', 'rettifiche da far pagare sotto fermate nelle ultime 24 ore (nate 7-8 giorni fa, ancora in attesa)',
+       (select nuove_24h from rettifiche_ferme)::numeric, 'al massimo 50', (select nuove_24h from rettifiche_ferme) > 50
 union all
 select 'tracking', 'consegnate senza cronologia (ultime 48h)', (select n from senza_cronologia)::numeric, 'zero', (select n from senza_cronologia) > 20
 union all
