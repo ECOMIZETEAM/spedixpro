@@ -37,13 +37,18 @@ export async function masterIdsVisibili(adminDb: any, masterId: string): Promise
 // (139 €, pagato con carta) e' finito attribuito a "Demo — castellanomassimo@hotmail.it" e mancava
 // dagli incassi di MoovExpress; e la catena delle spedizioni (lib/cascata.ts) non riconosceva piu'
 // MULTIEXPRESS come attaccata alla piattaforma.
+// Una lettura sola, come sottoAlberoMasterIds qui sotto: la usa anche la catena dei costi a ogni
+// spedizione creata, e una lettura per livello sarebbero tre o quattro viaggi al database in fila.
 export async function radiceDi(adminDb: any, masterId: string | null | undefined): Promise<string | null> {
-  let cur: string | null = masterId || null
-  for (let i = 0; i < 20 && cur; i++) {
-    const { data } = await adminDb.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
-    if (!data) return null
-    if (!data.parent_master_id) return cur
-    cur = data.parent_master_id
+  if (!masterId) return null
+  const { data } = await adminDb.from('masters').select('id,parent_master_id')
+  const padreDi = new Map<string, string | null>((data || []).map((m: any) => [m.id, m.parent_master_id]))
+  let cur: string = masterId
+  for (let i = 0; i < 20; i++) {
+    if (!padreDi.has(cur)) return null
+    const padre = padreDi.get(cur)
+    if (!padre) return cur
+    cur = padre
   }
   return null
 }

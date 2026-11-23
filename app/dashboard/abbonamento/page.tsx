@@ -459,10 +459,12 @@ export default function AbbonamentoPage() {
             <div style={{fontSize:'22px',fontWeight:800,color:ACCENT}}>€ {Number(stato?.previstoProssimoMese||0).toFixed(2)}</div>
             <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>canoni pieni di tutti · {stato?.abbonatiAttivi||0} abbonati (esclusi esenti)</div>
           </div>
-          <div style={{...card, borderColor: (nSenzaCarta+nRitardo)>0 ? '#fed7aa' : '#e8e8e8'}}>
+          {/* Un congelato e' uno che non paga da oltre la tolleranza: sta qui dentro, non a parte. Prima la
+              casella diceva 0 mentre accanto c'era un congelato fermo dal 3/08. */}
+          <div style={{...card, borderColor: (nSenzaCarta+nRitardo+nCongelati)>0 ? '#fed7aa' : '#e8e8e8'}}>
             <div style={{fontSize:'12px',color:'#777'}}>Non stanno pagando</div>
-            <div style={{fontSize:'22px',fontWeight:800,color:(nSenzaCarta+nRitardo)>0?'#b45309':'#16a34a'}}>{nSenzaCarta+nRitardo}</div>
-            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{nSenzaCarta} senza carta · {nRitardo} in ritardo</div>
+            <div style={{fontSize:'22px',fontWeight:800,color:(nSenzaCarta+nRitardo+nCongelati)>0?'#b45309':'#16a34a'}}>{nSenzaCarta+nRitardo+nCongelati}</div>
+            <div style={{fontSize:'11px',color:'#999',marginTop:'2px'}}>{nSenzaCarta} senza carta · {nRitardo} in ritardo · {nCongelati} congelati</div>
           </div>
           <div style={{...card, borderColor: nCongelati>0 ? '#fecaca' : '#e8e8e8'}}>
             <div style={{fontSize:'12px',color:'#777'}}>Congelati</div>
@@ -506,7 +508,7 @@ export default function AbbonamentoPage() {
           <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'13px'}}>
             <thead>
               <tr style={{background:'#fafafa'}}>
-                {['Master','Piano','Prossimo addebito','Ultimo pagamento','Ultima sessione','Usato','Stato'].map(h=>(
+                {['Master','Piano','Prossimo addebito','Ultimo pagamento','Ultima sessione','Usato nel mese','Stato'].map(h=>(
                   <th key={h} style={{textAlign:'left' as const,padding:'9px 14px',fontSize:'11px',fontWeight:600,color:'#777',borderBottom:'1px solid #f0f0f0',whiteSpace:'nowrap' as const}}>{h}</th>
                 ))}
               </tr>
@@ -559,8 +561,13 @@ export default function AbbonamentoPage() {
                     {a.ultima_sessione && <div style={{fontSize:'10.5px',color:'#999',fontWeight:400}}>{new Date(a.ultima_sessione).toLocaleDateString('it-IT')}</div>}
                   </td>
                   <td style={{padding:'11px 14px',whiteSpace:'nowrap' as const}}>
+                    {/* Il consumo del piano nel mese, lo stesso numero del suo contatore (tutta la sua rete, un
+                        pacco una volta). Prima qui c'erano le spedizioni di sempre del solo master. */}
                     {a.spedizioni_totali>0
-                      ? <span style={{color:'#1a1a1a',fontWeight:700}}>{Number(a.spedizioni_totali).toLocaleString('it-IT')}</span>
+                      ? <>
+                          <span style={{color: a.limite>0 && a.usato_mese>=a.limite ? '#dc2626' : a.limite>0 && a.usato_mese>=a.limite*0.9 ? '#b45309' : '#1a1a1a', fontWeight:700}}>{Number(a.usato_mese||0).toLocaleString('it-IT')}</span>
+                          {a.limite>0 && <span style={{color:'#999',fontWeight:500}}> / {Number(a.limite).toLocaleString('it-IT')}</span>}
+                        </>
                       : <span style={{background:'#fef3c7',color:'#b45309',borderRadius:'999px',padding:'2px 8px',fontSize:'10.5px',fontWeight:700}}>mai usato</span>}
                   </td>
                   <td style={{padding:'11px 14px',whiteSpace:'nowrap' as const}}>

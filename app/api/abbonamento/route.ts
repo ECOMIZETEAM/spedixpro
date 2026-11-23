@@ -121,21 +121,28 @@ export async function GET() {
     // Per il master principale l'albero e' gia' partito insieme alle prime letture (pRete).
     const reteIds = (await pRete) ?? await sottoAlberoMasterIds(admin, utente.master_id)
     // Le quattro letture della panoramica dipendono solo dall'albero: partono insieme.
-    const [{ data: pagTutti }, { data: mastersRete }, { data: sessioni }, { data: contTot }] = await Promise.all([
+    const [{ data: pagTutti }, { data: mastersRete }, { data: sessioni }, { data: contTot }, { data: usatiMese, error: errUsatiMese }] = await Promise.all([
       // Pagamenti della rete (per stato incasso). I record ORFANI (master cancellato) vengono scartati sotto.
       admin.from('abbonamenti_pagamenti')
         .select('id,master_id,piano,mese,importo,pagato,pagato_il,metodo,created_at')
         .eq('root_id', utente.master_id).order('mese', { ascending: true }).limit(1000),
       // Master della rete, escluso il root. Solo questi esistono → niente orfani.
       admin.from('masters')
-        .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
+        .select('id,nome,email,abbonamento_piano,abbonamento_prezzo,abbonamento_limite,abbonamento_esente,stripe_subscription_id,stripe_stato,pagamento_scaduto_dal')
         .in('id', reteIds).neq('id', utente.master_id),
       // ARRICCHIMENTO per la panoramica: ultima SESSIONE (login) e spedizioni TOTALI di OGNI master della
       // rete — così il root vede chi usa e paga, chi ha la posizione aperta ma è fermo, chi non ha mai
       // scelto un piano. La sessione arriva da auth.users via fn_ultima_sessione (SECURITY DEFINER).
       admin.rpc('fn_ultima_sessione', { p_masters: reteIds }),
       admin.from('contatori_spedizioni').select('master_id,n').in('master_id', reteIds),
+      // QUANTO HA USATO IL PIANO QUESTO MESE, master per master: lo stesso numero del blocco, della sua
+      // home e della sua pagina Abbonamento (fn_usato_rete: tutta la sua rete, un pacco una volta). La
+      // colonna "Usato" mostrava le spedizioni di sempre del solo master — Mayling 1.370 accanto a un
+      // piano da 5.000 al mese, quando nel mese ne aveva usate 681.
+      admin.rpc('fn_usato_rete_elenco', { p_masters: reteIds, p_mese: meseCorrente() }),
     ])
+    if (errUsatiMese) console.error('[ABBONAMENTO] fn_usato_rete_elenco non letta:', errUsatiMese.message)
+    const usatoMese = new Map<string, number>((usatiMese || []).map((r: any) => [r.master_id, Number(r.usato || 0)]))
     // Le righe a 0€ sono le fatture-FANTASMA del cambio piano (Stripe emette un'invoice a zero quando
     // si fa l'upgrade): non sono incassi, non vanno né in lista né nei conteggi. Restano nel DB perché
     // il calcolo del conguaglio legge da lì la scaletta dei piani — qui si escludono e basta.
@@ -207,6 +214,9 @@ export async function GET() {
         senza_piano: !m.abbonamento_piano && !m.abbonamento_esente,
         ultima_sessione: ultimaSessione.get(m.id) || null,
         spedizioni_totali: spedTot.get(m.id) || 0,
+        // Consumo del piano nel mese (tutta la sua rete) e il limite del piano: la colonna "Usato".
+        usato_mese: usatoMese.get(m.id) || 0,
+        limite: Number(m.abbonamento_limite || 0),
       }
     }).sort((a, b) => b.importo_da_incassare - a.importo_da_incassare)
 
