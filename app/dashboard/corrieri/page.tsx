@@ -115,6 +115,8 @@ export default function CorrieriPage() {
       limite_combinato: (c.settings?.limite_combinato ?? '') || '',
       peso_max_collo: (c.settings?.peso_max_collo ?? '') || '',
       colli_max: (c.settings?.colli_max ?? '') || '',
+      // Numero MINIMO colli: per i contratti MULTICOLLO, che non devono comparire per un collo solo.
+      colli_min: (c.settings?.colli_min ?? '') || '',
     })
   }
 
@@ -132,7 +134,8 @@ export default function CorrieriPage() {
     const nuoviSettings = (base:any) => ({ ...(base||{}), mittente: popup.mittente, agevolazione_peso_reale: popup.agevolazione_peso_reale, misure_max: misureMax, misure_scaglioni: scaglioni, peso_reale_soglia: pesoRealeSoglia,
       limite_combinato: popup.limite_combinato !== '' ? Number(popup.limite_combinato) : null,
       peso_max_collo: popup.peso_max_collo !== '' ? Number(popup.peso_max_collo) : null,
-      colli_max: popup.colli_max !== '' ? Number(popup.colli_max) : null })
+      colli_max: popup.colli_max !== '' ? Number(popup.colli_max) : null,
+      colli_min: popup.colli_min !== '' && popup.colli_min != null ? Number(popup.colli_min) : null })
     await fetch('/api/corrieri/'+popup.id, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -284,6 +287,7 @@ export default function CorrieriPage() {
                 <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Misura combinata max (cm)</label><input type="number" value={popup.limite_combinato||''} onChange={e=>setPopup({...popup,limite_combinato:e.target.value})} placeholder="es. 400" style={{...selStyle,width:'100%'}}/></div>
                 <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>Peso max per collo (kg)</label><input type="number" value={popup.peso_max_collo||''} onChange={e=>setPopup({...popup,peso_max_collo:e.target.value})} placeholder="es. 70" style={{...selStyle,width:'100%'}}/></div>
                 <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>N. max colli</label><input type="number" value={popup.colli_max||''} onChange={e=>setPopup({...popup,colli_max:e.target.value})} placeholder="es. 20" style={{...selStyle,width:'100%'}}/></div>
+                <div style={{flex:1}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a'}}>N. min colli</label><input type="number" value={popup.colli_min||''} onChange={e=>setPopup({...popup,colli_min:e.target.value})} placeholder="es. 2" style={{...selStyle,width:'100%'}}/></div>
               </div>
               <div style={{borderTop:'1px solid #eee',margin:'4px 0 18px'}}></div><div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px'}}>Impostazioni Generale</div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'16px',marginBottom:'14px'}}>

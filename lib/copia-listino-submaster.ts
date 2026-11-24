@@ -15,7 +15,7 @@ import { pontiCodiceDi } from '@/lib/ponti-codice'
 // creazione si ferma con "senza tipo di servizio"): era il motivo per cui i sotto-master non
 // riuscivano a spedire FedEx. tipo_ritiro/test_mode idem. (GLS/BRT tollerano l'assenza col default,
 // per questo non bloccavano.)
-const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'somma_lati_max', 'peso_max_collo', 'colli_max',
+const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'somma_lati_max', 'peso_max_collo', 'colli_max', 'colli_min',
   'tipo_servizio', 'tipo_ritiro', 'test_mode']
 function settingsContratto(src: any): any {
   const out: any = {}

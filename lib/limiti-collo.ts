@@ -13,6 +13,12 @@ export function superaLimitiCollo(settings: any, pesoReale: number, colli: any[]
   // N. massimo colli
   const colliMax = Number(settings?.colli_max) || 0
   if (colliMax > 0 && arr.length > colliMax) return true
+  // N. MINIMO colli. Serve ai contratti MULTICOLLO (UPS di LOGIXIA via Dielle, 24/11): hanno zone normali con
+  // la tariffa multicollo sul peso totale e il minimo a collo, perche' un contratto con sole zone multicollo
+  // il motore non lo prezza mai. Senza un minimo comparirebbero anche per un collo solo, al prezzo del
+  // multicollo (Italia 15,00 contro 7,00 del monocollo).
+  const colliMin = Number(settings?.colli_min) || 0
+  if (colliMin > 1 && arr.length < colliMin) return true
   // Peso massimo per collo
   const pesoMaxCollo = Number(settings?.peso_max_collo) || 0
   if (pesoMaxCollo > 0 && arr.some((c: any) => (Number(c.weight) || Number(c.peso) || 0) > pesoMaxCollo)) return true
@@ -51,6 +57,8 @@ export function motivoLimiteCollo(settings: any, pesoReale: number, colli: any[]
   const arr = colli || []
   const colliMax = Number(settings?.colli_max) || 0
   if (colliMax > 0 && arr.length > colliMax) return `questo contratto accetta al massimo ${colliMax} colli per spedizione`
+  const colliMin = Number(settings?.colli_min) || 0
+  if (colliMin > 1 && arr.length < colliMin) return `questo contratto si usa da ${colliMin} colli in su: per un collo solo scegli il contratto monocollo`
   const pesoMaxCollo = Number(settings?.peso_max_collo) || 0
   if (pesoMaxCollo > 0 && arr.some((c: any) => (Number(c.weight) || Number(c.peso) || 0) > pesoMaxCollo)) return `il peso massimo per collo di questo contratto è ${pesoMaxCollo} kg`
   const sommaMax = Number(settings?.somma_lati_max) || 0

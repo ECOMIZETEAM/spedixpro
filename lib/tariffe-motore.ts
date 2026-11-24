@@ -65,6 +65,7 @@ export function descriviLimiti(settings: any, pesoReale?: number): string {
   if (Number(settings.limite_combinato) > 0) parts.push(`lato+2×(altri due) ≤ ${settings.limite_combinato} cm`)
   if (Number(settings.peso_max_collo) > 0) parts.push(`${settings.peso_max_collo} kg/collo`)
   if (Number(settings.colli_max) > 0) parts.push(`max ${settings.colli_max} colli`)
+  if (Number(settings.colli_min) > 1) parts.push(`da ${settings.colli_min} colli`)
   return parts.join(' · ')
 }
 
