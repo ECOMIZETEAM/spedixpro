@@ -29,8 +29,12 @@ const PER_CAP = new Map<string, { norm: Set<string>; nomi: Set<string> }>()
 const COMUNI_PER_CAP = new Map<string, Set<string>>()
 // "CAP|nome normalizzato" -> "Nome (SIGLA)": per dire a chi spedisce DOVE sta l'indirizzo che ha scritto.
 const LOCALITA_ITALIANA = new Map<string, string>()
+// Tutti i nomi (normalizzati) di comuni e frazioni italiane, con qualunque CAP: per riconoscere una
+// citta' che in Italia non esiste (vedi indirizzoEsteroComeItalia).
+const NOMI_ITALIANI = new Set<string>()
 function aggiungi(cap: string, nome: string, sigla: string) {
   if (!cap || !nome) return
+  NOMI_ITALIANI.add(normCitta(nome))
   let e = PER_CAP.get(cap)
   if (!e) { e = { norm: new Set(), nomi: new Set() }; PER_CAP.set(cap, e) }
   e.norm.add(normCitta(nome)); e.nomi.add(nome)
@@ -43,6 +47,8 @@ for (const c of comuni as Comune[]) for (const cap of (c.cap || [])) {
   s.add(c.nome)
 }
 for (const f of frazioni as Loc[]) aggiungi(f.cap, f.nome, f.sigla)
+// Le prime tre cifre dei CAP italiani (206): la "forma" di un CAP italiano (vedi indirizzoEsteroComeItalia).
+const PREFISSI_ITALIANI = new Set(Array.from(PER_CAP.keys()).filter(k => /^\d{5}$/.test(k)).map(k => k.slice(0, 3)))
 
 // UN INDIRIZZO ITALIANO NON PARTE COL PAESE DI UN ALTRO. Il paese decide contratto, prezzo e strada
 // del pacco, e nessuno lo confrontava con l'indirizzo. Caso vero NI665485843 (24/10/2026): "Via
@@ -68,6 +74,37 @@ export function localitaItalianaFuoriPaese(
   const town = (citta || '').trim()
   if (!/^\d{5}$/.test(c) || !town) return null
   return LOCALITA_ITALIANA.get(`${c}|${normCitta(town)}`) || null
+}
+
+// IL CONTRARIO: UN INDIRIZZO ESTERO NON PARTE COME ITALIA. Caso vero 282343J119862 (24/11/2026): paese
+// Italia, "68300 ST LOUIS", provincia "FR" (in Francia; ma FR e' anche Frosinone, e nessun campo sembrava
+// sbagliato). Il preventivo ha proposto i contratti italiani, SDA EXPRESS L l'ha preso, Poste ha fatto la
+// LDV per un CAP italiano che non esiste. In 60 giorni di SDA EXPRESS L altre due cosi': Reutlingen
+// (72770, Germania) e Hvar (21450, Croazia), entrambe annullate.
+// Su tutti i contratti, in 30 giorni, 26 spedizioni cosi': Espoo, Groningen, Wuppertal, Nizza, Mataro'...
+// su UPS Italia, BRT Express, Poste, GLS — annullate, rese al mittente, o consegnate a prezzo d'Italia.
+// FERMA SOLO QUANDO SONO STRANIERI SIA IL CAP SIA LA CITTA'.
+//  - Il CAP: non ha la forma italiana, cioe' 5 cifre con prime tre che in Italia esistono. Il CAP fuori
+//    archivio NON basta: la prima prova fermava ~30 spedizioni italiane vere in 30 giorni — comuni nuovi
+//    che l'archivio non ha (91031 MISILISCEMI, 21009 BARDELLO CON MALGESSO E BREGANO), frazioni e
+//    abbreviazioni (38098 S.MICHELE A/ADIGE, 40040 FUNO DI ARGELATO). Con le prime tre cifre ne resta una.
+//  - La citta': nessun comune o frazione italiana si chiama cosi' (la provincia tra parentesi non conta).
+// Restano fuori, e passano come prima: CAP con lettere (refusi come 21O19, I37030, o paesi che le usano),
+// indirizzi oscurati dal marketplace (asterischi), e i pochi esteri con un CAP dalla forma italiana
+// (06000 NICE, come Perugia). Un CAP sbagliato con la citta' giusta passa come prima (99163 MESSINA).
+// San Marino (4789x) ha la forma italiana: passa come oggi.
+export function indirizzoEsteroComeItalia(
+  cap: string | null | undefined,
+  citta: string | null | undefined,
+  paese: string | null | undefined,
+): boolean {
+  if ((paese || 'IT').toUpperCase().trim() !== 'IT') return false
+  const c = (cap || '').trim()
+  const town = (citta || '').trim()
+  if (!c || !town || (c + town).includes('*')) return false
+  if (/[a-z]/i.test(c)) return false
+  if (/^\d{5}$/.test(c) && PREFISSI_ITALIANI.has(c.slice(0, 3))) return false
+  return !NOMI_ITALIANI.has(normCitta(town.replace(/\([^)]*\)/g, '')))
 }
 
 export function capNotoInArchivio(cap: string): boolean {

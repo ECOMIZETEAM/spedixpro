@@ -34,20 +34,26 @@
  * 64020 anche se la zona disagiata nomina solo il comune, Castellalto: se il corriere la tratta da
  * disagiata va aggiunta alla zona, e lo si decide col preventivo del corriere, non indovinando qui.
  * Sulle frazioni di comuni disagiati che BRT ci ha quotato, il supplemento era zero. */
-import { validaCittaCap, normalizzaCittaUfficiale, normCitta, localitaItalianaFuoriPaese } from '@/lib/valida-citta'
+import { validaCittaCap, normalizzaCittaUfficiale, normCitta, localitaItalianaFuoriPaese, indirizzoEsteroComeItalia } from '@/lib/valida-citta'
 import { filtraCapCondiviso } from '@/lib/zone-match'
 import { PAESI_MONDO } from '@/lib/paesi-elenco'
 import { normalizzaPaese } from '@/lib/paesi'
 
-// Indirizzo italiano col paese di un altro (regola e caso vero in lib/valida-citta.ts). Esportata
+// Paese e indirizzo che non stanno insieme, nei due versi (regole e casi veri in lib/valida-citta.ts):
+// un indirizzo italiano col paese di un altro, e un indirizzo estero col paese Italia. Esportata
 // perche' la usano anche chi non passa da cittaPerLaSpedizione: il preventivo del portale, cosi' il
-// prezzo per la Romania non compare nemmeno, e l'API pubblica, che ha la sua creazione.
+// prezzo sbagliato non compare nemmeno, e l'API pubblica, che ha la sua creazione.
 export function erroreIndirizzoItaliano(p: { cap: unknown; citta: unknown; paese?: unknown }): string | null {
   const paese = normalizzaPaese(p.paese)
-  const loc = localitaItalianaFuoriPaese(String(p.cap ?? ''), String(p.citta ?? ''), paese)
+  const cap = String(p.cap ?? '').trim()
+  const citta = String(p.citta ?? '').trim()
+  if (indirizzoEsteroComeItalia(cap, citta, paese)) {
+    return `Il CAP ${cap} e la città ${citta} non risultano in Italia, ma come paese è scelto Italia: se il pacco va all'estero scegli il paese giusto, altrimenti correggi CAP e città.`
+  }
+  const loc = localitaItalianaFuoriPaese(cap, citta, paese)
   if (!loc) return null
   const nome = PAESI_MONDO.find(x => x.code === paese)?.nome || paese
-  return `${String(p.cap).trim()} ${loc} è in Italia, ma come paese è scelto ${nome}: se il pacco va in Italia scegli Italia come paese, altrimenti correggi città e CAP.`
+  return `${cap} ${loc} è in Italia, ma come paese è scelto ${nome}: se il pacco va in Italia scegli Italia come paese, altrimenti correggi città e CAP.`
 }
 
 export type EsitoCitta =
