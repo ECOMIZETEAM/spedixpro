@@ -483,6 +483,14 @@ export function noloMulticollo(nolo: number, colli: number, minimo: number, rego
   return regola?.minimoObbligatorio ? null : nolo
 }
 
+// Nei ricalcoli delle rettifiche (zonaForzata) la spedizione e' gia' partita: "solo a zone" non deve
+// toglierle il minimo a collo. Senza, il null di soloAZone arrivava prima del minimo e il ricalcolo usava
+// la fascia nuda (4 colli con minimo 7,85 e fascia 13,43: 13,43 invece di 31,40). Le altre due regole
+// restano come sono sempre state.
+function regolaPerRicalcolo(regola: RegolaMulticollo | undefined, zonaForzata?: string): RegolaMulticollo | undefined {
+  return regola && zonaForzata ? { ...regola, soloAZone: false } : regola
+}
+
 // La regola di ogni contratto, letta sul contratto del DETENTORE. Client di servizio, sempre: il
 // contratto del detentore e' di un altro master, e chi prezza la spedizione propria lo fa col token
 // della sua sessione, che quella riga non la vede. Si leggono solo `contratto_id` e `settings` — mai
@@ -879,7 +887,7 @@ export async function calcolaPrezzoListino(
     const _fuelPct = Number((fascia as any).fuel) || 0
     // Multicollo: il minimo a collo sta sullo stesso piano della fascia, il fuel si applica dopo.
     // Nei ricalcoli delle rettifiche (zonaForzata) non si esclude, come per l'origine.
-    const noloFascia = noloMulticollo(Number(fascia.prezzo), colli, minimoPerCorr.get(cId) || 0, regolaPerCorr.get(cId), params.paese)
+    const noloFascia = noloMulticollo(Number(fascia.prezzo), colli, minimoPerCorr.get(cId) || 0, regolaPerRicalcolo(regolaPerCorr.get(cId), params.zonaForzata), params.paese)
     if (noloFascia === null && !params.zonaForzata) continue
     const prezzo = (noloFascia ?? Number(fascia.prezzo)) * (1 + _fuelPct / 100)
     if (!isFinite(prezzo)) continue
@@ -1172,7 +1180,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // multicollo; nei ricalcoli delle rettifiche (zonaForzata) non si esclude, come per l'origine.
   // Col multicollo a zone il minimo e' gia' dentro il nolo.
   if (packages.length > 1 && !conTabella) {
-    const n = noloMulticollo(prezzo, packages.length, minimoACollo(suppl || []), regolaMC, params.paese)
+    const n = noloMulticollo(prezzo, packages.length, minimoACollo(suppl || []), regolaPerRicalcolo(regolaMC, params.zonaForzata), params.paese)
     if (n === null && !params.zonaForzata) return null
     if (n !== null) prezzo = n
   }
