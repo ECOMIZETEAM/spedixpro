@@ -354,7 +354,7 @@ export async function calcolaTariffeCliente(
   // Lettura fallita = stesso esito di una lettura fasce fallita: errore tecnico, non "listino vuoto".
   {
     const idsContratti = Array.from(new Set(fasce.map((f: any) => f.corriere_id).filter(Boolean)))
-    const { data: contratti, error: errContratti } = await adminDb.from('corrieri').select('id,tipo,nome_contratto,attivo,credenziali,settings').in('id', idsContratti as string[])
+    const { data: contratti, error: errContratti } = await adminDb.from('corrieri').select('id,tipo,nome_contratto,attivo,multicollo,credenziali,settings').in('id', idsContratti as string[])
     if (errContratti) {
       console.error('[TARIFFE] lettura contratti fallita', cliente.listino_cliente_id, errContratti.message)
       return { errore: 'Errore tecnico nel calcolo delle tariffe: riprova tra poco. Se persiste contatta l\'assistenza (il listino non c\'entra).', stato: 500 }
@@ -362,6 +362,12 @@ export async function calcolaTariffeCliente(
     const perId = new Map<string, any>((contratti || []).map((c: any) => [c.id, c]))
     for (const f of fasce as any[]) f.corrieri = perId.get(f.corriere_id) ?? null
   }
+  // UN CONTRATTO "SOLO MONOCOLLO" (corrieri.multicollo = false) CON PIU' COLLI NON SI VENDE. La creazione lo
+  // rifiuta (crea/route.ts), e cosi' /api/v1 e l'anteprima dei negozi; il preventivo del portale invece lo
+  // mostrava, prezzato come un collo solo, e il cliente scopriva il rifiuto solo premendo Crea. Serve dal
+  // 24/11 ai contratti UPS di LOGIXIA divisi in MONOCOLLO e MULTICOLLO: con 2 colli il monocollo compariva
+  // accanto al multicollo, piu' economico (Italia 7,00 contro 15,00) e non creabile.
+  if (tuttiColli.length > 1) fasce = (fasce as any[]).filter((f: any) => (f.corrieri as any)?.multicollo !== false)
 
   // Match zona via zone_cap (CAP esatto > provincia > jolly), ristretto alle zone del listino.
   // Mappa zona->corriere così i tier si applicano PER CORRIERE (un CAP esatto di un corriere non
