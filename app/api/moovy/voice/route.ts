@@ -1,9 +1,12 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { gestisceLaRete } from '@/lib/ruoli'
+import type Anthropic from '@anthropic-ai/sdk'
+import { clientMoovy, logErroreMoovy, PARAMETRI_MOOVY, RIFIUTO_MOOVY, testoRisposta } from '@/lib/moovy-ia'
 
 export const runtime = 'nodejs'
-export const maxDuration = 45
+// Due chiamate al modello (scelta dello strumento, poi la frase da leggere): 20 secondi l'una al massimo.
+export const maxDuration = 60
 
 // ── MOOVY VOICE — assistente vocale che AGISCE (Fase 1) ──────────────────
 // Letture: eseguite subito. Scritture (ricarica credito / elimina spedizione): NON eseguite qui,
@@ -17,12 +20,12 @@ const SYS = `Sei MOOVY, l'assistente vocale di MoovExpress. L'utente ti parla a 
 - Non rivelare mai guadagni, margini, costi altrui o la struttura della rete. Solo dati dell'utente.
 - Se non hai uno strumento per una richiesta, spiega a voce come farlo dall'app.`
 
-const TOOLS = [
-  { type: 'function', function: { name: 'leggi_credito', description: 'Legge il credito residuo dell\'utente, oppure di un suo cliente/sotto-master indicato per nome (solo master).', parameters: { type: 'object', properties: { nome: { type: 'string', description: 'nome cliente/sotto-master; vuoto = proprio credito' } } } } },
-  { type: 'function', function: { name: 'traccia_spedizione', description: 'Stato/tracking di una spedizione dalla sua lettera di vettura (LDV) o numero.', parameters: { type: 'object', properties: { ldv: { type: 'string' } }, required: ['ldv'] } } },
-  { type: 'function', function: { name: 'conta_spedizioni', description: 'Conta le spedizioni dell\'utente in un periodo.', parameters: { type: 'object', properties: { periodo: { type: 'string', enum: ['oggi', 'settimana', 'mese'] } } } } },
-  { type: 'function', function: { name: 'ricarica_credito', description: 'Ricarica il credito di un cliente o sotto-master (SOLO master). Va confermata.', parameters: { type: 'object', properties: { nome: { type: 'string' }, importo: { type: 'number' } }, required: ['nome', 'importo'] } } },
-  { type: 'function', function: { name: 'elimina_spedizione', description: 'Elimina/annulla una spedizione dalla sua LDV. Va confermata.', parameters: { type: 'object', properties: { ldv: { type: 'string' } }, required: ['ldv'] } } },
+const TOOLS: Anthropic.Beta.BetaTool[] = [
+  { name: 'leggi_credito', description: 'Legge il credito residuo dell\'utente, oppure di un suo cliente/sotto-master indicato per nome (solo master).', input_schema: { type: 'object', properties: { nome: { type: 'string', description: 'nome cliente/sotto-master; vuoto = proprio credito' } } } },
+  { name: 'traccia_spedizione', description: 'Stato/tracking di una spedizione dalla sua lettera di vettura (LDV) o numero.', input_schema: { type: 'object', properties: { ldv: { type: 'string' } }, required: ['ldv'] } },
+  { name: 'conta_spedizioni', description: 'Conta le spedizioni dell\'utente in un periodo.', input_schema: { type: 'object', properties: { periodo: { type: 'string', enum: ['oggi', 'settimana', 'mese'] } } } },
+  { name: 'ricarica_credito', description: 'Ricarica il credito di un cliente o sotto-master (SOLO master). Va confermata.', input_schema: { type: 'object', properties: { nome: { type: 'string' }, importo: { type: 'number' } }, required: ['nome', 'importo'] } },
+  { name: 'elimina_spedizione', description: 'Elimina/annulla una spedizione dalla sua LDV. Va confermata.', input_schema: { type: 'object', properties: { ldv: { type: 'string' } }, required: ['ldv'] } },
 ]
 
 export async function POST(req: Request) {
@@ -41,36 +44,41 @@ export async function POST(req: Request) {
   const isMaster = gestisceLaRete(u)
 
   const body = await req.json().catch(() => ({} as any))
-  const messages: any[] = (Array.isArray(body?.messages) ? body.messages : [])
+  const messages: Anthropic.Beta.BetaMessageParam[] = (Array.isArray(body?.messages) ? body.messages : [])
     .filter((m: any) => (m?.role === 'user' || m?.role === 'assistant') && typeof m?.content === 'string' && m.content.trim())
     .slice(-12).map((m: any) => ({ role: m.role, content: String(m.content).slice(0, 2000) }))
   if (!messages.length) return json({ error: 'Messaggio mancante' }, 400)
 
-  const GROQ = process.env.GROQ_API_KEY
-  if (!GROQ) return json({ reply: 'Moovy non è configurato su questo ambiente.' })
+  const client = clientMoovy()
+  if (!client) return json({ reply: 'Moovy non è configurato su questo ambiente.' })
 
   const admin = createAdminSupabase()
 
-  async function groq(msgs: any[], withTools: boolean) {
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST', headers: { Authorization: `Bearer ${GROQ}`, 'Content-Type': 'application/json' },
-      // Stesso modello della chat via GROQ_MODEL (default gpt-oss-120b): llama-3.3-70b-versatile
-      // dismesso da Groq il 16/08/2026. gpt-oss-120b supporta il tool-calling usato qui.
-      body: JSON.stringify({ model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b', temperature: 0.2, max_tokens: 700,
-        messages: [{ role: 'system', content: SYS }, ...msgs], ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}) }),
+  // Una chiamata al modello. Gli strumenti si mandano sempre (la seconda chiamata contiene lo strumento
+  // usato nella prima); `conStrumenti` dice se puo' sceglierne uno. Uno per volta: qui sotto si esegue
+  // solo il primo, e uno strumento chiamato senza risposta farebbe rifiutare la chiamata dopo.
+  async function chiedi(msgs: Anthropic.Beta.BetaMessageParam[], conStrumenti: boolean) {
+    return client!.beta.messages.create({
+      ...PARAMETRI_MOOVY,
+      max_tokens: 4000,
+      system: SYS,
+      tools: TOOLS,
+      tool_choice: conStrumenti ? { type: 'auto', disable_parallel_tool_use: true } : { type: 'none' },
+      messages: msgs,
     })
-    if (!r.ok) { console.error('[MOOVY][VOICE][GROQ] HTTP', r.status, (await r.text().catch(() => '')).slice(0, 200)); throw new Error('groq ' + r.status) }
-    return (await r.json())?.choices?.[0]?.message
   }
 
   try {
-    const msg = await groq(messages, true)
-    const call = msg?.tool_calls?.[0]
-    if (!call) return json({ reply: msg?.content || 'Come posso aiutarti?' })
+    const msg = await chiedi(messages, true)
+    const call = msg.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
+    if (!call) {
+      if (msg.stop_reason === 'refusal') return json({ reply: RIFIUTO_MOOVY })
+      return json({ reply: testoRisposta(msg) || 'Come posso aiutarti?' })
+    }
 
-    const nome = call.function?.name
-    let args: any = {}
-    try { args = JSON.parse(call.function?.arguments || '{}') } catch {}
+    const nome = call.name
+    const args: any = call.input || {}
+    const conRisultato = (risultato: string) => riformula(chiedi, messages, msg, call, risultato)
 
     // ── LETTURE: eseguo e faccio riformulare a Moovy ──
     if (nome === 'leggi_credito') {
@@ -92,7 +100,7 @@ export async function POST(req: Request) {
         const { data: m } = await admin.from('masters').select('credito').eq('id', u!.master_id).maybeSingle()
         testo = `Il tuo credito residuo è € ${Number(m?.credito || 0).toFixed(2)}.`
       }
-      return json({ reply: await riformula(groq, messages, call, testo) })
+      return json({ reply: await conRisultato(testo) })
     }
 
     if (nome === 'conta_spedizioni') {
@@ -106,16 +114,16 @@ export async function POST(req: Request) {
         if (gambe.length) q = q.or(`cliente_id.is.null,cliente_id.not.in.(${gambe.join(',')})`)
       }
       const { count } = await q
-      return json({ reply: await riformula(groq, messages, call, `Spedizioni ${args.periodo || 'oggi'}: ${count || 0}.`) })
+      return json({ reply: await conRisultato(`Spedizioni ${args.periodo || 'oggi'}: ${count || 0}.`) })
     }
 
     if (nome === 'traccia_spedizione') {
       const ldv = String(args.ldv || '').trim()
       const sped = await trovaSped(admin, ldv, u, isCliente, isAgente, supabase)
       if (!sped) return json({ reply: `Non ho trovato la spedizione ${ldv} tra le tue.` })
-      // Senza il nome del destinatario: questa frase va a Groq per la riformulazione, e il destinatario
-      // puo' essere un compratore Amazon, i cui dati non escono verso terzi (politica Amazon 4.6).
-      return json({ reply: await riformula(groq, messages, call, `Spedizione ${sped.numero}: stato ${statoUmano(sped.stato)}.`) })
+      // Senza il nome del destinatario: questa frase va al fornitore dell'IA per la riformulazione, e il
+      // destinatario puo' essere un compratore Amazon, i cui dati non escono verso terzi (politica Amazon 4.6).
+      return json({ reply: await conRisultato(`Spedizione ${sped.numero}: stato ${statoUmano(sped.stato)}.`) })
     }
 
     // ── SCRITTURE: NON eseguo, propongo con conferma ──
@@ -134,23 +142,37 @@ export async function POST(req: Request) {
       const ldv = String(args.ldv || '').trim()
       const sped = await trovaSped(admin, ldv, u, isCliente, isAgente, supabase)
       if (!sped) return json({ reply: `Non ho trovato la spedizione ${ldv} tra le tue.` })
-      // Senza nome: la risposta torna nella conversazione, che al messaggio dopo si rimanda a Groq.
+      // Senza nome: la risposta torna nella conversazione, che al messaggio dopo si rimanda al fornitore dell'IA.
       const desc = `Eliminare la spedizione ${sped.numero}?`
       return json({ reply: `Confermi: ${desc}`, pendingAction: { azione: 'elimina_spedizione', spedizioneId: sped.id, numero: sped.numero, descrizione: desc } })
     }
 
-    return json({ reply: msg?.content || 'Non ho capito la richiesta.' })
+    return json({ reply: testoRisposta(msg) || 'Non ho capito la richiesta.' })
   } catch (e: any) {
+    // Prima l'errore si perdeva senza una riga nel log.
+    logErroreMoovy('[VOICE]', e)
     return json({ reply: 'Ho avuto un problema tecnico. Riprova tra poco.' })
   }
 }
 
-// Riformula il risultato con voce naturale (secondo giro senza tools)
-async function riformula(groq: any, messages: any[], call: any, risultato: string) {
+// Riformula il risultato con voce naturale (secondo giro, senza scegliere strumenti). La risposta del
+// primo giro torna INTERA, ragionamento compreso, come la vuole il fornitore; se il secondo giro va male
+// si legge il risultato cosi' com'e'.
+async function riformula(
+  chiedi: (msgs: Anthropic.Beta.BetaMessageParam[], conStrumenti: boolean) => Promise<Anthropic.Beta.BetaMessage>,
+  messages: Anthropic.Beta.BetaMessageParam[], primo: Anthropic.Beta.BetaMessage, call: Anthropic.Beta.BetaToolUseBlock, risultato: string,
+) {
   try {
-    const m = await groq([...messages, { role: 'assistant', content: '', tool_calls: [call] }, { role: 'tool', tool_call_id: call.id, content: risultato }], false)
-    return m?.content || risultato
-  } catch { return risultato }
+    const m = await chiedi([
+      ...messages,
+      { role: 'assistant', content: primo.content },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: call.id, content: risultato }] },
+    ], false)
+    return testoRisposta(m) || risultato
+  } catch (e) {
+    logErroreMoovy('[VOICE] riformula', e)
+    return risultato
+  }
 }
 
 async function trovaSped(admin: any, ldv: string, u: any, isCliente: boolean, isAgente: boolean, supabase: any) {

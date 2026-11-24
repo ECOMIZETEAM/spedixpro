@@ -1,5 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
+import { clientMoovy, logErroreMoovy, PARAMETRI_MOOVY, RIFIUTO_MOOVY } from '@/lib/moovy-ia'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -59,9 +60,15 @@ const GUIDA_CLIENTE = `SEI NEL PORTALE CLIENTE. Sezioni principali e cosa fanno:
 - Impostazioni: Pacchi (misure preimpostate), Stampa e Notifiche, Cambia Password, API Key (per integrazioni), Logo.
 CONCETTI CHIAVE: il credito è a scalare — se il credito non copre il costo della spedizione, questa viene bloccata; ricarica o contatta il tuo referente. Il contrassegno (COD) incassato ti viene poi rimesso.`
 
-function systemPrompt(ruolo: 'master' | 'cliente', contesto: string) {
+// Le istruzioni in due pezzi: regole e guida sono uguali per tutti quelli dello stesso ruolo, e il
+// fornitore le tiene in memoria tra una domanda e l'altra (costano un decimo); il contesto cambia per
+// ogni utente e va dopo, altrimenti quella memoria non servirebbe a niente.
+function istruzioni(ruolo: 'master' | 'cliente', contesto: string) {
   const guida = ruolo === 'master' ? GUIDA_MASTER : GUIDA_CLIENTE
-  return `${REGOLE}\n\n${RISERVATEZZA}\n\n${guida}\n\nCONTESTO DELL'UTENTE CORRENTE (dati SUOI, solo per personalizzare; non ripeterlo a pappagallo e non confrontarlo con altri):\n${contesto}`
+  return [
+    { type: 'text' as const, text: `${REGOLE}\n\n${RISERVATEZZA}\n\n${guida}`, cache_control: { type: 'ephemeral' as const } },
+    { type: 'text' as const, text: `CONTESTO DELL'UTENTE CORRENTE (dati SUOI, solo per personalizzare; non ripeterlo a pappagallo e non confrontarlo con altri):\n${contesto || 'n/d'}` },
+  ]
 }
 
 export async function POST(req: Request) {
@@ -130,65 +137,38 @@ export async function POST(req: Request) {
     }
   } catch { /* contesto opzionale */ }
 
-  const GROQ_KEY = process.env.GROQ_API_KEY
-  if (!GROQ_KEY) {
+  const client = clientMoovy()
+  if (!client) {
     return new Response('MOOVY non è configurato su questo ambiente.', { status: 503 })
   }
 
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     async start(controller) {
+      let scritto = false
       try {
-        // Groq: API compatibile OpenAI, in streaming (SSE). Il system prompt va
-        // come primo messaggio con ruolo "system".
-        // MODELLO via env (GROQ_MODEL) così una dismissione futura si cambia SENZA deploy. Groq ha
-        // DISMESSO `llama-3.3-70b-versatile` il 16/08/2026: era la causa del "problema tecnico" (le
-        // richieste al modello non venivano più servite). Default = openai/gpt-oss-120b, la migrazione
-        // consigliata da Groq.
-        const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b'
-        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${GROQ_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: MODEL,
-            temperature: 0.3,
-            max_tokens: 1024,
-            stream: true,
-            messages: [{ role: 'system', content: systemPrompt(ruolo, contesto) }, ...messages],
-          }),
+        // In streaming: il testo arriva a pezzi e si gira subito al browser. I blocchi di ragionamento
+        // del modello non si mostrano.
+        const s = client.beta.messages.stream({
+          ...PARAMETRI_MOOVY,
+          max_tokens: 8000,
+          system: istruzioni(ruolo, contesto),
+          messages,
         })
-        if (!resp.ok) {
-          // Prima il catch INGHIOTTIVA l'errore (nessun log): un fallimento Groq era invisibile e
-          // diventava un generico "problema tecnico" impossibile da diagnosticare. Ora stato + corpo.
-          const errTxt = await resp.text().catch(() => '')
-          console.error('[MOOVY][GROQ] HTTP', resp.status, MODEL, errTxt.slice(0, 300))
-          throw new Error('groq ' + resp.status)
-        }
-        if (!resp.body) throw new Error('groq no body')
-
-        const reader = resp.body.getReader()
-        const dec = new TextDecoder()
-        let buf = ''
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += dec.decode(value, { stream: true })
-          const righe = buf.split('\n')
-          buf = righe.pop() || '' // l'ultima riga può essere parziale
-          for (const riga of righe) {
-            const l = riga.trim()
-            if (!l.startsWith('data:')) continue
-            const dati = l.slice(5).trim()
-            if (!dati || dati === '[DONE]') continue
-            try {
-              const j = JSON.parse(dati)
-              const t = j?.choices?.[0]?.delta?.content
-              if (t) controller.enqueue(encoder.encode(t))
-            } catch { /* frammento non-JSON: ignora */ }
+        for await (const ev of s) {
+          if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta' && ev.delta.text) {
+            controller.enqueue(encoder.encode(ev.delta.text))
+            scritto = true
           }
         }
+        const finale = await s.finalMessage()
+        if (!scritto) {
+          // Rifiuto (anche del modello di riserva) o risposta vuota: mai lasciare la chat muta.
+          if (finale.stop_reason !== 'refusal') console.error('[MOOVY] risposta senza testo:', finale.stop_reason, finale.model)
+          controller.enqueue(encoder.encode(finale.stop_reason === 'refusal' ? RIFIUTO_MOOVY : 'Non sono riuscito a formulare una risposta. Riprova a chiedermelo con altre parole.'))
+        }
       } catch (e: any) {
-        console.error('[MOOVY][GROQ] chiamata fallita:', e?.message || e)
+        logErroreMoovy('', e)
         try { controller.enqueue(encoder.encode('\n\nMi dispiace, ho avuto un problema tecnico. Riprova tra poco o apri un Ticket dalla sezione Assistenza.')) } catch {}
       } finally {
         try { controller.close() } catch {}
