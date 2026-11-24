@@ -165,7 +165,9 @@ export type CategoriaVoce = 'carburante' | 'contrassegno' | 'isole' | 'ingombro'
 // listino del detentore. Se lì c'è un prezzo, la voce è prevista e va girata al cliente; se no, manca.
 // `legendaBrt`: come BRT la scrive nella legenda del PDF. Se un PDF dice altro, BRT ha cambiato la sigla e
 // la pagina lo dice invece di continuare a chiamarla col nome vecchio.
-export type SiglaBrt = { nome: string; categoria: CategoriaVoce; certa: boolean; voceListino?: string; legendaBrt?: string; dallaFattura?: boolean }
+// `sopraIlCarburante`: la voce è una percentuale calcolata DOPO il carburante, sul totale che lo comprende: il
+// carburante non ci va sopra (e lei non entra nella base del carburante).
+export type SiglaBrt = { nome: string; categoria: CategoriaVoce; certa: boolean; voceListino?: string; legendaBrt?: string; dallaFattura?: boolean; sopraIlCarburante?: boolean }
 export const SIGLE_BRT: Record<string, SiglaBrt> = {
   // FUEL SURCH. Una percentuale fissa (8% a giugno, 12,5% a ottobre) del nolo e dei supplementi, mai del contrassegno.
   f: { nome: 'Carburante', categoria: 'carburante', certa: true, legendaBrt: 'FUEL SURCH' },
@@ -194,11 +196,18 @@ export const SIGLE_BRT: Record<string, SiglaBrt> = {
   U: { nome: 'Ritiro', categoria: 'servizio', certa: true, legendaBrt: 'RITIRO' },
   // DIROTTAM.T. 4 € su bolle A3.
   '*': { nome: 'Dirottamento', categoria: 'altro', certa: true, legendaBrt: 'DIROTTAM.T' },
+  // NUOVA da novembre 2026 (fattura 74855 di Wave, TIVAF del 18/11; nelle TIVAF di ottobre non c'è): 333 righe su
+  // 335, anche sui resi e sulle bolle accessorie. Vale l'1,5% di TUTTA la riga carburante compreso (scarto
+  // 0,006%: 0,069 su 4,10 + 0,513 di carburante). Il nome BRT è nella legenda del PDF, che non abbiamo ancora:
+  // certa: false finché non lo si legge, così la pagina chiede il PDF.
+  b: { nome: 'Supplemento 1,5% sul totale (nuovo da novembre)', categoria: 'altro', certa: false, sopraIlCarburante: true },
 }
 
 // Una sigla che non conosciamo prende il nome dalla legenda del PDF di quella fattura, se c'è: com'è
 // scritto da BRT ("DIROTTAM.T"), senza tradurlo a occhio.
 export function descriviVoce(sigla: string, legenda?: Record<string, string> | null): SiglaBrt {
+  // Una sigla che conosciamo solo dai numeri (certa: false) prende il nome dalla legenda appena c'è.
+  if (SIGLE_BRT[sigla] && !SIGLE_BRT[sigla].certa && legenda?.[sigla]) return { ...SIGLE_BRT[sigla], nome: `${legenda[sigla]} (dalla legenda BRT)`, certa: true, dallaFattura: true }
   if (SIGLE_BRT[sigla]) return SIGLE_BRT[sigla]
   // Le voci delle righe GLS (lib/fattura-gls): stessa pagina, stesse funzioni.
   if (VOCI_GLS[sigla]) return VOCI_GLS[sigla]
@@ -211,7 +220,8 @@ export function confrontaLegenda(legenda: Record<string, string>) {
   const nuove: { sigla: string; nome: string }[] = [], cambiate: { sigla: string; prima: string; ora: string }[] = []
   for (const [sigla, nome] of Object.entries(legenda || {})) {
     const nota = SIGLE_BRT[sigla]
-    if (!nota) nuove.push({ sigla, nome })
+    // Anche quelle note solo dai numeri: il nome vero va scritto in SIGLE_BRT, e il log lo dice.
+    if (!nota || !nota.certa) nuove.push({ sigla, nome })
     else if (nota.legendaBrt && nota.legendaBrt.toUpperCase() !== nome.toUpperCase()) cambiate.push({ sigla, prima: nota.legendaBrt, ora: nome })
   }
   return { nuove, cambiate }
@@ -219,4 +229,4 @@ export function confrontaLegenda(legenda: Record<string, string>) {
 
 // Le sigle della fattura che non sappiamo leggere (né conosciute né nella legenda del PDF).
 export const sigleSconosciute = (righe: RigaFatturaBrt[], legenda?: Record<string, string> | null) =>
-  Array.from(new Set(righe.flatMap(r => r.voci.map(v => v.sigla)))).filter(s => !SIGLE_BRT[s] && !VOCI_GLS[s] && !legenda?.[s])
+  Array.from(new Set(righe.flatMap(r => r.voci.map(v => v.sigla)))).filter(s => (!SIGLE_BRT[s] || !SIGLE_BRT[s].certa) && !VOCI_GLS[s] && !legenda?.[s])

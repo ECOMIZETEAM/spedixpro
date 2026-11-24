@@ -191,8 +191,12 @@ export async function analizzaFatturaBrt(
     const peso = r2(listino.totale - moove)
     if (Math.abs(peso) >= 0.01) {
       const dich = Number(s.peso_fatturato || s.peso_reale || 0)
-      const come = r.pesoRilevato > dich + 0.001 ? `pesato ${kg(r.pesoRilevato)} kg`
-        : Math.max(r.volumeFatturare, r.volumeRilevato) * 200 > dich + 0.001 ? `misurato ${Math.max(r.volumeFatturare, r.volumeRilevato).toLocaleString('it-IT')} m³ (${kg(Math.max(r.volumeFatturare, r.volumeRilevato) * 200)} kg di volume)`
+      // Il motivo è quello che fa il peso tassato: se il volume supera il peso pesato, è il volume. Prima vinceva
+      // sempre il peso pesato, e Wave leggeva "BRT ha pesato 4,9 kg, tassato 16 kg" (24/11): i 16 kg erano volume.
+      const m3 = Math.max(r.volumeFatturare, r.volumeRilevato), volKg = m3 * 200
+      const come = volKg > dich + 0.001 && volKg >= r.pesoRilevato - 0.001
+        ? `misurato ${m3.toLocaleString('it-IT')} m³ (${kg(volKg)} kg di volume${r.pesoRilevato > 0 ? `, pesato ${kg(r.pesoRilevato)} kg` : ''})`
+        : r.pesoRilevato > dich + 0.001 ? `pesato ${kg(r.pesoRilevato)} kg`
         : `tassato ${kg(r.pesoTassato)} kg`
       // BRT arrotonda (al kg fino a 100, ai 50 kg oltre): se l'arrotondamento cambia il peso, si dice.
       const arrot = Math.abs(r.pesoTassato - (r.pesoMisurato ?? r.pesoTassato)) > 0.001 && !come.startsWith('tassato') ? `, tassato ${kg(r.pesoTassato)} kg` : ''
@@ -204,13 +208,13 @@ export async function analizzaFatturaBrt(
     // BRT calcola il carburante anche sopra le voci extra (sulla "i" da 6,90 € sono 0,55 € in più): quel
     // carburante appartiene alla voce, non al nolo, altrimenti un listino giusto sembrerebbe sotto costo.
     // La percentuale si ricava dalla riga stessa: carburante / (tutto ciò che non è carburante né contrassegno).
-    const baseCarburante = r.nolo + r.voci.reduce((s, v) => { const c = descriviVoce(v.sigla, legenda).categoria; return c === 'carburante' || c === 'contrassegno' ? s : s + v.importo }, 0)
+    const baseCarburante = r.nolo + r.voci.reduce((s, v) => { const d = descriviVoce(v.sigla, legenda); return d.categoria === 'carburante' || d.categoria === 'contrassegno' || d.sopraIlCarburante ? s : s + v.importo }, 0)
     const quotaCarburante = baseCarburante > 0 ? (vociPerCategoria.carburante || 0) / baseCarburante : 0
     let fuori = 0
     for (const v of r.voci) {
       const d = descriviVoce(v.sigla, legenda)
       if (CATEGORIE_IN_LISTINO.has(d.categoria) || Math.abs(v.importo) < 0.005) continue
-      const conCarburante = r2(v.importo * (1 + quotaCarburante))
+      const conCarburante = r2(v.importo * (d.sopraIlCarburante ? 1 : 1 + quotaCarburante))
       fuori += conCarburante
       const sopra = r2(conCarburante - v.importo)
       const brtVoce = `${euro(v.importo)}${sopra >= 0.01 ? ` + ${euro(sopra)} di carburante` : ''}`
@@ -229,9 +233,20 @@ export async function analizzaFatturaBrt(
     const tariffa = r2(differenza - peso - fuori)
     if (Math.abs(tariffa) >= 0.01) {
       const brtTariffa = r2(r.totale - fuori)
-      motivi.push({ tipo: 'tariffa', importo: tariffa, testo: tariffa > 0
+      // Isola sì o no: BRT e il listino possono vederla diversa sullo stesso CAP (80070 è Bacoli, terraferma, e
+      // comuni di Ischia; 30126 è Venezia Lido). Fattura 74855 di Wave, 24/11: Barano d'Ischia isola per BRT
+      // (8 €) e Italia per Moove, Bacoli il contrario. Detto così si sa cosa sistemare: la zona, non il prezzo.
+      const isolaBrt = (vociPerCategoria.isole || 0) > 0.005
+      const isolaListino = /isol|venezia|lagun/i.test(listino.zona || '')
+      const dove = `${s.dest_cap || r.cap} ${s.dest_citta || r.localita}`
+      const zone = isolaBrt && !isolaListino
+        ? ` BRT l'ha trattata come isola (${euro(vociPerCategoria.isole || 0)}), il tuo listino come ${listino.zona || 'Italia'}: in Moove ${dove} non cade nella zona isole.`
+        : !isolaBrt && isolaListino
+          ? ` Il tuo listino l'ha trattata come ${listino.zona}, BRT no: per BRT ${dove} non è un'isola.`
+          : ''
+      motivi.push({ tipo: 'tariffa', importo: tariffa, testo: (tariffa > 0
         ? `A parità di peso BRT chiede ${euro(brtTariffa)} (nolo ${euro(r.nolo)} + carburante, isole, contrassegno), il tuo listino ${euro(listino.totale)}: listino più basso del vero.`
-        : `A parità di peso BRT chiede ${euro(brtTariffa)}, il tuo listino ${euro(listino.totale)}: listino più alto del vero.` })
+        : `A parità di peso BRT chiede ${euro(brtTariffa)}, il tuo listino ${euro(listino.totale)}: listino più alto del vero.`) + zone })
     }
     return { ...base, moove, listino, differenza, motivi }
   })
