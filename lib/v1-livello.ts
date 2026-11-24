@@ -11,6 +11,8 @@ import { erroreIndirizzoItaliano, cittaPerLaSpedizione } from '@/lib/citta-spedi
 import { spedizioneDoppioneAttiva, messaggioDoppione, doppioneSenzaTesta, prenotaOrdineInCreazione, MSG_ORDINE_IN_CORSO } from '@/lib/guardia-doppione'
 import { emailValidaSp } from '@/lib/spediamopro'
 import { modalitaConsegna, trovaPuntoDaCodice, puntoDichiarato, depositoDaRichiesta, ErrorePunti, type PuntoApi } from '@/lib/punti-consegna'
+import { serviziDelCorpo, risolviServiziRichiesti } from '@/lib/v1-servizi'
+import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 
 // UN LIVELLO DELL'API PUBBLICA, PRIMA DI TOCCARE IL CREDITO.
 // Sono i controlli e il prezzo di /api/v1/shipments, spostati qui riga per riga e senza cambiarli (20/11/2026):
@@ -246,7 +248,32 @@ export async function valutaLivelloV1(
     valoreMerce: Number(body.valoreMerce || 0), nolo: ris.prezzo, pesoReale,
   })
   if (!supp.disponibile) return NextResponse.json({ error: 'Importo contrassegno/assicurazione oltre il massimo consentito per questo contratto' }, { status: 400 })
-  const costoCliente = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100
+  let costoCliente = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100
+
+  // SERVIZI ACCESSORI (Exchange, Saturday Service): le regole del portale, in lib/v1-servizi. Senza servizi chiesti
+  // il prezzo resta la somma qui sopra, com'era. Con i servizi il prezzo e' quello di lib/prezzo-cliente, la stessa
+  // funzione con cui il portale addebita: nolo, supplementi e servizi riletti dal listino.
+  let serviziAccessori: { nome: string; importo: number }[] | null = null
+  const _serviziChiesti = serviziDelCorpo(body)
+  if (_serviziChiesti.length) {
+    const sv = await risolviServiziRichiesti(admin, { listinoId: cliente.listino_cliente_id, corriere, richiesti: _serviziChiesti })
+    if (!sv.ok) return NextResponse.json({ error: sv.errore }, { status: 400 })
+    const esito = await prezzoClienteDaListino(admin, {
+      listinoId: cliente.listino_cliente_id, corriereId: ctx.corriereId,
+      provincia: (body.shipTo.state || '').toUpperCase().trim(), cap: (body.shipTo.postalCode || '').toString().trim(),
+      paese: (body.shipTo.country || 'IT').toUpperCase().trim(), citta: (body.shipTo.city || '').toString().trim(), packages,
+      mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(),
+      contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), valoreMerce: Number(body.valoreMerce || 0),
+      serviziAccessori: sv.servizi, noloGiaCalcolato: ris,
+    })
+    if (!esito.ok || !esito.accessori) return NextResponse.json({ error: 'Destinazione non coperta dal listino per questo contratto (zona non prezzata): spedizione non creabile con questo corriere.' }, { status: 400 })
+    // Il prezzo vero e' quello riletto dal listino: se a conti fatti un servizio vale 0, al corriere non andrebbe
+    // (il portale lo scarta), quindi non si vende.
+    const senzaPrezzo = esito.accessori.find(a => !(Number(a.importo) > 0))
+    if (senzaPrezzo) return NextResponse.json({ error: `Servizio accessorio "${senzaPrezzo.nome}" senza prezzo nel listino per questo contratto: non è attivabile.` }, { status: 400 })
+    serviziAccessori = esito.accessori
+    costoCliente = esito.prezzo
+  }
 
   // Verifica credito della catena master
   // GLI STESSI ARGOMENTI DEL PORTALE, che chiama questa identica funzione dieci righe diverse piu'
@@ -272,6 +299,8 @@ export async function valutaLivelloV1(
     citta: body.shipTo.city,
     corriereNome: corriere.nome_contratto,
     contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+    // I servizi accessori pesano anche sul costo dei master, come nel portale (lib/cascata, accessoriDelLivello).
+    ...(serviziAccessori ? { serviziAccessori } : {}),
     mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT',
     // Con che zona e a che prezzo e' stato calcolato il cliente: serve al controllo "due zone sulla
     // stessa spedizione" dentro verificaCreditoCatena, che vale per tutte le porte insieme.
@@ -289,6 +318,6 @@ export async function valutaLivelloV1(
   return {
     cliente, masterId, corriere, cred, packages, pkg, pesoReale, pressoFrom, pressoTo, conPresso,
     _vuoleRitiro, _dataRitiro, _pomeriggio, _modalita, _codicePunto, puntoConsegna, depositoTipo,
-    _ritiroAlCorriere, _avvisoRitiroDeposito, ris, supp, costoCliente, catena,
+    _ritiroAlCorriere, _avvisoRitiroDeposito, ris, supp, costoCliente, catena, serviziAccessori,
   }
 }

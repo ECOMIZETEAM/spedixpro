@@ -39,10 +39,12 @@ export function rigaV1(p: {
   pressoFrom: string; pressoTo: string; puntoConsegna: any; packages: any[]; pesoReale: number; ris: any; pkg: any
   codModeUsata: ModalitaCod | null; etichettaUrl: string | null; colliDettaglio: any[] | null; raw: any
   costoCorrente: number; costoCliente: number; ritiroPrenotato: boolean; _dataRitiro: string; _pomeriggio: boolean
+  serviziAccessori?: { nome: string; importo: number }[] | null
 }) {
   const {
     cliente, ctx, numero, masterId, corriere, body, pressoFrom, pressoTo, puntoConsegna, packages, pesoReale, ris, pkg,
     codModeUsata, etichettaUrl, colliDettaglio, raw, costoCorrente, costoCliente, ritiroPrenotato, _dataRitiro, _pomeriggio,
+    serviziAccessori,
   } = p
   const numeroDb = (cliente as any)?.ledger && numero ? `${numero}-${String(ctx.clienteId).slice(0, 8)}` : numero
   const riga = {
@@ -86,6 +88,9 @@ export function rigaV1(p: {
     data_ritiro: ritiroPrenotato ? _dataRitiro : null,
     intervallo_ritiro: ritiroPrenotato ? (_pomeriggio ? '14:00-18:00' : '09:00-13:00') : null,
     canale: 'api',
+    // I servizi accessori col loro importo dal listino, come li salva il portale: report, scansione resi e
+    // contrassegno di un cambio li leggono da qui. Solo se chiesti: senza, la riga resta quella di prima.
+    ...(serviziAccessori?.length ? { servizi_accessori: serviziAccessori } : {}),
   }
   return { numeroDb, riga }
 }
@@ -137,7 +142,9 @@ export function parametriAlberoV1(p: { masterId: string; corriere: any; body: an
   }
 }
 
-export function parametriCatenaV1(p: { masterId: string; corriere: any; body: any; packages: any[]; costoCorrente: number; numero: string; spedizioneId: string | null }) {
+export function parametriCatenaV1(p: { masterId: string; corriere: any; body: any; packages: any[]; costoCorrente: number; numero: string; spedizioneId: string | null; serviziAccessori?: { nome: string; importo: number }[] | null }) {
   const { masterId, corriere, body, packages, costoCorrente, numero } = p
-  return { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT', numero, destNome: body.shipTo?.name || '', spedizioneId: p.spedizioneId, createdBy: null }
+  return { masterDirettoId: masterId, corriereOwnerId: corriere.master_id, costoSpedizione: costoCorrente, provincia: body.shipTo.state, packages, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city, corriereNome: corriere.nome_contratto, contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0), mittCap: (body.shipFrom.postalCode || '').toString().trim(), mittProvincia: (body.shipFrom.state || '').toUpperCase().trim(), mittPaese: 'IT', numero, destNome: body.shipTo?.name || '', spedizioneId: p.spedizioneId, createdBy: null,
+    // I servizi accessori: ogni master li paga col suo listino (lib/cascata, accessoriDelLivello), come dal portale.
+    ...(p.serviziAccessori?.length ? { serviziAccessori: p.serviziAccessori } : {}) }
 }

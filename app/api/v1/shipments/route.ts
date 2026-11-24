@@ -24,6 +24,7 @@ import { valutaLivelloV1 } from '@/lib/v1-livello'
 import { ldvPosteV1 } from '@/lib/v1-poste'
 import { corpoPerIlVenditoreV1, rigaV1, parametriAlberoV1, parametriCatenaV1 } from '@/lib/v1-riga'
 import { apriRichiestaPonte, chiudiRichiestaPonte, leggiRichiestaPonte, codiceRichiestaValido, type RegistroPonte } from '@/lib/ponte-richieste'
+import { codiciServiziContratto } from '@/lib/v1-servizi'
 
 // IL TETTO DI DURATA, che qui non c'era.
 // Oltre la chiamata d'ordine il pacco e' COMPRATO: se la funzione viene uccisa fra l'ordine e la
@@ -80,7 +81,8 @@ export async function GET(req: NextRequest) {
 // Auth: Authorization: Bearer <api_key>
 // Body: { packages:[{weight,length,width,height}], shipFrom:{...}, shipTo:{...}, codValue?, insuranceValue?, notes?, contenuto?,
 //         incassoModalita?: 'C'|'AB'|'AC' (contanti / assegno bancario / circolare: GLS e SDA EXPRESS L),
-//         pickup?: { requested: true, date: 'AAAA-MM-GG', time?: 'mattina'|'pomeriggio' } }
+//         pickup?: { requested: true, date: 'AAAA-MM-GG', time?: 'mattina'|'pomeriggio' },
+//         accessoryServices?: ['Exchange', ...] (servizi accessori del listino, dove il contratto li trasmette: lib/v1-servizi) }
 // Sui contratti Poste la risposta dice come si incassera' il contrassegno: `codMode: 'CON'|'ABM'|'ACM'`.
 // Il RITIRO va chiesto QUI: su alcuni contratti si prenota solo insieme all'ordine e non si puo'
 // aggiungere dopo — /api/v1/pickups per quei contratti risponde 400 apposta. Se il ritiro e' stato
@@ -130,7 +132,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   const {
     cliente, masterId, corriere, cred, packages, pkg, pesoReale, pressoFrom, pressoTo, conPresso,
     _vuoleRitiro, _dataRitiro, _pomeriggio, _codicePunto, puntoConsegna, depositoTipo,
-    _ritiroAlCorriere, _avvisoRitiroDeposito, ris, costoCliente,
+    _ritiroAlCorriere, _avvisoRitiroDeposito, ris, costoCliente, serviziAccessori,
   } = v
 
   // ── PRENOTAZIONE DEL CREDITO ─────────────────────────────────────────────────────
@@ -227,7 +229,10 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       body: JSON.stringify({ carrierCode: rate.carrierCode, contractCode: rate.contractCode, label_format: 'PDF', packages,
         shipFrom: { ...spedFrom, email: emailAlCorriere(corriere.nome_contratto, body.shipFrom?.email) },
         shipTo: { ...spedTo, email: emailAlCorriere(corriere.nome_contratto, body.shipTo?.email) },
-        notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0, accessoriServices: [] }),
+        notes: body.notes || '', insuranceValue: body.insuranceValue || 0, codValue: body.codValue || 0,
+        // I servizi accessori scelti (Exchange, Saturday Service), coi codici del fornitore: lib/v1-servizi, come il
+        // portale. Il preventivo qui sopra resta senza, come nel portale; il supplemento torna in shipmentCost.
+        accessoriServices: codiciServiziContratto(corriere, serviziAccessori) }),
     })
     const text = await res.text(); try { raw = JSON.parse(text) } catch { raw = { error: text } }
     // erroreCorrierePulito: la risposta grezza del provider porta il suo nome e i suoi campi
@@ -627,6 +632,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         email: body.shipTo.email || undefined,
         cellulare: body.shipTo.phone || undefined,
         telefono: body.shipTo.phone || undefined,
+        // Servizi accessori coi codici GLS (oggi l'Exchange, 24): lib/v1-servizi, come il portale.
+        ...(serviziAccessori?.length ? { serviziAccessori: codiciServiziContratto(corriere, serviziAccessori) } : {}),
         ...(parcelGls ? { tipoSpedizione: 'P' as const, paese: body.shipTo.country, personaRiferimento: body.shipTo.name } : {}),
       })
       if (!risGls.numeroSpedizione) {
@@ -719,6 +726,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   const { numeroDb, riga } = rigaV1({
     cliente, ctx, numero, masterId, corriere, body, pressoFrom, pressoTo, puntoConsegna, packages, pesoReale, ris, pkg,
     codModeUsata, etichettaUrl, colliDettaglio, raw, costoCorrente, costoCliente, ritiroPrenotato, _dataRitiro, _pomeriggio,
+    serviziAccessori,
   })
   const scriviRiga = () => admin.from('spedizioni').insert(riga).select('id').single()
   let inserted: any = null, insErr: any = null
@@ -859,7 +867,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       // salto). NON addebitaCatena, che risalirebbe l'albero fino all'owner = doppio su credito_proprio.
       await addebitaTreeCondivisione(admin, parametriAlberoV1({ masterId, corriere, body, packages, numero, spedizioneId: inserted?.id || null }))
     } else {
-      await addebitaCatena(admin, parametriCatenaV1({ masterId, corriere, body, packages, costoCorrente, numero, spedizioneId: inserted?.id || null }))
+      await addebitaCatena(admin, parametriCatenaV1({ masterId, corriere, body, packages, costoCorrente, numero, spedizioneId: inserted?.id || null, serviziAccessori }))
     }
   } catch (e) { console.error('API cascata:', e) }
 
@@ -932,6 +940,8 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
   return NextResponse.json({
     id: inserted?.id || null, tracking: numero, contratto: corriere.nome_contratto,
     prezzo: costoCliente, valuta: 'EUR', label_url: `/api/v1/shipments/${inserted?.id}/label`, stato: 'in_lavorazione',
+    // I servizi accessori trasmessi al corriere, con l'importo compreso in `prezzo`.
+    ...(serviziAccessori?.length ? { servizi_accessori: serviziAccessori } : {}),
     // Come si incassera' il contrassegno, quando il contratto e' Poste: lo legge anche il ponte che ha chiamato.
     ...(codModeUsata ? { codMode: codModeUsata } : {}),
     // Se il ritiro e' stato chiesto, la risposta dice se e' stato PRENOTATO e, se no, cosa fare.

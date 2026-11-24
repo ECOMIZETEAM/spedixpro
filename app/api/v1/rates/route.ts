@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { calcolaPrezzoListino, calcolaSupplementiCliente } from '@/lib/pricing'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { serviziDelCorpo, risolviServiziRichiesti } from '@/lib/v1-servizi'
+import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 
 // API pubblica MoovExpress — tariffa per il contratto della API key.
 // Auth: Authorization: Bearer <api_key>
-// Body: { packages:[{weight,length,width,height}], shipTo:{postalCode,state,country}, codValue?, insuranceValue? }
+// Body: { packages:[{weight,length,width,height}], shipTo:{postalCode,state,country}, codValue?, insuranceValue?, accessoryServices? }
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
@@ -69,7 +71,28 @@ export async function POST(req: NextRequest) {
   })
   if (!supp.disponibile) return NextResponse.json({ error: 'Importo contrassegno/assicurazione oltre il massimo consentito per questo contratto' }, { status: 400 })
 
-  const totale = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100
+  let totale = Math.round((ris.prezzo + supp.contrassegno + supp.assicurazione) * 100) / 100
+
+  // SERVIZI ACCESSORI: le stesse regole e lo stesso prezzo della creazione (lib/v1-servizi, lib/prezzo-cliente),
+  // cosi' il preventivo con l'Exchange e' quello che poi si paga. Senza servizi chiesti il totale resta quello sopra.
+  let serviziAccessori: { nome: string; importo: number }[] | null = null
+  const serviziChiesti = serviziDelCorpo(body)
+  if (serviziChiesti.length) {
+    const corriereSv = { ...(contratto as any), id: ctx.corriereId }
+    const sv = await risolviServiziRichiesti(admin, { listinoId: cliente.listino_cliente_id, corriere: corriereSv, richiesti: serviziChiesti })
+    if (!sv.ok) return NextResponse.json({ error: sv.errore }, { status: 400 })
+    const esito = await prezzoClienteDaListino(admin, {
+      listinoId: cliente.listino_cliente_id, corriereId: ctx.corriereId, provincia, cap, paese,
+      citta: (shipTo.city || shipTo.citta || '').toString().trim(), packages,
+      contrassegno: cod, assicurazione: ass, valoreMerce: Number(body.valoreMerce || 0),
+      serviziAccessori: sv.servizi, noloGiaCalcolato: ris,
+    })
+    if (!esito.ok || !esito.accessori) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione/peso' }, { status: 400 })
+    const senzaPrezzo = esito.accessori.find(a => !(Number(a.importo) > 0))
+    if (senzaPrezzo) return NextResponse.json({ error: `Servizio accessorio "${senzaPrezzo.nome}" senza prezzo nel listino per questo contratto: non è attivabile.` }, { status: 400 })
+    serviziAccessori = esito.accessori
+    totale = esito.prezzo
+  }
 
   return NextResponse.json({
     contratto: (contratto as any)?.nome_contratto || null,
@@ -80,6 +103,7 @@ export async function POST(req: NextRequest) {
     nolo: ris.prezzo,
     contrassegno: supp.contrassegno,
     assicurazione: supp.assicurazione,
+    ...(serviziAccessori ? { servizi_accessori: serviziAccessori } : {}),
     prezzo: totale,
     valuta: 'EUR',
   })

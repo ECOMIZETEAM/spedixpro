@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { serviziDisponibili } from '@/lib/v1-servizi'
 
 // GET /api/v1/account — verifica del collegamento ("test connessione").
 // Con API key valida risponde 200 con i dati del contratto; senza, 401.
@@ -34,6 +35,12 @@ export async function GET(req: NextRequest) {
     valuta: 'EUR',
     base_url: 'https://moovexpress.com/api/v1',
     consegna: await consegnaDelContratto(admin, corriere, (cliente as any)?.master_id),
+    // I servizi accessori che si possono chiedere con questa chiave (accessoryServices in POST /shipments e
+    // /rates): quelli del listino che il contratto trasmette al corriere (lib/v1-servizi). Importo = prezzo +
+    // percentuale del trasporto; il conto esatto lo dà /rates. Lista vuota = nessun servizio su questo contratto.
+    servizi_accessori: (await serviziDisponibili(admin, {
+      listinoId: (cliente as any)?.listino_cliente_id, corriere: corriere ? { ...(corriere as any), id: ctx.corriereId } : null,
+    })).map(s => ({ nome: s.nome, prezzo: s.prezzo, percentuale_trasporto: s.perc })),
   })
 }
 
