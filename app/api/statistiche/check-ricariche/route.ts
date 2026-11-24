@@ -170,10 +170,10 @@ async function aggiungi(admin: any, s: { user: any, master_id: string, ruolo: st
   if (giorno < '2024-01-01') return NextResponse.json({ error: 'Data troppo vecchia' }, { status: 400 })
   const stato = String(b.stato || '')
   if (!['attesa', 'effettuato', 'arrivato'].includes(stato)) return NextResponse.json({ error: 'Scegli a che punto è il bonifico' }, { status: 400 })
-  // Come nella finestra di ricarica: dove la contabilita' e' accesa si dice come ha pagato e chi ha fatto il
-  // bonifico; contanti o contrassegni compensati non aspettano niente in banca.
+  // Come nella finestra di ricarica: tutti dicono come ha pagato (contanti o contrassegni compensati non aspettano
+  // niente in banca), e dove la contabilita' e' accesa anche chi ha fatto il bonifico.
   const conti = contabilitaAttiva(s.master_id)
-  const metodo = conti ? (metodoValido(b.metodo) ? b.metodo : 'bonifico') : null
+  const metodo = metodoValido(b.metodo) ? b.metodo : 'bonifico'
   const bonifico = !metodo || metodo === 'bonifico'
   const mittente = conti && bonifico ? (pulisciNome(b.mittente) || null) : null
   const note = String(b.note || '').trim().slice(0, 500) || null

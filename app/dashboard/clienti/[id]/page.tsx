@@ -318,7 +318,8 @@ export default function ClienteProfiloPage() {
           importo: imp,
           bonificoEffettuato: bonifico && pagamento.stato !== 'attesa',
           bonificoArrivato: bonifico && pagamento.stato === 'arrivato',
-          ...(contabilita && bonifico ? { metodo: pagamento.metodo, mittente: pagamento.mittente } : {}),
+          // Come ha pagato: per tutti. Chi ha fatto il bonifico: solo dove la contabilita' e' accesa (estratto conto).
+          ...(bonifico ? { metodo: pagamento.metodo, ...(contabilita ? { mittente: pagamento.mittente } : {}) } : {}),
         }),
       })
       const data = await res.json()

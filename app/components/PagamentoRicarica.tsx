@@ -2,9 +2,13 @@
 import { useEffect, useState } from 'react'
 import { METODI_PAGAMENTO, type MetodoPagamento } from '@/lib/contabilita-banca'
 
-// Nella finestra di ricarica: A CHE PUNTO e' il bonifico (per il Check Ricariche, tutti i master) e, dove la
-// contabilita' e' accesa (lib/contabilita-banca), COME ha pagato e CHI ha fatto il bonifico, per ritrovarlo
-// sull'estratto conto. Propone per primo il nome usato l'ultima volta per quel cliente.
+// Nella finestra di ricarica: COME ha pagato e A CHE PUNTO e' il bonifico (per il Check Ricariche, tutti i master) e,
+// dove la contabilita' e' accesa (lib/contabilita-banca), CHI ha fatto il bonifico, per ritrovarlo sull'estratto
+// conto. Propone per primo il nome usato l'ultima volta per quel cliente.
+// «Come ha pagato» prima c'era solo dove la contabilita' e' accesa. Il 24/11/2026 Wave ha registrato «Pagamento
+// fattura · pagamento compensazione» (+3.106,60 €): non avendo la scelta, la riga e' nata «in attesa di bonifico» e
+// Wave l'ha eliminata dal Check Ricariche sedici secondi dopo. Ora la scelta c'e' per tutti (Lorenzo, 24/11): una
+// compensazione o dei contanti non aspettano niente in banca.
 // "Gia' arrivato" (Lorenzo, 10/11): con il bonifico istantaneo i soldi sono sul conto mentre si ricarica, e
 // prima bisognava aprire il Check Ricariche solo per segnarlo arrivato.
 
@@ -46,12 +50,12 @@ export default function PagamentoRicarica({ target, valore, onChange, onAttiva }
 
   // Lo stesso nome con due IBAN e' una persona sola nella tendina.
   const nomi = Array.from(new Set(pagatori.map(p => p.nome)))
-  const bonifico = !attiva || valore.metodo === 'bonifico'
+  const bonifico = valore.metodo === 'bonifico'
   const stato = STATI.find(s => s.valore === valore.stato) || STATI[0]
 
   return (
     <div style={{ marginTop: '14px', padding: '14px', background: '#fafafa', border: '1px solid #ececec', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {attiva && (
+      {(
         <div>
           <div style={titolo}>Come ha pagato</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -60,7 +64,7 @@ export default function PagamentoRicarica({ target, valore, onChange, onAttiva }
             ))}
           </div>
           {!bonifico && (
-            <div style={nota}>Non è un bonifico: questa ricarica non si cercherà sull&apos;estratto conto e non risulterà mai «non pagata».</div>
+            <div style={nota}>Non è un bonifico: nel Check Ricariche non resta «in attesa di bonifico»{attiva ? ', non si cercherà sull\'estratto conto' : ''} e non risulterà mai «non pagata».</div>
           )}
         </div>
       )}

@@ -15,12 +15,12 @@ type Spedizione = { id: string; numero: string | null; tracking_number: string |
 
 type Pagamento = { metodo: MetodoPagamento; mittente: string | null } | null
 
-// Come ha pagato la ricarica e chi ha fatto il bonifico (lib/contabilita-banca), per ritrovarla
-// sull'estratto conto. Solo per i master in prova: per gli altri la riga resta quella di sempre.
+// Come ha pagato la ricarica (per tutti dal 24/11/2026: contanti o una compensazione non aspettano un bonifico) e chi
+// ha fatto il bonifico, che serve solo a ritrovarlo sull'estratto conto: quello dove la contabilita' e' accesa.
+// Senza metodo (l'assistente Moovy, una pagina vecchia) vale bonifico, come prima.
 function pagamentoDa(body: any, masterId: string): Pagamento {
-  if (!contabilitaAttiva(masterId)) return null
   const metodo: MetodoPagamento = metodoValido(body?.metodo) ? body.metodo : 'bonifico'
-  return { metodo, mittente: metodo === 'bonifico' ? (pulisciNome(body?.mittente) || null) : null }
+  return { metodo, mittente: metodo === 'bonifico' && contabilitaAttiva(masterId) ? (pulisciNome(body?.mittente) || null) : null }
 }
 
 // CHECK RICARICHE: ogni credito aggiunto a mano senza una spedizione lascia una riga di controllo

@@ -70,7 +70,7 @@ export default function ModificaMasterPage() {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ clienteId: `m:${id}`, voce: v.id, numero: voce.numero, testo: voce.testo, importo: imp,
           bonificoEffettuato: bonifico && pagamento.stato !== 'attesa', bonificoArrivato: bonifico && pagamento.stato === 'arrivato',
-          ...(contabilita && bonifico ? { metodo: pagamento.metodo, mittente: pagamento.mittente } : {}) })
+          ...(bonifico ? { metodo: pagamento.metodo, ...(contabilita ? { mittente: pagamento.mittente } : {}) } : {}) })
       })
       const d = await res.json(); setSavingCredito(false)
       if (d.error) { setErrCredito(d.error); return }
