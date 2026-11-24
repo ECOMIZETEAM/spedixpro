@@ -12,6 +12,7 @@ import { anticipa } from '@/lib/richieste-anticipate'
 import { useProfiloUtente, type ProfiloUtente } from './RuoloUtente'
 import { GraficaNuova } from '@/app/components/grafica/contesto'
 import PlanciaB from '@/app/components/grafica/proposte/b/PlanciaB'
+import DashboardFinexy from '@/app/components/dashboard-finexy/DashboardFinexy'
 
 // I report del guadagno: una sola lista per le card e per le chiamate anticipate, cosi' i due
 // indirizzi non possono divergere.
@@ -135,21 +136,29 @@ function DashboardDiOggi() {
   const kpiLabel = {fontSize:'10px',fontWeight:'700' as const,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',lineHeight:1.3}
   const kpiValue = {fontSize:'26px',fontWeight:'800' as const,marginTop:'4px',lineHeight:1,color:'#1a1a1a'}
 
+  // LA DASHBOARD NUOVA (composizione «Finexy», Lorenzo 24/11/2026) per lo staff del master: saluto, credito, i numeri di
+  // oggi, le settimane, il piano, i corrieri e le ultime spedizioni stanno tutti in DashboardFinexy, e qui sotto restano
+  // solo i riquadri che li' non ci sono (crediti da recuperare, resi della rete, destinazioni, guadagno). L'agente ha la
+  // sua dashboard confinata ai suoi clienti e i numeri nuovi (/api/dashboard/plancia) sono solo dello staff: per lui
+  // resta quella di oggi, identica.
+  const nuova = String(data.ruolo || '').toLowerCase() !== 'agente'
+
   return (
     <div style={{display:'flex',flexDirection:'column' as const,gap:'16px'}}>
+      {nuova && <DashboardFinexy data={data} />}
 
       {/* Saluto */}
-      <div>
+      {!nuova && <div>
         <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.masterNome}</h1>
         <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
-      </div>
+      </div>}
 
       {/* Banner SMS: quanti ne restano / invito ad attivare */}
       <BannerSms />
 
       {/* IL TUO CREDITO: conto rete (verso il master sopra) + eventuale conto proprio. Verde se a
           credito, rosso se a debito — chi fattura va sotto zero ed e' normale. */}
-      {data.creditoMaster && (() => {
+      {!nuova && data.creditoMaster && (() => {
         const rete = Number(data.creditoMaster.rete || 0)
         const proprio = Number(data.creditoMaster.proprio || 0)
         const pos = rete >= 0
@@ -181,6 +190,7 @@ function DashboardDiOggi() {
       })()}
 
       {/* KPI */}
+      {!nuova && <>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
 
         {/* Spedizioni mese — card scura principale */}
@@ -277,6 +287,7 @@ function DashboardDiOggi() {
           <div style={{...kpiValue,fontSize:'20px',color:Number(data.codDaRimettere)>0?'#ea580c':'#1a1a1a'}}>€ {Number(data.codDaRimettere||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
+      </>}
 
       {/* CREDITI DA RECUPERARE — le due modalita' NON vanno confuse:
           a scalare = cliente bloccato che deve ricaricare (soldi da farsi ridare);
@@ -323,7 +334,7 @@ function DashboardDiOggi() {
       )}
 
       {/* Tasso consegna + Top corriere + Top cliente */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'12px'}}>
+      {!nuova && <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'12px'}}>
         <div style={kpiCardLight}>
           <div style={{...kpiIconLight,background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#16a34a'}}>📈</div>
           <div style={kpiLabel}>TASSO DI CONSEGNA</div>
@@ -342,12 +353,13 @@ function DashboardDiOggi() {
           <div style={{...kpiValue,fontSize:'17px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{data.topCliente?.nome || '—'}</div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>{data.topCliente?.n ? `${Number(data.topCliente.n).toLocaleString()} spedizioni` : 'nessun dato'}</div>
         </div>
-      </div>
+      </div>}
 
       {/* Resi della rete: i clienti con troppi resi (truffe, clienti in difficolta'), vedi ResiReteWidget */}
       <ResiReteWidget />
 
       {/* Grafici */}
+      {!nuova && <>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'16px'}}>
         <div style={card}>
           <div style={cardH}>Statistiche</div>
@@ -427,6 +439,7 @@ function DashboardDiOggi() {
           </table>
         </div>
       </div>
+      </>}
 
       {/* Destinazioni principali — mappa Italia (master vede la rete, agente i suoi clienti) */}
       <DestinazioniWidget />
