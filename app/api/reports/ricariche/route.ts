@@ -7,6 +7,7 @@ import { vedeLaRete } from '@/lib/ruoli'
 import { eDiscendente } from '@/lib/rete-masters'
 import { senzaNomiFornitori } from '@/lib/corriere-logo'
 import { confineGiornoRoma } from '@/lib/date-roma'
+import { voceManuale } from '@/lib/movimento-manuale'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,8 +17,15 @@ export const dynamic = 'force-dynamic'
 // ricariche vere 15.887,86 — il resto erano rimborsi di annullo, rimesse contrassegni e rettifiche a
 // favore. Una pagina che si chiama "Storico Ricariche" deve dare per prima la cifra delle ricariche;
 // gli altri accrediti restano, scegliendoli, e "Tutti gli accrediti" li somma tipo per tipo.
+// Dal 24/11/2026 gli accrediti scritti a mano portano la voce (lib/movimento-manuale): una fattura pagata, dei
+// contrassegni compensati, del credito trasferito o una correzione sono tipo 'ricarica' ma non sono ricariche. Il 3/11
+// QUICK ha accreditato 7.977,61 € a un cliente con «Emissione fattura FPR 1658/26» e qui risultava ricaricato; dall'1 al
+// 24/11 erano 110 accrediti cosi', 80.502,27 €. Ora ognuno ha il nome della sua voce e «Solo ricariche» tiene le
+// ricariche e i movimenti senza voce (lo storico, che resta com'e'). I contrassegni compensati a mano stanno con le
+// rimesse contrassegni.
 const ETICHETTA: Record<string, string> = {
   ricarica: 'Ricarica credito',
+  spedizione: 'Spedizione a favore',
   rimborso: 'Rimborso/storno',
   rettifica: 'Rettifica a favore',
   contrassegno: 'Rimessa contrassegni',
@@ -27,13 +35,28 @@ const ETICHETTA: Record<string, string> = {
   abbonamento_incasso: 'Incasso abbonamento',
   rimborso_abbonamento: 'Rimborso abbonamento',
 }
-// Valore della tendina "Tipo" → tipi di movimento. 'tutti' = nessun filtro sul tipo.
+// Valore della tendina "Tipo" → tipi di movimento da leggere. 'tutti' = nessun filtro sul tipo.
 const TIPI_FILTRO: Record<string, string[] | null> = {
   ricarica: ['ricarica'],
   rimborso: ['rimborso', 'rimborso_abbonamento'],
-  contrassegno: ['contrassegno'],
+  contrassegno: ['contrassegno', 'ricarica'],
   rettifica: ['rettifica'],
+  a_mano: ['ricarica'],
   tutti: null,
+}
+type Accredito = { tipo: string; voce?: string | null }
+// Poi la voce decide dove sta un accredito a mano di tipo 'ricarica'.
+const STA_NEL_FILTRO: Record<string, (m: Accredito) => boolean> = {
+  ricarica: (m) => !m.voce || m.voce === 'ricarica',
+  contrassegno: (m) => m.tipo === 'contrassegno' || m.voce === 'contrassegni',
+  a_mano: (m) => !!m.voce && m.voce !== 'ricarica' && m.voce !== 'contrassegni',
+}
+// Il nome in colonna Tipo: quello della voce per gli accrediti a mano che non stanno su una spedizione (su una
+// spedizione vale il tipo, che e' gia' giacenza, rettifica, reso o rimborso).
+function etichettaDi(m: Accredito): string {
+  const v = voceManuale(m.voce)
+  if (v && v.famiglia !== 'pacco') return v.id === 'ricarica' ? ETICHETTA.ricarica : v.id === 'contrassegni' ? 'Contrassegni compensati' : v.nome
+  return ETICHETTA[m.tipo] || m.tipo
 }
 
 export async function GET(req: NextRequest) {
@@ -93,7 +116,7 @@ export async function GET(req: NextRequest) {
       // Solo il conto RETE, cioe' il credito che il sotto-master tiene presso la mia rete. Sul conto
       // 'proprio' stanno i rimborsi dei SUOI contratti, che col mio storico non c'entrano.
       const mv = await fetchAllStretto(() => {
-        let q = admin.from('movimenti').select('created_at,tipo,descrizione,riferimento,importo,saldo_dopo')
+        let q = admin.from('movimenti').select('created_at,tipo,voce,descrizione,riferimento,importo,saldo_dopo')
           .eq('master_target_id', masterSel).gt('importo', 0).or('conto.is.null,conto.neq.proprio')
         if (tipi) q = q.in('tipo', tipi)
         if (dal) q = q.gte('created_at', dal)
@@ -112,7 +135,7 @@ export async function GET(req: NextRequest) {
         const chunk = ids.slice(i, i + 100)
         if (!chunk.length) continue
         const mv = await fetchAllStretto(() => {
-          let q = admin.from('movimenti').select('created_at,tipo,descrizione,riferimento,importo,saldo_dopo,cliente_id')
+          let q = admin.from('movimenti').select('created_at,tipo,voce,descrizione,riferimento,importo,saldo_dopo,cliente_id')
             .in('cliente_id', chunk).gt('importo', 0)
           if (tipi) q = q.in('tipo', tipi)
           if (dal) q = q.gte('created_at', dal)
@@ -123,6 +146,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    if (STA_NEL_FILTRO[filtroTipo]) {
+      const resta = righe.filter(STA_NEL_FILTRO[filtroTipo])
+      righe.length = 0
+      righe.push(...resta)
+    }
     righe.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
     // Il credito residuo dei clienti lo vede solo lo staff del master: all'agente no, come in Lista
     // Movimenti e in Consumabili. Gli accrediti restano, il saldo dopo ciascuno no.
@@ -130,7 +158,7 @@ export async function GET(req: NextRequest) {
     const out = righe.map((r: any) => ({
       data: r.created_at,
       cliente: r.cliente,
-      tipo: ETICHETTA[r.tipo] || r.tipo,
+      tipo: etichettaDi(r),
       // All'agente senza i nomi dei fornitori tecnici scritti a mano nelle descrizioni.
       descrizione: nascondiSaldo ? senzaNomiFornitori(r.descrizione) : (r.descrizione || ''),
       riferimento: nascondiSaldo ? senzaNomiFornitori(r.riferimento) : (r.riferimento || ''),

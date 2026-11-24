@@ -27,6 +27,7 @@ import { sottoSulConto } from '@/lib/contabilita-banca'
 import { voceUscita } from '@/lib/contabilita-abbina'
 import { guadagnoOperativo } from '@/lib/guadagno-totale'
 import { leggiCostiGestione, riepilogoCosti } from '@/lib/costi-gestione'
+import { FILTRO_SOLDI_ARRIVATI } from '@/lib/movimento-manuale'
 
 const GIORNO = 86400000
 const r2 = (x: number) => Math.round(x * 100) / 100
@@ -71,8 +72,9 @@ export async function usciteDellaBanca(admin: any, M: string, dal: string, al: s
   const [righe, voci, ricariche, distinte] = await Promise.all([
     fetchAllStretto(() => admin.from('estratti_righe').select('id,data,nome,causale,iban,importo').eq('master_id', M).gte('data', dal).lte('data', al).lt('importo', 0).order('data').order('id')),
     fetchAllStretto(() => admin.from('uscite_voci').select('controparte,voce').eq('master_id', M).order('controparte')),
-    // le ricariche sul conto del master verso chi gli vende (conto 'rete'), qualche giorno piu' in la'
-    fetchAllStretto(() => admin.from('movimenti').select('id,importo,created_at').eq('master_target_id', M).eq('conto', 'rete').eq('tipo', 'ricarica')
+    // le ricariche sul conto del master verso chi gli vende (conto 'rete'), qualche giorno piu' in la'. Solo i soldi
+    // arrivati davvero (lib/movimento-manuale): dei contrassegni compensati non sono un bonifico da riconoscere.
+    fetchAllStretto(() => admin.from('movimenti').select('id,importo,created_at').eq('master_target_id', M).eq('conto', 'rete').eq('tipo', 'ricarica').or(FILTRO_SOLDI_ARRIVATI)
       .gte('created_at', inizioGiornoRoma(spostaGiorni(dal, -1))).lte('created_at', fineGiornoRoma(spostaGiorni(al, 6))).order('created_at').order('id')),
     fetchAllStretto(() => admin.from('distinte_contrassegni').select('id,metodo_pagamento,data_pagamento').eq('master_id', M)
       .gte('data_pagamento', inizioGiornoRoma(spostaGiorni(dal, -6))).lte('data_pagamento', fineGiornoRoma(spostaGiorni(al, 6))).order('id')),
@@ -348,9 +350,11 @@ export async function saluteConto(admin: any, M: string, adesso = new Date()) {
 }
 
 /** Le ricariche del master a un sotto-master in un intervallo. Il pulsante del giro scrive la sua con riferimento
- *  'giro <id>' (gira_bonifici_sotto_master): `colPulsante` false = solo quelle a mano. */
+ *  'giro <id>' (gira_bonifici_sotto_master): `colPulsante` false = solo quelle a mano.
+ *  Solo i soldi arrivati davvero (lib/movimento-manuale): tra settembre e ottobre 2026 Ecomize Solution ha accreditato
+ *  a Ecomize LL 8.257,96 € di contrassegni («rimb cod») che qui passavano per bonifici dei suoi clienti girati. */
 async function ricaricheASotto(admin: any, M: string, sotto: string, dal: string, al: string, colPulsante: boolean) {
-  const l = await fetchAllStretto(() => admin.from('movimenti').select('id,importo,riferimento').eq('master_target_id', sotto).eq('conto', 'rete').eq('tipo', 'ricarica')
+  const l = await fetchAllStretto(() => admin.from('movimenti').select('id,importo,riferimento').eq('master_target_id', sotto).eq('conto', 'rete').eq('tipo', 'ricarica').or(FILTRO_SOLDI_ARRIVATI)
     .eq('master_id', M).gte('created_at', dal).lte('created_at', al).order('id'))
   return r2(l.filter((x: any) => colPulsante || !String(x.riferimento || '').startsWith('giro ')).reduce((t: number, x: any) => t + Number(x.importo), 0))
 }

@@ -133,6 +133,15 @@ export function metodoNelCheck(v: VoceManuale): 'cod_compensati' | 'altro' {
   return v.id === 'contrassegni' ? 'cod_compensati' : 'altro'
 }
 
+// SOLDI CHE ARRIVANO DAVVERO. Fra gli accrediti a mano (tipo 'ricarica'), solo la ricarica e il pagamento di una
+// fattura sono soldi entrati: sono quelli che la Salute del conto cerca in banca (lo Storico Ricariche invece chiama
+// ricarica solo la ricarica, e mostra ogni altro accredito col suo nome). Contrassegni compensati, credito trasferito e correzioni muovono il credito senza che entri un euro: il 17/09
+// Ecomize Solution ha accreditato a Ecomize LL 2.303,70 € di contrassegni («rimb cod»), e la Salute del conto lo
+// contava fra i bonifici girati. I movimenti senza voce (lo storico, prima del 24/11/2026) restano contati come prima.
+export const VOCI_SOLDI_ARRIVATI: IdVoce[] = ['ricarica', 'fattura']
+// Lo stesso filtro per PostgREST (`.or(...)` su movimenti).
+export const FILTRO_SOLDI_ARRIVATI = `voce.is.null,voce.in.(${VOCI_SOLDI_ARRIVATI.join(',')})`
+
 // Il numero si cerca fra `numero` e `tracking_number`: solo lettere, cifre e pochi separatori, perche' finisce
 // dentro un filtro PostgREST.
 export function numeroSpedizionePulito(v: unknown): string | null {

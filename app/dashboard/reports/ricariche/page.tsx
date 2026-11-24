@@ -21,6 +21,9 @@ const TIPI = [
   { v: 'rimborso', l: 'Rimborsi', titolo: 'Rimborsi e storni', totale: 'TOTALE RIMBORSI' },
   { v: 'contrassegno', l: 'Rimesse contrassegni', titolo: 'Rimesse contrassegni', totale: 'TOTALE RIMESSE' },
   { v: 'rettifica', l: 'Rettifiche a favore', titolo: 'Rettifiche a favore', totale: 'TOTALE RETTIFICHE A FAVORE' },
+  // Dal 24/11/2026 chi scrive un accredito a mano sceglie la voce (lib/movimento-manuale): le fatture pagate, i
+  // contrassegni compensati, il credito trasferito e le correzioni non stanno piu' fra le ricariche ma qui.
+  { v: 'a_mano', l: 'Fatture e altri accrediti a mano', titolo: 'Fatture pagate e accrediti a mano', totale: 'TOTALE ACCREDITI A MANO' },
   { v: 'tutti', l: 'Tutti gli accrediti', titolo: 'Storico ricariche e accrediti', totale: 'TOTALE ACCREDITATO' },
 ]
 const tipoDi = (v: string) => TIPI.find(t => t.v === v) || TIPI[0]
@@ -175,7 +178,7 @@ export default function ReportRicarichePage() {
     <div>
       <div style={{marginBottom:'16px'}}>
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Storico Ricariche e Accrediti</h1>
-        <p style={{color:'#666',fontSize:'13px',marginTop:'4px'}}>Le ricariche di credito dei clienti. Dalla tendina Tipo anche gli altri accrediti: rimborsi, rimesse contrassegni e rettifiche a favore.</p>
+        <p style={{color:'#666',fontSize:'13px',marginTop:'4px'}}>Le ricariche di credito dei clienti. Dalla tendina Tipo anche gli altri accrediti: rimborsi, rimesse contrassegni, rettifiche a favore, fatture pagate e accrediti a mano.</p>
       </div>
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px',marginBottom:'16px'}}>
