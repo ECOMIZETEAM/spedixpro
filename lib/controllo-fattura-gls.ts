@@ -45,6 +45,13 @@ const pct = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 2 
 // delle ripesature): fuori i costi di resi e giacenze del fornitore e gli storni dei resi, che col tipo
 // 'rettifica' sembrerebbero nolo.
 const TIPI_LETTI = ['spedizione', 'rettifica', 'reso', 'giacenza', 'rimborso', 'accessorio']
+// «ENTRO ORE 12» PER ERRORE NOSTRO. Fino al 30/10/2026 (correzione 800db65a, rilasciata dopo le 10:03) Moove
+// metteva la modalità del contrassegno nei servizi accessori GLS (01 contanti, dalla tabella che GLS ci aveva
+// dato il 2/9); per GLS 01 è "consegna entro le 12", e lo stampava su ogni etichetta. I 12/22/32/42 € della
+// colonna servizi (la "Sprinter" del borderò) sui contrassegni di quel periodo sono quello: verificato sulle
+// etichette salvate di tutte e 16 le spedizioni di Wave (338 € a ottobre, 24 € a novembre). Non vanno chiesti a
+// GLS: il servizio l'abbiamo chiesto noi.
+const FINE_ERRORE_ENTRO_12 = '2026-10-30T09:30:00Z'
 // Supabase taglia una risposta a 1.000 righe senza errore: arrivarci vuol dire che ne mancano.
 const TETTO = 1000
 // Sotto questo scarto la percentuale del carburante è la stessa: GLS la calcola su tutto il nolo del
@@ -225,7 +232,10 @@ export async function analizzaFatturaGls(
         ? { tipo: 'voce', importo: residuo, voce: 'Servizio a listino, GLS non lo fa pagare', gruppo: 'listino', testo: `Il tuo listino fa costare il servizio ${euro(accG)}, GLS non lo fa pagare.` }
         : accG > 0.005 || conServizi
           ? { tipo: 'voce', importo: residuo, voce: d.nome, gruppo: 'listino', testo: `${d.nome}: GLS ${euro(glsServizi)}, il tuo listino ${accG > 0.005 ? euro(accG) : 'non gli dà un costo'}.` }
-          : { tipo: 'voce', importo: residuo, voce: d.nome, gruppo: d.gruppo, testo: `${d.nome}: ${d.nota}` })
+          : Number(s.contrassegno || 0) > 0 && String(s.created_at || '') < FINE_ERRORE_ENTRO_12
+            ? { tipo: 'voce', importo: residuo, voce: 'Entro ore 12, attivato per errore da Moove', gruppo: 'listino',
+                testo: `Entro ore 12, attivato per errore da Moove: fino al 30/10 Moove lo chiedeva a GLS su ogni contrassegno (sull'etichetta "ENTRO ORE 12"). GLS l'ha fatto pagare ${euro(glsServizi)}: errore della piattaforma, non di GLS.` }
+            : { tipo: 'voce', importo: residuo, voce: d.nome, gruppo: d.gruppo, testo: `${d.nome}: ${d.nota}` })
     }
 
     const tariffa = r2(differenza - peso - carburante - voci)
