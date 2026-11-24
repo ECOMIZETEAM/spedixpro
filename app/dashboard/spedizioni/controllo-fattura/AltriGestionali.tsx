@@ -2,6 +2,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import { descriviVoce, KG_PER_M3_BRT, type RigaFatturaBrt } from '@/lib/fattura-brt'
+import { eGls } from '@/lib/fattura-gls'
 import { FORMATI, riconosciFormato, abbinaEsterne, righeRettificheEsterne, type FormatoEsterno, type SpedizioneEsterna, type AbbinataEsterna } from '@/lib/gestionali-esterni'
 import { C, carta, cifre, euro, conSegno, kg, r2, Icona, Tessera, Pillola } from './ui'
 
@@ -14,8 +15,10 @@ type FileCaricato = { nome: string; formato: FormatoEsterno; spedizioni: Spedizi
 type Filtro = 'perdita' | 'tutte' | 'rettifica' | 'rientri'
 const PER_PAGINA = 50
 
-// Perché BRT l'ha tassata così: pesata, misurata, o il volume scritto sulla bolla; poi l'arrotondamento.
+// Perché il corriere l'ha tassata così: pesata, misurata, o il volume scritto sulla bolla; poi l'arrotondamento.
+// GLS stampa solo il peso reale e quello di volume, e tassa il maggiore.
 function comeTassata(r: RigaFatturaBrt) {
+  if (eGls(r)) return r.pesoVolume > r.pesoRilevato + 0.001 ? `misurata ${kg(r.pesoVolume)} di volume` : `pesata ${kg(r.pesoRilevato)}`
   const m = r.pesoMisurato ?? r.pesoTassato   // le righe salvate nello storico prima del 02/11 non l'hanno
   const tassata = Math.abs(r.pesoTassato - m) > 0.001 ? `, tassata ${kg(r.pesoTassato)}` : ''
   if (r.pesoRilevato >= m - 0.001 && r.pesoRilevato > r.pesoDichiarato + 0.001) return `pesata ${kg(r.pesoRilevato)}${tassata}`
@@ -30,8 +33,8 @@ const vociDi = (r: RigaFatturaBrt, legenda?: Record<string, string> | null) => [
 
 export type EsternoIniziale = { nome: string; formatoId: string; spedizioni: SpedizioneEsterna[] }
 
-export default function AltriGestionali({ righe, numeroFattura, iniziali, onScaricato, legenda }: {
-  righe: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]; legenda?: Record<string, string> | null
+export default function AltriGestionali({ righe, numeroFattura, iniziali, onScaricato, legenda, corriere = 'BRT' }: {
+  righe: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]; legenda?: Record<string, string> | null; corriere?: string
   onScaricato?: (x: { nome: string; righe: number }) => void   // scaricare il file è un'azione: la fattura resta nello storico
 }) {
   const dialog = useDialog()
@@ -149,7 +152,7 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10, marginBottom: 12 }}>
               {[
                 { t: 'Abbinate', v: `${righeAbbinate} di ${e.disponibili}`, n: 'righe della fattura', c: C.testo },
-                { t: 'Andate: BRT', v: euro(brtAndate), n: `${andate.length} spedizioni`, c: C.testo },
+                { t: `Andate: ${corriere}`, v: euro(brtAndate), n: `${andate.length} spedizioni`, c: C.testo },
                 { t: 'Andate: pagato dai clienti', v: euro(prezzo), n: 'prezzo nel gestionale, contrassegno compreso', c: C.testo },
                 { t: 'Margine sulle andate', v: conSegno(margine), n: inPerdita ? `${inPerdita} spedizioni in perdita` : 'nessuna in perdita', c: margine < -0.005 ? C.rosso : C.verde },
                 { t: 'Resi e giacenze', v: euro(rientri), n: conRientri.length ? `${conRientri.length} spedizioni: l'export non dice se li hai fatti pagare` : 'nessuno', c: rientri ? C.ambra : C.testo },
@@ -168,8 +171,8 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
                 <div style={{ flex: 1, minWidth: 240 }}>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>{rett.length} rettifiche di peso pronte per questo gestionale</div>
                   <div style={{ fontSize: 12.5, color: '#475467', marginTop: 2, lineHeight: 1.45 }}>
-                    BRT le ha tassate più del peso su cui il gestionale ha fatto il prezzo. Il file ha le colonne che vuole lui
-                    ({e.formato.rettifiche.colonne.join(', ')}), col peso tassato da BRT: caricalo là, e lì si ricalcola il prezzo al cliente.
+                    {corriere} le ha tassate più del peso su cui il gestionale ha fatto il prezzo. Il file ha le colonne che vuole lui
+                    ({e.formato.rettifiche.colonne.join(', ')}), col peso tassato da {corriere}: caricalo là, e lì si ricalcola il prezzo al cliente.
                     {multi > 0 && ` ${multi} multicollo restano fuori: la fattura dà il peso totale e il file lo vuole collo per collo, vanno fatti a mano.`}
                   </div>
                 </div>
@@ -189,7 +192,7 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
             <Icona nome="avviso" size={16} />
             <span>
               {nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione in nessun file:{' '}
-              {nonAbbinate.slice(0, 6).map(r => `${r.tipoBolla === 'F1' ? 'andata' : r.tipoBolla.startsWith('A') ? 'reso' : 'bolla accessoria'} ${r.segnacollo} (${r.tipoBolla.startsWith('A') ? r.mittente : r.destinatario}, ${euro(r.totale)})`).join('; ')}
+              {nonAbbinate.slice(0, 6).map(r => `${r.andata ? 'andata' : r.tipoBolla === 'Arrivo' ? 'arrivo' : r.tipoBolla.startsWith('A') ? 'reso' : 'bolla accessoria'} ${r.segnacollo} (${!r.andata && r.tipoBolla.startsWith('A') ? r.mittente || r.destinatario : r.destinatario}, ${euro(r.totale)})`).join('; ')}
               {nonAbbinate.length > 6 ? '…' : ''}. Di solito è un pacco partito in un periodo che l'export non copre.
             </span>
           </div>
@@ -216,7 +219,7 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead><tr style={{ background: C.fondoTenue, color: C.attenuato, fontSize: 11.5, textAlign: 'left', textTransform: 'uppercase', letterSpacing: '.03em' }}>
-                {['Lettera di vettura', 'Destinazione', 'Peso gestionale → BRT', 'BRT', 'Pagato dal cliente', 'Margine', 'Perché'].map((h, i) => (
+                {['Lettera di vettura', 'Destinazione', `Peso gestionale → ${corriere}`, corriere, 'Pagato dal cliente', 'Margine', 'Perché'].map((h, i) => (
                   <th key={h} style={{ padding: '10px 12px', fontWeight: 600, textAlign: i >= 3 && i <= 5 ? 'right' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr></thead>
@@ -249,7 +252,7 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
                         <Pillola colore={netto < -0.005 ? C.rosso : C.verde} fondo={netto < -0.005 ? C.rossoTenue : C.verdeTenue} orlo={netto < -0.005 ? C.rossoOrlo : C.verdeOrlo}>{conSegno(netto)}</Pillola>
                       </td>
                       <td style={{ padding: '10px 12px', fontSize: 12.5, color: '#475467', lineHeight: 1.5, minWidth: 280 }}>
-                        {r && <div>Andata: {vociDi(r, legenda)}.{a.daRettificare ? ` BRT l'ha ${comeTassata(r)}, il gestionale aveva ${kg(a.sped.peso)}.` : ''}</div>}
+                        {r && <div>Andata: {vociDi(r, legenda)}.{a.daRettificare ? ` ${corriere} l'ha ${comeTassata(r)}, il gestionale aveva ${kg(a.sped.peso)}.` : ''}</div>}
                         {a.rientri.map(x => (
                           <div key={x.segnacollo + x.numeroSpedizione}>{x.tipoBolla.startsWith('A') ? 'Reso al mittente' : 'Bolla accessoria (giacenza)'}: {vociDi(x, legenda)}.</div>
                         ))}

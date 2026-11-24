@@ -11,6 +11,7 @@
  * Qui solo la lettura: niente database, così la stessa funzione gira nel browser (anteprima) e sul server
  * (abbinamento e addebito) e le due non possono leggere lo stesso file in due modi diversi. */
 import Papa from 'papaparse'
+import { VOCI_GLS } from '@/lib/fattura-gls'
 
 // Peso volumetrico BRT: 200 kg per metro cubo (= divisore 5000 in cm). È il fattore con cui BRT tassa
 // "VOLUME DA FATTURARE" e "VOLUME RILEVATO"; le fatture lo confermano (materasso 0,181 m³ → 36,2 kg).
@@ -199,6 +200,8 @@ export const SIGLE_BRT: Record<string, SiglaBrt> = {
 // scritto da BRT ("DIROTTAM.T"), senza tradurlo a occhio.
 export function descriviVoce(sigla: string, legenda?: Record<string, string> | null): SiglaBrt {
   if (SIGLE_BRT[sigla]) return SIGLE_BRT[sigla]
+  // Le voci delle righe GLS (lib/fattura-gls): stessa pagina, stesse funzioni.
+  if (VOCI_GLS[sigla]) return VOCI_GLS[sigla]
   if (legenda?.[sigla]) return { nome: `${legenda[sigla]} (dalla legenda BRT)`, categoria: 'altro', certa: true, dallaFattura: true }
   return { nome: `Voce "${sigla}" sconosciuta`, categoria: 'altro', certa: false }
 }
@@ -216,4 +219,4 @@ export function confrontaLegenda(legenda: Record<string, string>) {
 
 // Le sigle della fattura che non sappiamo leggere (né conosciute né nella legenda del PDF).
 export const sigleSconosciute = (righe: RigaFatturaBrt[], legenda?: Record<string, string> | null) =>
-  Array.from(new Set(righe.flatMap(r => r.voci.map(v => v.sigla)))).filter(s => !SIGLE_BRT[s] && !legenda?.[s])
+  Array.from(new Set(righe.flatMap(r => r.voci.map(v => v.sigla)))).filter(s => !SIGLE_BRT[s] && !VOCI_GLS[s] && !legenda?.[s])

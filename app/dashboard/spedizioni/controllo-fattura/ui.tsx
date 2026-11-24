@@ -37,6 +37,9 @@ export const TRATTI: Record<string, string> = {
   avviso: 'M12 9v4 M12 17h.01 M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
   rientro: 'M9 14 4 9l5-5 M4 9h11a5 5 0 0 1 0 10h-3',
   matita: 'M4 20h4L19 9l-4-4L4 16z M14 6l4 4',
+  carburante: 'M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16 M3 21h12 M7 8h4 M14 10h2a2 2 0 0 1 2 2v4a1.5 1.5 0 0 0 3 0V8l-3-3',
+  storico: 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 7v5l3 2',
+  domanda: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6 M12 17h.01',
 }
 export function Icona({ nome, size = 18, colore }: { nome: string; size?: number; colore?: string }) {
   return (

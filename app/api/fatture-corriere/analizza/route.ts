@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { contrattiDelDetentore, utenteDetentore } from '@/lib/controllo-fattura-accesso'
+import { contrattiDelDetentore, gruppiGls, utenteDetentore } from '@/lib/controllo-fattura-accesso'
 import { analizzaFatturaBrt } from '@/lib/controllo-fattura'
+import { analizzaFatturaGls } from '@/lib/controllo-fattura-gls'
+import { eGls, type RigaFatturaGls } from '@/lib/fattura-gls'
 import { riepilogaFattura, fatturaConAzioni, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
 
@@ -13,18 +15,34 @@ export const maxDuration = 300
 // storico (fatture_corriere + righe), così la fattura si riapre senza il file. Il costo in Moove non si
 // tocca: l'addebito ai clienti lo fa la Rettifica, la pagina le manda le differenze di peso come "solo pesi".
 // Chi può usarla: solo il detentore del contratto (lib/controllo-fattura-accesso).
+// GLS (dal 24/11): le righe arrivano dal PDF letto da /api/fatture-corriere/gls e si confrontano con
+// lib/controllo-fattura-gls; storico, chiusura e Rettifica sono gli stessi di BRT.
+
+// I contratti che si possono controllare: BRT uno per uno, GLS uno per conto (più contratti Moove sullo
+// stesso contratto GLS stanno nello stesso PDF).
+async function contrattiControllabili(admin: any, masterId: string) {
+  const tutti = await contrattiDelDetentore(admin, masterId, ['brt', 'gls'])
+  const brt = tutti.filter((c: any) => c.tipo === 'brt').map((c: any) => ({ id: c.id, nome: c.nome_contratto, nome_contratto: c.nome_contratto, attivo: c.attivo, tipo: 'brt' as const, ids: [c.id] }))
+  const gls = gruppiGls(tutti).map(g => ({
+    id: g.rappresentante.id, tipo: 'gls' as const, ids: g.ids,
+    attivo: tutti.some((c: any) => g.ids.includes(c.id) && c.attivo),
+    nome: g.ids.length > 1 ? `GLS ${g.codice || ''} (${g.nomi.join(', ')})`.replace('GLS  (', 'GLS (') : g.nomi[0],
+    nome_contratto: g.ids.length > 1 ? `GLS ${g.codice || g.nomi[0]}` : g.nomi[0],
+  }))
+  return [...brt, ...gls]
+}
 
 export async function GET() {
   const u = await utenteDetentore(); if (u.errore) return u.errore
-  const contratti = await contrattiDelDetentore(createAdminSupabase(), u.masterId)
-  return NextResponse.json({ contratti: contratti.map((c: any) => ({ id: c.id, nome: c.nome_contratto, attivo: c.attivo })) })
+  const contratti = await contrattiControllabili(createAdminSupabase(), u.masterId)
+  return NextResponse.json({ contratti: contratti.map(c => ({ id: c.id, nome: c.nome, attivo: c.attivo, tipo: c.tipo })) })
 }
 
 type Corpo = {
   contrattoId?: string
   righe?: RigaFatturaBrt[]
   fatturaId?: string
-  testata?: { numeroFattura?: string; dataFattura?: string | null; nomeFile?: string; legenda?: Record<string, string> }
+  testata?: { numeroFattura?: string; dataFattura?: string | null; nomeFile?: string; legenda?: Record<string, string>; gls?: any }
   chiudi?: boolean
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
@@ -39,13 +57,31 @@ const pulisciLegenda = (l: any): Record<string, string> | null => {
   return Object.keys(out).length ? out : null
 }
 
+// Quello che la pagina sa del documento GLS (tracciato, periodo, carburante per contratto): si salva con la
+// fattura, così riaprendola dallo storico l'avviso sul carburante c'è ancora. Arriva dal browser: si tengono
+// solo numeri e testi corti.
+const pulisciGls = (g: any) => {
+  if (!g || typeof g !== 'object') return null
+  const n = (v: any) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v))
+  const d = (v: any) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
+  return {
+    tracciato: g.tracciato === 'allegato' ? 'allegato' : 'bordero',
+    titolo: String(g.titolo || '').slice(0, 120), dal: d(g.dal), al: d(g.al),
+    totaleCliente: n(g.totaleCliente), carburanteListino: n(g.carburanteListino),
+    contratti: (Array.isArray(g.contratti) ? g.contratti : []).slice(0, 10).map((c: any) => ({
+      codice: String(c?.codice || '').slice(0, 12), righe: n(c?.righe) ?? 0, nolo: n(c?.nolo) ?? 0,
+      carburante: n(c?.carburante), percentuale: n(c?.percentuale), quadra: !!c?.quadra,
+    })),
+  }
+}
+
 export async function POST(req: NextRequest) {
   const u = await utenteDetentore(); if (u.errore) return u.errore
   const admin = createAdminSupabase()
   const corpo = await req.json() as Corpo
-  const contratti = await contrattiDelDetentore(admin, u.masterId)
+  const contratti = await contrattiControllabili(admin, u.masterId)
 
-  // Una fattura già aperta si tocca solo se è del master e di un suo contratto BRT.
+  // Una fattura già aperta si tocca solo se è del master e di un suo contratto BRT o GLS.
   let fattura: any = null
   if (corpo.fatturaId) {
     const { data } = await admin.from('fatture_corriere').select('id,master_id,corriere_id,stato,riepilogo').eq('id', corpo.fatturaId).maybeSingle()
@@ -100,11 +136,14 @@ export async function POST(req: NextRequest) {
 
   // ── UN PACCHETTO DI RIGHE ──
   const contrattoId = fattura?.corriere_id || corpo.contrattoId
-  const contratto = contratti.find((c: any) => c.id === contrattoId)
+  const contratto = contratti.find(c => c.ids.includes(contrattoId))
   if (!contratto) return NextResponse.json({ error: 'Contratto non tuo: la fattura del corriere la controlla solo chi detiene il contratto.' }, { status: 403 })
   const righe = corpo.righe
   if (!Array.isArray(righe) || !righe.length) return NextResponse.json({ error: 'Nessuna riga da controllare.' }, { status: 400 })
   if (righe.length > 1000) return NextResponse.json({ error: 'Troppe righe in una volta.' }, { status: 400 })
+  // Righe GLS su un contratto GLS, righe BRT su un contratto BRT: lette con l'altro controllo darebbero
+  // numeri senza senso, senza nessun errore.
+  if (righe.some(r => eGls(r) !== (contratto.tipo === 'gls'))) return NextResponse.json({ error: `Questo documento non è di ${contratto.tipo === 'gls' ? 'GLS' : 'BRT'}: scegli il contratto giusto.` }, { status: 400 })
   if (fattura && fattura.stato !== 'in_corso') return NextResponse.json({ error: 'Questa fattura è già stata controllata.' }, { status: 409 })
 
   // Primo pacchetto: si apre la fattura nello storico. La stessa fattura caricata due volte non si rifà se ci
@@ -116,6 +155,8 @@ export async function POST(req: NextRequest) {
     if (!numero) return NextResponse.json({ error: 'Nel file manca il numero della fattura.' }, { status: 400 })
     // Le fatture del master caricate e lasciate lì senza azioni non restano: le toglie il caricamento dopo.
     // Quelle in corso solo se ferme da più di un giorno (un'altra scheda potrebbe starne caricando una).
+    const glsTestata = contratto.tipo === 'gls' ? pulisciGls(corpo.testata?.gls) : null
+    const riepilogoIniziale = legendaTestata || glsTestata ? { ...(legendaTestata ? { legenda: legendaTestata } : {}), ...(glsTestata ? { gls: glsTestata } : {}) } : null
     const { data: sue } = await admin.from('fatture_corriere').select('id,numero_fattura,corriere_id,stato,created_at,rettifiche_file_id,riepilogo').eq('master_id', u.masterId)
     const ieri = Date.now() - 86400000
     const daTogliere = (sue || []).filter((f: any) => !(f.numero_fattura === numero && f.corriere_id === contratto.id) && !fatturaConAzioni(f)
@@ -125,7 +166,7 @@ export async function POST(req: NextRequest) {
     if (esistente?.stato === 'completa' && fatturaConAzioni(esistente)) return NextResponse.json({ giaCaricata: { id: esistente.id, il: esistente.created_at } })
     if (esistente) {
       await admin.from('fatture_corriere_righe').delete().eq('fattura_id', esistente.id)
-      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo: legendaTestata ? { legenda: legendaTestata } : null, etichetta: null, completata_at: null,
+      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo: riepilogoIniziale, etichetta: null, completata_at: null,
         nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId, created_at: new Date().toISOString() }).eq('id', esistente.id)
       fattura = { id: esistente.id, stato: 'in_corso' }
     } else {
@@ -133,7 +174,7 @@ export async function POST(req: NextRequest) {
         master_id: u.masterId, corriere_id: contratto.id, nome_contratto: contratto.nome_contratto,
         numero_fattura: numero, data_fattura: corpo.testata?.dataFattura || righe[0]?.dataFattura || null,
         nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId,
-        ...(legendaTestata ? { riepilogo: { legenda: legendaTestata } } : {}),
+        ...(riepilogoIniziale ? { riepilogo: riepilogoIniziale } : {}),
       }).select('id').single()
       if (error || !nuova) return NextResponse.json({ error: 'Non riesco ad aprire la fattura nello storico: ' + (error?.message || '') }, { status: 500 })
       fattura = { id: nuova.id, stato: 'in_corso' }
@@ -144,7 +185,9 @@ export async function POST(req: NextRequest) {
   try {
     // La legenda del PDF, se c'è: col primo pacchetto arriva nella testata, poi sta nella fattura salvata.
     const legenda = pulisciLegenda(corpo.testata?.legenda) || fattura.riepilogo?.legenda || null
-    esiti = await analizzaFatturaBrt(admin, { contrattoId: contratto.id, masterId: u.masterId, righe, legenda })
+    esiti = contratto.tipo === 'gls'
+      ? await analizzaFatturaGls(admin, { contrattiIds: contratto.ids, masterId: u.masterId, righe: righe as RigaFatturaGls[] })
+      : await analizzaFatturaBrt(admin, { contrattoId: contratto.id, masterId: u.masterId, righe, legenda })
   } catch (e: any) {
     // Una lettura saltata non deve diventare "spedizione non trovata": meglio fermarsi e dirlo.
     return NextResponse.json({ error: 'Controllo non riuscito: ' + String(e?.message || e) }, { status: 500 })
@@ -176,6 +219,7 @@ export async function POST(req: NextRequest) {
     abbinataPer: e.abbinataPer,
     brt: e.brt, moove: e.moove, listino: e.listino?.totale ?? null, zona: e.listino?.zona ?? null,
     differenza: e.differenza, motivi: e.motivi, voci: e.vociPerCategoria as Record<string, number>,
+    ...(e.scartoListino != null ? { scartoListino: e.scartoListino } : {}),
   }))
 
   const { error: errRighe } = await admin.from('fatture_corriere_righe')

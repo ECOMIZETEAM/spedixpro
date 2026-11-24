@@ -548,6 +548,9 @@ export type DettaglioCorriere = {
   totale: number
   nolo: number
   fuel: number
+  // La percentuale della fascia, non ricavata dagli importi già arrotondati (0,16 su 5,25 dava 3,05%): il
+  // controllo fattura la confronta con quella che il corriere ha messo in fattura.
+  fuel_pct?: number
   sponda: number
   contrassegno: number
   assicurazione: number
@@ -1139,6 +1142,7 @@ export async function calcolaPrezzoCorriereDettaglio(
     totale: r2(noloBase + fuelAmt + spondaAmt + feeCod + feeAss + mittAmt),
     nolo: r2(noloBase),
     fuel: r2(fuelAmt),
+    fuel_pct: fuelPct,
     sponda: r2(spondaAmt),
     contrassegno: r2(feeCod),
     assicurazione: r2(feeAss),

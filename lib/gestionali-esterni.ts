@@ -109,7 +109,10 @@ export function abbinaEsterne(righe: RigaFatturaBrt[], spedizioni: SpedizioneEst
 
   for (const r of righe) {
     if (r.andata) {
-      if (perLdv.has(r.segnacollo)) { prendi(r.segnacollo).andata = r; continue }
+      // GLS: il tracking ha davanti la sigla della sede (NI665645497) e il gestionale può scrivere il numero
+      // nudo (665645497). Le LDV di BRT sono solo cifre: per loro non cambia niente.
+      const ldv = perLdv.has(r.segnacollo) ? r.segnacollo : [r.segnacollo.replace(/^[A-Z]{2}(?=\d{9}$)/, '')].find(x => x !== r.segnacollo && perLdv.has(x))
+      if (ldv) { prendi(ldv).andata = r; continue }
       nonAbbinate.push(r); continue
     }
     const reso = r.tipoBolla.startsWith('A')

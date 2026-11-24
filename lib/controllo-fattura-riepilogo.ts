@@ -3,12 +3,14 @@
  * Niente database qui: gira nel browser e sul server. */
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
 
-export type MotivoPagina = { tipo: 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile'; importo: number; testo: string }
+export type MotivoPagina = { tipo: 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile' | 'carburante' | 'storico'; importo: number; testo: string
+  voce?: string; gruppo?: 'contestare' | 'clienti' | 'chiarire' | 'listino' }
 export type EsitoPagina = {
   riga: RigaFatturaBrt
   spedizione: { id: string; numero: string; stato: string; data: string; colli: number; peso: number; contrassegno: number; citta: string; chi: string } | null
   abbinataPer: 'riferimento' | 'segnacollo' | null
   brt: number; moove: number | null; listino: number | null; zona: string | null; differenza: number | null
+  scartoListino?: number | null
   motivi: MotivoPagina[]; voci: Record<string, number>
 }
 
@@ -36,7 +38,8 @@ export function riepilogaFattura(esiti: EsitoPagina[]) {
     for (const m of e.motivi) {
       const v = perMotivo[m.tipo] || { n: 0, euro: 0 }; v.n++; v.euro = r2(v.euro + m.importo); perMotivo[m.tipo] = v
       if (m.tipo === 'voce') {
-        const s = m.testo.match(/sigla BRT "([^"]+)"/)?.[1] || '?'
+        // BRT: la sigla dal testo. GLS: il nome della voce, che il controllo scrive a parte.
+        const s = m.voce || m.testo.match(/sigla BRT "([^"]+)"/)?.[1] || '?'
         const w = perVoce[s] || { n: 0, euro: 0 }; w.n++; w.euro = r2(w.euro + m.importo); perVoce[s] = w
       }
     }

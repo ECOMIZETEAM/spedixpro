@@ -19,8 +19,11 @@ import { calcolaPrezzoCorriereDettaglio, type DettaglioCorriere } from '@/lib/pr
 import { descriviVoce, type RigaFatturaBrt, type CategoriaVoce } from '@/lib/fattura-brt'
 import { prezziSupplementoDa, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
 
-export type TipoMotivo = 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile'
-export type Motivo = { tipo: TipoMotivo; importo: number; testo: string }
+export type TipoMotivo = 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile' | 'carburante' | 'storico'
+// `voce` e `gruppo` li usa la fattura GLS (lib/controllo-fattura-gls): il nome della voce per raggrupparla e
+// cosa farne (contestare a GLS, girare ai clienti, chiarire con GLS, allineare il listino).
+export type GruppoMotivo = 'contestare' | 'clienti' | 'chiarire' | 'listino'
+export type Motivo = { tipo: TipoMotivo; importo: number; testo: string; voce?: string; gruppo?: GruppoMotivo }
 
 export type SpedizioneAbbinata = {
   id: string
@@ -48,6 +51,7 @@ export type EsitoRiga = {
   moove: number | null
   listino: DettaglioCorriere | null
   differenza: number | null              // BRT − Moove: positivo = il detentore ha speso più di quanto vede
+  scartoListino?: number | null          // GLS: corriere − listino di OGGI allo stesso peso (lib/controllo-fattura-gls)
   motivi: Motivo[]
   vociPerCategoria: Partial<Record<CategoriaVoce | 'nolo', number>>
 }
