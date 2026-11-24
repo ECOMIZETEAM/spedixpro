@@ -446,10 +446,19 @@ export function supplPresenteMax(suppl: any[], tipo: string, pesoReale?: number 
 // Regno Unito: 2 colli da 1 kg 59,51 contro 13,08 del collo singolo (preventivi del 10/11) — nessun
 // minimo a collo lo rappresenta.
 //
+// `multicollo_solo_a_zone`: il multicollo di questo contratto si vende SOLO con le fasce delle zone
+// multicollo (lib/multicollo-zone). Un livello che non le ha prezzate non lo vende: niente ripiego sul
+// collo singolo col minimo. UPS Europa: il fornitore prezza il multicollo con un'altra tariffa, e un listino
+// senza la scheda multicollo lo vendeva come un collo solo sul peso totale. Caso vero (preventivi 24/11,
+// Milano → Bucarest): 2 colli da 3 kg al fornitore 24,45, MULTIEXPRESS li rivendeva a 18,85 come un collo
+// da 6 kg. Nessun listino di vendita aveva la scheda multicollo, quindi succedeva a ogni cliente. Non si
+// deduce dalle zone multicollo del contratto: SDA ESPRESSO L di LOGIXIA ne ha una ("LOCALITA PERIFERICHE")
+// e due listini senza, e il suo multicollo si sarebbe fermato.
+//
 // Un collo solo non passa mai di qui: per il monocollo non cambia niente, nemmeno una lettura.
 export const TIPO_MINIMO_COLLO = 'minimo_collo'
 
-export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[] }
+export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[]; soloAZone?: boolean }
 
 // Il valore della voce in un elenco di supplementi (gia' filtrato per listino e contratto). 0 = non
 // prezzata. Con due righe (un contratto salvato in due listini dello stesso master, succede) vince la
@@ -461,11 +470,14 @@ export function minimoACollo(suppl: any[]): number {
 }
 
 // Il nolo di una spedizione a `colli` colli con la regola del minimo. null = su questo livello il
-// multicollo non si vende (paese escluso, o regola del contratto e voce non prezzata).
+// multicollo non si vende (paese escluso, contratto solo a zone, o regola del contratto e voce non
+// prezzata). Si arriva qui solo quando le fasce multicollo a zone non hanno dato il prezzo: per un
+// contratto solo a zone vuol dire che su questo livello il multicollo non ha prezzo.
 export function noloMulticollo(nolo: number, colli: number, minimo: number, regola: RegolaMulticollo | undefined, paese?: string): number | null {
   if (!(colli > 1)) return nolo
   const p = String(paese || 'IT').toUpperCase().trim()
   if (regola?.paesiEsclusi.includes(p)) return null
+  if (regola?.soloAZone) return null
   if (minimo > 0) return Math.max(nolo, colli * minimo)
   return regola?.minimoObbligatorio ? null : nolo
 }
@@ -488,7 +500,7 @@ export async function regoleMulticollo(corriereIds: string[]): Promise<Map<strin
   for (const r of (righe || []) as any[]) {
     const s = settPerDet.get(r.contratto_id || r.id) || {}
     const esclusi = Array.isArray(s.multicollo_paesi_esclusi) ? s.multicollo_paesi_esclusi.map((x: any) => String(x).toUpperCase().trim()) : []
-    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi })
+    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi, soloAZone: s.multicollo_solo_a_zone === true })
   }
   return out
 }
