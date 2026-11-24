@@ -4,6 +4,8 @@ import { useParams } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
 import PagatoriBonifico from '@/app/components/PagatoriBonifico'
+import VoceMovimento, { VOCE_INIZIALE, type ValoreVoce } from '@/app/components/VoceMovimento'
+import { chiedeBonifico, erroreVoce, suggerimentoSegno, voceManuale } from '@/lib/movimento-manuale'
 
 function fmtEuro(n: number) {
   return `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -199,11 +201,12 @@ export default function ClienteProfiloPage() {
   const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
 
-  // Popup ricarica
+  // Popup del movimento a mano. La voce la sceglie il master (lib/movimento-manuale): prima il testo arrivava
+  // gia' scritto, «Accredito credito a scalare», e l'87% lo lasciava cosi'.
   const [showRicarica, setShowRicarica] = useState(false)
   const [importo, setImporto] = useState('')
   const [conferma, setConferma] = useState('')
-  const [descrizione, setDescrizione] = useState('Accredito credito a scalare')
+  const [voce, setVoce] = useState<ValoreVoce>(VOCE_INIZIALE)
   // A che punto e' il bonifico (Check Ricariche, tutti i master); come ha pagato e chi (lib/contabilita-banca)
   // solo sui master dove la funzione e' accesa.
   const [pagamento, setPagamento] = useState<ValorePagamento>(PAGAMENTO_INIZIALE)
@@ -286,7 +289,7 @@ export default function ClienteProfiloPage() {
   }, [id])
 
   function apriRicarica() {
-    setImporto(''); setConferma(''); setDescrizione('Accredito credito a scalare')
+    setImporto(''); setConferma(''); setVoce(VOCE_INIZIALE)
     setPagamento(PAGAMENTO_INIZIALE); setErrore(null); setShowRicarica(true)
   }
 
@@ -294,9 +297,13 @@ export default function ClienteProfiloPage() {
     setErrore(null)
     const imp = parseFloat(importo.replace(',', '.'))
     const conf = parseFloat(conferma.replace(',', '.'))
+    const v = voceManuale(voce.voce)
+    if (!v) { setErrore('Scegli che movimento è.'); return }
     if (!isFinite(imp) || imp === 0) { setErrore('Inserisci un importo diverso da 0 (usa il − per togliere credito)'); return }
     if (imp !== conf) { setErrore('L\'importo e la conferma non coincidono'); return }
-    if (!descrizione.trim()) { setErrore('Inserisci una descrizione'); return }
+    const errVoce = erroreVoce(v, imp, voce.numero, voce.testo)
+    if (errVoce) { setErrore(errVoce); return }
+    const bonifico = chiedeBonifico(v, imp)
 
     setSaving(true)
     try {
@@ -307,23 +314,22 @@ export default function ClienteProfiloPage() {
           // Uso l'id fornito dall'API (sempre ben formato, es. "m:<uuid>" per i sotto-master),
           // NON quello dell'URL dove i due punti diventano %3A e romperebbero il ramo m:.
           clienteId: cliente?.id || id,
-          tipo: imp > 0 ? 'ricarica' : 'rettifica',
-          descrizione: descrizione.trim(),
+          voce: v.id, numero: voce.numero, testo: voce.testo,
           importo: imp,
-          bonificoEffettuato: imp > 0 && pagamento.stato !== 'attesa',
-          bonificoArrivato: imp > 0 && pagamento.stato === 'arrivato',
-          ...(contabilita && imp > 0 ? { metodo: pagamento.metodo, mittente: pagamento.mittente } : {}),
+          bonificoEffettuato: bonifico && pagamento.stato !== 'attesa',
+          bonificoArrivato: bonifico && pagamento.stato === 'arrivato',
+          ...(contabilita && bonifico ? { metodo: pagamento.metodo, mittente: pagamento.mittente } : {}),
         }),
       })
       const data = await res.json()
-      if (!res.ok) { setErrore(data.error || 'Errore durante la ricarica'); setSaving(false); return }
+      if (!res.ok) { setErrore(data.error || 'Errore durante la registrazione'); setSaving(false); return }
       setShowRicarica(false)
       setSaving(false)
       caricaCliente()
       caricaMovimenti()
       setVersionePagatori(v => v + 1)
       // Notifica verde in alto + scroll su per mostrarla
-      setSuccesso('✓ Credito caricato con successo')
+      setSuccesso(`✓ Registrato: ${data.descrizione || v.nome}`)
       if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
       setTimeout(() => setSuccesso(null), 5000)
     } catch {
@@ -487,7 +493,7 @@ export default function ClienteProfiloPage() {
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
               <span>Credito &amp; Movimenti</span>
-              <button onClick={apriRicarica} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'4px 12px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>+ Ricarica</button>
+              <button onClick={apriRicarica} style={{background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',padding:'4px 12px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>+ Movimento</button>
             </div>
             <div style={{padding:'20px',textAlign:'center'}}>
               <div style={{fontSize:'32px',fontWeight:'800',color:'#f97316'}}>{fmtEuro(creditoView)}</div>
@@ -520,39 +526,41 @@ export default function ClienteProfiloPage() {
       {/* POPUP RICARICA */}
       {showRicarica && (
         <div onClick={()=>!saving&&setShowRicarica(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'10px',width:'520px',maxWidth:'94vw',overflow:'hidden'}}>
+          {/* Con la voce, il numero e il riquadro del bonifico la finestra puo' superare lo schermo del telefono:
+              resta dentro e scorre il corpo, con titolo e tasti sempre in vista. */}
+          <div onClick={e=>e.stopPropagation()} style={{background:'#fff',borderRadius:'10px',width:'560px',maxWidth:'94vw',maxHeight:'92vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+            <style>{`@media (max-width: 560px) { .mx-griglia-movimento { grid-template-columns: 1fr !important; gap: 6px 0 !important; } .mx-griglia-movimento > label, .mx-griglia-movimento label { text-align: left !important; padding-top: 6px !important; } .mx-griglia-movimento__vuoto { display: none; } }`}</style>
             <div style={{padding:'14px 20px',borderBottom:'1px solid #eee',fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>
-              👤 Cliente: {cliente.ragione_sociale}
+              Movimento sul credito di {cliente.ragione_sociale}
             </div>
-            <div style={{padding:'20px'}}>
+            <div style={{padding:'20px',overflowY:'auto'}}>
               {errore && <div style={{marginBottom:'14px',padding:'10px 12px',borderRadius:'8px',background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',fontSize:'13px'}}>{errore}</div>}
-              <div style={{display:'grid',gridTemplateColumns:'150px 1fr',gap:'12px',alignItems:'center'}}>
-                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Importo</label>
-                <div style={{position:'relative'}}>
-                  <input value={importo} onChange={e=>setImporto(e.target.value)} placeholder="0.00" inputMode="decimal"
-                    style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
-                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#1a1a1a',fontSize:'14px'}}>€</span>
-                </div>
+              <div className="mx-griglia-movimento" style={{display:'grid',gridTemplateColumns:'150px 1fr',gap:'12px',alignItems:'center'}}>
+                <VoceMovimento layout="griglia" valore={voce} onChange={v=>{ if (v.voce !== voce.voce) setErrore(null); setVoce(v) }} dopoVoce={<>
+                  <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Importo</label>
+                  <div style={{position:'relative'}}>
+                    <input value={importo} onChange={e=>setImporto(e.target.value)} placeholder="0.00" inputMode="decimal"
+                      style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
+                    <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#1a1a1a',fontSize:'14px'}}>€</span>
+                  </div>
 
-                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Conferma l'importo</label>
-                <div style={{position:'relative'}}>
-                  <input value={conferma} onChange={e=>setConferma(e.target.value)} placeholder="0.00" inputMode="decimal"
-                    style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
-                  <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#1a1a1a',fontSize:'14px'}}>€</span>
-                </div>
-
-                <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Descrizione</label>
-                <input value={descrizione} onChange={e=>setDescrizione(e.target.value)}
-                  style={{width:'100%',padding:'9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
+                  <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Conferma l'importo</label>
+                  <div style={{position:'relative'}}>
+                    <input value={conferma} onChange={e=>setConferma(e.target.value)} placeholder="0.00" inputMode="decimal"
+                      style={{width:'100%',padding:'9px 34px 9px 12px',border:'1px solid #ddd',borderRadius:'6px',fontSize:'14px',textAlign:'right',boxSizing:'border-box',color:'#1a1a1a',background:'#fff'}}/>
+                    <span style={{position:'absolute',right:'12px',top:'50%',transform:'translateY(-50%)',color:'#1a1a1a',fontSize:'14px'}}>€</span>
+                  </div>
+                  <div className="mx-griglia-movimento__vuoto" />
+                  <div style={{fontSize:'11.5px',color:'#6b7280',marginTop:'-6px'}}>{suggerimentoSegno(voceManuale(voce.voce))}</div>
+                </>} />
               </div>
-              <div style={{marginTop:'8px',fontSize:'11px',color:'#1a1a1a'}}>Suggerimento: scrivi <strong>200</strong> per accreditare, <strong>-200</strong> per addebitare/togliere credito.</div>
-              {parseFloat((importo||'').replace(',','.')) > 0 && (
+              {chiedeBonifico(voceManuale(voce.voce), parseFloat((importo||'').replace(',','.'))) && (
                 <PagamentoRicarica target={cliente?.id || id} valore={pagamento} onChange={setPagamento} onAttiva={setContabilita} />
               )}
             </div>
             <div style={{padding:'14px 20px',borderTop:'1px solid #eee',display:'flex',justifyContent:'flex-end',gap:'10px'}}>
               <button onClick={()=>setShowRicarica(false)} disabled={saving} style={{padding:'8px 16px',background:'#f2f2f2',color:'#1a1a1a',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'600',cursor:'pointer'}}>Annulla</button>
-              <button onClick={salvaRicarica} disabled={saving} style={{padding:'8px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.6:1}}>{saving?'Salvataggio…':'Ricarica'}</button>
+              <button onClick={salvaRicarica} disabled={saving} style={{padding:'8px 20px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.6:1}}>{saving?'Salvataggio…':'Registra'}</button>
             </div>
           </div>
         </div>

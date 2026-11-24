@@ -21,6 +21,9 @@ export async function registraMovimento(
     // Si usa per la PRENOTAZIONE in creazione spedizione. Non si applica a fattura_mensile, agli
     // importi positivi, e a rettifiche/resi/giacenze, che devono poter andare sotto zero.
     richiediCapienza?: boolean
+    // La voce scelta da chi scrive un movimento a mano (lib/movimento-manuale). Va al database solo quando
+    // c'e': tutti gli altri chiamanti restano identici a prima.
+    voce?: string | null
   }
 ): Promise<{ saldo: number }> {
   const importo = Number(params.importo)
@@ -36,6 +39,7 @@ export async function registraMovimento(
     p_spedizione_id: params.spedizioneId ?? null,
     p_created_by: params.createdBy ?? null,
     p_richiedi_capienza: params.richiediCapienza ?? false,
+    ...(params.voce ? { p_voce: params.voce } : {}),
   })
   // Il messaggio CREDITO_INSUFFICIENTE viene propagato tale e quale: il chiamante lo riconosce e
   // risponde 402 senza aver creato nulla.
@@ -55,6 +59,7 @@ export async function registraMovimentoMaster(
     riferimento?: string | null
     spedizioneId?: string | null
     createdBy?: string | null
+    voce?: string | null   // come in registraMovimento
   }
 ): Promise<{ saldo: number }> {
   const importo = Number(params.importo)
@@ -69,6 +74,7 @@ export async function registraMovimentoMaster(
     p_riferimento: params.riferimento ?? null,
     p_spedizione_id: params.spedizioneId ?? null,
     p_created_by: params.createdBy ?? null,
+    ...(params.voce ? { p_voce: params.voce } : {}),
   })
   if (error) throw new Error('Errore movimento master: ' + error.message)
   return { saldo: Number(data) }

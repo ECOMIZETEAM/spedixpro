@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       const clienteId = a.targetTipo === 'master' ? 'm:' + a.targetId : a.targetId
       const r = await inoltra('/api/movimenti/crea', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clienteId, tipo: 'ricarica', importo, descrizione: `Ricarica via Moovy (assistente vocale)` }),
+        body: JSON.stringify({ clienteId, voce: 'ricarica', importo, testo: 'via Moovy (assistente vocale)' }),
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok || d.error) return NextResponse.json({ reply: `Non sono riuscito: ${d.error || 'errore'}.` }, { status: 200 })
