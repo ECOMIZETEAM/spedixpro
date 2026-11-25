@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import DateRangePicker from './DateRangePicker'
 import { prendiAnticipata } from '@/lib/richieste-anticipate'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' } as Intl.NumberFormatOptions)
@@ -27,19 +26,21 @@ function fmtGiorno(g: string) {
   return `${d}/${m}`
 }
 
-export default function GuadagnoChart() {
-  const [range, setRange] = useState(meseCorrente)
+// Il periodo lo sceglie la sezione «Il tuo guadagno» della Dashboard nuova, uno per tutte le schede.
+export default function GuadagnoChart({ dal, al }: { dal: string, al: string }) {
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!range.dal || !range.al) return
+    if (!dal || !al) return
+    let vivo = true
     setLoading(true)
-    const url = urlGuadagno(range.dal, range.al)
+    const url = urlGuadagno(dal, al)
     const risposta = prendiAnticipata(url) ?? fetch(url)
     risposta
-      .then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
-  }, [range.dal, range.al])
+      .then(r => r.json()).then(x => { if (vivo) { setD(x); setLoading(false) } }).catch(() => { if (vivo) setLoading(false) })
+    return () => { vivo = false }
+  }, [dal, al])
 
   const margine = Number(d?.guadagno || 0)
   const serie = (d?.serie || []).map((s: any) => ({ ...s, label: fmtGiorno(s.giorno) }))
@@ -50,8 +51,7 @@ export default function GuadagnoChart() {
   return (
     <section className="fx-scheda fx-largo">
       <div className="fx-testa">
-        <div><h2>Guadagno spedizioni</h2><p className="fx-sotto">Rettifiche escluse: le trovi nella loro scheda</p></div>
-        <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
+        <div><h2>Guadagno spedizioni</h2><p className="fx-sotto">Rettifiche escluse: sono nella loro voce, qui sotto</p></div>
       </div>
 
       <div className="fx-guadagno-numeri">
@@ -80,7 +80,7 @@ export default function GuadagnoChart() {
         </div>
       )}
 
-      <div className="fx-pannello" style={{ height: 250 }}>
+      <div className="fx-pannello" style={{ height: 190 }}>
         {loading ? (
           <div className="fx-vuoto">Carico il guadagno…</div>
         ) : !serie.length ? (

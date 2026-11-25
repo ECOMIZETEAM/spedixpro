@@ -5,11 +5,9 @@ import { ldvProvvisoria, LDV_IN_ELABORAZIONE, numeroMostrato, nomeClientePulito 
 import BannerSms from '@/app/components/BannerSms'
 import ResiReteWidget from '@/app/components/ResiReteWidget'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
-import ReportGuadagno, { REPORT_TOTALE, REPORT_VOCI } from '@/app/components/ReportGuadagno'
-import GuadagnoChart from '@/app/components/GuadagnoChart'
-import CostiGestioneCard from '@/app/components/CostiGestioneCard'
-import { CreditiDaRecuperare, LaTuaRete, LavoroInCorso, MesePerMese, StatiTrentaGiorni, type DatiDashboard } from './SezioniFinexy'
+import { CreditiDaRecuperare, IlTuoGuadagno, LaTuaRete, LavoroInCorso, MesePerMese, StatiTrentaGiorni, type DatiDashboard } from './SezioniFinexy'
 import { euro, intero, statoDi } from './formati'
+import { Barra3D, DefsBarre, profondita } from './Barre3D'
 import './dashboard-finexy.css'
 
 // LA DASHBOARD DEL MASTER nella composizione «Finexy» (Lorenzo 24/11/2026: «molto bene»), dentro il portale di oggi:
@@ -19,12 +17,11 @@ import './dashboard-finexy.css'
 //   credito e conti | i quattro numeri di oggi | spedizioni per settimana
 //   il lavoro in corso (le altre caselle di oggi, ognuna col suo periodo)
 //   piano + corrieri | ultime spedizioni
-//   la tua rete | gli stati degli ultimi 30 giorni | SMS
-//   resi della rete
-//   mese per mese
+//   la tua rete | gli stati degli ultimi 30 giorni | resi della rete
+//   mese per mese (largo) | destinazioni
+//   (gli SMS stanno in piccolo accanto al saluto)
 //   crediti da recuperare (a scalare, a fattura)
-//   destinazioni
-//   il guadagno: totale | spedizioni (grafico); le schede per voce; i costi di gestione
+//   il guadagno, con un periodo solo: totale | spedizioni (grafico); le voci in una fila
 // Fuori resta solo la tabella «Statistiche spese spedizioni extra», che non ha mai mostrato dati (diceva sempre
 // «Nessun dato disponibile»): rettifiche, resi e giacenze hanno le loro schede nel guadagno.
 // I numeri vengono da /api/dashboard (passati dalla pagina), da /api/dashboard/plancia (oggi sul giorno di Roma,
@@ -140,7 +137,7 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
   // Grafico
   const sett = plancia?.settimane || []
   const massimo = scala(Math.max(0, ...sett.map(s => s.create)))
-  const W = misura.w, H = misura.h, X0 = 30, Y0 = 6, Y1 = H - 22, slot = (W - X0) / 8, larga = Math.min(slot * 0.62, 34)
+  const W = misura.w, H = misura.h, X0 = 30, Y0 = 14, Y1 = H - 22, slot = (W - X0) / 8, larga = Math.min(slot * 0.5, 28)
   const y = (v: number) => Y1 - v / massimo * (Y1 - Y0)
 
   const usoPiano = data.illimitato || !data.limiteMese ? 0 : Math.min(100, Number(data.spedizioniMese || 0) / Number(data.limiteMese) * 100)
@@ -148,8 +145,11 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
   return (
     <div className="fx">
       <div className="fx-titolo">
-        <h1>{saluto()}, {data.masterNome || 'master'}</h1>
-        <p>Le spedizioni di oggi, cosa c&apos;è da chiudere e come va la tua rete.</p>
+        <div>
+          <h1>{saluto()}, {data.masterNome || 'master'}</h1>
+          <p>Le spedizioni di oggi, cosa c&apos;è da chiudere e come va la tua rete.</p>
+        </div>
+        <BannerSms />
       </div>
 
       <div className="fx-griglia">
@@ -248,24 +248,19 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
             <div className="fx-grafico" ref={area}>
               {!plancia ? <div className="fx-vuoto">{erroreP || 'Carico le settimane…'}</div> : (
                 <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Spedizioni per settimana, ultime 8 settimane">
-                  <defs>
-                    <pattern id="fx-righe" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                      <rect width="5" height="5" fill="#F27445" /><rect width="2.6" height="5" fill="#EA5326" />
-                    </pattern>
-                  </defs>
+                  <DefsBarre id="fxs" />
                   {[0, 1, 2, 3, 4, 5].map(i => {
                     const v = massimo * (5 - i) / 5, yy = Y0 + i * (Y1 - Y0) / 5
                     return <g key={i}><text className="fx-asse" x={0} y={yy + 3}>{breve(v)}</text>{i < 5 && <line x1={X0} x2={W} y1={yy} y2={yy} stroke="#E9E9E9" strokeWidth="0.6" />}</g>
                   })}
                   {sett.map((s, i) => {
-                    const x = X0 + i * slot + (slot - larga) / 2, yc = y(s.consegnate), ya = y(s.create)
-                    const alta = Math.max(0, yc - ya - (s.nonConsegnate > 0 ? 1.5 : 0))
+                    const x = X0 + i * slot + (slot - larga - profondita(larga)) / 2, yc = y(s.consegnate), ya = y(s.create)
                     return (
                       <g key={s.dal}>
                         <title>{`Settimana dal ${s.dal}: ${intero(s.create)} create, ${intero(s.consegnate)} consegnate, ${intero(s.nonConsegnate)} non ancora`}</title>
-                        {s.nonConsegnate > 0 && <rect className="fx-barra-a" x={x} y={ya} width={larga} height={Math.max(alta, 1.5)} rx="3.5" />}
-                        <rect className="fx-barra-n" x={x} y={yc} width={larga} height={Math.max(0, Y1 - yc)} rx="3.5" />
-                        <text className="fx-asse" x={x + larga / 2} y={H - 4} textAnchor="middle">{s.dal}</text>
+                        <Barra3D id="fxs" x={x} y={yc} larga={larga} alta={Math.max(0, Y1 - yc)} tinta="nero" cima={s.nonConsegnate <= 0} />
+                        {s.nonConsegnate > 0 && <Barra3D id="fxs" x={x} y={ya} larga={larga} alta={Math.max(yc - ya, 2)} tinta="righe" ombra={false} />}
+                        <text className="fx-asse" x={x + (larga + profondita(larga)) / 2} y={H - 4} textAnchor="middle">{s.dal}</text>
                       </g>
                     )
                   })}
@@ -362,37 +357,26 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
           </div>
         </section>
 
-        {/* LA RETE: tasso di consegna e i primi, gli stati degli ultimi 30 giorni, gli SMS; poi i resi (larghi, la
-            lista dei clienti da controllare e' lunga) e il mese per mese */}
+        {/* LA RETE: tasso di consegna e i primi, gli stati degli ultimi 30 giorni, i resi */}
         <LaTuaRete data={data} />
         <StatiTrentaGiorni stati={data.statiUltimi30 || {}} />
-        <BannerSms />
         <ResiReteWidget fx />
-        <MesePerMese mesi={data.statsMensili || []} />
 
-        {/* I CREDITI DA RECUPERARE: compaiono solo se ci sono */}
+        {/* MESE PER MESE (largo) e DESTINAZIONI (la mappa in rilievo e le prime province) */}
+        <MesePerMese mesi={data.statsMensili || []} />
+        <DestinazioniWidget fx />
+
+        {/* I CREDITI DA RECUPERARE: compaiono solo se ci sono, meta' e meta' */}
         {(Number(data.creditiDaRecuperare?.scalare?.clienti || 0) > 0 || Number(data.creditiDaRecuperare?.fattura?.clienti || 0) > 0) && (
           <div className="fx-tutta fx-fila">
             <CreditiDaRecuperare crediti={data.creditiDaRecuperare} />
           </div>
         )}
 
-        {/* DESTINAZIONI: la mappa e la classifica degli ultimi 30 giorni */}
-        <DestinazioniWidget fx />
-
-        {/* IL GUADAGNO. Il totale e' il calderone del master: spedizioni + rettifiche + rimborsi + resi + giacenze +
-            commissioni + accessori + logistica + canone, una cifra senza doppi conteggi e senza i soldi che passano
-            soltanto (ricariche, cassa dei contrassegni), vedi /api/reports/guadagno-totale. Il grafico e le schede
-            sotto sono il dettaglio per voce, ognuna col suo periodo. */}
-        <div className="fx-sezione fx-tutta">
-          <h2>Il tuo guadagno</h2>
-          <p>Ogni scheda ha il suo periodo: si apre sul mese in corso.</p>
-        </div>
-        <ReportGuadagno titolo="Guadagno Totale" endpoint={REPORT_TOTALE} variante="nera" />
-        <GuadagnoChart />
-        {REPORT_VOCI.map(r => <ReportGuadagno key={r.endpoint} titolo={r.titolo} endpoint={r.endpoint} />)}
-        {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
-        {['master', 'admin'].includes(String(data.ruolo || '').toLowerCase()) && <CostiGestioneCard />}
+        {/* IL GUADAGNO: un periodo per tutte le voci. Il totale e' il calderone del master: spedizioni + rettifiche +
+            rimborsi + resi + giacenze + commissioni + accessori + logistica + canone, una cifra senza doppi conteggi e
+            senza i soldi che passano soltanto (ricariche, cassa dei contrassegni), vedi /api/reports/guadagno-totale. */}
+        <IlTuoGuadagno ruolo={data.ruolo} />
       </div>
     </div>
   )

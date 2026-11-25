@@ -97,30 +97,94 @@ export default function DestinazioniWidget({ fx = false }: { fx?: boolean } = {}
   const totale = vista === 'italia' ? (dati?.totale || 0) : (dati?.totalePaesi || 0)
   const conteggioLabel = vista === 'italia' ? `${dati?.nProvince || 0} province` : `${(dati?.paesi || []).length} paesi`
 
-  const card: React.CSSProperties = fx ? {} : { background: '#fff', border: '1px solid #eee', borderRadius: 14, padding: 18 }
   const tab = (attivo: boolean): React.CSSProperties => fx
     ? { border: 'none', background: attivo ? '#1C1C1C' : '#F2F2F2', color: attivo ? '#fff' : '#555', fontSize: 12, fontWeight: 500, padding: '6px 13px', borderRadius: 999, cursor: 'pointer' }
     : { border: 'none', background: attivo ? '#EA580C' : '#f4f4f4', color: attivo ? '#fff' : '#6b7280', fontSize: 12.5, fontWeight: 700, padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }
 
+  // La mappa in rilievo della Dashboard nuova: lo spessore sono due copie della sagoma, piu' scure e spostate in basso,
+  // disegnate una volta sola (al passaggio del mouse cambia solo lo strato colorato sopra).
+  const spessore = useMemo(() => !italiaPaths ? null : (
+    <>
+      <g transform="translate(0,9)" filter="url(#fx-mappa-ombra)">{italiaPaths.map((p: any, i: number) => <path key={i} d={p.d} fill="#A9401A" stroke="#A9401A" strokeWidth={1.2} />)}</g>
+      <g transform="translate(0,4.5)">{italiaPaths.map((p: any, i: number) => <path key={i} d={p.d} fill="#C8501F" stroke="#C8501F" strokeWidth={1.2} />)}</g>
+    </>
+  ), [italiaPaths])
+
+  // Dashboard nuova (Lorenzo 25/11: «grande, piatta, brutta»): una scheda di una colonna, la mappa piccola in rilievo e
+  // inclinata come un plastico, sotto le prime province. Il cliente e l'agente vedono il riquadro di sempre, qui sotto.
+  if (fx) {
+    const prime = classifica.slice(0, 3)
+    return (
+      <section className="fx-scheda fx-destinazioni">
+        <div className="fx-testa">
+          <h2>Destinazioni</h2>
+          <span style={{ display: 'inline-flex', gap: 4 }}>
+            <button onClick={() => setVista('italia')} style={tab(vista === 'italia')}>Italia</button>
+            <button onClick={() => setVista('mondo')} style={tab(vista === 'mondo')}>Mondo</button>
+          </span>
+        </div>
+        <p className="fx-sotto">Ultimi 30 giorni · {totale.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} spedizioni · {conteggioLabel}</p>
+        <div ref={boxRef} className="fx-mappa" onMouseLeave={() => { setHover(null); onUp() }}>
+          {vista === 'italia' ? (
+            !italiaPaths ? <div className="fx-vuoto">{errore ? 'Mappa non disponibile' : 'Carico la mappa…'}</div>
+              : <svg viewBox={`-6 -6 ${W + 12} ${H + 24}`} className="fx-mappa-plastico" role="img" aria-label="Spedizioni per provincia, ultimi 30 giorni">
+                <defs><filter id="fx-mappa-ombra" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="9" floodColor="#5A1E08" floodOpacity="0.32" /></filter></defs>
+                {spessore}
+                {italiaPaths.map((p: any, i: number) => {
+                  const n = perSigla.get(p.sigla) || 0
+                  return <path key={i} d={p.d} fill={coloreVolume(n, maxProv)} stroke="#fff" strokeWidth={0.5} style={{ cursor: n ? 'pointer' : 'default' }}
+                    onMouseMove={e => { const r = boxRef.current?.getBoundingClientRect(); setHover({ nome: p.nome, n, x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) }) }} />
+                })}
+              </svg>
+          ) : (
+            !globo ? <div className="fx-vuoto">{errore ? 'Globo non disponibile' : 'Carico il globo…'}</div>
+              : <svg viewBox={`0 0 ${W} ${H}`} className="fx-mappa-globo" style={{ cursor: drag.current ? 'grabbing' : 'grab', userSelect: 'none' }}
+                onMouseDown={onDown} onMouseMove={onMoveGlobo} onMouseUp={onUp}>
+                <path d={globo.sphere} fill="#eef4f7" stroke="#dbe6ec" strokeWidth={0.6} />
+                {globo.countries.map((c: any, i: number) => {
+                  const n = numToN.get(c.id) || 0
+                  return <path key={i} d={c.d} fill={n ? coloreVolume(n, maxPaese) : '#dfe7ec'} stroke="#fff" strokeWidth={0.3}
+                    onMouseMove={e => { if (drag.current) return; const r = boxRef.current?.getBoundingClientRect(); const a2 = NUM_ALPHA2[c.id]; setHover({ nome: (a2 && PAESE_NOME_IT[a2]) || c.nome, n, x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) }) }} />
+                })}
+              </svg>
+          )}
+          {hover && (hover.n > 0 || vista === 'italia') && (
+            <div className="fx-mappa-nota" style={{ left: hover.x + 10, top: hover.y + 10 }}>{hover.nome}: {hover.n.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)}</div>
+          )}
+        </div>
+        <div className="fx-righe">
+          {!dati ? <div className="fx-vuoto">Carico…</div> : !prime.length
+            ? <div className="fx-vuoto">{vista === 'italia' ? 'Nessuna spedizione in Italia negli ultimi 30 giorni.' : 'Nessuna spedizione estera negli ultimi 30 giorni.'}</div>
+            : prime.map(p => (
+              <div key={p.k} className="fx-riga fx-dest-riga">
+                <span><b className="fx-sigla" title={p.nome}>{p.nome}</b><i className="fx-barretta"><i style={{ width: `${Math.max(4, (p.n / maxClass) * 100)}%` }} /></i></span>
+                <b>{p.n.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} <span style={{ color: 'var(--fx-grigio)', fontWeight: 400 }}>· {p.perc.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</span></b>
+              </div>
+            ))}
+        </div>
+      </section>
+    )
+  }
+
+  const card: React.CSSProperties = { background: '#fff', border: '1px solid #eee', borderRadius: 14, padding: 18 }
   return (
-    <div style={card} className={fx ? 'fx-scheda fx-tutta' : undefined}>
+    <div style={card}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-        {fx ? <h2 style={{ margin: 0, fontSize: 17, fontWeight: 500, letterSpacing: -0.2 }}>Destinazioni principali</h2> : (
         <div style={{ fontSize: 16, fontWeight: 800, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ color: '#EA580C' }}>📍</span> Destinazioni principali
-        </div>)}
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ display: 'inline-flex', gap: 4 }}>
             <button onClick={() => setVista('italia')} style={tab(vista === 'italia')}>Italia</button>
             <button onClick={() => setVista('mondo')} style={tab(vista === 'mondo')}>Mondo</button>
           </span>
-          {fx ? <span className="fx-chip fx-chip--neutro">ultimi 30 giorni</span> : <span style={{ fontSize: 12, color: '#9a9a9a' }}>Ultimi 30 gg</span>}
+          <span style={{ fontSize: 12, color: '#9a9a9a' }}>Ultimi 30 gg</span>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* MAPPA / GLOBO */}
-        <div ref={boxRef} style={{ position: 'relative', flex: '1 1 300px', minWidth: 260, ...(fx ? { maxWidth: 440 } : {}) }} onMouseLeave={() => { setHover(null); onUp() }}>
+        <div ref={boxRef} style={{ position: 'relative', flex: '1 1 300px', minWidth: 260 }} onMouseLeave={() => { setHover(null); onUp() }}>
           {vista === 'italia' ? (
             !italiaPaths ? <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb', fontSize: 13 }}>{errore ? 'Mappa non disponibile' : 'Carico la mappa…'}</div>
               : <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>

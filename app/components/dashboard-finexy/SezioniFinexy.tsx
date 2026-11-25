@@ -1,6 +1,11 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { euro, intero, meseItaliano, percento, statoDi } from './formati'
+import { Barra3D, DefsBarre, profondita } from './Barre3D'
+import DateRangePicker from '@/app/components/DateRangePicker'
+import ReportGuadagno, { REPORT_TOTALE, REPORT_VOCI, meseCorrente } from '@/app/components/ReportGuadagno'
+import GuadagnoChart from '@/app/components/GuadagnoChart'
+import CostiGestioneCard from '@/app/components/CostiGestioneCard'
 
 // LE PARTI DELLA DASHBOARD NUOVA CHE LA DASHBOARD DI OGGI GIA' AVEVA. Lorenzo, 25/11: «nella vecchia versione nella home
 // ci stavano tanti blocchi, ora non se li ritrovano piu'... applica il design, ma la sistemazione falla in base a tutti
@@ -43,7 +48,7 @@ export function LavoroInCorso({ data }: { data: DatiDashboard }) {
         {celle.map(c => {
           const dentro = <>
             <div className="fx-cella-nome">{c.nome}</div>
-            <div className="fx-cella-cifra">{c.cifra}</div>
+            <div className={`fx-cella-cifra${c.cifra.length > 11 ? ' fx-cella-cifra--lunga' : ''}`}>{c.cifra}</div>
             <div className="fx-cella-quando"><span className="fx-chip fx-chip--neutro">{c.quando}</span></div>
           </>
           const cls = `fx-cella${c.arancio ? ' fx-cella--arancio' : ''}`
@@ -134,36 +139,42 @@ export function MesePerMese({ mesi }: { mesi: { mese: string; totale: number; im
   const righe = (mesi || []).slice(-6)
   const max = Math.max(1, ...righe.map(m => Number(m.totale) || 0))
   // Disegnato sulla larghezza vera, come le settimane: con una larghezza fissa le scritte crescevano con la scheda.
+  // E in altezza riempie la riga (la decide la scheda accanto): niente vuoto sotto il grafico.
   const area = useRef<HTMLDivElement>(null)
-  const [W, setW] = useState(420)
+  const [misura, setMisura] = useState({ w: 420, h: 270 })
   useEffect(() => {
     const el = area.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const o = new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (w > 0) setW(w) })
+    const o = new ResizeObserver(([e]) => {
+      const w = Math.round(e.contentRect.width), h = Math.round(e.contentRect.height)
+      if (w > 0) setMisura(m => (m.w === w && m.h === Math.max(220, h) ? m : { w, h: Math.max(220, h) }))
+    })
     o.observe(el)
     return () => o.disconnect()
   }, [])
-  const H = 210, Y1 = H - 24, slot = W / Math.max(1, righe.length), larga = Math.min(slot * 0.5, 56)
+  const W = misura.w, H = misura.h, Y1 = H - 26, slot = W / Math.max(1, righe.length), larga = Math.min(slot * 0.42, 54), d = profondita(larga)
   return (
-    <section className="fx-scheda fx-tutta">
+    <section className="fx-scheda fx-largo fx-pieno">
       <div className="fx-testa">
         <div><h2>Mese per mese</h2><p className="fx-sotto">Spedizioni della rete create in ogni mese, e il loro volume</p></div>
         <a className="fx-link" href="/dashboard/statistiche/corrieri">Statistiche →</a>
       </div>
       {!righe.length ? <div className="fx-vuoto">Nessun dato</div> : (
-        <div className="fx-mesi">
-          <div className="fx-pannello">
-            <div ref={area}>
-            <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} style={{ display: 'block', maxWidth: '100%' }} role="img" aria-label="Spedizioni per mese">
+        <div className="fx-mesi fx-riempi">
+          <div className="fx-pannello fx-mesi-grafico">
+            <div ref={area} className="fx-mesi-area">
+            <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Spedizioni per mese">
+              <DefsBarre id="fxm" />
+              <line x1="0" x2={W} y1={Y1 + 0.5} y2={Y1 + 0.5} stroke="#E4E4E4" />
               {righe.map((m, i) => {
-                const h = (Number(m.totale) || 0) / max * (Y1 - 22), x = i * slot + (slot - larga) / 2
+                const h = (Number(m.totale) || 0) / max * (Y1 - 40), x = i * slot + (slot - larga - d) / 2
                 const ultimo = i === righe.length - 1
                 return (
                   <g key={m.mese}>
                     <title>{`${meseItaliano(m.mese)}: ${intero(m.totale)} spedizioni, ${euro(m.importo)}`}</title>
-                    <rect x={x} y={Y1 - h} width={larga} height={Math.max(h, 1.5)} rx="5" fill={ultimo ? 'var(--fx-arancio)' : 'var(--fx-nero)'} />
-                    <text x={x + larga / 2} y={Y1 - h - 6} textAnchor="middle" style={{ fontSize: 10.5, fill: 'var(--fx-testo)', fontWeight: 500 }}>{intero(m.totale)}</text>
-                    <text x={x + larga / 2} y={H - 6} textAnchor="middle" className="fx-asse" style={{ fontSize: 11 }}>{meseItaliano(m.mese)}</text>
+                    <Barra3D id="fxm" x={x} y={Y1 - Math.max(h, 2)} larga={larga} alta={Math.max(h, 2)} tinta={ultimo ? 'arancio' : 'nero'} />
+                    <text x={x + (larga + d) / 2} y={Y1 - h - d * 0.62 - 7} textAnchor="middle" style={{ fontSize: 11, fill: 'var(--fx-testo)', fontWeight: 600 }}>{intero(m.totale)}</text>
+                    <text x={x + (larga + d) / 2} y={H - 7} textAnchor="middle" className="fx-asse" style={{ fontSize: 11 }}>{meseItaliano(m.mese)}</text>
                   </g>
                 )
               })}
@@ -181,6 +192,13 @@ export function MesePerMese({ mesi }: { mesi: { mese: string; totale: number; im
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="fx-totale">
+                <td>{righe.length} mesi</td>
+                <td className="fx-destra">{intero(righe.reduce((t, m) => t + (Number(m.totale) || 0), 0))}</td>
+                <td className="fx-destra">{euro(righe.reduce((t, m) => t + (Number(m.importo) || 0), 0))}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
@@ -206,15 +224,37 @@ export function CreditiDaRecuperare({ crediti }: { crediti?: DatiDashboard['cred
             ? `${g.clienti} client${g.clienti === 1 ? 'e non può' : 'i non possono'} spedire finché non ricaric${g.clienti === 1 ? 'a' : 'ano'}`
             : `${g.clienti} client${g.clienti === 1 ? 'e' : 'i'} con esposizione regolare: spedisc${g.clienti === 1 ? 'e' : 'ono'} normalmente`}</p>
           <div className="fx-righe">
-            {g.lista.map(c => (
+            {g.lista.slice(0, 5).map(c => (
               <a key={c.id} className={`fx-riga${scal ? ' fx-riga--male' : ''}`} href={`/dashboard/clienti/${c.id}`}>
                 <span title={c.nome}>{c.nome}</span><b>{euro(Number(c.saldo))}</b>
               </a>
             ))}
-            {g.clienti > g.lista.length && <div className="fx-piu">e altri {g.clienti - g.lista.length}…</div>}
+            {g.clienti > Math.min(5, g.lista.length) && <div className="fx-piu">e altri {g.clienti - Math.min(5, g.lista.length)}…</div>}
           </div>
         </section>
       )
     })}
+  </>
+}
+
+// IL TUO GUADAGNO: un periodo per tutte le voci (Lorenzo 25/11: «il controllo delle date a blocco singolo va
+// raggruppato»). Il periodo di partenza e' il mese in corso, lo stesso che la pagina chiede in anticipo all'apertura.
+export function IlTuoGuadagno({ ruolo }: { ruolo?: string }) {
+  const [periodo, setPeriodo] = useState(meseCorrente)
+  const titolare = ['master', 'admin'].includes(String(ruolo || '').toLowerCase())
+  return <>
+    <div className="fx-sezione fx-tutta">
+      <div><h2>Il tuo guadagno</h2><p>Un periodo per tutte le voci</p></div>
+      <DateRangePicker dal={periodo.dal} al={periodo.al} onChange={(dal, al) => setPeriodo({ dal, al })} />
+    </div>
+    <ReportGuadagno titolo="Guadagno Totale" endpoint={REPORT_TOTALE} dal={periodo.dal} al={periodo.al} variante="nera" />
+    <GuadagnoChart dal={periodo.dal} al={periodo.al} />
+    <section className="fx-scheda fx-striscia fx-tutta" aria-label="Il guadagno per voce">
+      <div className="fx-striscia-righe fx-voci">
+        {REPORT_VOCI.map(r => <ReportGuadagno key={r.endpoint} titolo={r.titolo} endpoint={r.endpoint} dal={periodo.dal} al={periodo.al} />)}
+        {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
+        {titolare && <CostiGestioneCard dal={periodo.dal} al={periodo.al} />}
+      </div>
+    </section>
   </>
 }

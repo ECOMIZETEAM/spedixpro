@@ -26,18 +26,17 @@ export default function BannerSms() {
   if (app && rimasti <= 0) return null
   const eur = (n: number) => Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 
-  // Nella Dashboard nuova (app/components/dashboard-finexy): la scheda col disegno delle altre. Si vede solo li', nella
-  // dashboard dello staff del master; all'agente l'endpoint risponde 403 e la scheda non c'e'.
+  // Nella Dashboard nuova (app/components/dashboard-finexy): un riquadro piccolo accanto al saluto, non una scheda della
+  // griglia (Lorenzo 25/11: i blocchi in fila avevano proporzioni sbagliate). Si vede solo li', nella dashboard dello
+  // staff del master; all'agente l'endpoint risponde 403 e non c'e'.
   return (
-    <a className="fx-scheda fx-sms" href="/dashboard/reports/storico-sms">
-      <div className="fx-testa"><h2>Notifiche SMS</h2><span className={`fx-chip ${rimasti > 0 ? 'fx-chip--bene' : 'fx-chip--neutro'}`}>{rimasti > 0 ? 'attive' : 'non attive'}</span></div>
-      <div className="fx-grande">{rimasti > 0 ? `${rimasti.toLocaleString('it-IT')} SMS` : 'Avvisa i destinatari'}</div>
-      <p className="fx-sotto">
-        {rimasti > 0
-          ? "disponibili. Un SMS a ogni spedizione: meno richieste «dov'è il pacco?»."
-          : `via SMS con il link al tracking. ${eur(costo)}/SMS, pacchetti da 1000: paghi solo quel che usi.`}
-      </p>
-      <span className="fx-tasto fx-tasto--chiaro" style={{ marginTop: 14 }}>{rimasti > 0 ? 'Gestisci SMS' : 'Attiva SMS'} →</span>
+    <a className="fx-sms-mini" href="/dashboard/reports/storico-sms">
+      <i aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z" /><path d="M4 7l8 6 8-6" /></svg></i>
+      <span>
+        <b>{rimasti > 0 ? `${rimasti.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} SMS disponibili` : 'SMS ai destinatari'}</b>
+        <small>{rimasti > 0 ? "un SMS a ogni spedizione" : `non attivi · ${eur(costo)}/SMS`}</small>
+      </span>
+      <em>{rimasti > 0 ? 'Gestisci' : 'Attiva'} →</em>
     </a>
   )
 }

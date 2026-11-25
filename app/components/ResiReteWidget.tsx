@@ -35,7 +35,7 @@ export default function ResiReteWidget({ fx = false }: { fx?: boolean } = {}) {
   const card = { background: '#fff', border: '1px solid #e8e8e8', borderRadius: '8px', padding: '16px' }
   const etichetta = { fontSize: '10px', fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.6px', color: '#999' }
   if (!d && fx) return (
-    <section className="fx-scheda fx-tutta">
+    <section className="fx-scheda">
       <div className="fx-testa"><h2>Resi della rete</h2><span className="fx-chip fx-chip--neutro">ultimi 90 giorni</span></div>
       <div className="fx-vuoto">{errore ? 'Dati non disponibili.' : 'Carico i resi…'}</div>
     </section>
@@ -57,44 +57,36 @@ export default function ResiReteWidget({ fx = false }: { fx?: boolean } = {}) {
   )
 
   if (fx) return (
-    <section className="fx-scheda fx-tutta">
+    <section className="fx-scheda">
       <div className="fx-testa">
         <h2>Resi della rete</h2>
         <a className="fx-link" href="/dashboard/resi/analisi">Analisi resi →</a>
       </div>
-      <div className="fx-resi">
-      <div>
-      <div className="fx-grande">{String(d.totale.pct).replace('.', ',')}%</div>
-      <p className="fx-sotto">di resi negli ultimi 90 giorni: {Number(d.totale.resi).toLocaleString('it-IT')} su {Number(d.totale.partite).toLocaleString('it-IT')} spedizioni partite</p>
-      <div className="fx-cella-nome" style={{ marginTop: 14 }}>Clienti oltre soglia</div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+      <div className="fx-resi-testa">
+        <div className="fx-grande">{String(d.totale.pct).replace('.', ',')}%</div>
+        <p className="fx-sotto">di resi negli ultimi 90 giorni<br />{Number(d.totale.resi).toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} su {Number(d.totale.partite).toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} spedizioni partite</p>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }} title="Clienti oltre soglia di resi">
         {(['rosso', 'arancione', 'giallo'] as const).map(l => (
-          <div key={l} style={{ flex: '1 1 0', minWidth: 0, background: COLORI_RESI[l].bg, borderRadius: 11, padding: '9px 11px' }}>
-            <div style={{ fontSize: 20, fontWeight: 600, color: COLORI_RESI[l].fg, lineHeight: 1 }}>{d.allarmi[l]}</div>
-            <div style={{ fontSize: 11, fontWeight: 500, color: COLORI_RESI[l].fg, marginTop: 4 }}>{l === 'rosso' ? 'oltre 20%' : l === 'arancione' ? '10–20%' : '8–10%'}</div>
+          <div key={l} style={{ flex: '1 1 0', minWidth: 0, background: COLORI_RESI[l].bg, borderRadius: 11, padding: '8px 11px' }}>
+            <div style={{ fontSize: 19, fontWeight: 600, color: COLORI_RESI[l].fg, lineHeight: 1 }}>{d.allarmi[l]}</div>
+            <div style={{ fontSize: 11, fontWeight: 500, color: COLORI_RESI[l].fg, marginTop: 4 }}>clienti {l === 'rosso' ? 'oltre 20%' : l === 'arancione' ? '10–20%' : '8–10%'}</div>
           </div>
         ))}
       </div>
-      </div>
-      <div>
       <div className="fx-cella-nome" style={{ marginTop: 14 }}>Da controllare per primi</div>
       {!d.peggiori.length ? (
         <p className="fx-sotto" style={{ color: 'var(--fx-bene)' }}>Nessun cliente oltre l&apos;8% di resi.</p>
       ) : (
         <div className="fx-righe" style={{ marginTop: 4 }}>
-          {d.peggiori.map((p: any) => (
-            <div key={p.id} className="fx-riga">
-              <span style={{ display: 'block' }}>
-                <span style={{ display: 'block', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.nome}>{p.nome}</span>
-                <span style={{ display: 'block', fontSize: 11, color: 'var(--fx-grigio)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.master} · {p.resi} resi su {p.partite}</span>
-              </span>
+          {d.peggiori.slice(0, 3).map((p: any) => (
+            <div key={p.id} className="fx-riga" title={`${p.master} · ${p.resi} resi su ${p.partite} spedizioni`}>
+              <span>{p.nome}<small style={{ color: 'var(--fx-grigio)', marginLeft: 6, fontSize: 11 }}>{p.resi} su {p.partite}</small></span>
               <BadgeResi pct={p.pct} livello={p.livello} />
             </div>
           ))}
         </div>
       )}
-      </div>
-      </div>
     </section>
   )
 
