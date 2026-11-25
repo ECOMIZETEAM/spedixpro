@@ -89,7 +89,7 @@ const dataIt = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleD
 // Il numero della fattura BRT si scrive "n. 68967"; quello del documento GLS è già una frase.
 const nDoc = (x: string) => /^\d/.test(x) ? `n. ${x}` : x
 
-export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string; storico?: FatturaStorico[]; esterni?: EsternoIniziale[]; gls?: InfoGls } }) {
+export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string; storico?: FatturaStorico[]; esterni?: EsternoIniziale[]; gls?: InfoGls; fatturaId?: string; rettificheInviate?: boolean } }) {
   const dialog = useDialog()
   const [contratti, setContratti] = useState<Contratto[] | null>(iniziale?.contratti ?? null)
   const [contrattoId, setContrattoId] = useState(iniziale?.contratti?.[0]?.id ?? '')
@@ -102,8 +102,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const [pagina, setPagina] = useState(1)
   const [inviando, setInviando] = useState(false)
   const [trascina, setTrascina] = useState(false)
-  const [fatturaId, setFatturaId] = useState<string | null>(null)
-  const [rettificheInviate, setRettificheInviate] = useState(false)
+  // Da `iniziale` solo nelle pagine di prova: una fattura già aperta, con le rettifiche già mandate.
+  const [fatturaId, setFatturaId] = useState<string | null>(iniziale?.fatturaId ?? null)
+  const [rettificheInviate, setRettificheInviate] = useState(iniziale?.rettificheInviate ?? false)
   const [storico, setStorico] = useState<FatturaStorico[] | null>(iniziale?.storico ?? null)
   const [rinomina, setRinomina] = useState<{ id: string; valore: string } | null>(null)
   const [etichettaAperta, setEtichettaAperta] = useState<string | null>(null)
@@ -130,11 +131,43 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       setContratti(c); if (c.length === 1) setContrattoId(c[0].id)
     }).catch(() => setContratti([]))
     caricaStorico()
+    // LA FATTURA APERTA STA NELL'INDIRIZZO (?fattura=…). Prima viveva solo nella pagina: Wave il 25/11 mandava le
+    // differenze alla Rettifica, andava a confermarle, tornava indietro (o ricaricava) e la fattura non c'era più,
+    // da riaprire o ricaricare da capo. Ora si riapre da sola, in silenzio: se nel frattempo non c'è più, niente.
+    const daRiaprire = new URLSearchParams(window.location.search).get('fattura')
+    if (daRiaprire) apriFattura(daRiaprire, true)
   }, [iniziale])
 
-  async function apriFattura(id: string) {
+  // L'indirizzo segue la fattura aperta (solo a controllo finito: setFatturaId arriva dopo la chiusura). Il primo
+  // giro si salta, se no toglierebbe il ?fattura= prima che la fattura si riapra.
+  const primoGiroIndirizzo = useRef(true)
+  useEffect(() => {
+    if (iniziale) return
+    if (primoGiroIndirizzo.current) { primoGiroIndirizzo.current = false; return }
+    const u = new URL(window.location.href)
+    if (fatturaId) u.searchParams.set('fattura', fatturaId); else u.searchParams.delete('fattura')
+    window.history.replaceState(window.history.state, '', u.pathname + u.search + u.hash)
+  }, [fatturaId, iniziale])
+
+  // LO STATO DELLE RETTIFICHE MANDATE SI AGGIORNA DA SOLO quando si torna su questa scheda: le rettifiche si
+  // confermano in Rettifica Costi (che ora si apre in un'altra scheda), e tornando qui si vede subito quante
+  // sono confermate. Lo stesso fa il tasto "Aggiorna". Lo stato viene dallo storico (girate per fattura).
+  const [aggiornando, setAggiornando] = useState(false)
+  const aggiornaStato = async () => { setAggiornando(true); await caricaStorico(); setAggiornando(false) }
+  useEffect(() => {
+    if (iniziale || !fatturaId || !rettificheInviate) return
+    // Scheda che torna visibile, o finestra che torna in primo piano (Rettifica Costi in un'altra finestra).
+    const torna = () => { if (document.visibilityState === 'visible') caricaStorico() }
+    document.addEventListener('visibilitychange', torna); window.addEventListener('focus', torna)
+    return () => { document.removeEventListener('visibilitychange', torna); window.removeEventListener('focus', torna) }
+  }, [iniziale, fatturaId, rettificheInviate])
+
+  async function apriFattura(id: string, daIndirizzo = false) {
     const d = await fetch('/api/fatture-corriere/storico?fattura=' + id).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
-    if (d.error) { await dialog.alert({ title: 'Fattura non aperta', message: d.error }); return }
+    if (d.error) {
+      if (daIndirizzo) { const u = new URL(window.location.href); u.searchParams.delete('fattura'); window.history.replaceState(window.history.state, '', u.pathname + u.search + u.hash); return }
+      await dialog.alert({ title: 'Fattura non aperta', message: d.error }); return
+    }
     setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setEtichettaAperta(d.fattura.etichetta || null)
     // Mandate col pulsante, o già girate con un file proprio dalla pagina Rettifica.
     setRettificheInviate(!!d.fattura.rettifiche_file_id || !!d.fattura.riepilogo?.rettificheEsterne?.ids?.length)
@@ -149,7 +182,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       return { ...e, riga: { ...r, pesoMisurato: m, pesoTassato: pesoTassatoBrt(m) } }
     }))
     setAvvisi([]); setPagina(1); setFiltro('perdita'); setCerca('')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    if (!daIndirizzo) window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null); setLegenda(null); setNotePdf([]); setInfoGls(null); setVoceScelta(null) }
 
@@ -292,6 +325,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // I rientri delle spedizioni fatte altrove li racconta la sezione degli altri gestionali.
   const rientriMoove = useMemo(() => trovate.filter(e => !e.riga.andata), [trovate])
   const daRettificare = useMemo(() => esiti.filter(daGirare), [esiti])
+  // Com'è andata la Rettifica della fattura aperta: mandate, confermate, da confermare (dallo storico).
+  const girateAperta = storico?.find(f => f.id === fatturaId)?.girate ?? null
   const arriviResiFuori = useMemo(() => esiti.filter(e => !e.spedizione && !e.riga.andata).length, [esiti])
   const totali = useMemo(() => riepilogaFattura(esiti), [esiti])
 
@@ -444,7 +479,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       message: (errore ? errore + ' — ' : '') + `Create ${creati} rettifiche su ${righe.length} spedizioni.`
         + (gia ? ` ${gia} erano già state rettificate e sono state saltate.` : '')
         + (nonTrovate ? ` ${nonTrovate} non sono state trovate dalla Rettifica.` : '')
-        + ' Le trovi in Spedizioni → Rettifica Costi: controllale e premi Conferma.',
+        + ' Le trovi in Rettifica Costi (il tasto qui sotto la apre in un\'altra scheda, questa resta aperta): controllale e premi Conferma.',
     })
   }
 
@@ -918,16 +953,33 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                 <span style={{ color: C.arancioScuro, marginLeft: 8, ...cifre }}>{conSegno(r2(daRettificare.reduce((s, e) => s + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0)))}</span>
               </div>
               <div style={{ fontSize: 12.5, color: '#475467', marginTop: 3, lineHeight: 1.45 }}>
-                {rettificheInviate
-                  ? 'Le hai già mandate alla Rettifica: le trovi in Rettifica Costi, da confermare. Rimandarle non le raddoppia, quelle già create vengono saltate.'
-                  : `${cr} le ha tassate più del peso registrato in Moove. Diventano rettifiche da confermare in Rettifica Costi, ognuno paga col proprio listino: finché non le confermi non si muove nulla.`}
+                {rettificheInviate && girateAperta
+                  ? <>
+                      <b>{girateAperta.inviate} rettifich{girateAperta.inviate === 1 ? 'a' : 'e'}</b> su {daRettificare.length} spedizion{daRettificare.length === 1 ? 'e' : 'i'}:{' '}
+                      <b style={{ color: C.verde }}>{girateAperta.confermate} confermat{girateAperta.confermate === 1 ? 'a' : 'e'}</b>{girateAperta.confermate ? ` (${euro(girateAperta.euroConfermati)} girati)` : ''}
+                      {girateAperta.inviate - girateAperta.confermate > 0 && <>, <b style={{ color: C.arancioScuro }}>{girateAperta.inviate - girateAperta.confermate} da confermare</b> ({euro(girateAperta.euroInAttesa)}) in Rettifica Costi</>}.
+                      {girateAperta.inviate < daRettificare.length && (daRettificare.length - girateAperta.inviate === 1
+                        ? ' 1 non è diventata una rettifica (già rettificata o scartata dalla Rettifica).'
+                        : ` ${daRettificare.length - girateAperta.inviate} non sono diventate rettifiche (già rettificate o scartate dalla Rettifica).`)}
+                      {' '}Si aggiorna da solo quando torni su questa pagina.
+                    </>
+                  : rettificheInviate
+                    ? 'Le hai già mandate alla Rettifica: le trovi in Rettifica Costi, da confermare. Rimandarle non le raddoppia, quelle già create vengono saltate.'
+                    : `${cr} le ha tassate più del peso registrato in Moove. Diventano rettifiche da confermare in Rettifica Costi, ognuno paga col proprio listino: finché non le confermi non si muove nulla.`}
               </div>
             </div>
             {rettificheInviate ? (
-              <a href="/dashboard/spedizioni/rettifica"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: `1px solid ${C.arancioOrlo}`, fontSize: 13.5, fontWeight: 700, background: '#fff', color: C.arancioScuro, textDecoration: 'none' }}>
-                Apri Rettifica Costi <Icona nome="freccia" size={16} />
-              </a>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={aggiornaStato} disabled={aggiornando}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, border: `1px solid ${C.arancioOrlo}`, fontSize: 13.5, fontWeight: 600, background: 'transparent', color: C.arancioScuro, cursor: aggiornando ? 'default' : 'pointer' }}>
+                  {aggiornando ? 'Aggiorno…' : 'Aggiorna'}
+                </button>
+                {/* In un'altra scheda: qui il controllo resta aperto, e tornando si aggiorna da solo. */}
+                <a href="/dashboard/spedizioni/rettifica" target="_blank" rel="noopener"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: `1px solid ${C.arancioOrlo}`, fontSize: 13.5, fontWeight: 700, background: '#fff', color: C.arancioScuro, textDecoration: 'none' }}>
+                  Apri Rettifica Costi <Icona nome="freccia" size={16} />
+                </a>
+              </div>
             ) : (
               <button onClick={mandaAllaRettifica} disabled={inviando}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: 'none', fontSize: 13.5, fontWeight: 700, background: C.arancio, color: '#fff', cursor: inviando ? 'default' : 'pointer', boxShadow: '0 1px 2px rgba(16,24,40,.1)' }}>
