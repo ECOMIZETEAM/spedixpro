@@ -100,7 +100,9 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
-        <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Giacenza — {sped.numero}</h1>
+        {/* Il titolo sta sul fondo della pagina, fuori dalle schede bianche: di notte il fondo e' scuro,
+            quindi segue il testo della cornice (chiaro di notte, scuro di giorno) invece del nero fisso. */}
+        <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--gx-testo, #1a1a1a)', margin: 0 }}>Giacenza — {sped.numero}</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           {isMaster && sped.giacenza_stato !== 'chiusa' && (
             <button disabled={salvando} onClick={async () => { if (await dialog.confirm({ title: 'Chiudere la giacenza?', message: 'Non sarà più gestibile.', danger: true, confirmText: 'Chiudi' })) azione({ azione: 'chiudi' }) }}
