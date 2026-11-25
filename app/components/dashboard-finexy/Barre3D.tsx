@@ -14,7 +14,7 @@ export function DefsBarre({ id }: { id: string }) {
   return (
     <defs>
       <linearGradient id={`${id}-nero`} x1="0" x2="1" y1="0" y2="0">
-        <stop offset="0" stopColor="#3A3A39" /><stop offset="1" stopColor="#141414" />
+        <stop className="fx-s-nero-a" offset="0" stopColor="#3A3A39" /><stop className="fx-s-nero-b" offset="1" stopColor="#141414" />
       </linearGradient>
       <linearGradient id={`${id}-arancio`} x1="0" x2="1" y1="0" y2="0">
         <stop offset="0" stopColor="#FF8A5C" /><stop offset="1" stopColor="#E54E1E" />
@@ -42,9 +42,9 @@ export function Barra3D({ id, x, y, larga, alta, tinta, cima = true, ombra = tru
   return (
     <g>
       {ombra && <ellipse cx={x + larga / 2 + d / 2} cy={y + alta + 1} rx={larga * 0.62} ry={3.2} fill="rgba(0,0,0,.18)" filter={`url(#${id}-ombra)`} />}
-      <polygon points={`${x + larga},${y} ${x + larga + d},${y - dy} ${x + larga + d},${y + alta - dy} ${x + larga},${y + alta}`} fill={FIANCO[tinta]} />
+      <polygon className={`fx-fianco-${tinta}`} points={`${x + larga},${y} ${x + larga + d},${y - dy} ${x + larga + d},${y + alta - dy} ${x + larga},${y + alta}`} fill={FIANCO[tinta]} />
       <rect x={x} y={y} width={larga} height={alta} fill={davanti} />
-      {cima && <polygon points={`${x},${y} ${x + d},${y - dy} ${x + larga + d},${y - dy} ${x + larga},${y}`} fill={CIMA[tinta]} />}
+      {cima && <polygon className={`fx-cima-${tinta}`} points={`${x},${y} ${x + d},${y - dy} ${x + larga + d},${y - dy} ${x + larga},${y}`} fill={CIMA[tinta]} />}
     </g>
   )
 }

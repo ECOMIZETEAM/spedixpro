@@ -10,7 +10,6 @@ import ResiReteWidget, { URL_RESI_RETE, INIT_RESI_RETE } from '@/app/components/
 import { anticipa } from '@/lib/richieste-anticipate'
 import { useProfiloUtente, type ProfiloUtente } from './RuoloUtente'
 import { GraficaNuova } from '@/app/components/grafica/contesto'
-import PlanciaB from '@/app/components/grafica/proposte/b/PlanciaB'
 import DashboardFinexy from '@/app/components/dashboard-finexy/DashboardFinexy'
 
 // I RIQUADRI PARTONO INSIEME A /api/dashboard, NON DOPO. Si montano solo quando la dashboard ha
@@ -37,17 +36,19 @@ function anticipaRiquadri(profilo: ProfiloUtente | null) {
   for (const r of REPORT_VOCI) anticipa(urlInizialeReport(r.endpoint))
 }
 
-// Con la grafica nuova (v11) la Plancia è un'altra pagina, coi numeri delle stesse rotte; con quella di oggi resta
-// questa, identica. L'agente ha la sua plancia confinata ai suoi clienti: finché non è disegnata, resta quella di oggi.
+// Con la grafica nuova (v11, il menu a striscia approvato) la Dashboard è quella nuova, composizione «Finexy» (Lorenzo
+// 25/11: «il menu non vedo quello che avevamo fatto nella nuova versione, che fine ha fatto?»): stessi numeri, stesse
+// rotte. Con la grafica di oggi resta questa, identica. L'agente ha la sua dashboard confinata ai suoi clienti: finché
+// non è disegnata, resta quella di oggi in tutte e due.
 export default function Dashboard() {
   const g = useContext(GraficaNuova)
   if (!g.attiva || g.ruolo === 'agente') return <DashboardDiOggi />
-  // Lorenzo 18/11: «ho deciso la B» (Il flusso). Le altre proposte del 27/10 e il selettore in basso non si mostrano più;
-  // il loro codice resta nelle cartelle proposte/a, c, d finché Lorenzo non dice di toglierlo.
-  return <PlanciaB />
+  // Prima qui c'era la Plancia B (Lorenzo 18/11); il 23/11 Lorenzo ha scelto Finexy. Il codice delle proposte resta nelle
+  // cartelle proposte/a, b, c, d finché Lorenzo non dice di toglierlo.
+  return <DashboardDiOggi nuova />
 }
 
-function DashboardDiOggi() {
+function DashboardDiOggi({ nuova = false }: { nuova?: boolean }) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const profilo = useProfiloUtente()
@@ -81,11 +82,10 @@ function DashboardDiOggi() {
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
   if (!data) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>Errore caricamento</div>
 
-  // LA DASHBOARD NUOVA (composizione «Finexy», Lorenzo 24-25/11/2026) per lo staff del master: tutti i riquadri di
-  // questa pagina, con lo stesso disegno e sistemati per uso (app/components/dashboard-finexy). L'agente ha la sua
-  // dashboard confinata ai suoi clienti e i numeri nuovi (/api/dashboard/plancia) sono solo dello staff: per lui resta
-  // quella qui sotto, identica.
-  if (String(data.ruolo || '').toLowerCase() !== 'agente') return <DashboardFinexy data={data} />
+  // LA DASHBOARD NUOVA (composizione «Finexy», Lorenzo 24-25/11/2026) nella grafica nuova, per lo staff del master:
+  // tutti i riquadri di questa pagina, con lo stesso disegno e sistemati per uso (app/components/dashboard-finexy).
+  // I numeri nuovi (/api/dashboard/plancia) sono solo dello staff: l'agente resta su quella qui sotto, identica.
+  if (nuova && String(data.ruolo || '').toLowerCase() !== 'agente') return <DashboardFinexy data={data} />
 
   const STATI_COLORS: Record<string,string> = {
     'in_lavorazione':'#ca8a04',

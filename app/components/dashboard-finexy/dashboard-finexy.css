@@ -21,6 +21,9 @@
 .fx-griglia { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .fx-scheda { background: var(--fx-carta); border-radius: 15px; box-shadow: var(--fx-ombra); padding: 15px; min-width: 0; }
 .fx-colonna { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+/* la scheda dei corrieri arriva in fondo alla riga: le due carte si allungano */
+.fx-colonna > .fx-scheda:last-child { flex: 1; display: flex; flex-direction: column; }
+.fx-colonna > .fx-scheda:last-child .fx-carte { flex: 1; }
 .fx-largo { grid-column: span 2; }
 .fx-testa { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .fx-testa h2 { margin: 0; font-size: 17px; font-weight: 500; letter-spacing: -0.2px; }
@@ -44,6 +47,8 @@
 .fx-tasto { height: 40px; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13.5px; font-weight: 500; border: 0; cursor: pointer; }
 .fx-tasto svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .fx-tasto--nero { background: linear-gradient(180deg, #3A3A38, #121212); color: #fff; box-shadow: 0 3px 9px rgba(0,0,0,.2); }
+/* Nella cornice della grafica nuova i collegamenti prendono il colore della cornice: qui il bianco va tenuto. */
+.fx a.fx-tasto--nero, .fx a.fx-tasto--nero:visited { color: #fff; }
 .fx-tasto--chiaro { background: #fff; color: var(--fx-testo); box-shadow: 0 0 0 1px #EFEFEF, 0 2px 8px rgba(0,0,0,.04); }
 .fx-tasto:hover { filter: brightness(1.06); }
 .fx-conti { margin-top: 20px; background: var(--fx-pannello); border-radius: 11px; padding: 10px; }
@@ -101,7 +106,7 @@
 .fx-carta--nera { background: linear-gradient(160deg, #2A2A2A, #0E0E0E); }
 .fx-carta--arancio { background: linear-gradient(160deg, #F2683A, #E9532A); border-radius: 11px 0 0 11px; }
 .fx-carta-testa { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: rgba(255,255,255,.6); white-space: nowrap; }
-.fx-carta-testa b { background: #fff; color: var(--fx-testo); font-size: 10.5px; font-weight: 600; border-radius: 999px; padding: 2px 8px; }
+.fx-carta-testa b { background: #fff; color: #111; font-size: 10.5px; font-weight: 600; border-radius: 999px; padding: 2px 8px; }
 .fx-carta--arancio .fx-carta-testa b { color: var(--fx-arancio); }
 .fx-carta-nome { margin-top: auto; padding-top: 12px; font-size: 14.5px; font-weight: 600; line-height: 1.2; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .fx-carta-cifre { display: flex; gap: 24px; margin-top: 12px; }
@@ -240,19 +245,82 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
 /* Destinazioni: la mappa piccola in rilievo, come un plastico */
 .fx-destinazioni { display: flex; flex-direction: column; }
 .fx-mappa { position: relative; display: flex; justify-content: center; margin: 6px 0 2px; }
-.fx-mappa-plastico { width: 100%; max-width: 190px; height: auto; display: block; overflow: visible; transform: perspective(760px) rotateX(24deg); transform-origin: 50% 65%; }
-.fx-mappa-globo { width: 100%; max-width: 230px; height: auto; display: block; }
+.fx-mappa-plastico { width: 100%; max-width: 300px; height: auto; display: block; overflow: visible; transform: perspective(760px) rotateX(24deg); transform-origin: 50% 65%; }
+.fx-mappa-europa { max-width: 380px; overflow: hidden; }
+.fx-mappa-globo { width: 100%; max-width: 330px; height: auto; display: block; }
 .fx-mappa-nota { position: absolute; pointer-events: none; z-index: 5; background: var(--fx-nero); color: #fff; font-size: 11.5px; font-weight: 500; padding: 4px 8px; border-radius: 7px; white-space: nowrap; }
-.fx-destinazioni .fx-righe { margin-top: 6px; }
+.fx-destinazioni .fx-righe { margin-top: 0; }
+.fx-destinazioni .fx-dest-riga { padding: 10px 4px; }
 .fx-dest-riga > span:first-child { flex: 1; gap: 10px; }
 .fx-sigla { width: 30px; flex-shrink: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .fx-barretta { flex: 1; height: 7px; border-radius: 6px; background: #F1F1F1; overflow: hidden; display: block; }
 .fx-barretta i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--fx-arancio-2), var(--fx-arancio)); }
 
+/* LE ANIMAZIONI (Lorenzo 25/11: «manca qualche animazione»): le schede entrano una dopo l'altra, le colonne salgono dalla
+   base, le barrette si allungano, la ciambella gira, la mappa si appoggia inclinandosi. Una volta, all'apertura: quando
+   la dashboard si aggiorna da sola cambiano solo i numeri (Conta). Spente per chi ha chiesto meno movimento. */
+@keyframes fx-entra { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes fx-cresce { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes fx-allunga { from { width: 0; } }
+@keyframes fx-appare { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fx-gira { from { opacity: 0; transform: rotate(-110deg) scale(.82); } to { opacity: 1; transform: none; } }
+@keyframes fx-appoggia { from { opacity: 0; transform: perspective(760px) rotateX(58deg) translateY(-26px); } to { opacity: 1; transform: perspective(760px) rotateX(24deg); } }
+@keyframes fx-globo { from { opacity: 0; transform: scale(.88) rotate(-12deg); } to { opacity: 1; transform: none; } }
+.fx-titolo, .fx-griglia > * { animation: fx-entra .6s cubic-bezier(.2, .7, .2, 1) both; }
+.fx-griglia > :nth-child(1) { animation-delay: 60ms; } .fx-griglia > :nth-child(2) { animation-delay: 120ms; }
+.fx-griglia > :nth-child(3) { animation-delay: 180ms; } .fx-griglia > :nth-child(4) { animation-delay: 240ms; }
+.fx-griglia > :nth-child(5) { animation-delay: 300ms; } .fx-griglia > :nth-child(6) { animation-delay: 340ms; }
+.fx-griglia > :nth-child(7) { animation-delay: 380ms; } .fx-griglia > :nth-child(8) { animation-delay: 420ms; }
+.fx-griglia > :nth-child(9) { animation-delay: 460ms; } .fx-griglia > :nth-child(10) { animation-delay: 500ms; }
+.fx-griglia > :nth-child(n+11) { animation-delay: 540ms; }
+.fx-barra3d { transform-box: fill-box; transform-origin: 50% 100%; animation: fx-cresce .9s cubic-bezier(.2, .8, .2, 1) both; }
+.fx-appare { animation: fx-appare .5s ease both; }
+.fx-barretta i, .fx-piano-barra div { animation: fx-allunga 1.1s cubic-bezier(.2, .8, .2, 1) both .35s; }
+.fx-ciambella-svg { animation: fx-gira 1s cubic-bezier(.2, .8, .2, 1) both .25s; }
+.fx-mappa-plastico { animation: fx-appoggia 1s cubic-bezier(.2, .8, .2, 1) both .2s; }
+.fx-mappa-globo { animation: fx-globo .9s cubic-bezier(.2, .8, .2, 1) both; }
+/* al passaggio del mouse le caselle si alzano appena */
+.fx-numero, a.fx-cella, .fx-carta, .fx-coppia a { transition: transform .18s ease, box-shadow .18s ease, filter .15s; }
+.fx-numero:hover, a.fx-cella:hover, .fx-coppia a:hover { transform: translateY(-2px); }
+@media (prefers-reduced-motion: reduce) {
+  .fx, .fx * { animation: none !important; transition: none !important; }
+}
+
+/* Destinazioni larga: la mappa a sinistra, la classifica a destra */
+.fx-dest-corpo { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 24px; align-items: center; margin-top: 10px; flex: 1; }
+.fx-mappa-aiuto { position: absolute; bottom: -2px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--fx-grigio); }
+
+/* LA NOTTE della grafica nuova (la cornice mette data-luce="notte"): schede grafite, testi chiari, le colonne in
+   rilievo color argilla chiara invece che nere, che sul grafite sparivano. La scheda nera del guadagno, le carte dei
+   corrieri e il tasto Movimenti restano scuri: sono oggetti, non fondo. */
+.gx[data-luce="notte"] .fx {
+  --fx-fondo: #141416; --fx-carta: #1E1E21; --fx-riquadro: #2A2A2E; --fx-pannello: #242427; --fx-testo: #F2F2F3; --fx-grigio: #A4A4AA;
+  --fx-filo: #36363A; --fx-nero: #ECECEC; --fx-bene: #4CC37A; --fx-bene-tinta: rgba(76,195,122,.14); --fx-male: #FF6B6B; --fx-male-tinta: rgba(255,107,107,.14);
+  --fx-ombra: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.35);
+}
+.gx[data-luce="notte"] .fx-conto, .gx[data-luce="notte"] .fx-tasto--chiaro, .gx[data-luce="notte"] .fx-numero-testa i { background: var(--fx-riquadro); color: var(--fx-testo); }
+.gx[data-luce="notte"] .fx-numero--pieno .fx-numero-testa i { background: rgba(255,255,255,.2); }
+.gx[data-luce="notte"] .fx-tasto--chiaro { box-shadow: 0 0 0 1px var(--fx-filo); }
+.gx[data-luce="notte"] .fx-chip--neutro { background: #34343A; color: #C9C9CE; }
+.gx[data-luce="notte"] .fx-piano-barra, .gx[data-luce="notte"] .fx-barretta { background: #34343A; }
+.gx[data-luce="notte"] .fx-tasto--nero { background: linear-gradient(180deg, #4A4A4F, #222225); }
+.gx[data-luce="notte"] .fx-s-nero-a { stop-color: #F7F5F2; }
+.gx[data-luce="notte"] .fx-s-nero-b { stop-color: #C9C4BE; }
+.gx[data-luce="notte"] .fx-fianco-nero { fill: #8F8A84; }
+.gx[data-luce="notte"] .fx-cima-nero { fill: #FFFFFF; }
+.gx[data-luce="notte"] .fx-numero:hover { filter: brightness(1.08); }
+/* i titoli: la cornice nuova da' ai titoli il suo inchiostro, che di notte qui restava scuro */
+:root .fx h1, :root .fx h2 { color: var(--fx-testo); }
+.gx[data-luce="notte"] .fx-soglia { background: rgba(255,255,255,.05) !important; }
+.gx[data-luce="notte"] .fx-soglia--rosso, .gx[data-luce="notte"] .fx-soglia--rosso * { color: #FF8A8A !important; }
+.gx[data-luce="notte"] .fx-soglia--arancione, .gx[data-luce="notte"] .fx-soglia--arancione * { color: #FDBA74 !important; }
+.gx[data-luce="notte"] .fx-soglia--giallo, .gx[data-luce="notte"] .fx-soglia--giallo * { color: #FDE68A !important; }
+
 /* Telefono e schermi stretti: una colonna, i quattro numeri restano 2x2, la tabella scorre */
 @media (max-width: 1100px) {
   .fx-griglia { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .fx-mesi { grid-template-columns: minmax(0, 1fr); }
+  .fx-dest-corpo { grid-template-columns: minmax(0, 1fr); }
   .fx-grafico-scheda { grid-column: span 2; }
   .fx-largo { grid-column: span 2; }
 }

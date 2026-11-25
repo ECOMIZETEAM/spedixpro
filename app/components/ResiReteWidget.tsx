@@ -68,7 +68,7 @@ export default function ResiReteWidget({ fx = false }: { fx?: boolean } = {}) {
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }} title="Clienti oltre soglia di resi">
         {(['rosso', 'arancione', 'giallo'] as const).map(l => (
-          <div key={l} style={{ flex: '1 1 0', minWidth: 0, background: COLORI_RESI[l].bg, borderRadius: 11, padding: '8px 11px' }}>
+          <div key={l} className={`fx-soglia fx-soglia--${l}`} style={{ flex: '1 1 0', minWidth: 0, background: COLORI_RESI[l].bg, borderRadius: 11, padding: '8px 11px' }}>
             <div style={{ fontSize: 19, fontWeight: 600, color: COLORI_RESI[l].fg, lineHeight: 1 }}>{d.allarmi[l]}</div>
             <div style={{ fontSize: 11, fontWeight: 500, color: COLORI_RESI[l].fg, marginTop: 4 }}>clienti {l === 'rosso' ? 'oltre 20%' : l === 'arancione' ? '10–20%' : '8–10%'}</div>
           </div>

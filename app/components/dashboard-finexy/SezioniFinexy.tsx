@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { euro, intero, meseItaliano, percento, statoDi } from './formati'
 import { Barra3D, DefsBarre, profondita } from './Barre3D'
+import Conta from './Conta'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import ReportGuadagno, { REPORT_TOTALE, REPORT_VOCI, meseCorrente } from '@/app/components/ReportGuadagno'
 import GuadagnoChart from '@/app/components/GuadagnoChart'
@@ -30,17 +31,18 @@ const mesePerNome = () => new Intl.DateTimeFormat('it-IT', { month: 'long', time
 export function LavoroInCorso({ data }: { data: DatiDashboard }) {
   const mese = mesePerNome()
   const senzaDistinta = Number(data.daMettereInDistinta || 0)
-  const celle: { nome: string; cifra: string; quando: string; href?: string; arancio?: boolean; spiega?: string }[] = [
-    { nome: 'In transito', cifra: intero(Number(data.inTransito || 0)), quando: 'ora', href: '/dashboard/spedizioni?stato=in_transito' },
-    { nome: 'Da spedire', cifra: intero(Number(data.daSpedire || 0)), quando: 'ultimi 30 giorni', href: '/dashboard/spedizioni?stato=in_lavorazione',
+  const tutto = (x: number) => intero(Math.round(x))
+  const celle: { nome: string; n: number; formato: (x: number) => string; quando: string; href?: string; arancio?: boolean; spiega?: string }[] = [
+    { nome: 'In transito', n: Number(data.inTransito || 0), formato: tutto, quando: 'ora', href: '/dashboard/spedizioni?stato=in_transito' },
+    { nome: 'Da spedire', n: Number(data.daSpedire || 0), formato: tutto, quando: 'ultimi 30 giorni', href: '/dashboard/spedizioni?stato=in_lavorazione',
       spiega: 'Create negli ultimi 30 giorni e ancora in lavorazione' },
-    { nome: 'In lavorazione', cifra: intero(Number(data.inLavorazione || 0)), quando: 'ultimi 30 giorni', href: '/dashboard/spedizioni',
+    { nome: 'In lavorazione', n: Number(data.inLavorazione || 0), formato: tutto, quando: 'ultimi 30 giorni', href: '/dashboard/spedizioni',
       spiega: 'In lavorazione o spedite, create negli ultimi 30 giorni' },
-    { nome: 'Senza distinta', cifra: intero(senzaDistinta), quando: 'da sempre', href: '/dashboard/distinte/crea', arancio: senzaDistinta > 0,
+    { nome: 'Senza distinta', n: senzaDistinta, formato: tutto, quando: 'da sempre', href: '/dashboard/distinte/crea', arancio: senzaDistinta > 0,
       spiega: 'Tutte le spedizioni della rete senza distinta, annullate escluse' },
-    { nome: 'Consegnate', cifra: intero(Number(data.consegnateMese || 0)), quando: mese, spiega: `Create a ${mese} e già consegnate` },
-    { nome: 'Volume', cifra: euro(Number(data.fatturatoMese || 0)), quando: mese, spiega: `Il valore delle spedizioni create a ${mese}` },
-    { nome: 'Clienti diretti', cifra: intero(Number(data.totClienti || 0)), quando: 'tuoi', href: '/dashboard/clienti' },
+    { nome: 'Consegnate', n: Number(data.consegnateMese || 0), formato: tutto, quando: mese, spiega: `Create a ${mese} e già consegnate` },
+    { nome: 'Volume', n: Number(data.fatturatoMese || 0), formato: euro, quando: mese, spiega: `Il valore delle spedizioni create a ${mese}` },
+    { nome: 'Clienti diretti', n: Number(data.totClienti || 0), formato: tutto, quando: 'tuoi', href: '/dashboard/clienti' },
   ]
   return (
     <section className="fx-scheda fx-striscia fx-tutta" aria-label="Il lavoro in corso">
@@ -48,7 +50,7 @@ export function LavoroInCorso({ data }: { data: DatiDashboard }) {
         {celle.map(c => {
           const dentro = <>
             <div className="fx-cella-nome">{c.nome}</div>
-            <div className={`fx-cella-cifra${c.cifra.length > 11 ? ' fx-cella-cifra--lunga' : ''}`}>{c.cifra}</div>
+            <div className={`fx-cella-cifra${c.formato(c.n).length > 11 ? ' fx-cella-cifra--lunga' : ''}`}><Conta n={c.n} formato={c.formato} /></div>
             <div className="fx-cella-quando"><span className="fx-chip fx-chip--neutro">{c.quando}</span></div>
           </>
           const cls = `fx-cella${c.arancio ? ' fx-cella--arancio' : ''}`
@@ -107,8 +109,8 @@ export function StatiTrentaGiorni({ stati }: { stati: Record<string, number> }) 
       <div className="fx-testa"><h2>Gli stati</h2><span className="fx-chip fx-chip--neutro">ultimi 30 giorni</span></div>
       {!totale ? <div className="fx-vuoto">Nessuna spedizione negli ultimi 30 giorni</div> : (
         <div className="fx-ciambella">
-          <svg viewBox="0 0 120 120" role="img" aria-label={`Stati delle ${intero(totale)} spedizioni degli ultimi 30 giorni`}>
-            <circle cx="60" cy="60" r={R} fill="none" stroke="#F1F1F1" strokeWidth="15" />
+          <svg className="fx-ciambella-svg" viewBox="0 0 120 120" role="img" aria-label={`Stati delle ${intero(totale)} spedizioni degli ultimi 30 giorni`}>
+            <circle cx="60" cy="60" r={R} fill="none" stroke="var(--fx-riquadro)" strokeWidth="15" />
             {voci.map(v => {
               const lungo = v.n / totale * C, inizio = fatto
               fatto += lungo
@@ -154,7 +156,7 @@ export function MesePerMese({ mesi }: { mesi: { mese: string; totale: number; im
   }, [])
   const W = misura.w, H = misura.h, Y1 = H - 26, slot = W / Math.max(1, righe.length), larga = Math.min(slot * 0.42, 54), d = profondita(larga)
   return (
-    <section className="fx-scheda fx-largo fx-pieno">
+    <section className="fx-scheda fx-tutta fx-pieno">
       <div className="fx-testa">
         <div><h2>Mese per mese</h2><p className="fx-sotto">Spedizioni della rete create in ogni mese, e il loro volume</p></div>
         <a className="fx-link" href="/dashboard/statistiche/corrieri">Statistiche →</a>
@@ -165,15 +167,17 @@ export function MesePerMese({ mesi }: { mesi: { mese: string; totale: number; im
             <div ref={area} className="fx-mesi-area">
             <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Spedizioni per mese">
               <DefsBarre id="fxm" />
-              <line x1="0" x2={W} y1={Y1 + 0.5} y2={Y1 + 0.5} stroke="#E4E4E4" />
+              <line x1="0" x2={W} y1={Y1 + 0.5} y2={Y1 + 0.5} stroke="var(--fx-filo)" />
               {righe.map((m, i) => {
                 const h = (Number(m.totale) || 0) / max * (Y1 - 40), x = i * slot + (slot - larga - d) / 2
                 const ultimo = i === righe.length - 1
                 return (
                   <g key={m.mese}>
                     <title>{`${meseItaliano(m.mese)}: ${intero(m.totale)} spedizioni, ${euro(m.importo)}`}</title>
-                    <Barra3D id="fxm" x={x} y={Y1 - Math.max(h, 2)} larga={larga} alta={Math.max(h, 2)} tinta={ultimo ? 'arancio' : 'nero'} />
-                    <text x={x + (larga + d) / 2} y={Y1 - h - d * 0.62 - 7} textAnchor="middle" style={{ fontSize: 11, fill: 'var(--fx-testo)', fontWeight: 600 }}>{intero(m.totale)}</text>
+                    <g className="fx-barra3d" style={{ animationDelay: `${120 + i * 90}ms` }}>
+                      <Barra3D id="fxm" x={x} y={Y1 - Math.max(h, 2)} larga={larga} alta={Math.max(h, 2)} tinta={ultimo ? 'arancio' : 'nero'} />
+                    </g>
+                    <text className="fx-appare" style={{ fontSize: 11, fill: 'var(--fx-testo)', fontWeight: 600, animationDelay: `${700 + i * 90}ms` }} x={x + (larga + d) / 2} y={Y1 - h - d * 0.62 - 7} textAnchor="middle">{intero(m.totale)}</text>
                     <text x={x + (larga + d) / 2} y={H - 7} textAnchor="middle" className="fx-asse" style={{ fontSize: 11 }}>{meseItaliano(m.mese)}</text>
                   </g>
                 )

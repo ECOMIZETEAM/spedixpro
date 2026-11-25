@@ -31,6 +31,10 @@ const NUM_ALPHA2: Record<number, string> = Object.entries(PAESE_ISO_NUM).reduce(
 export const URL_DESTINAZIONI = '/api/dashboard/destinazioni'
 export const URL_MAPPA_ITALIA = '/geo/italia-province.json'
 
+// I paesi della vista Europa della Dashboard nuova.
+const EUROPA = new Set(['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT',
+  'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'GB', 'CH', 'NO', 'IS', 'LI', 'MC', 'SM', 'VA', 'AD', 'AL', 'BA', 'ME', 'MK', 'RS', 'XK', 'MD', 'UA', 'BY'])
+
 // `fx`: nella Dashboard nuova del master (app/components/dashboard-finexy) cornice, titolo e tasti prendono il disegno
 // delle altre schede; mappa, globo e classifica sono gli stessi. Il cliente e l'agente la vedono com'era.
 export default function DestinazioniWidget({ fx = false }: { fx?: boolean } = {}) {
@@ -38,7 +42,7 @@ export default function DestinazioniWidget({ fx = false }: { fx?: boolean } = {}
   const [italiaTopo, setItaliaTopo] = useState<any>(null)
   const [worldTopo, setWorldTopo] = useState<any>(null)
   const [errore, setErrore] = useState(false)
-  const [vista, setVista] = useState<'italia' | 'mondo'>('italia')
+  const [vista, setVista] = useState<'italia' | 'europa' | 'mondo'>('italia')
   const [hover, setHover] = useState<{ nome: string; n: number; x: number; y: number } | null>(null)
   const [rot, setRot] = useState<[number, number]>([-12, -42])   // parte centrato sull'Italia
   const boxRef = useRef<HTMLDivElement>(null)
@@ -53,7 +57,7 @@ export default function DestinazioniWidget({ fx = false }: { fx?: boolean } = {}
     return () => { vivo = false }
   }, [])
   // il mondo si carica solo quando si apre la vista globo (108KB in meno all'ingresso)
-  useEffect(() => { if (vista === 'mondo' && !worldTopo) fetch('/geo/world-110m.json').then(r => r.json()).then(setWorldTopo).catch(() => setErrore(true)) }, [vista, worldTopo])
+  useEffect(() => { if (vista !== 'italia' && !worldTopo) fetch('/geo/world-110m.json').then(r => r.json()).then(setWorldTopo).catch(() => setErrore(true)) }, [vista, worldTopo])
 
   const W = 380, H = 440
   const perSigla = useMemo(() => { const m = new Map<string, number>(); for (const p of (dati?.province || [])) m.set(p.sigla, p.n); return m }, [dati])
@@ -90,77 +94,115 @@ export default function DestinazioniWidget({ fx = false }: { fx?: boolean } = {}
   }
   function onUp() { drag.current = null }
 
+  // EUROPA (Dashboard nuova, Lorenzo 25/11): i paesi europei fuori dall'Italia, che ha la sua vista.
+  const europei = (dati?.paesi || []).filter(p => EUROPA.has(p.code) && p.code !== 'IT')
+  const totaleEuropa = europei.reduce((t, p) => t + p.n, 0)
   const classifica = vista === 'italia'
     ? (dati?.province || []).slice(0, 8).map(p => ({ k: p.sigla, nome: p.sigla, n: p.n, perc: p.perc }))
-    : (dati?.paesi || []).slice(0, 8).map(p => ({ k: p.code, nome: PAESE_NOME_IT[p.code] || p.code, n: p.n, perc: p.perc }))
+    : vista === 'europa'
+      ? europei.slice(0, 8).map(p => ({ k: p.code, nome: PAESE_NOME_IT[p.code] || p.code, n: p.n, perc: totaleEuropa ? p.n / totaleEuropa * 100 : 0 }))
+      : (dati?.paesi || []).slice(0, 8).map(p => ({ k: p.code, nome: PAESE_NOME_IT[p.code] || p.code, n: p.n, perc: p.perc }))
   const maxClass = classifica[0]?.n || 1
-  const totale = vista === 'italia' ? (dati?.totale || 0) : (dati?.totalePaesi || 0)
-  const conteggioLabel = vista === 'italia' ? `${dati?.nProvince || 0} province` : `${(dati?.paesi || []).length} paesi`
+  const totale = vista === 'italia' ? (dati?.totale || 0) : vista === 'europa' ? totaleEuropa : (dati?.totalePaesi || 0)
+  const conteggioLabel = vista === 'italia' ? `${dati?.nProvince || 0} province` : vista === 'europa' ? `${europei.length} paesi europei` : `${(dati?.paesi || []).length} paesi`
+
+  // La sagoma dell'Europa (dal mondo, inquadrata da Lisbona all'Ucraina e da Malta a Capo Nord).
+  const WE = 440, HE = 420
+  const europaPaths = useMemo(() => {
+    if (!worldTopo) return null
+    try {
+      const obj = worldTopo.objects.countries || worldTopo.objects[Object.keys(worldTopo.objects)[0]]
+      const fc: any = feature(worldTopo, obj)
+      const cornice: any = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[-11, 35], [-11, 71.5], [40, 71.5], [40, 35], [-11, 35]]] } }
+      const path = geoPath(geoMercator().fitExtent([[4, 4], [WE - 4, HE - 4]], cornice))
+      // solo i paesi europei: la sagoma dell'Europa, non un riquadro del mondo tagliato ai bordi
+      // (l'Islanda resta nella classifica, ma disegnarla allargherebbe la mappa per un'isola)
+      return fc.features.filter((f: any) => { const a2 = NUM_ALPHA2[Number(f.id)] || ''; return EUROPA.has(a2) && a2 !== 'IS' })
+        .map((f: any) => ({ d: path(f) || '', id: Number(f.id), nome: String(f.properties?.name || '') }))
+    } catch { return null }
+  }, [worldTopo])
 
   const tab = (attivo: boolean): React.CSSProperties => fx
-    ? { border: 'none', background: attivo ? '#1C1C1C' : '#F2F2F2', color: attivo ? '#fff' : '#555', fontSize: 12, fontWeight: 500, padding: '6px 13px', borderRadius: 999, cursor: 'pointer' }
+    ? { border: 'none', background: attivo ? 'var(--fx-nero)' : 'var(--fx-riquadro)', color: attivo ? 'var(--fx-carta)' : 'var(--fx-grigio)', fontSize: 12, fontWeight: 500, padding: '6px 13px', borderRadius: 999, cursor: 'pointer' }
     : { border: 'none', background: attivo ? '#EA580C' : '#f4f4f4', color: attivo ? '#fff' : '#6b7280', fontSize: 12.5, fontWeight: 700, padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }
 
   // La mappa in rilievo della Dashboard nuova: lo spessore sono due copie della sagoma, piu' scure e spostate in basso,
   // disegnate una volta sola (al passaggio del mouse cambia solo lo strato colorato sopra).
-  const spessore = useMemo(() => !italiaPaths ? null : (
+  const spessore = (paths: any[] | null) => !paths ? null : (
     <>
-      <g transform="translate(0,9)" filter="url(#fx-mappa-ombra)">{italiaPaths.map((p: any, i: number) => <path key={i} d={p.d} fill="#A9401A" stroke="#A9401A" strokeWidth={1.2} />)}</g>
-      <g transform="translate(0,4.5)">{italiaPaths.map((p: any, i: number) => <path key={i} d={p.d} fill="#C8501F" stroke="#C8501F" strokeWidth={1.2} />)}</g>
+      <g transform="translate(0,9)" filter="url(#fx-mappa-ombra)">{paths.map((p: any, i: number) => <path key={i} d={p.d} fill="#A9401A" stroke="#A9401A" strokeWidth={1.2} />)}</g>
+      <g transform="translate(0,4.5)">{paths.map((p: any, i: number) => <path key={i} d={p.d} fill="#C8501F" stroke="#C8501F" strokeWidth={1.2} />)}</g>
     </>
-  ), [italiaPaths])
+  )
+  const spessoreItalia = useMemo(() => spessore(italiaPaths), [italiaPaths])  // eslint-disable-line react-hooks/exhaustive-deps
+  const spessoreEuropa = useMemo(() => spessore(europaPaths), [europaPaths])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Dashboard nuova (Lorenzo 25/11: «grande, piatta, brutta»): una scheda di una colonna, la mappa piccola in rilievo e
-  // inclinata come un plastico, sotto le prime province. Il cliente e l'agente vedono il riquadro di sempre, qui sotto.
+  // Dashboard nuova (Lorenzo 25/11): prima «grande, piatta, brutta», poi «troppo piccolo». Una scheda larga due colonne:
+  // a sinistra la mappa in rilievo e inclinata come un plastico (Italia, Europa) o il globo (Mondo), a destra la
+  // classifica. Il cliente e l'agente vedono il riquadro di sempre, qui sotto.
   if (fx) {
-    const prime = classifica.slice(0, 3)
+    const ombra = <defs><filter id="fx-mappa-ombra" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="9" floodColor="#5A1E08" floodOpacity="0.32" /></filter></defs>
+    const sopra = (nome: string, n: number) => (e: React.MouseEvent) => { if (drag.current) return; const r = boxRef.current?.getBoundingClientRect(); setHover({ nome, n, x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) }) }
+    const carico = (testo: string) => <div className="fx-vuoto">{errore ? 'Mappa non disponibile' : testo}</div>
     return (
-      <section className="fx-scheda fx-destinazioni">
+      <section className="fx-scheda fx-largo fx-destinazioni">
         <div className="fx-testa">
-          <h2>Destinazioni</h2>
+          <div><h2>Destinazioni</h2><p className="fx-sotto">Ultimi 30 giorni · {totale.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} spedizioni · {conteggioLabel}</p></div>
           <span style={{ display: 'inline-flex', gap: 4 }}>
-            <button onClick={() => setVista('italia')} style={tab(vista === 'italia')}>Italia</button>
-            <button onClick={() => setVista('mondo')} style={tab(vista === 'mondo')}>Mondo</button>
+            {(['italia', 'europa', 'mondo'] as const).map(v => <button key={v} onClick={() => { setVista(v); setHover(null) }} style={tab(vista === v)}>{v === 'italia' ? 'Italia' : v === 'europa' ? 'Europa' : 'Mondo'}</button>)}
           </span>
         </div>
-        <p className="fx-sotto">Ultimi 30 giorni · {totale.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} spedizioni · {conteggioLabel}</p>
-        <div ref={boxRef} className="fx-mappa" onMouseLeave={() => { setHover(null); onUp() }}>
-          {vista === 'italia' ? (
-            !italiaPaths ? <div className="fx-vuoto">{errore ? 'Mappa non disponibile' : 'Carico la mappa…'}</div>
-              : <svg viewBox={`-6 -6 ${W + 12} ${H + 24}`} className="fx-mappa-plastico" role="img" aria-label="Spedizioni per provincia, ultimi 30 giorni">
-                <defs><filter id="fx-mappa-ombra" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="9" floodColor="#5A1E08" floodOpacity="0.32" /></filter></defs>
-                {spessore}
-                {italiaPaths.map((p: any, i: number) => {
-                  const n = perSigla.get(p.sigla) || 0
-                  return <path key={i} d={p.d} fill={coloreVolume(n, maxProv)} stroke="#fff" strokeWidth={0.5} style={{ cursor: n ? 'pointer' : 'default' }}
-                    onMouseMove={e => { const r = boxRef.current?.getBoundingClientRect(); setHover({ nome: p.nome, n, x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) }) }} />
-                })}
-              </svg>
-          ) : (
-            !globo ? <div className="fx-vuoto">{errore ? 'Globo non disponibile' : 'Carico il globo…'}</div>
-              : <svg viewBox={`0 0 ${W} ${H}`} className="fx-mappa-globo" style={{ cursor: drag.current ? 'grabbing' : 'grab', userSelect: 'none' }}
-                onMouseDown={onDown} onMouseMove={onMoveGlobo} onMouseUp={onUp}>
-                <path d={globo.sphere} fill="#eef4f7" stroke="#dbe6ec" strokeWidth={0.6} />
-                {globo.countries.map((c: any, i: number) => {
-                  const n = numToN.get(c.id) || 0
-                  return <path key={i} d={c.d} fill={n ? coloreVolume(n, maxPaese) : '#dfe7ec'} stroke="#fff" strokeWidth={0.3}
-                    onMouseMove={e => { if (drag.current) return; const r = boxRef.current?.getBoundingClientRect(); const a2 = NUM_ALPHA2[c.id]; setHover({ nome: (a2 && PAESE_NOME_IT[a2]) || c.nome, n, x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) }) }} />
-                })}
-              </svg>
-          )}
-          {hover && (hover.n > 0 || vista === 'italia') && (
-            <div className="fx-mappa-nota" style={{ left: hover.x + 10, top: hover.y + 10 }}>{hover.nome}: {hover.n.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)}</div>
-          )}
-        </div>
-        <div className="fx-righe">
-          {!dati ? <div className="fx-vuoto">Carico…</div> : !prime.length
-            ? <div className="fx-vuoto">{vista === 'italia' ? 'Nessuna spedizione in Italia negli ultimi 30 giorni.' : 'Nessuna spedizione estera negli ultimi 30 giorni.'}</div>
-            : prime.map(p => (
-              <div key={p.k} className="fx-riga fx-dest-riga">
-                <span><b className="fx-sigla" title={p.nome}>{p.nome}</b><i className="fx-barretta"><i style={{ width: `${Math.max(4, (p.n / maxClass) * 100)}%` }} /></i></span>
-                <b>{p.n.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} <span style={{ color: 'var(--fx-grigio)', fontWeight: 400 }}>· {p.perc.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</span></b>
-              </div>
-            ))}
+        <div className="fx-dest-corpo">
+          <div ref={boxRef} className="fx-mappa" onMouseLeave={() => { setHover(null); onUp() }}>
+            {vista === 'italia' ? (
+              !italiaPaths ? carico('Carico la mappa…')
+                : <svg key="italia" viewBox={`-6 -6 ${W + 12} ${H + 24}`} className="fx-mappa-plastico" role="img" aria-label="Spedizioni per provincia, ultimi 30 giorni">
+                  {ombra}{spessoreItalia}
+                  {italiaPaths.map((p: any, i: number) => {
+                    const n = perSigla.get(p.sigla) || 0
+                    return <path key={i} d={p.d} fill={coloreVolume(n, maxProv)} stroke="#fff" strokeWidth={0.5} style={{ cursor: n ? 'pointer' : 'default' }} onMouseMove={sopra(p.nome, n)} />
+                  })}
+                </svg>
+            ) : vista === 'europa' ? (
+              !europaPaths ? carico('Carico l\'Europa…')
+                : <svg key="europa" viewBox={`0 0 ${WE} ${HE + 14}`} className="fx-mappa-plastico fx-mappa-europa" role="img" aria-label="Spedizioni per paese europeo, ultimi 30 giorni">
+                  {ombra}{spessoreEuropa}
+                  {europaPaths.map((c: any, i: number) => {
+                    const a2 = NUM_ALPHA2[c.id]
+                    const n = a2 && a2 !== 'IT' ? (numToN.get(c.id) || 0) : 0
+                    const maxE = Math.max(1, ...europei.map(p => p.n))
+                    return <path key={i} d={c.d} fill={a2 === 'IT' ? '#E2D9D3' : n ? coloreVolume(n, maxE) : '#F1E9E3'} stroke="#fff" strokeWidth={0.5}
+                      onMouseMove={sopra(a2 === 'IT' ? 'Italia (vedi la vista Italia)' : ((a2 && PAESE_NOME_IT[a2]) || c.nome), n)} />
+                  })}
+                </svg>
+            ) : (
+              !globo ? carico('Carico il globo…')
+                : <svg key="mondo" viewBox={`0 0 ${W} ${H}`} className="fx-mappa-globo" style={{ cursor: drag.current ? 'grabbing' : 'grab', userSelect: 'none' }}
+                  onMouseDown={onDown} onMouseMove={onMoveGlobo} onMouseUp={onUp}>
+                  <defs><radialGradient id="fx-globo-luce" cx="35%" cy="30%" r="75%"><stop offset="0" stopColor="#FFFFFF" /><stop offset="1" stopColor="#E3ECF1" /></radialGradient></defs>
+                  <path d={globo.sphere} fill="url(#fx-globo-luce)" stroke="#D6E2E8" strokeWidth={0.6} />
+                  {globo.countries.map((c: any, i: number) => {
+                    const n = numToN.get(c.id) || 0
+                    const a2 = NUM_ALPHA2[c.id]
+                    return <path key={i} d={c.d} fill={n ? coloreVolume(n, maxPaese) : '#DCE5EA'} stroke="#fff" strokeWidth={0.3} onMouseMove={sopra((a2 && PAESE_NOME_IT[a2]) || c.nome, n)} />
+                  })}
+                </svg>
+            )}
+            {hover && (hover.n > 0 || vista !== 'mondo') && (
+              <div className="fx-mappa-nota" style={{ left: hover.x + 12, top: hover.y + 12 }}>{hover.nome}{hover.n ? `: ${hover.n.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)}` : ''}</div>
+            )}
+            {vista === 'mondo' && globo && <div className="fx-mappa-aiuto">Trascina per girare il globo</div>}
+          </div>
+          <div className="fx-righe">
+            {!dati ? <div className="fx-vuoto">Carico…</div> : !classifica.length
+              ? <div className="fx-vuoto">{vista === 'italia' ? 'Nessuna spedizione in Italia negli ultimi 30 giorni.' : vista === 'europa' ? 'Nessuna spedizione verso l\'Europa negli ultimi 30 giorni.' : 'Nessuna spedizione estera negli ultimi 30 giorni.'}</div>
+              : classifica.slice(0, 6).map(p => (
+                <div key={p.k} className="fx-riga fx-dest-riga">
+                  <span><b className="fx-sigla" title={p.nome} style={{ width: vista === 'italia' ? 34 : 104 }}>{p.nome}</b><i className="fx-barretta"><i style={{ width: `${Math.max(4, (p.n / maxClass) * 100)}%` }} /></i></span>
+                  <b>{p.n.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} <span style={{ color: 'var(--fx-grigio)', fontWeight: 400 }}>· {p.perc.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</span></b>
+                </div>
+              ))}
+          </div>
         </div>
       </section>
     )
