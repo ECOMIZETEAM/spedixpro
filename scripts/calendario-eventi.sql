@@ -1,8 +1,8 @@
 -- IL CALENDARIO: le voci scritte da chi usa il portale (promemoria, eventi, riunioni). Lorenzo 25/11/2026.
--- NON ANCORA APPLICATO: si lancia solo con l'ok di Lorenzo. Finché la tabella non c'è, /api/calendario/eventi risponde
--- { anteprima: true } e il calendario tiene le voci nel browser.
+-- APPLICATO in produzione il 25/11/2026 con l'ok di Lorenzo (advisors: nessun errore; solo l'INFO «RLS senza
+-- politiche», voluto).
 --
--- Chi legge e scrive: solo /api/calendario/eventi, col client di servizio, e sempre con utente_id = chi ha la sessione.
+-- Chi legge e scrive: solo /api/calendario/eventi e il giro /api/cron/calendario-avvisi, col client di servizio, e sempre con utente_id = chi ha la sessione.
 -- Per questo RLS attiva, nessuna politica e nessun permesso ad anon e authenticated (revocare «da public» non basta).
 -- Le voci automatiche (ritiri, giacenze) NON stanno qui: si leggono dalle loro tabelle, così non esistono due copie.
 -- Niente chiave esterna verso auth.users: lo storico non si cancella, anche se l'utente viene tolto.

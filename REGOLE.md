@@ -69,6 +69,8 @@ Vivono nel codice, ma in **un punto solo** che tutti chiamano. Modificarle lì v
 | Regola | Dove |
 |---|---|
 | Chi può vedere la rete (non cliente, non agente, non autista) | `lib/perimetro.ts` → `vedeLaRete` |
+| Chi vede quali ritiri e quali giacenze: cliente i suoi, agente quelli dei suoi clienti, staff la rete (solo sui contratti posseduti, senza le gambe interne per le giacenze). Elenco Ritiri, pagina Giacenze e calendario la chiamano tutti e tre; il calendario la restringe al proprio master, quindi non mostra mai una riga che le pagine non mostrano (provato il 25/11/2026 su 25 utenti veri: 49 confronti identici prima e dopo) | `lib/perimetro-ritiri-giacenze.ts` → `perimetroRitiri`, `perimetroGiacenze`, `applicaPerimetro` |
+| Quando arriva l'avviso di una voce del calendario (le voci di tutto il giorno dalle 9): campanella, email e avviso a calendario aperto | `lib/calendario-avviso.ts` → `momentoAvviso` |
 | Si tassa sul peso reale o sul volumetrico | `lib/agevolazione-misure.ts` → `pesoSuReale` |
 | Limiti del collo: misure, peso, colli, scaglioni | `lib/limiti-collo.ts` → `superaLimitiCollo`, `motivoLimiteCollo` |
 | Quale zona rivendica un CAP | `lib/zone-match.ts` → `trovaZoneMatchDett` |

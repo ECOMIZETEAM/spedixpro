@@ -3,21 +3,14 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { giornoRoma, fineGiornoRomaISO } from '@/lib/date-roma'
 
-// LE TUE VOCI DEL CALENDARIO (promemoria, eventi, riunioni). Tabella calendario_eventi (scripts/calendario-eventi.sql):
-// RLS attiva e nessun permesso ad anon e authenticated, quindi la si tocca solo da qui, col client di servizio, e
-// ogni lettura e scrittura è legata a utente_id = chi ha la sessione. Nessuno legge o cambia le voci di un altro.
-//
-// ANTEPRIMA: finché la tabella non è creata (serve l'ok di Lorenzo per il database di produzione) la rotta risponde
-// { anteprima: true } e il calendario tiene le voci nel browser (app/components/calendario/deposito.ts).
+// LE TUE VOCI DEL CALENDARIO (promemoria, eventi, riunioni). Tabella calendario_eventi (scripts/calendario-eventi.sql,
+// applicato il 25/11/2026): RLS attiva e nessun permesso ad anon e authenticated, quindi la si tocca solo da qui (e dal
+// giro degli avvisi), col client di servizio, e ogni lettura e scrittura è legata a utente_id = chi ha la sessione.
+// Nessuno legge o cambia le voci di un altro.
 // Lo storico non si cancella: «elimina» mette eliminato_il, la riga resta.
 
 const COLONNE = 'id,tipo,titolo,inizio,fine,tutto_il_giorno,luogo,note,avviso_minuti,collegamento,fatto,creato_il'
 const TIPI = new Set(['promemoria', 'evento', 'riunione'])
-
-function manca(e: any): boolean {
-  // PGRST205 = PostgREST non conosce la tabella; 42P01 = Postgres non la trova
-  return !!e && (e.code === 'PGRST205' || e.code === '42P01')
-}
 
 async function chi() {
   const supabase = await createServerSupabase()
@@ -80,7 +73,6 @@ export async function GET(req: NextRequest) {
       .order('inizio', { ascending: true }).limit(2000)
   }
   const { data, error } = await q
-  if (manca(error)) return NextResponse.json({ anteprima: true, eventi: [] })
   if (error) return NextResponse.json({ error: 'Lettura non riuscita: ' + error.message }, { status: 500 })
   return NextResponse.json({ eventi: data || [] })
 }
@@ -95,7 +87,6 @@ export async function POST(req: NextRequest) {
   const { data, error } = await admin.from('calendario_eventi')
     .insert({ ...r.v, utente_id: u.id, master_id: u.master_id, cliente_id: u.cliente_id })
     .select(COLONNE).single()
-  if (manca(error)) return NextResponse.json({ anteprima: true }, { status: 409 })
   if (error) return NextResponse.json({ error: 'Salvataggio non riuscito: ' + error.message }, { status: 500 })
   return NextResponse.json({ evento: data })
 }
@@ -110,8 +101,16 @@ export async function PATCH(req: NextRequest) {
   if (!r.ok) return NextResponse.json({ error: r.errore }, { status: 400 })
   const admin = createAdminSupabase()
   // eq utente_id: si cambia solo una voce propria (un id indovinato di un altro non trova righe)
+  const { data: prima, error: ePrima } = await admin.from('calendario_eventi')
+    .select('inizio,tutto_il_giorno,avviso_minuti')
+    .eq('id', id).eq('utente_id', u.id).is('eliminato_il', null).maybeSingle()
+  if (ePrima) return NextResponse.json({ error: 'Lettura non riuscita: ' + ePrima.message }, { status: 500 })
+  if (!prima) return NextResponse.json({ error: 'Voce non trovata' }, { status: 404 })
+  // l'avviso si riarma solo se cambia QUANDO avvisare: correggere una nota non deve rimandare l'email
+  const cambiaMomento = new Date((prima as any).inizio).getTime() !== new Date(r.v.inizio).getTime()
+    || (prima as any).tutto_il_giorno !== r.v.tutto_il_giorno || (prima as any).avviso_minuti !== r.v.avviso_minuti
   const { data, error } = await admin.from('calendario_eventi')
-    .update({ ...r.v, aggiornato_il: new Date().toISOString(), avvisato_il: null })
+    .update({ ...r.v, aggiornato_il: new Date().toISOString(), ...(cambiaMomento ? { avvisato_il: null } : {}) })
     .eq('id', id).eq('utente_id', u.id).is('eliminato_il', null)
     .select(COLONNE).maybeSingle()
   if (error) return NextResponse.json({ error: 'Salvataggio non riuscito: ' + error.message }, { status: 500 })

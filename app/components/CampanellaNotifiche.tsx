@@ -14,6 +14,8 @@ type Notifica = { id: string; oggetto: string; messaggio: string; created_at: st
 const VISTE_KEY = 'spx_notifiche_viste'   // ricorda l'ultima notifica vista (per contare le nuove)
 
 const TABS: { key: string; label: string; cats: string[] }[] = [
+  // i promemoria del calendario arrivati all'ora dell'avviso (25/11): vengono prima, sono cose da fare adesso
+  { key: 'promemoria', label: 'Promemoria', cats: ['promemoria'] },
   { key: 'avvisi', label: 'Avvisi', cats: ['avviso'] },
   { key: 'spedizioni', label: 'Spedizioni', cats: ['consegna', 'giacenza'] },
   { key: 'contrassegni', label: 'Contrassegni', cats: ['contrassegno'] },

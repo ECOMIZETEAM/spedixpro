@@ -642,3 +642,49 @@ export async function inviaEmailProforma(p: {
     return { ok: false, error: e?.message || 'invio non riuscito' }
   }
 }
+
+// IL PROMEMORIA DEL CALENDARIO (25/11/2026): a chi l'ha scritto, all'ora dell'avviso. Col marchio del suo master,
+// come le altre email che arrivano ai clienti: il cliente conosce il portale col nome di chi gli vende il servizio.
+// Nessuna risposta attesa (niente replyTo). Lo manda il giro /api/cron/calendario-avvisi.
+export async function inviaEmailPromemoria(p: {
+  to: string
+  tipo: 'promemoria' | 'evento' | 'riunione'
+  titolo: string
+  quando: string            // già scritto per esteso, ora di Roma
+  luogo?: string | null
+  note?: string | null
+  spedizione?: string | null
+  link: string
+  brand?: { logo?: string | null; nome?: string | null }
+}): Promise<{ ok: boolean; error?: string }> {
+  const dest = String(p.to || '').trim().toLowerCase()
+  if (!EMAIL_RE.test(dest)) return { ok: false, error: 'email non valida' }
+  const nomeTipo = p.tipo === 'riunione' ? 'Riunione' : p.tipo === 'evento' ? 'Evento' : 'Promemoria'
+  const riga = (etichetta: string, valore: string) =>
+    `<div style="padding:8px 0;border-bottom:1px solid #efefef;font-size:13px"><span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;display:block;margin-bottom:2px">${etichetta}</span><span style="color:#1a1a1a">${valore}</span></div>`
+  const corpo = `
+    <p style="color:#999;font-size:12px;text-transform:uppercase;letter-spacing:0.6px;margin:0 0 6px">${nomeTipo}</p>
+    <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 16px;line-height:1.3">${esc(p.titolo)}</h2>
+    <div style="background:#f7f7f7;border-radius:8px;padding:6px 16px;margin-bottom:20px">
+      ${riga('Quando', esc(p.quando))}
+      ${p.luogo ? riga('Dove', esc(p.luogo)) : ''}
+      ${p.spedizione ? riga('Spedizione', esc(p.spedizione)) : ''}
+      ${p.note ? riga('Note', esc(p.note).replace(/\n/g, '<br>')) : ''}
+    </div>
+    <a href="${p.link}" style="display:inline-block;background:#1a1a1a;color:#fff;padding:12px 26px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px">Apri il calendario →</a>
+    <p style="color:#999;font-size:12px;line-height:1.6;margin:22px 0 0">Ricevi questa email perché hai chiesto un avviso per questa voce del calendario. Per non riceverne, togli l’avviso dalla voce.</p>
+  `
+  const nomeBrand = (p.brand?.nome || '').replace(/["<>]/g, '').slice(0, 60)
+  const fromAddr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+  const from = nomeBrand ? `${nomeBrand} <${fromAddr}>` : FROM
+  try {
+    await invia({
+      from, to: dest,
+      subject: `${nomeTipo}: ${p.titolo}`.slice(0, 180),
+      html: (p.brand?.logo || p.brand?.nome) ? wrapBrand(corpo, { logo: p.brand?.logo, nome: p.brand?.nome }) : wrap(corpo),
+    })
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'invio non riuscito' }
+  }
+}

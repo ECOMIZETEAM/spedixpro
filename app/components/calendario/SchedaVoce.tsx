@@ -27,10 +27,9 @@ function classeStato(stato: string) {
 const giorniDa = (giorno: string) => Math.max(0, Math.round((inizioGiorno(new Date()).getTime() - daChiave(giorno).getTime()) / 86400000))
 const daQuanto = (giorno: string) => { const n = giorniDa(giorno); return n === 0 ? 'entrata oggi' : n === 1 ? 'da 1 giorno' : `da ${n} giorni` }
 
-export default function SchedaVoce({ voce, cliente, anteprima, onChiudi, onModifica, onElimina, onFatto, onApriSpedizione }: {
+export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElimina, onFatto, onApriSpedizione }: {
   voce: Voce
   cliente: boolean
-  anteprima: boolean
   onChiudi: () => void
   onModifica: () => void
   onElimina: () => Promise<void>
@@ -82,7 +81,7 @@ export default function SchedaVoce({ voce, cliente, anteprima, onChiudi, onModif
             <div className="cal-dato"><Ic n="calendario" /><div>{quando(voce)}{voce.tipo === 'giacenza' && giacenze.length === 1 && <small>In giacenza {daQuanto(giacenze[0].giorno)}</small>}</div></div>
 
             {m && m.avviso_minuti != null && (
-              <div className="cal-dato"><Ic n="campanella" /><div>{AVVISI.find(a => a.v === m.avviso_minuti)?.l || `${m.avviso_minuti} minuti prima`}<small>{anteprima ? 'in anteprima l’avviso compare solo a calendario aperto; poi nella campanella e per email' : 'nella campanella e per email'}</small></div></div>
+              <div className="cal-dato"><Ic n="campanella" /><div>{AVVISI.find(a => a.v === m.avviso_minuti)?.l || `${m.avviso_minuti} minuti prima`}<small>{m.tutto_il_giorno ? 'alle 9, ' : ''}nella campanella e per email</small></div></div>
             )}
             {m?.luogo && <div className="cal-dato"><Ic n="luogo" /><div>{m.luogo}</div></div>}
             {m?.note && <div className="cal-dato"><Ic n="note" /><p>{m.note}</p></div>}

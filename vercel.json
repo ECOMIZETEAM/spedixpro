@@ -139,6 +139,10 @@
       "schedule": "45 2 * * *"
     },
     {
+      "path": "/api/cron/calendario-avvisi",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/spedizioni/dogana-bloccata",
       "schedule": "20 * * * *"
     },

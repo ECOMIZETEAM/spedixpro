@@ -12,7 +12,8 @@ import {
   ora, oraBreve, dataLunga, quandoRelativo, titoloPeriodo, MESI, MESI_BREVI, GIORNI, giornoSettimana,
 } from './date'
 import { costruisciGiorni, disponi } from './voci'
-import { leggiMiei, leggiDaFare, eliminaMio, segnaFatto, inAnteprima, CAMBIATO } from './deposito'
+import { leggiMiei, leggiDaFare, eliminaMio, segnaFatto, CAMBIATO } from './deposito'
+import { momentoAvviso } from '@/lib/calendario-avviso'
 import FinestraEvento, { type Bozza } from './FinestraEvento'
 import SchedaVoce from './SchedaVoce'
 import Ic from './icone'
@@ -55,7 +56,6 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
   const [caricaMiei, setCaricaMiei] = useState(false)
   const [erroreAuto, setErroreAuto] = useState('')
   const [erroreMiei, setErroreMiei] = useState('')
-  const [anteprima, setAnteprima] = useState(false)
   const [versione, setVersione] = useState(0)          // le tue voci cambiate (anche da un'altra finestra)
   const [riprova, setRiprova] = useState(0)
 
@@ -110,9 +110,8 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
     if (!montato) return
     let vivo = true
     setCaricaMiei(true); setErroreMiei('')
-    // in fila: la prima lettura scopre se la tabella c'è (o se siamo in anteprima), la seconda lo sa già
-    leggiMiei(dal, al).then(m => leggiDaFare().then(f => [m, f] as const))
-      .then(([m, f]) => { if (!vivo) return; setMiei(m); setDaFare(f); setAnteprima(inAnteprima()) })
+    Promise.all([leggiMiei(dal, al), leggiDaFare()])
+      .then(([m, f]) => { if (!vivo) return; setMiei(m); setDaFare(f) })
       .catch(e => { if (vivo) setErroreMiei(e?.message || 'Non riesco a leggere le tue voci') })
       .finally(() => { if (vivo) setCaricaMiei(false) })
     return () => { vivo = false }
@@ -158,7 +157,7 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
     return () => window.removeEventListener('keydown', tasto)
   }, [finestra, aperta, spedizione, oggi, nuova, vai])
 
-  // ── avvisi dei promemoria (anteprima: a calendario aperto; dopo il rilascio li manda il giro sul server) ──
+  // ── l'avviso a calendario aperto (campanella ed email li mandano il server e il giro ogni 5 minuti) ──
   const mostrati = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (!montato) return
@@ -170,11 +169,13 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
     for (const e of [...miei, ...daFare]) tutti.set(e.id, e)
     const nuovi: Avviso[] = []
     for (const e of tutti.values()) {
-      if (e.avviso_minuti == null || e.fatto) continue
-      const inizio = new Date(e.inizio).getTime()
-      const quando = inizio - e.avviso_minuti * 60000
+      if (e.fatto) continue
+      const m = momentoAvviso(e)
+      if (!m) continue
+      const quando = m.getTime()
       const chiave = `${e.id}|${e.inizio}|${e.avviso_minuti}`
-      if (adesso.getTime() >= quando && adesso.getTime() < inizio + 30 * 60000 && !mostrati.current.has(chiave)) {
+      // a calendario aperto si mostra nella mezz'ora dopo il momento dell'avviso, una volta per sessione
+      if (adesso.getTime() >= quando && adesso.getTime() < quando + 30 * 60000 && !mostrati.current.has(chiave)) {
         mostrati.current.add(chiave)
         nuovi.push({ id: chiave, etichetta: 'Promemoria', titolo: e.titolo, sotto: `${NOME_TIPO[e.tipo]} · ${quandoRelativo(new Date(e.inizio), adesso)}${e.tutto_il_giorno ? '' : ' alle ' + ora(new Date(e.inizio))}`, evento: e })
       }
@@ -454,11 +455,6 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
         </div>
       </div>
 
-      {anteprima && (
-        <div className="cal-nota"><Ic n="info" />
-          <div><b>Anteprima.</b> Ritiri e giacenze sono quelli veri, in sola lettura. Le voci che scrivi restano in questo browser finché il calendario non viene rilasciato.</div>
-        </div>
-      )}
       {auto.troncati && (
         <div className="cal-nota"><Ic n="info" /><div>In questo periodo ci sono più di 5.000 ritiri: ne mostro i primi. L’elenco completo è in Elenco Ritiri.</div></div>
       )}
@@ -498,7 +494,7 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
       </div>
 
       {aperta && (
-        <SchedaVoce voce={aperta} cliente={cliente} anteprima={anteprima}
+        <SchedaVoce voce={aperta} cliente={cliente}
           onChiudi={() => setAperta(null)}
           onModifica={() => { if (aperta.mio) { setFinestra({ evento: aperta.mio }); setAperta(null) } }}
           onElimina={async () => { if (aperta.mio) { await eliminaMio(aperta.mio.id); setAperta(null); conferma('Voce eliminata', aperta.mio.titolo) } }}

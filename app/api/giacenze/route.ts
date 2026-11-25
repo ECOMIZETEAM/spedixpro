@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { isAgente } from '@/lib/agente'
+import { perimetroGiacenze, applicaPerimetro, corrieriDelPerimetro } from '@/lib/perimetro-ritiri-giacenze'
 import { vedeLaRete } from '@/lib/perimetro'
 import { gestisceLaRete, senzaCostoMaster } from '@/lib/ruoli'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
-import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { spedizioniInCatena } from '@/lib/catena-report'
 import { confineGiornoRoma } from '@/lib/date-roma'
@@ -47,37 +47,15 @@ export async function GET(req: NextRequest) {
 
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const adminDb = createAdminSupabase()
-  let db: any = supabase
-  let subtreeSel: string[] | null = null
-  let ownedContractNames: string[] | null = null   // filtro visibilità rete (contratti posseduti)
-  if (masterSel && vedeLaRete(utente)) {
-    const { sottoAlberoMasterIds, masterIdsVisibili, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
-    const mieiDiscendenti = await masterIdsVisibili(adminDb, utente.master_id)
-    subtreeSel = mieiDiscendenti.includes(masterSel)
-      ? await sottoAlberoMasterIds(adminDb, masterSel)
-      : ['00000000-0000-0000-0000-000000000000']
-    db = adminDb
-    const nn = await contrattiPossedutiNomi(adminDb, utente.master_id)
-    ownedContractNames = nn.length ? nn : null
-  // Elencare "cliente per cliente" i ruoli esclusi a mano (agente, cliente) lasciava dentro
-  // l'AUTISTA, che un master_id ce l'ha come tutti: con l'accesso pieno vedeva le giacenze
-  // dell'intera rete, prezzi e clienti compresi. La regola sta in lib/perimetro.ts, dove e' una
-  // sola e non si dimentica un ruolo per volta.
-  } else if (vedeLaRete(utente)) {
-    // MASTER: le giacenze risalgono a TUTTA la rete (come Elenco Spedizioni/volumetria), non solo
-    // le proprie: prima si vedeva solo master_id === il mio, quindi le giacenze dei sotto-master
-    // (es. Ecomize LL) non comparivano.
-    const { sottoAlberoMasterIds, contrattiPossedutiNomi } = await import('@/lib/rete-masters')
-    subtreeSel = await sottoAlberoMasterIds(adminDb, utente.master_id)
-    if (subtreeSel.length > 1) db = adminDb
-    const nn = await contrattiPossedutiNomi(adminDb, utente.master_id)
-    ownedContractNames = nn.length ? nn : null
-  }
-  const filtroContratti = !!ownedContractNames && ownedContractNames.length > 0
-  // NASCONDI-FORNITORI (come lista spedizioni): niente giacenze delle gambe a monte (cliente = ledger d'acquisto).
-  const ledgerNascosti = isAgente(utente) ? [] : await ledgerGambeInterne(adminDb, utente.master_id)
-  // Agente: solo giacenze dei suoi clienti (copre anche l'eventuale ramo rete).
-  const idsAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // CHI VEDE QUALI GIACENZE: la regola sta in lib/perimetro-ritiri-giacenze (la stessa del calendario). Staff: tutta
+  // la rete (come Elenco Spedizioni: prima si vedeva solo master_id === il mio, e le giacenze dei sotto-master, es.
+  // Ecomize LL, non comparivano), solo sui contratti posseduti (non i privati del sub), senza le gambe a monte
+  // (NASCONDI-FORNITORI: il cliente di quelle righe è un ledger d'acquisto). Agente: solo i suoi clienti.
+  // Elencare "cliente per cliente" i ruoli esclusi a mano lasciava dentro l'AUTISTA, che un master_id ce l'ha come
+  // tutti: la regola su chi vede la rete sta in lib/perimetro.ts, dove e' una sola.
+  const per = await perimetroGiacenze(supabase, adminDb, utente, masterSel)
+  if (per.nessuno) return NextResponse.json({ error: 'Non consentito' }, { status: 403 })
+  const db: any = per.rete ? adminDb : supabase
 
   // Filtro "è entrata in giacenza" (giacenza_data valorizzata), NON lo stato corrente: dopo lo
   // svincolo il cron sposta spedizioni.stato (in_giacenza -> non_consegnato/in_consegna) ma la
@@ -89,16 +67,11 @@ export async function GET(req: NextRequest) {
   // silenzio (MULTIEXPRESS ne ha 1.198 nel solo settembre, ~2.650 nei 365 giorni che la pagina carica).
   const build = () => {
     let query = db.from('spedizioni')
-      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), ${filtroContratti ? 'corrieri!inner(nome_contratto)' : 'corrieri(nome_contratto)'}`)
+      .select(`${SPED_COLS}, clienti(ragione_sociale,agente), ${corrieriDelPerimetro(per, 'nome_contratto')}`)
       .not('giacenza_data', 'is', null)
       .order('giacenza_data', { ascending: false })
       .order('id', { ascending: false })
-    if (subtreeSel) query = query.in('master_id', subtreeSel)
-    else query = query.eq('master_id', utente.master_id)
-    if (ledgerNascosti.length) query = query.or(`cliente_id.is.null,cliente_id.not.in.(${ledgerNascosti.join(',')})`)
-    // Rete: solo giacenze su contratti che possiedo (non i privati del sub).
-    if (filtroContratti) query = query.in('corrieri.nome_contratto', ownedContractNames as string[])
-    if (idsAgente) query = query.in('cliente_id', idsAgente)
+    query = applicaPerimetro(query, per)
     if (clienteId) query = query.eq('cliente_id', clienteId)
     // 'aperta' = in attesa di istruzioni: le giacenze appena rilevate hanno giacenza_stato NULL
     // (il rilevamento valorizza solo giacenza_data) -> il confronto esatto le escludeva dal filtro.

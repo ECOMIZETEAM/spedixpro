@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { momentoAvviso } from '@/lib/calendario-avviso'
 
 // Notifiche destinate all'utente, con una CATEGORIA calcolata così le schermate possono dividerle in
 // tab (gli avvisi importanti non devono più sparire sotto la valanga di "Spedizione consegnata").
@@ -15,6 +16,8 @@ function categoria(n: any): string {
   if (o.includes('giacenza')) return 'giacenza'
   return 'consegna'
 }
+
+const escHtml = (v: any) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 export async function GET(_req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -53,9 +56,35 @@ export async function GET(_req: NextRequest) {
         .order('created_at', { ascending: false }).limit(30)
     : Promise.resolve({ data: [] as any[] })
 
-  const [{ data: avvisi }, { data: eventi }, { data: rete }] = await Promise.all([avvisiQ, eventiP, reteP])
-  const tutte = [...(avvisi || []), ...(eventi || []), ...(rete || [])]
-    .map(n => ({ ...n, categoria: categoria(n) }))
+  // I PROMEMORIA DEL CALENDARIO (25/11/2026): le voci di questa persona arrivate all'ora dell'avviso e non ancora
+  // fatte, degli ultimi 7 giorni. Stanno nella stessa risposta che la campanella chiede già ogni 60 secondi: nessun
+  // controllo in più dal browser. Sono di chi le ha scritte (utente_id), non del gruppo: le notifiche di oggi sono
+  // per master o per cliente, non per persona. Se la lettura non riesce, la campanella resta com'era.
+  const ora = Date.now()
+  const calP = createAdminSupabase().from('calendario_eventi')
+    .select('id,tipo,titolo,inizio,tutto_il_giorno,luogo,avviso_minuti,collegamento')
+    .eq('utente_id', user.id).is('eliminato_il', null).eq('fatto', false).not('avviso_minuti', 'is', null)
+    .gte('inizio', new Date(ora - 7 * 86400000).toISOString()).lte('inizio', new Date(ora + 7 * 86400000).toISOString())
+    .order('inizio', { ascending: false }).limit(100)
+
+  const [{ data: avvisi }, { data: eventi }, { data: rete }, cal] = await Promise.all([avvisiQ, eventiP, reteP, calP])
+  if (cal.error) console.error('[NOTIFICHE] promemoria del calendario non letti:', cal.error.message)
+  const hrefCalendario = utente.cliente_id ? '/cliente/calendario' : '/dashboard/calendario'
+  const promemoria = (cal.data || []).flatMap((e: any) => {
+    const quando = momentoAvviso(e)
+    if (!quando || quando.getTime() > ora) return []
+    const inizio = new Date(e.inizio)
+    const giorno = inizio.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', weekday: 'long', day: 'numeric', month: 'long' })
+    const orario = e.tutto_il_giorno ? 'tutto il giorno' : 'alle ' + inizio.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit' })
+    // il messaggio della campanella è HTML: i testi scritti dall'utente si scappano
+    const parti = [`${giorno}, ${orario}`, e.luogo, e.collegamento?.etichetta].filter(Boolean).map(escHtml)
+    return [{
+      id: 'cal-' + e.id, oggetto: e.titolo, messaggio: parti.join(' · '), created_at: quando.toISOString(),
+      link: hrefCalendario, categoria: 'promemoria',
+    }]
+  })
+  // la categoria calcolata vale per le righe di «notifiche»; i promemoria hanno già la loro
+  const tutte = [...[...(avvisi || []), ...(eventi || []), ...(rete || [])].map(n => ({ ...n, categoria: categoria(n) })), ...promemoria]
     .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
 
   return NextResponse.json(tutte)
