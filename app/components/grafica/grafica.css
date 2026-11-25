@@ -112,6 +112,33 @@
 .gx-lato--chiuso { width: 0; margin-right: 0; padding: 0; }
 .gx .gx-lato.gx-vetro, [data-luce] .gx-lato.gx-vetro { border-radius: 0; box-shadow: inset -1px 0 0 var(--gx-filo), 18px 0 50px -40px rgba(20, 30, 50, .35); }
 [data-luce="notte"] .gx-lato.gx-vetro { box-shadow: inset -1px 0 0 var(--gx-filo), 18px 0 50px -40px rgba(0, 0, 0, .7); }
+/* IL MENU IN TITANIO ANCHE DI GIORNO (Lorenzo 25/11: «il menu lascialo anche nella versione chiara in titanio come
+   nella versione scura, voglio fare una prova»). Il menu prende i colori della notte, la pagina e la barra in alto
+   restano chiare. Il vetro scuro della notte sopra il fondo chiaro veniva grigio slavato: qui il titanio è pieno, con
+   lo stesso riflesso spazzolato del fondo di notte. Le variabili valgono per tutto quello che sta nel menu (voci, rami,
+   numerini, «Esci», e sul telefono il menu a tutto schermo coi suoi tasti in fondo). */
+[data-luce="argilla"] .gx-lato {
+  --gx-fondo: #1B1B1C;
+  --gx-inchiostro: #FFFFFF;
+  --gx-testo: rgba(240, 239, 236, .88);
+  --gx-attenuato: rgba(226, 224, 220, .64);
+  --gx-filo: rgba(255, 255, 255, .11);
+  --gx-accento: #FF5F1F;
+  --gx-accento-testo: #FF8552;
+  --gx-bene: #5BE0B5;
+  --gx-problema: #FF8A94;
+  --gx-vetro-orlo: rgba(255, 255, 255, .14);
+  --gx-vetro-luce: rgba(255, 255, 255, .16);
+  --gx-incavo: rgba(255, 255, 255, .065);
+  color-scheme: dark;
+  color: var(--gx-testo);
+  background: linear-gradient(155deg, rgba(255, 255, 255, .045) 0%, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, .02) 72%, rgba(255, 255, 255, 0) 100%), #232322;
+}
+[data-luce="argilla"] .gx-lato.gx-vetro { box-shadow: inset -1px 0 0 var(--gx-filo), 18px 0 50px -36px rgba(0, 0, 0, .5); }
+/* il logo del master sta già sul titanio: la lastrina d'ardesia del giorno non serve */
+/* (.gx-marca.gx-marca--logo: deve vincere anche sulla lastrina del giorno qui sotto, [data-tema="giorno"] .gx-marca--logo) */
+[data-luce="argilla"] .gx-lato .gx-marca.gx-marca--logo { background: none; box-shadow: none; }
+[data-luce="argilla"] .gx-lato .gx-tondo { background: rgba(44, 43, 42, .82); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 14px 34px -14px rgba(0, 0, 0, .7); }
 .gx-marca { display: flex; align-items: center; gap: 10px; padding: 0 8px 16px; min-width: 0; }
 .gx-marca__v { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--gx-accento-pieno); font-weight: 600; font-size: 17px; line-height: 1; color: #fff; }
 .gx-marca__logo { width: 100%; max-height: 52px; object-fit: contain; object-position: left center; }
