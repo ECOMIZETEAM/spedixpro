@@ -44,17 +44,41 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const nomeVecchio = String(t.aperto_da || '')
   const nomeAttuale = String((tAgg as any).aperto_da || '')
 
-  const msgOut = messaggiVisti.map((m: any) => ({
-    ...m,
+  // CHI HA RISPOSTO DALLA RETE E' UNA PERSONA, NON L'AZIENDA. Fino al 25/11/2026 chi rispondeva a un
+  // ticket INOLTRATO firmava col nome del suo master: nella stessa giornata Stefy e Tiziana uscivano
+  // "Stefy" e "Tiziana" sui ticket dei clienti di MULTIEXPRESS e "MULTIEXPRESS" su quelli girati da
+  // Velox — 10.021 messaggi cosi', 8.278 di MULTIEXPRESS. Chi ha scritto e' salvato in autore_id:
+  // si mostra la persona, lo storico resta com'e'. E a chi guarda da un ALTRO master si dice anche
+  // di quale azienda e' ("Stefy · MULTIEXPRESS"): il nome da solo non lo dice. Due letture in tutto.
+  const idMaster = [...new Set(messaggiVisti.map((m: any) => m.autore_master_id).filter(Boolean))]
+  const { data: aziende } = idMaster.length ? await admin.from('masters').select('id,nome').in('id', idMaster) : { data: [] }
+  const nomeAzienda = new Map<string, string>((aziende || []).map((a: any) => [a.id, a.nome]))
+  const firmatiAzienda = messaggiVisti.filter((m: any) => m.autore === 'rete' && m.autore_id && m.autore_master_id
+    && m.autore_nome === nomeAzienda.get(m.autore_master_id))
+  const idPersone = [...new Set(firmatiAzienda.map((m: any) => m.autore_id))]
+  const { data: persone } = idPersone.length ? await admin.from('utenti').select('id,nome,cognome').in('id', idPersone) : { data: [] }
+  const nomePersona = new Map<string, string>((persone || [])
+    .map((p: any) => [p.id, [p.nome, p.cognome].filter(Boolean).join(' ').trim()] as [string, string]).filter(([, n]) => !!n))
+
+  const msgOut = messaggiVisti.map((m: any) => {
     // ANCHE NELLA CHAT, ma SOLO il nome di chi ha aperto. Gli altri `autore_nome` sono PERSONE
     // ("TODINI GIACOMO", "LUCA ONOFRI"): sostituirli con la ragione sociale cancellerebbe chi ha
     // risposto. Si riconosce l'azienda dal fatto che il nome salvato e' identico a quello congelato
     // sul ticket — una persona non coincide mai con quello.
-    autore_nome: nomeAttuale && nomeVecchio && m.autore_nome === nomeVecchio ? nomeAttuale : m.autore_nome,
-    mio: ruolo === 'cliente' ? m.autore === 'cliente'
-      : (m.autore !== 'cliente' && (m.autore_master_id ? m.autore_master_id === utente?.master_id : ruolo === 'master' && m.autore === 'master')),
-    tu: !!m.autore_id && m.autore_id === user.id,
-  }))
+    let nome = nomeAttuale && nomeVecchio && m.autore_nome === nomeVecchio ? nomeAttuale : m.autore_nome
+    if (firmatiAzienda.includes(m) && nomePersona.get(m.autore_id)) nome = nomePersona.get(m.autore_id)
+    const azienda = m.autore_master_id ? nomeAzienda.get(m.autore_master_id) : null
+    return {
+      ...m,
+      autore_nome: nome,
+      // Al cliente no: vede solo la sua assistenza, e la rete non deve comparirgli.
+      // Nemmeno sulle tracce di sistema ("📤 Ticket inoltrato…"), che non hanno una persona dietro.
+      autore_azienda: ruolo !== 'cliente' && m.autore_id && azienda && m.autore_master_id !== utente?.master_id && azienda !== nome ? azienda : undefined,
+      mio: ruolo === 'cliente' ? m.autore === 'cliente'
+        : (m.autore !== 'cliente' && (m.autore_master_id ? m.autore_master_id === utente?.master_id : ruolo === 'master' && m.autore === 'master')),
+      tu: !!m.autore_id && m.autore_id === user.id,
+    }
+  })
   // Aprendo la chat, segno letto il lato di CHI apre.
   if (ruolo === 'master') await admin.from('tickets').update({ non_letto_owner: false }).eq('id', id)
   else if (ruolo === 'cliente') await admin.from('tickets').update({ aperto_letto: true }).eq('id', id)
@@ -109,13 +133,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const allegatiOut = [...giaCaricati, ...caricatiOra]
 
   // Nome autore: cliente = ragione sociale; master = nome utente o "Assistenza".
+  // Anche dalla rete firma la PERSONA (vedi GET): il nome del master solo se l'utente non ne ha uno.
   let autoreNome = 'Assistenza'
   if (ruolo === 'cliente') {
     if ((utente as any)?.cliente_id) { const { data: cli } = await admin.from('clienti').select('ragione_sociale').eq('id', (utente as any).cliente_id).maybeSingle(); autoreNome = cli?.ragione_sociale || t.aperto_da || 'Cliente' }
     else autoreNome = [utente?.nome, utente?.cognome].filter(Boolean).join(' ') || t.aperto_da || 'Richiedente'
   } else if (ruolo === 'rete') {
-    const { data: m } = await admin.from('masters').select('nome').eq('id', utente?.master_id).maybeSingle()
-    autoreNome = m?.nome || 'Rete'
+    autoreNome = [utente?.nome, utente?.cognome].filter(Boolean).join(' ')
+    if (!autoreNome) {
+      const { data: m } = await admin.from('masters').select('nome').eq('id', utente?.master_id).maybeSingle()
+      autoreNome = m?.nome || 'Rete'
+    }
   } else {
     autoreNome = [utente?.nome, utente?.cognome].filter(Boolean).join(' ') || 'Assistenza'
   }
@@ -152,8 +180,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // AUTO-PRESA PER MASTER: chi risponde (owner O master della catena) prende il ticket per il PROPRIO
   // livello, se nessuno del suo master l'ha già preso. Ognuno vede solo la propria assegnazione, così
-  // la presa di E&A sui ticket di rete non scende al sotto-master. Nome = la PERSONA (per la rete
-  // autoreNome è il nome dell'organizzazione, non serve qui).
+  // la presa di E&A sui ticket di rete non scende al sotto-master. Nome = la PERSONA.
   const nomePersona = [utente?.nome, utente?.cognome].filter(Boolean).join(' ') || autoreNome
   const mid = utente?.master_id
   if ((ruolo === 'master' || ruolo === 'rete') && mid && !((t.assegnazioni as any)?.[mid])) {

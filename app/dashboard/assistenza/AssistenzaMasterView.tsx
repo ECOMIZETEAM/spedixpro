@@ -444,7 +444,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                       <div style={{ fontSize: '10.5px', color: '#94a3b8', margin: mio ? '0 4px 3px 0' : '0 0 3px 4px', textAlign: mio ? 'right' : 'left', fontWeight: 600 }}>
                         {/* Sempre il NOME di chi ha scritto (Sara/Giuliana), mai "Tu": col master
                             condiviso, "Tu" non diceva quale dei due. "· tu" marca i propri. */}
-                        {m.autore_nome || (m.autore === 'cliente' ? 'Cliente' : m.autore === 'rete' ? 'Rete' : 'Assistenza')}{m.tu ? ' · tu' : ''}
+                        {m.autore_nome || (m.autore === 'cliente' ? 'Cliente' : m.autore === 'rete' ? 'Rete' : 'Assistenza')}{m.autore_azienda ? ` · ${m.autore_azienda}` : ''}{m.tu ? ' · tu' : ''}
                         {interno && <span style={{ marginLeft: '5px', background: '#1a1a1a', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px' }}>🔒 RETE</span>}
                       </div>
                       {editId === m.id ? (
