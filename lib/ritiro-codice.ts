@@ -267,3 +267,103 @@ export async function rincorriRitiriSpediamopro(
   }
   return esito
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// RITIRI POSTE: LO STATO DALLA PAGINA DEI RITIRI DI poste.it, PIANO
+// Per i codici CP… (SDA EXPRESS L, Poste V, Poste su Spedisci, PDB L) nessun fornitore ci dice com'e' andato il
+// ritiro: restavano "Richiesto" per sempre. Lo dice la pagina pubblica dei ritiri di Poste ("Cerca Ritiri",
+// trovata da Lorenzo il 25/11/2026), con un servizio che risponde per codice. Misurato su 60 ritiri veri:
+//   100 SPEDIZIONE RITIRATA · 118 RITIRO GIA' EFFETTUATO IN GIORNATA · XXX DA EFFETTUARE
+//   ANN Prenotazione di ritiro annullata — su tutti quelli guardati il pacco era gia' partito PRIMA del giorno
+//       del ritiro: Poste annulla la prenotazione perche' l'ha gia' preso.
+//   102 NULLA DA RITIRARE — il corriere e' passato e non c'era niente: "Annullato dal corriere" (Lorenzo, 25/11).
+// I codici mai visti non cambiano lo stato: finiscono nei log, per decidere dopo.
+//
+// PIANO, per scelta di Lorenzo: da poste.it leggiamo anche il tracking (bonifica-poste), e un blocco per troppe
+// richieste toglierebbe entrambi. Massimo 20 letture per giro, una ogni 1,5 secondi, al primo errore ci si
+// ferma. Si leggono solo i ritiri di ieri e, dal pomeriggio, quelli di oggi: quelli futuri direbbero solo "da
+// effettuare". Prima quelli mai letti (ancora "Richiesto"), poi a rotazione quelli rimasti "da effettuare".
+// ═══════════════════════════════════════════════════════════════════════════════════════
+export function statoRitiroPoste(codice: unknown): string | null {
+  switch (String(codice ?? '')) {
+    case '100': case '118': return 'ritirato'
+    case 'XXX': return 'confermato'
+    case 'ANN': return 'annullato'
+    case '102': return 'annullato_corriere'
+    default: return null
+  }
+}
+
+export async function leggiStatoRitiroPoste(codice: string): Promise<{ ok: boolean; codice?: string; descrizione?: string; trovato?: boolean; http: number }> {
+  const res = await fetch(`https://www.poste.it/rest/prenota-ritiri-rest/api/ritiro?param=${encodeURIComponent(codice)}`, {
+    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json', Referer: 'https://www.poste.it/prenota-ritiri/index.html' },
+    signal: AbortSignal.timeout(10000),
+  })
+  const testo = await res.text()
+  let j: any = null
+  try { j = JSON.parse(testo) } catch { /* una pagina HTML al posto del JSON e' un rifiuto */ }
+  if (!res.ok || !j) return { ok: false, http: res.status }
+  // "La ricerca non ha prodotto risultati" (PR1106): Poste non conosce il codice. Non e' un errore del giro.
+  if (String(j.code) !== '0') return { ok: true, trovato: false, http: res.status }
+  return { ok: true, trovato: true, codice: String(j?.data?.status?.code ?? ''), descrizione: String(j?.data?.status?.description ?? ''), http: res.status }
+}
+
+export type EsitoRitiriPoste = {
+  candidate: number; lette: number; stati: Record<string, number>; nonTrovati: number
+  sconosciuti: Record<string, number>  // codice Poste mai visto → quante volte (con la sua descrizione)
+  fermo: string | null                 // perche' il giro si e' fermato prima (rifiuto di poste.it)
+}
+
+export async function rincorriRitiriPoste(admin: any, opts: { max?: number; pausaMs?: number } = {}): Promise<EsitoRitiriPoste> {
+  const esito: EsitoRitiriPoste = { candidate: 0, lette: 0, stati: {}, nonTrovati: 0, sconosciuti: {}, fermo: null }
+  const max = opts.max ?? 20
+  const pausa = opts.pausaMs ?? 1500
+  const { giornoRoma, giorniFaRoma } = await import('@/lib/date-roma')
+  const { fetchAllStretto } = await import('@/lib/fetch-all')
+  const oggi = giornoRoma()
+  const ieri = giorniFaRoma(1)
+  const oraRoma = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', hourCycle: 'h23' }).format(new Date()))
+  const giorni = oraRoma >= 15 ? [ieri, oggi] : [ieri]
+
+  // I ritiri SpediamoPro hanno gia' lo stato dal fornitore (rincorriRitiriSpediamopro): qui tutti gli altri.
+  let righe: any[] = []
+  try {
+    righe = await fetchAllStretto(() => admin.from('ritiri')
+      .select('id,stato,cod_ritiro,data_ritiro,corrieri!inner(tipo)')
+      .neq('corrieri.tipo', 'spediamopro')
+      .like('cod_ritiro', 'CP%')
+      .in('data_ritiro', giorni)
+      .not('stato', 'in', '(ritirato,annullato,annullato_corriere,errore)')
+      .order('data_ritiro', { ascending: true }).order('id', { ascending: true }))
+  } catch (e: any) { esito.fermo = 'lettura dei ritiri: ' + e?.message; return esito }
+  righe = righe.filter((r: any) => /^CP\d{9}$/.test(String(r.cod_ritiro)))
+  esito.candidate = righe.length
+
+  const maiLetti = righe.filter((r: any) => r.stato === 'richiesto')
+  const daRileggere = righe.filter((r: any) => r.stato !== 'richiesto')
+  const giro = Math.round(Date.now() / (10 * 60 * 1000))
+  const periodo = Math.max(1, Math.ceil(daRileggere.length / max))
+  const scelti = [...maiLetti, ...daRileggere.filter((r: any) => tocca(String(r.id), periodo, giro))].slice(0, max)
+
+  // 45 secondi al massimo: il giro ne ha 60, e una poste.it lenta (10 secondi a lettura) non deve farlo morire.
+  const avvio = Date.now()
+  for (const r of scelti) {
+    if (Date.now() - avvio > 45000) break
+    let l
+    try { l = await leggiStatoRitiroPoste(String(r.cod_ritiro)) } catch (e: any) { esito.fermo = 'poste.it non risponde: ' + String(e?.message || e).slice(0, 80); break }
+    if (!l.ok) { esito.fermo = `poste.it ha risposto ${l.http}`; break }
+    esito.lette++
+    if (!l.trovato) esito.nonTrovati++
+    else {
+      const stato = statoRitiroPoste(l.codice)
+      if (!stato) { const k = `${l.codice} ${String(l.descrizione).slice(0, 50)}`; esito.sconosciuti[k] = (esito.sconosciuti[k] || 0) + 1 }
+      else if (stato !== r.stato) {
+        const { error } = await admin.from('ritiri').update({ stato }).eq('id', r.id)
+        if (error) { esito.fermo = 'scrittura: ' + error.message; break }
+        esito.stati[stato] = (esito.stati[stato] || 0) + 1
+      }
+    }
+    await new Promise(ok => setTimeout(ok, pausa))
+  }
+  return esito
+}

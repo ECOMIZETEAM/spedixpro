@@ -99,6 +99,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/ritiri/stati-poste",
+      "schedule": "7,17,27,37,47,57 * * * *"
+    },
+    {
       "path": "/api/cron/registro-home",
       "schedule": "*/2 * * * *"
     },

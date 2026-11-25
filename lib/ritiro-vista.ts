@@ -1,8 +1,9 @@
 // COME SI MOSTRA UN RITIRO: lo stato a parole e il link alla pagina del corriere. Lo usano le tre
 // liste (Ritiri, Elenco Ritiri, Ritiri del cliente), quindi qui niente che giri solo sul server.
 
-// GLI STATI. 'richiesto' e' il punto di partenza di tutti i contratti; gli altri li scrive solo il
-// ritiro letto dal fornitore (oggi SpediamoPro, vedi statoRitiroSpediamopro). 'elaborato' e
+// GLI STATI. 'richiesto' e' il punto di partenza di tutti i contratti; gli altri li scrive il ritiro riletto
+// presso il fornitore o il corriere (SpediamoPro: statoRitiroSpediamopro; codici CP di Poste: statoRitiroPoste,
+// in lib/ritiro-codice). 'elaborato' e
 // 'completato' sono parole vecchie: restano sulle righe gia' scritte e si leggono ancora.
 export const STATI_RITIRO: Record<string, { label: string; bg: string; color: string; nota?: string }> = {
   richiesto: { label: 'Richiesto', bg: '#fff7ed', color: '#f97316' },
@@ -10,7 +11,8 @@ export const STATI_RITIRO: Record<string, { label: string; bg: string; color: st
   confermato: { label: 'Confermato dal corriere', bg: '#eff6ff', color: '#1d4ed8', nota: 'Il corriere ha preso in carico la prenotazione. Su alcuni ritiri il corriere non comunica il passaggio: se il ritiro è di ieri, guarda lo stato delle spedizioni.' },
   rimandato: { label: 'Rimandato', bg: '#fffbeb', color: '#b45309', nota: 'Il corriere ha rimandato il ritiro (per esempio merce non pronta).' },
   ritirato: { label: 'Ritirato', bg: '#f0fdf4', color: '#16a34a' },
-  annullato: { label: 'Annullato', bg: '#fef2f2', color: '#dc2626', nota: 'Questa prenotazione è stata annullata. Se il pacco è ancora fermo, la spedizione è di nuovo tra quelle da ritirare: richiedi un nuovo ritiro.' },
+  // Su Poste quasi sempre perche' il pacco era gia' stato preso prima del giorno del ritiro (25/11/2026).
+  annullato: { label: 'Annullato', bg: '#fef2f2', color: '#dc2626', nota: 'Questa prenotazione è stata annullata: spesso perché il pacco era già stato preso con un altro passaggio. Controlla lo stato della spedizione: se è ferma, è di nuovo tra quelle da ritirare, richiedi un nuovo ritiro.' },
   // Su 563 ritiri annullati dal corriere in 30 giorni (al 25/11/2026) 422 pacchi erano partiti lo stesso, con
   // un altro passaggio: la parola da sola spaventava. I 102 rimasti fermi sono quelli da rifare, e tornano
   // ritirabili (STATI_RITIRO_ANNULLATI qui sotto).
