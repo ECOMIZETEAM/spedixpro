@@ -33,8 +33,8 @@ const vociDi = (r: RigaFatturaBrt, legenda?: Record<string, string> | null) => [
 
 export type EsternoIniziale = { nome: string; formatoId: string; spedizioni: SpedizioneEsterna[] }
 
-export default function AltriGestionali({ righe, numeroFattura, iniziali, onScaricato, legenda, corriere = 'BRT' }: {
-  righe: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]; legenda?: Record<string, string> | null; corriere?: string
+export default function AltriGestionali({ righe, righeFattura, numeroFattura, iniziali, onScaricato, legenda, corriere = 'BRT' }: {
+  righe: RigaFatturaBrt[]; righeFattura?: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]; legenda?: Record<string, string> | null; corriere?: string
   onScaricato?: (x: { nome: string; righe: number }) => void   // scaricare il file è un'azione: la fattura resta nello storico
 }) {
   const dialog = useDialog()
@@ -49,11 +49,11 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
   const esiti = useMemo(() => {
     let resto = righe
     return file.map(f => {
-      const a = abbinaEsterne(resto, f.spedizioni)
+      const a = abbinaEsterne(resto, f.spedizioni, righeFattura || righe)
       resto = a.nonAbbinate
       return { ...f, ...a, disponibili: resto.length + a.abbinate.reduce((n, x) => n + (x.andata ? 1 : 0) + x.rientri.length, 0) }
     })
-  }, [righe, file])
+  }, [righe, righeFattura, file])
   const nonAbbinate = esiti.length ? esiti[esiti.length - 1].nonAbbinate : righe
   const totaleNonAbbinate = r2(nonAbbinate.reduce((s, r) => s + r.totale, 0))
 
@@ -252,7 +252,7 @@ export default function AltriGestionali({ righe, numeroFattura, iniziali, onScar
                         <Pillola colore={netto < -0.005 ? C.rosso : C.verde} fondo={netto < -0.005 ? C.rossoTenue : C.verdeTenue} orlo={netto < -0.005 ? C.rossoOrlo : C.verdeOrlo}>{conSegno(netto)}</Pillola>
                       </td>
                       <td style={{ padding: '10px 12px', fontSize: 12.5, color: '#475467', lineHeight: 1.5, minWidth: 280 }}>
-                        {r && <div>Andata: {vociDi(r, legenda)}.{a.daRettificare ? ` ${corriere} l'ha ${comeTassata(r)}, il gestionale aveva ${kg(a.sped.peso)}.` : ''}</div>}
+                        {r && <div>Andata: {vociDi(r, legenda)}.{a.daRettificare ? ` ${corriere} l'ha ${comeTassata(r)}, il gestionale aveva ${kg(a.sped.peso)}.` : a.pesoSenzaCosto ? ` ${corriere} l'ha ${comeTassata(r)} (il gestionale aveva ${kg(a.sped.peso)}), ma nello stesso scaglione: ${euro(r.nolo)} come a ${kg(a.sped.peso)}, niente da rettificare.` : ''}</div>}
                         {a.rientri.map(x => (
                           <div key={x.segnacollo + x.numeroSpedizione}>{x.tipoBolla.startsWith('A') ? 'Reso al mittente' : 'Bolla accessoria (giacenza)'}: {vociDi(x, legenda)}.</div>
                         ))}

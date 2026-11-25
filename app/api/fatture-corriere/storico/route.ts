@@ -34,15 +34,18 @@ export async function GET(req: NextRequest) {
   // tutte e due si conta una volta. La differenza è negativa = addebito.
   const fileIds = Array.from(new Set((fatture || []).map((f: any) => f.rettifiche_file_id).filter(Boolean))) as string[]
   const esterneIds = Array.from(new Set((fatture || []).flatMap((f: any) => Array.isArray(f.riepilogo?.rettificheEsterne?.ids) ? f.riepilogo.rettificheEsterne.ids : []))) as string[]
-  type Rett = { id: string; file_id: string | null; confermata: boolean; euro: number }
+  // Per la fattura aperta (`?aperta=`) anche le spedizioni rettificate: la pagina ci trova quelle da girare
+  // rimaste fuori dalla Rettifica, e dice quali sono e perché.
+  const aperta = req.nextUrl.searchParams.get('aperta')
+  type Rett = { id: string; file_id: string | null; spedizione_id: string | null; confermata: boolean; euro: number }
   const perId = new Map<string, Rett>()
   const leggi = async (campo: 'file_id' | 'id', valori: string[]) => {
     for (let i = 0; i < valori.length; i += 100) {
       for (let da = 0; ; da += 1000) {
-        const { data, error } = await admin.from('rettifiche').select('id,file_id,confermata,differenza,fuori_sagoma')
+        const { data, error } = await admin.from('rettifiche').select('id,file_id,spedizione_id,confermata,differenza,fuori_sagoma')
           .eq('master_id', u.masterId).in(campo, valori.slice(i, i + 100)).or('propagazione.is.null,propagazione.neq.annullata').order('id').range(da, da + 999)
         if (error) throw new Error(error.message)
-        for (const r of data || []) perId.set(r.id, { id: r.id, file_id: r.file_id, confermata: !!r.confermata, euro: -(Number(r.differenza) || 0) + (Number(r.fuori_sagoma) || 0) })
+        for (const r of data || []) perId.set(r.id, { id: r.id, file_id: r.file_id, spedizione_id: r.spedizione_id, confermata: !!r.confermata, euro: -(Number(r.differenza) || 0) + (Number(r.fuori_sagoma) || 0) })
         if ((data || []).length < 1000) break
       }
     }
@@ -60,7 +63,8 @@ export async function GET(req: NextRequest) {
       const recuperato = r2(g?.euroConfermati || 0)
       // Gli id delle rettifiche servono solo qui: nell'elenco non viaggiano.
       const riepilogo = f.riepilogo ? { ...f.riepilogo, rettificheEsterne: undefined } : f.riepilogo
-      return { ...f, riepilogo, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa) } : null, aTuoCarico: r2(Number(f.differenza) - recuperato) }
+      const spedizioni = f.id === aperta ? Array.from(new Set(Array.from(sue.values()).map(r => r.spedizione_id).filter(Boolean))) : undefined
+      return { ...f, riepilogo, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa), ...(spedizioni ? { spedizioni } : {}) } : null, aTuoCarico: r2(Number(f.differenza) - recuperato) }
     }),
   })
 }

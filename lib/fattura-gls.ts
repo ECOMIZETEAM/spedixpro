@@ -141,7 +141,7 @@ export const espandiRigaGls = (x: Partial<RigaGls>): RigaGls => ({
 // Prima andava a quattro decimali (al centesimo riga per riga, su 3.482 righe da 3,50 €, la somma perdeva 10 €),
 // ma la riga si arrotondava poi a schermo: sull'allegato di ottobre di Wave (25/11) la testata diceva +512,45 e
 // i motivi riga per riga +512,58, perché quasi ogni riga finiva a 0,0004 sotto il centesimo (3,9196 → 3,92).
-function carburantePerRiga(righe: RigaGls[], contratti: { codice: string; percentualeCarburante: number | null; carburante?: number | null }[]): number[] {
+function carburantePerRiga(righe: { contratto: string; nolo: number }[], contratti: { codice: string; percentualeCarburante: number | null; carburante?: number | null }[]): number[] {
   const out = righe.map(() => 0)
   for (const c of contratti) {
     const idx = righe.map((r, i) => r.contratto === c.codice && r.nolo > 0 ? i : -1).filter(i => i >= 0)
@@ -157,6 +157,16 @@ function carburantePerRiga(righe: RigaGls[], contratti: { codice: string; percen
     for (let k = 0; k < resto && k < quote.length; k++) out[quote[k].i] += 1
   }
   return out.map(c => c / 100)
+}
+
+// Le righe GIÀ SALVATE di un documento, col carburante ripartito di nuovo al centesimo: per rifare il controllo
+// con le regole di oggi senza ricaricare il PDF (il carburante stampato per contratto sta nel riepilogo).
+export function ricalcolaCarburanteGls(righe: RigaFatturaGls[], contratti: { codice: string; percentualeCarburante: number | null; carburante?: number | null }[]): RigaFatturaGls[] {
+  const fuel = carburantePerRiga(righe, contratti)
+  return righe.map((r, i) => {
+    const voci = [...r.voci.filter(v => v.sigla !== 'gls:carburante'), ...(fuel[i] >= 0.005 ? [{ sigla: 'gls:carburante', importo: fuel[i] }] : [])]
+    return { ...r, voci, totale: r2(r.nolo + voci.reduce((s, v) => s + v.importo, 0)) }
+  })
 }
 
 // Le righe del PDF come righe del controllo. Il carburante non è sulla riga: è stampato per contratto, e qui si

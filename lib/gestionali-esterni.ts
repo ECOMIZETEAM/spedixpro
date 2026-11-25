@@ -8,6 +8,7 @@
  *
  * Niente database: gira nel browser, sul file che il detentore ha in mano. */
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
+import { eGls } from '@/lib/fattura-gls'
 
 export type SpedizioneEsterna = {
   ldv: string
@@ -95,10 +96,12 @@ export type AbbinataEsterna = {
   margineAndata: number | null
   pesoBrt: number | null
   daRettificare: boolean           // BRT l'ha tassata più del peso su cui il gestionale ha fatto il prezzo
+  pesoSenzaCosto: boolean          // GLS l'ha pesata di più, ma nello stesso scaglione: non le è costato niente
   multicollo: boolean              // la fattura dà il peso totale, non collo per collo: non va nel file
 }
 
-export function abbinaEsterne(righe: RigaFatturaBrt[], spedizioni: SpedizioneEsterna[]) {
+// `prezzi`: le righe della fattura da cui leggere gli scaglioni di GLS (tutte, non solo quelle da abbinare).
+export function abbinaEsterne(righe: RigaFatturaBrt[], spedizioni: SpedizioneEsterna[], prezzi: RigaFatturaBrt[] = righe) {
   const perLdv = new Map(spedizioni.filter(s => s.ldv).map(s => [s.ldv, s]))
   const perCap = new Map<string, SpedizioneEsterna[]>()
   for (const s of spedizioni) { const v = perCap.get(s.cap) || []; v.push(s); perCap.set(s.cap, v) }
@@ -125,6 +128,22 @@ export function abbinaEsterne(righe: RigaFatturaBrt[], spedizioni: SpedizioneEst
   }
 
   const r2 = (n: number) => Math.round(n * 100) / 100
+  // GLS TASSA A SCAGLIONI: fino a 5 kg 3,50 €, poi 7, 10, 13 kg… Un peso più alto dentro lo stesso scaglione non
+  // le costa niente e non è una rettifica: il 25/11 un pacco da 1 kg misurato 3,9 kg, pagato 3,50 € come uno da
+  // 1 kg, finiva nel file di rettifiche per l'altro gestionale (Lorenzo: "il primo scaglione è fino a 5 kg").
+  // Lo scaglione si legge dalla fattura stessa: se GLS ha fatto pagare lo stesso nolo a un pacco che non pesava
+  // più di quanto dice il gestionale, il peso in più non è costato niente. Per le spedizioni Moove il controllo
+  // lo sa già dal listino (il peso conta solo se il prezzo cambia).
+  // Italia ed estero a parte: le spedizioni "Parcel" (Germania, Austria…) costano 5,25 € già a 1 kg, e mescolate
+  // facevano sembrare 5,25 € il prezzo di un pacco italiano da 1 kg (borderò del 23/11: 10 righe così).
+  const chiave = (r: RigaFatturaBrt) => `${eGls(r) && /parcel/i.test(r.servizio) ? 'estero' : 'italia'}|${Math.round(r.nolo * 100)}`
+  const pesoMinimoPerNolo = new Map<string, number>()
+  for (const r of prezzi) if (r.andata && eGls(r) && r.nolo > 0) {
+    const k = chiave(r), p = Number(r.pesoTassato) || 0
+    if (!(p >= (pesoMinimoPerNolo.get(k) ?? Infinity))) pesoMinimoPerNolo.set(k, p)
+  }
+  const stessoScaglione = (r: RigaFatturaBrt, pesoGestionale: number) =>
+    eGls(r) && (pesoMinimoPerNolo.get(chiave(r)) ?? Infinity) <= pesoGestionale + 0.001
   const abbinate: AbbinataEsterna[] = Array.from(usate.entries()).map(([ldv, v]) => {
     const sped = perLdv.get(ldv)!
     const brtAndata = v.andata?.totale || 0
@@ -133,7 +152,8 @@ export function abbinaEsterne(righe: RigaFatturaBrt[], spedizioni: SpedizioneEst
     const multicollo = sped.colli > 1
     return { sped, andata: v.andata, rientri: v.rientri, brtAndata, brtRientri,
       margineAndata: v.andata ? r2(sped.prezzoCliente - brtAndata) : null, pesoBrt,
-      daRettificare: pesoBrt != null && pesoBrt > sped.peso + 0.001, multicollo }
+      daRettificare: pesoBrt != null && pesoBrt > sped.peso + 0.001 && !stessoScaglione(v.andata!, sped.peso),
+      pesoSenzaCosto: pesoBrt != null && pesoBrt > sped.peso + 0.001 && stessoScaglione(v.andata!, sped.peso), multicollo }
   })
   return { abbinate, nonAbbinate }
 }

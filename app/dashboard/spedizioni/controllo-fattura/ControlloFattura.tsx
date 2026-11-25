@@ -4,7 +4,7 @@ import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useDialog } from '@/app/components/DialogProvider'
 import { leggiFatturaBrt, descriviVoce, pesoTassatoBrt, KG_PER_M3_BRT, sigleSconosciute, type RigaFatturaBrt } from '@/lib/fattura-brt'
 import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
-import { eGls, espandiRigaGls, righeControlloGls, type ParteAllinea } from '@/lib/fattura-gls'
+import { eGls, espandiRigaGls, righeControlloGls, ricalcolaCarburanteGls, type ParteAllinea, type RigaFatturaGls } from '@/lib/fattura-gls'
 import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera, Pillola } from './ui'
 import AltriGestionali, { type EsternoIniziale } from './AltriGestionali'
 
@@ -31,7 +31,7 @@ type FatturaStorico = {
   id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; etichetta: string | null; data_fattura: string | null; nome_file: string | null
   righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
   da_girare: number; euro_da_girare: number; rettifiche_file_id: string | null; created_at: string
-  girate: { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number } | null; aTuoCarico: number
+  girate: { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number; spedizioni?: string[] } | null; aTuoCarico: number
   riepilogo?: { fileEsterni?: { nome: string; righe: number; il: string }[] } | null
 }
 type Filtro = 'perdita' | 'tutte' | 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_trovata' | 'rientri' | 'carburante' | 'storico'
@@ -89,7 +89,7 @@ const dataIt = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleD
 // Il numero della fattura BRT si scrive "n. 68967"; quello del documento GLS è già una frase.
 const nDoc = (x: string) => /^\d/.test(x) ? `n. ${x}` : x
 
-export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string; storico?: FatturaStorico[]; esterni?: EsternoIniziale[]; gls?: InfoGls; fatturaId?: string; rettificheInviate?: boolean } }) {
+export default function ControlloFattura({ iniziale }: { iniziale?: { contratti: Contratto[]; esiti: EsitoControllo[]; nomeFile: string; storico?: FatturaStorico[]; esterni?: EsternoIniziale[]; gls?: InfoGls; fatturaId?: string; rettificheInviate?: boolean; perche?: Record<string, { motivo: string; listino: boolean }> } }) {
   const dialog = useDialog()
   const [contratti, setContratti] = useState<Contratto[] | null>(iniziale?.contratti ?? null)
   const [contrattoId, setContrattoId] = useState(iniziale?.contratti?.[0]?.id ?? '')
@@ -123,7 +123,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const cr = gls ? 'GLS' : 'BRT'
   const MOTIVI = useMemo(() => motiviDi(cr), [cr])
 
-  const caricaStorico = () => fetch('/api/fatture-corriere/storico').then(r => r.json()).then(d => setStorico(d.fatture || [])).catch(() => setStorico([]))
+  // Con la fattura aperta lo storico dice anche su quali sue spedizioni ci sono rettifiche (per le non girate).
+  const caricaStorico = (aperta: string | null = fatturaId) => fetch('/api/fatture-corriere/storico' + (aperta ? '?aperta=' + encodeURIComponent(aperta) : '')).then(r => r.json()).then(d => setStorico(d.fatture || [])).catch(() => setStorico([]))
   useEffect(() => {
     if (iniziale) return
     fetch('/api/fatture-corriere/analizza').then(r => r.json()).then(d => {
@@ -183,6 +184,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     }))
     setAvvisi([]); setPagina(1); setFiltro('perdita'); setCerca('')
     if (!daIndirizzo) window.scrollTo({ top: 0, behavior: 'smooth' })
+    caricaStorico(id)   // com'è andata la Rettifica di questa fattura, spedizione per spedizione
   }
   const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null); setLegenda(null); setNotePdf([]); setInfoGls(null); setVoceScelta(null) }
 
@@ -328,7 +330,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     // Rettifica (fattura rifatta, o già girate da un file): allora il riquadro mostra com'è andata, non il pulsante.
     const chiusa: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId: id, chiudi: true }) }).then(r => r.json()).catch(() => null)
     setFatturaId(id); setAvanz(null); setEsiti(tutti); setRettificheInviate(!!chiusa?.rettificheInviate)
-    caricaStorico()
+    caricaStorico(id)
   }
 
   const trovate = useMemo(() => esiti.filter(e => e.spedizione), [esiti])
@@ -337,6 +339,25 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const daRettificare = useMemo(() => esiti.filter(daGirare), [esiti])
   // Com'è andata la Rettifica della fattura aperta: mandate, confermate, da confermare (dallo storico).
   const girateAperta = storico?.find(f => f.id === fatturaId)?.girate ?? null
+  // LE DA GIRARE RIMASTE FUORI DALLA RETTIFICA, una per una e col perché. La Rettifica dice solo quante ne ha
+  // scartate: il 25/11 Wave leggeva "1 non è diventata una rettifica" e in Rettifica Costi non c'era niente da
+  // cercare (la NI665520237: GLS 130 kg, e il listino che Wave fa al sotto-master arriva a 50).
+  const nonGirate = useMemo(() => {
+    const fatte = girateAperta?.spedizioni
+    if (!rettificheInviate || !fatte) return []
+    return daRettificare.filter(e => !fatte.includes(e.spedizione!.id))
+  }, [rettificheInviate, girateAperta, daRettificare])
+  const [perche, setPerche] = useState<Record<string, { motivo: string; listino: boolean }>>(iniziale?.perche ?? {})
+  const chiaveNonGirate = nonGirate.map(e => e.spedizione!.id).join(',')
+  useEffect(() => {
+    if (iniziale || !fatturaId || !nonGirate.length) return
+    let vivo = true
+    fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fatturaId, perche: nonGirate.map(e => ({ id: e.spedizione!.id, peso: r2(e.riga.pesoTassato) })) }) })
+      .then(r => r.json()).then(d => { if (vivo && Array.isArray(d.perche)) setPerche(Object.fromEntries(d.perche.map((x: any) => [x.id, { motivo: String(x.motivo || ''), listino: !!x.listino }]))) })
+      .catch(() => null)
+    return () => { vivo = false }
+  }, [iniziale, fatturaId, chiaveNonGirate])
   const arriviResiFuori = useMemo(() => esiti.filter(e => !e.spedizione && !e.riga.andata).length, [esiti])
   const totali = useMemo(() => riepilogaFattura(esiti), [esiti])
 
@@ -441,11 +462,12 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const pag = Math.min(pagina, pagine)
   const visibili = filtrate.slice((pag - 1) * PER_PAGINA, pag * PER_PAGINA)
 
-  async function mandaAllaRettifica() {
-    const euroPeso = r2(daRettificare.reduce((s, e) => s + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0))
+  // `lista`: di solito tutte quelle da girare; "Rimanda le non girate" passa solo quelle rimaste senza rettifica.
+  async function mandaAllaRettifica(lista: EsitoControllo[] = daRettificare) {
+    const euroPeso = r2(lista.reduce((s, e) => s + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0))
     const ok = await dialog.confirm({
       title: 'Mandare le differenze di peso alla Rettifica?',
-      message: `${daRettificare.length} spedizioni che ${cr} ha tassato più del peso registrato in Moove (col tuo listino ${euro(euroPeso)} in più). `
+      message: `${lista.length} spedizion${lista.length === 1 ? 'e' : 'i'} che ${cr} ha tassato più del peso registrato in Moove (col tuo listino ${euro(euroPeso)} in più). `
         + `Diventano rettifiche "da confermare" nella pagina Rettifica Costi, col peso tassato da ${cr}: lì ognuno paga col proprio listino, `
         + 'cliente o sotto-master che sia. Finché non le confermi non si muove un euro. Le spedizioni già rettificate vengono saltate.',
       confirmText: 'Manda alla Rettifica',
@@ -455,7 +477,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     // Lo stesso formato e lo stesso giro della pagina Rettifica: due colonne, lettera di vettura e peso.
     // La rotta li riconosce come file "solo pesi" e li passa dal motore delle rettifiche, coi suoi controlli.
     // Il peso come NUMERO: la Rettifica legge i chili col punto decimale e un numero lo prende così com'è.
-    const righe = daRettificare.map(e => ({ ldv: e.spedizione!.numero, peso: r2(e.riga.pesoTassato) }))
+    const righe = lista.map(e => ({ ldv: e.spedizione!.numero, peso: r2(e.riga.pesoTassato) }))
     const nome = `${gls ? '' : 'Fattura '}${cr} ${esiti[0]?.riga.numeroFattura || ''} - differenze di peso`
     const quante = 50
     let da = 0, fileId: string | undefined, creati = 0, gia = 0, nonTrovate = 0, errore = ''
@@ -491,6 +513,25 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         + (nonTrovate ? ` ${nonTrovate} non sono state trovate dalla Rettifica.` : '')
         + ' Le trovi in Rettifica Costi (il tasto qui sotto la apre in un\'altra scheda, questa resta aperta): controllale e premi Conferma.',
     })
+  }
+
+  // RIFARE IL DOCUMENTO APERTO CON LE REGOLE DI OGGI, dalle righe già salvate: non serve il file. Il 25/11 Wave
+  // riapriva l'allegato GLS di ottobre dallo storico e vedeva sempre la copia di prima delle correzioni: per
+  // rifarlo avrebbe dovuto ricaricare il PDF e sapere di doverlo fare. Le righe salvate sono quelle lette dal file
+  // (per GLS il carburante si ripartisce di nuovo, quello stampato è nel riepilogo). Le azioni restano (rotta).
+  async function rifaiConRegoleDiOggi() {
+    if (!fatturaId || !esiti.length || avanz) return
+    const ok = await dialog.confirm({
+      title: 'Rifare il controllo con le regole di oggi?',
+      message: `Rifaccio i conti ${gls ? 'di questo documento' : 'di questa fattura'} sulle righe già salvate, con le regole di oggi: non serve ricaricare il file. `
+        + 'Quello che hai già fatto resta: le rettifiche già mandate restano collegate, e rimandandole quelle già create vengono saltate.',
+      confirmText: 'Rifallo',
+    })
+    if (!ok) return
+    let righe: RigaFatturaBrt[] = esiti.map(e => e.riga)
+    if (gls && infoGls?.contratti?.length) righe = ricalcolaCarburanteGls(righe as RigaFatturaGls[], infoGls.contratti.map(c => ({ codice: c.codice, percentualeCarburante: c.percentuale, carburante: c.carburante })))
+    setAvvisi([]); setPagina(1); setVoceScelta(null)
+    await controlla(righe, { numeroFattura: righe[0].numeroFattura, dataFattura: righe[0].dataFattura, nomeFile, legenda: legenda || undefined, gls: infoGls || undefined }, true)
   }
 
   async function scaricaExcel() {
@@ -727,6 +768,12 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           <button onClick={chiudiFattura} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
             <Icona nome="fattura" size={16} /> Tutte le fatture
           </button>
+          {fatturaId && (
+            <button onClick={rifaiConRegoleDiOggi} disabled={!!avanz} title="Rifà i conti sulle righe già salvate, senza ricaricare il file: quello che hai già fatto resta"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, color: C.testo, cursor: avanz ? 'default' : 'pointer' }}>
+              <Icona nome="storico" size={16} /> Rifai con le regole di oggi
+            </button>
+          )}
           <button onClick={scegliFile} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
             <Icona nome="carica" size={16} /> Carica un'altra fattura
           </button>
@@ -737,6 +784,19 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             </button>
           )}
         </div>
+
+        {/* Un documento GLS controllato prima del 25/11: niente dettaglio dei listini e carburante a quattro decimali.
+            Lo si dice e si offre di rifarlo, invece di lasciarlo com'è senza che nessuno lo sappia. */}
+        {gls && fatturaId && allineareGls === null && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 13, color: C.ambra, background: C.ambraTenue, border: `1px solid ${C.ambraOrlo}`, borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>
+            <Icona nome="storico" size={16} />
+            <span style={{ flex: 1, minWidth: 220 }}>Questo documento è stato controllato con le regole di prima: «Cosa allineare nel listino» non dice quale listino e il carburante non è diviso al centesimo. Rifallo per vedere tutto aggiornato: quello che hai già fatto resta.</span>
+            <button onClick={rifaiConRegoleDiOggi} disabled={!!avanz}
+              style={{ padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.ambraOrlo}`, background: '#fff', fontSize: 13, fontWeight: 700, color: C.ambra, cursor: avanz ? 'default' : 'pointer' }}>
+              Rifai con le regole di oggi
+            </button>
+          </div>
+        )}
 
         {/* ── GLS: IL CARBURANTE. Il contratto ha la sua percentuale (nel listino); se GLS ne mette di più si
             dice qui, in alto, con quanto si è pagato in più su tutto il documento (Lorenzo, 24/11). ── */}
@@ -968,18 +1028,41 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                       <b>{girateAperta.inviate} rettifich{girateAperta.inviate === 1 ? 'a' : 'e'}</b> su {daRettificare.length} spedizion{daRettificare.length === 1 ? 'e' : 'i'}:{' '}
                       <b style={{ color: C.verde }}>{girateAperta.confermate} confermat{girateAperta.confermate === 1 ? 'a' : 'e'}</b>{girateAperta.confermate ? ` (${euro(girateAperta.euroConfermati)} girati)` : ''}
                       {girateAperta.inviate - girateAperta.confermate > 0 && <>, <b style={{ color: C.arancioScuro }}>{girateAperta.inviate - girateAperta.confermate} da confermare</b> ({euro(girateAperta.euroInAttesa)}) in Rettifica Costi</>}.
-                      {girateAperta.inviate < daRettificare.length && (daRettificare.length - girateAperta.inviate === 1
-                        ? ' 1 non è diventata una rettifica (già rettificata o scartata dalla Rettifica).'
-                        : ` ${daRettificare.length - girateAperta.inviate} non sono diventate rettifiche (già rettificate o scartate dalla Rettifica).`)}
+                      {/* Quali e perché, qui sotto; senza l'elenco delle spedizioni rettificate, solo quante. */}
+                      {nonGirate.length > 0
+                        ? (nonGirate.length === 1 ? ' 1 non è stata girata: qui sotto quale e perché.' : ` ${nonGirate.length} non sono state girate: qui sotto quali e perché.`)
+                        : !girateAperta.spedizioni && girateAperta.inviate < daRettificare.length
+                          ? ` ${daRettificare.length - girateAperta.inviate} non sono diventate rettifiche (già rettificate o scartate dalla Rettifica).` : ''}
                       {' '}Si aggiorna da solo quando torni su questa pagina.
                     </>
                   : rettificheInviate
                     ? 'Le hai già mandate alla Rettifica: le trovi in Rettifica Costi, da confermare. Rimandarle non le raddoppia, quelle già create vengono saltate.'
                     : `${cr} le ha tassate più del peso registrato in Moove. Diventano rettifiche da confermare in Rettifica Costi, ognuno paga col proprio listino: finché non le confermi non si muove nulla.`}
               </div>
+              {nonGirate.length > 0 && (
+                <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                  {nonGirate.map(e => {
+                    const sp = e.spedizione!, p = perche[sp.id], imp = e.motivi.find(m => m.tipo === 'peso')?.importo || 0
+                    return (
+                      <div key={sp.id} style={{ fontSize: 12.5, lineHeight: 1.45, background: '#fff', border: `1px solid ${C.arancioOrlo}`, borderRadius: 9, padding: '8px 10px', minWidth: 0, overflowWrap: 'anywhere' }}>
+                        <b>Non girata: {sp.numero}</b> <span style={{ color: C.attenuato }}>· {sp.chi} · Moove {kg(sp.peso)}, {cr} {kg(e.riga.pesoTassato)}</span>{' '}
+                        · <b style={{ color: C.rosso, ...cifre }}>{conSegno(imp)}</b> <span style={{ color: C.attenuato }}>per ora a tuo carico</span>
+                        <div style={{ color: '#475467', marginTop: 2 }}>{p ? p.motivo : 'Cerco perché la Rettifica non l\'ha creata…'}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
             {rettificheInviate ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {nonGirate.length > 0 && (
+                  <button onClick={() => mandaAllaRettifica(nonGirate)} disabled={inviando}
+                    title="Dopo aver sistemato il listino: rimanda alla Rettifica solo quelle non girate"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, border: 'none', fontSize: 13.5, fontWeight: 700, background: C.arancio, color: '#fff', cursor: inviando ? 'default' : 'pointer' }}>
+                    Rimanda {nonGirate.length === 1 ? 'la non girata' : `le ${nonGirate.length} non girate`}
+                  </button>
+                )}
                 <button onClick={aggiornaStato} disabled={aggiornando}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, border: `1px solid ${C.arancioOrlo}`, fontSize: 13.5, fontWeight: 600, background: 'transparent', color: C.arancioScuro, cursor: aggiornando ? 'default' : 'pointer' }}>
                   {aggiornando ? 'Aggiorno…' : 'Aggiorna'}
@@ -991,7 +1074,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                 </a>
               </div>
             ) : (
-              <button onClick={mandaAllaRettifica} disabled={inviando}
+              <button onClick={() => mandaAllaRettifica()} disabled={inviando}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: 'none', fontSize: 13.5, fontWeight: 700, background: C.arancio, color: '#fff', cursor: inviando ? 'default' : 'pointer', boxShadow: '0 1px 2px rgba(16,24,40,.1)' }}>
                 Manda alla Rettifica <Icona nome="freccia" size={16} />
               </button>
@@ -1001,7 +1084,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
 
         {/* ── LE SPEDIZIONI FATTE ALTROVE: si abbinano all'export di quel gestionale ── */}
         {totali.nonTrovate > 0 && (
-          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} onScaricato={registraFileEsterno} legenda={legenda} corriere={cr} />
+          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} righeFattura={esiti.map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} onScaricato={registraFileEsterno} legenda={legenda} corriere={cr} />
         )}
 
         {/* ── LE SPEDIZIONI ── */}

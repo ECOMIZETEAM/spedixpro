@@ -4,6 +4,7 @@ import { contrattiDelDetentore, gruppiGls, utenteDetentore } from '@/lib/control
 import { analizzaFatturaBrt } from '@/lib/controllo-fattura'
 import { analizzaFatturaGls } from '@/lib/controllo-fattura-gls'
 import { eGls, type RigaFatturaGls } from '@/lib/fattura-gls'
+import { costruisciCatena } from '@/lib/cascata'
 import { riepilogaFattura, fatturaConAzioni, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
 
@@ -45,6 +46,7 @@ type Corpo = {
   testata?: { numeroFattura?: string; dataFattura?: string | null; nomeFile?: string; legenda?: Record<string, string>; gls?: any }
   chiudi?: boolean
   rifai?: boolean                    // rifare con le regole di oggi una fattura già controllata, tenendo le azioni
+  perche?: { id: string; peso: number }[]   // spedizioni da girare rimaste senza rettifica: perché
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
   legenda?: Record<string, string>   // il PDF aggiunto dopo, a fattura già controllata
@@ -121,8 +123,52 @@ export async function POST(req: NextRequest) {
   if (corpo.rettificheFileId && fattura) {
     const { data: f } = await admin.from('rettifiche_files').select('id,master_id').eq('id', corpo.rettificheFileId).maybeSingle()
     if (!f || f.master_id !== u.masterId) return NextResponse.json({ error: 'File di rettifiche non tuo.' }, { status: 403 })
-    await admin.from('fatture_corriere').update({ rettifiche_file_id: f.id }).eq('id', fattura.id)
+    // Rimandate (le "non girate" dopo aver sistemato il listino), il file nuovo prende il posto del vecchio: le
+    // rettifiche del primo invio restano contate fra quelle sulle spedizioni della fattura.
+    const esterne = (await rettificheSulleSpedizioni(admin, u.masterId, [fattura.id]))?.get(fattura.id)
+    await admin.from('fatture_corriere').update({ rettifiche_file_id: f.id,
+      ...(esterne?.length ? { riepilogo: { ...(fattura.riepilogo || {}), rettificheEsterne: { ids: esterne } } } : {}) }).eq('id', fattura.id)
     return NextResponse.json({ ok: true })
+  }
+
+  // ── PERCHÉ NON È DIVENTATA UNA RETTIFICA ──
+  // La Rettifica dice quante spedizioni ha scartato, non quali né perché: il 25/11 Wave vedeva "1 non è diventata
+  // una rettifica" e in Rettifica Costi non c'era niente da cercare. Era la NI665520237: Moove 50 kg, GLS 130, e il
+  // listino che Wave fa al sotto-master Spedire semplice arriva a 50 kg. Qui, per le spedizioni della fattura
+  // senza rettifica: se ce n'è già una da un altro file, o se la catena dei prezzi si ferma a quel peso (stessa
+  // funzione dell'addebito e della Rettifica, lib/cascata). Solo lettura.
+  if (corpo.perche && fattura) {
+    const richieste = (Array.isArray(corpo.perche) ? corpo.perche : []).slice(0, 50)
+    const ids = richieste.map(p => String(p?.id || '')).filter(Boolean)
+    const { data: dellaFattura, error: errR } = await admin.from('fatture_corriere_righe').select('spedizione_id').eq('fattura_id', fattura.id).in('spedizione_id', ids)
+    if (errR) return NextResponse.json({ error: 'Lettura righe non riuscita: ' + errR.message }, { status: 500 })
+    const ammesse = new Set((dellaFattura || []).map((r: any) => r.spedizione_id))
+    const kg = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 2 })
+    const out: { id: string; motivo: string; listino: boolean }[] = []
+    for (const p of richieste) {
+      const peso = Number(p?.peso)
+      if (!ammesse.has(p?.id) || !(peso > 0)) continue
+      const { data: gia, error: errG } = await admin.from('rettifiche').select('confermata').eq('master_id', u.masterId).eq('spedizione_id', p.id)
+        .or('propagazione.is.null,propagazione.neq.annullata').limit(5)
+      if (errG) return NextResponse.json({ error: 'Lettura rettifiche non riuscita: ' + errG.message }, { status: 500 })
+      if (gia?.length) {
+        out.push({ id: p.id, listino: false, motivo: gia.some((r: any) => r.confermata) ? 'Già rettificata e confermata con un altro file: è in Rettifica Costi fra le confermate.' : 'Già rettificata con un altro file, da confermare in Rettifica Costi.' })
+        continue
+      }
+      const { data: s, error: errS } = await admin.from('spedizioni').select('master_id,corriere_id,dest_provincia,dest_cap,dest_citta,dest_paese,contrassegno,assicurazione,mitt_cap,mitt_provincia').eq('id', p.id).maybeSingle()
+      const { data: corr, error: errC } = s ? await admin.from('corrieri').select('master_id,nome_contratto').eq('id', s.corriere_id).maybeSingle() : { data: null, error: null }
+      if (errS || errC || !s || !corr) { out.push({ id: p.id, listino: false, motivo: 'Non riesco a rileggere la spedizione: riprova fra poco.' }); continue }
+      const { errore } = await costruisciCatena(admin, {
+        masterDirettoId: s.master_id, corriereOwnerId: corr.master_id, costoSpedizione: 0, provincia: String(s.dest_provincia || '').toUpperCase(),
+        packages: [{ weight: peso, length: 0, width: 0, height: 0 }], cap: s.dest_cap || '', citta: s.dest_citta || '', paese: s.dest_paese || 'IT',
+        corriereNome: corr.nome_contratto, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
+        mittCap: s.mitt_cap || '', mittProvincia: s.mitt_provincia || '', mittPaese: 'IT',
+      })
+      out.push(errore
+        ? { id: p.id, listino: true, motivo: `A ${kg(peso)} kg la catena dei prezzi si ferma: ${errore.trim().replace(/\.$/, '')}. Di solito manca quella fascia di peso nel listino di chi sta sotto: aggiungila, poi rimandala alla Rettifica. Finché non la giri, la differenza la paghi tu.` }
+        : { id: p.id, listino: false, motivo: `A ${kg(peso)} kg i prezzi della catena ci sono: la Rettifica non ci ha trovato niente da chiedere a chi ha spedito. Puoi rimandarla per riprovare.` })
+    }
+    return NextResponse.json({ perche: out })
   }
 
   // ── FILE DI RETTIFICHE SCARICATO PER UN ALTRO GESTIONALE: è un'azione, la fattura resta nello storico ──
