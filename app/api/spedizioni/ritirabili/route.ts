@@ -3,6 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { sottoAlberoMasterIds, contrattiPossedutiNomi } from '@/lib/rete-masters'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
+import { STATI_RITIRO_ANNULLATI } from '@/lib/ritiro-vista'
+import { giorniFaRoma } from '@/lib/date-roma'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -26,22 +28,44 @@ export async function GET(req: NextRequest) {
   // fisicamente ancora dal mittente in attesa di ritiro (caso reale BRT) — escluderle rendeva
   // impossibile prenotare il ritiro il giorno dopo. Restano fuori solo quelle davvero in viaggio
   // (in_transito e oltre).
-  let query = admin
-    .from('spedizioni')
-    .select(`id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,raw_response,created_at,${ownedContractNames && ownedContractNames.length ? 'corrieri!inner(tipo,nome_contratto)' : 'corrieri(tipo,nome_contratto)'}`)
-    .in('master_id', masterIds)
-    .in('stato', ['in_lavorazione', 'spedita'])
-    .is('ritiro_id', null)
+  const idsAgente = isAgente(utente) ? idClientiPerFiltro(await clientiAgente(supabase, utente)) : null
+  // Gli stessi filtri per le due letture qui sotto: senza ritiro, e con un ritiro annullato.
+  const base = () => {
+    let q = admin
+      .from('spedizioni')
+      .select(`id,numero,dest_nome,dest_citta,colli,peso_reale,corriere_id,cliente_id,master_id,raw_response,created_at,${ownedContractNames && ownedContractNames.length ? 'corrieri!inner(tipo,nome_contratto)' : 'corrieri(tipo,nome_contratto)'}`)
+      .in('master_id', masterIds)
+      .in('stato', ['in_lavorazione', 'spedita'])
+    if (isCliente) q = q.eq('cliente_id', utente.cliente_id)
+    else if (ownedContractNames && ownedContractNames.length) q = q.in('corrieri.nome_contratto', ownedContractNames)
+    // Agente: solo spedizioni dei suoi clienti.
+    if (idsAgente) q = q.in('cliente_id', idsAgente)
+    return q
+  }
+
+  const { data: senzaRitiro, error } = await base().is('ritiro_id', null)
     .order('created_at', { ascending: false })
     .limit(1000)
-
-  if (isCliente) query = query.eq('cliente_id', utente.cliente_id)
-  else if (ownedContractNames && ownedContractNames.length) query = query.in('corrieri.nome_contratto', ownedContractNames)
-  // Agente: solo spedizioni dei suoi clienti.
-  if (isAgente(utente)) query = query.in('cliente_id', idClientiPerFiltro(await clientiAgente(supabase, utente)))
-
-  const { data: spedizioni, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+  // RITIRO ANNULLATO = DI NUOVO RITIRABILE (Lorenzo, 25/11/2026). Se il corriere annulla o rifiuta la
+  // prenotazione e il pacco e' ancora fermo (in_lavorazione/spedita, come sopra), la spedizione resta legata
+  // al ritiro annullato — lo storico non si perde — ma si puo' prenotare di nuovo. Prima restava fuori da
+  // qui per sempre: 102 pacchi fermi in 30 giorni. Solo i ritiri degli ultimi 30 giorni, letti a blocchi: un
+  // .in() con centinaia di id fa un indirizzo troppo lungo e la lettura fallisce senza dirlo.
+  const { data: annullati, error: errA } = await admin.from('ritiri').select('id')
+    .in('stato', STATI_RITIRO_ANNULLATI).gte('data_ritiro', giorniFaRoma(30))
+    .order('data_ritiro', { ascending: false }).order('id', { ascending: true }).limit(1000)
+  if (errA) return NextResponse.json({ error: errA.message }, { status: 400 })
+  const idsAnnullati = (annullati || []).map((r: any) => r.id)
+  const conRitiroAnnullato: any[] = []
+  for (let i = 0; i < idsAnnullati.length; i += 150) {
+    const { data, error: e } = await base().in('ritiro_id', idsAnnullati.slice(i, i + 150))
+    if (e) return NextResponse.json({ error: e.message }, { status: 400 })
+    conRitiroAnnullato.push(...(data || []))
+  }
+  const spedizioni = [...(senzaRitiro || []), ...conRitiroAnnullato]
+    .sort((a: any, b: any) => String(b.created_at).localeCompare(String(a.created_at)))
 
   // Corrieri con ritiro ON-DEMAND: spedisci.online / spediamopro (pickup provider) e FedEx diretto
   // (Pickup API). GLS/BRT no: la raccolta è con l'accordo standard, non si prenota da qui.

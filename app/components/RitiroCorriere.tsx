@@ -1,16 +1,20 @@
 import { linkRitiroCorriere, statoRitiroVisto } from '@/lib/ritiro-vista'
 
-// SOTTO IL CODICE DI RITIRO, il link alla pagina del corriere che mostra la prenotazione e i suoi eventi
-// (oggi solo BRT: perche' Poste no, e come si riconosce il codice, in lib/ritiro-vista). Va FUORI da altri
-// link: nella lista Ritiri il codice e' gia' dentro un <a>.
+// SOTTO IL CODICE DI RITIRO, il link alla pagina del corriere che mostra la prenotazione: BRT la apre gia' sul
+// codice, Poste no (si apre con la casella vuota), quindi su Poste il clic copia anche il codice da incollare. Le regole
+// stanno in lib/ritiro-vista. Va FUORI da altri link: nella lista Ritiri il codice e' gia' dentro un <a>.
 //   {r.cod_ritiro}<LinkRitiroCorriere codice={r.cod_ritiro} contratto={r.corrieri?.nome_contratto} />
 export function LinkRitiroCorriere({ codice, contratto }: { codice?: string | null; contratto?: string | null }) {
-  const href = linkRitiroCorriere(codice, contratto)
-  if (!href) return null
+  const link = linkRitiroCorriere(codice, contratto)
+  if (!link) return null
+  const titolo = link.copiaCodice
+    ? `Apre la pagina dei ritiri di Poste. Il codice ${codice} viene copiato: scegli «Cerca Ritiri» e incollalo.`
+    : `Apre la pagina di ${link.corriere} con la prenotazione del ritiro e i suoi eventi`
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" title="Apre la pagina di BRT con la prenotazione del ritiro e i suoi eventi"
+    <a href={link.url} target="_blank" rel="noopener noreferrer" title={titolo}
+      onClick={() => { if (link.copiaCodice) { try { navigator.clipboard?.writeText(String(codice || '')).catch(() => {}) } catch { /* senza copia il link si apre lo stesso */ } } }}
       style={{ display: 'block', marginTop: '2px', fontSize: '11px', fontWeight: 600, color: '#2563eb', textDecoration: 'none', whiteSpace: 'nowrap' }}>
-      Vedi su BRT ↗
+      Vedi su {link.corriere} ↗
     </a>
   )
 }

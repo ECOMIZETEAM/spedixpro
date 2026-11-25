@@ -135,8 +135,15 @@ export async function POST(req: NextRequest) {
   if (corriere.tipo === 'poste' || corriere.tipo === 'moovexpress' || corriere.tipo === 'dielle') {
     const { contrattoCheRitira, prenotaRitiroPoste } = await import('@/lib/ritiro-poste')
     // Un secondo invio dello stesso lotto (risposta persa, nuovo tentativo) prenoterebbe presso il
-    // corriere un secondo ritiro per gli stessi pacchi: quelli gia' in un ritiro restano fuori.
-    const daRitirare = spedizioni.filter((s: any) => !s.ritiro_id)
+    // corriere un secondo ritiro per gli stessi pacchi: quelli gia' in un ritiro restano fuori. Tranne se
+    // quel ritiro e' stato annullato o rifiutato: allora si prenota di nuovo, come dal portale (ritirabili).
+    const idsRitiri = [...new Set(spedizioni.map((s: any) => s.ritiro_id).filter(Boolean))]
+    const { STATI_RITIRO_ANNULLATI } = await import('@/lib/ritiro-vista')
+    const { data: ritiriAnnullati } = idsRitiri.length
+      ? await admin.from('ritiri').select('id').in('id', idsRitiri).in('stato', STATI_RITIRO_ANNULLATI)
+      : { data: [] as any[] }
+    const annullato = new Set((ritiriAnnullati || []).map((r: any) => r.id))
+    const daRitirare = spedizioni.filter((s: any) => !s.ritiro_id || annullato.has(s.ritiro_id))
     if (!daRitirare.length) {
       const { data: esistente } = await admin.from('ritiri').select('id,cod_ritiro,data_ritiro').eq('id', (spedizioni[0] as any).ritiro_id).maybeSingle()
       return NextResponse.json({
