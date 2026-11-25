@@ -68,7 +68,9 @@ export async function GET(req: NextRequest) {
       const noteDiCredito = r2(stati.filter(x => x?.stato === 'accreditato').reduce((t, x) => t + (Number(x.importo) || 0), 0))
       const inAttesa = stati.filter(x => x?.stato === 'contestato' || x?.stato === 'chiesto').length
       // Gli id delle rettifiche servono solo qui: nell'elenco non viaggiano.
-      const riepilogo = f.riepilogo ? { ...f.riepilogo, rettificheEsterne: undefined } : f.riepilogo
+      // (e degli export degli altri gestionali, nell'elenco, solo i numeri: le righe abbinate servono alla fattura aperta)
+      const esterni = f.riepilogo?.esterni ? Object.fromEntries(Object.entries(f.riepilogo.esterni).map(([k, v]: [string, any]) => [k, { ...v, abbinate: undefined }])) : undefined
+      const riepilogo = f.riepilogo ? { ...f.riepilogo, rettificheEsterne: undefined, ...(esterni ? { esterni } : {}) } : f.riepilogo
       const spedizioni = f.id === aperta ? Array.from(new Set(Array.from(sue.values()).map(r => r.spedizione_id).filter(Boolean))) : undefined
       return { ...f, riepilogo, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa), ...(spedizioni ? { spedizioni } : {}) } : null, noteDiCredito, inAttesa, aTuoCarico: r2(Number(f.differenza) - recuperato) }
     }),

@@ -1,5 +1,5 @@
 'use client'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import { descriviVoce, KG_PER_M3_BRT, type RigaFatturaBrt } from '@/lib/fattura-brt'
 import { eGls } from '@/lib/fattura-gls'
@@ -9,7 +9,11 @@ import { C, carta, cifre, euro, conSegno, kg, r2, Icona, Tessera, Pillola } from
 /* LE SPEDIZIONI DELLA FATTURA FATTE CON UN ALTRO GESTIONALE. Il detentore carica l'export spedizioni di
  * quel gestionale (uno o più file): le righe che Moove non ha trovato si abbinano lì, si vede dove ha perso,
  * e si scarica il file di rettifiche nel formato di quel gestionale, da caricare là. Qui non si muove un
- * euro e non si salva niente: tutto resta nel browser, sul file che il detentore ha in mano. */
+ * euro. Il file resta nel browser; della fattura si salva solo cosa ne è uscito (quali righe hanno trovato la
+ * spedizione, quanto hanno pagato i clienti): serve al conto del documento anche riaprendolo (25/11). */
+
+// Quello che si salva con la fattura di un export abbinato (rotta analizza, riepilogo.esterni).
+export type EsternoSalvato = { nome: string; formato?: string; il?: string; righeFile: number; abbinate?: string[]; andate: number; corriereAndate: number; prezzoClienti: number; rientri: number; rettifiche: number }
 
 type FileCaricato = { nome: string; formato: FormatoEsterno; spedizioni: SpedizioneEsterna[] }
 type Filtro = 'perdita' | 'tutte' | 'rettifica' | 'rientri'
@@ -33,8 +37,13 @@ const vociDi = (r: RigaFatturaBrt, legenda?: Record<string, string> | null) => [
 
 export type EsternoIniziale = { nome: string; formatoId: string; spedizioni: SpedizioneEsterna[] }
 
-export default function AltriGestionali({ righe, righeFattura, numeroFattura, iniziali, onScaricato, legenda, corriere = 'BRT' }: {
-  righe: RigaFatturaBrt[]; righeFattura?: RigaFatturaBrt[]; numeroFattura: string; iniziali?: EsternoIniziale[]; legenda?: Record<string, string> | null; corriere?: string
+export default function AltriGestionali({ righe, righeFattura, numeroFattura, iniziali, onScaricato, legenda, corriere = 'BRT', salvati, onAbbinato, azioniRiga, azioniFile }: {
+  righe: RigaFatturaBrt[]; righeFattura?: RigaFatturaBrt[]; numeroFattura: string;
+  salvati?: Record<string, EsternoSalvato>                 // gli export abbinati le volte scorse (dalla fattura)
+  onAbbinato?: (x: EsternoSalvato) => void                  // un export appena abbinato: la pagina lo salva
+  azioniRiga?: (r: RigaFatturaBrt) => ReactNode             // sotto una riga che non trova la spedizione: com'è finita
+  azioniFile?: (nome: string) => ReactNode                  // accanto al file di rettifiche: caricato nel gestionale?
+  iniziali?: EsternoIniziale[]; legenda?: Record<string, string> | null; corriere?: string
   onScaricato?: (x: { nome: string; righe: number }) => void   // scaricare il file è un'azione: la fattura resta nello storico
 }) {
   const dialog = useDialog()
@@ -54,8 +63,43 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
       return { ...f, ...a, disponibili: resto.length + a.abbinate.reduce((n, x) => n + (x.andata ? 1 : 0) + x.rientri.length, 0) }
     })
   }, [righe, righeFattura, file])
-  const nonAbbinate = esiti.length ? esiti[esiti.length - 1].nonAbbinate : righe
+  // Senza file in mano, quelle che gli export salvati non avevano trovato.
+  const abbinateSalvate = useMemo(() => new Set(Object.values(salvati || {}).flatMap((x: EsternoSalvato) => x.abbinate || [])), [salvati])
+  const conSalvati = !esiti.length && abbinateSalvate.size > 0
+  const nonAbbinate = esiti.length ? esiti[esiti.length - 1].nonAbbinate : conSalvati ? righe.filter(r => !abbinateSalvate.has(r.segnacollo)) : righe
   const totaleNonAbbinate = r2(nonAbbinate.reduce((s, r) => s + r.totale, 0))
+  // Il mittente delle righe abbinate (WAVESHIP LLC): una riga che non trova la spedizione e ha un mittente diverso, o
+  // nessuno, e un riferimento d'altra forma, non viene da quel gestionale. Il 25/11 era la NI665312507 (Riga, 350 kg,
+  // 493,86 €, rif. "001", senza mittente) fra 120 col riferimento "009#3" e WAVESHIP: fatta sul sito del corriere.
+  const mittenteSolito = useMemo(() => {
+    const ok = righe.filter(r => !nonAbbinate.includes(r) && r.andata)
+    const m = new Map<string, number>(); for (const r of ok) m.set(r.mittente || '', (m.get(r.mittente || '') || 0) + 1)
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
+  }, [righe, nonAbbinate])
+  const formaRif = (x: string) => String(x || '').replace(/\d/g, '0')
+  const rifSolito = useMemo(() => {
+    const m = new Map<string, number>(); for (const r of righe.filter(r => !nonAbbinate.includes(r) && r.andata)) m.set(formaRif(r.rifAlfabetico), (m.get(formaRif(r.rifAlfabetico)) || 0) + 1)
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
+  }, [righe, nonAbbinate])
+  const perche = (r: RigaFatturaBrt) => r.andata && mittenteSolito && (r.mittente || '') !== mittenteSolito && formaRif(r.rifAlfabetico) !== rifSolito
+    ? `Mittente ${r.mittente ? `«${r.mittente}»` : 'vuoto'} e riferimento «${r.rifAlfabetico || '—'}» diversi da tutte le altre (${mittenteSolito}): non viene da questo gestionale, probabilmente creata sul sito del corriere. Chi l'ha fatta pagare?`
+    : 'Non c\'è nell\'export: forse è partita in un periodo che il file non copre, o da un altro gestionale.'
+
+  // Ogni export abbinato si salva con la fattura (una volta per file e per numero di righe abbinate).
+  const salvatiOra = useRef(new Set<string>())
+  useEffect(() => {
+    if (!onAbbinato) return
+    for (const e of esiti) {
+      const abbinate = e.abbinate.flatMap(a => [...(a.andata ? [a.andata.segnacollo] : []), ...a.rientri.map(x => x.segnacollo)])
+      const chiave = `${e.nome}|${abbinate.length}`
+      if (salvatiOra.current.has(chiave)) continue
+      salvatiOra.current.add(chiave)
+      const andate = e.abbinate.filter(a => a.andata)
+      onAbbinato({ nome: e.nome, formato: e.formato.id, righeFile: e.spedizioni.length, abbinate, andate: andate.length,
+        corriereAndate: r2(andate.reduce((t, a) => t + a.brtAndata, 0)), prezzoClienti: r2(andate.reduce((t, a) => t + a.sped.prezzoCliente, 0)),
+        rientri: r2(e.abbinate.reduce((t, a) => t + a.brtRientri, 0)), rettifiche: righeRettificheEsterne(e.abbinate).length })
+    }
+  }, [esiti, onAbbinato])
 
   async function carica(f: File) {
     if (inputRef.current) inputRef.current.value = ''
@@ -124,7 +168,17 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
         </div>
       </div>
 
-      {!esiti.length && dropzone(false)}
+      {conSalvati && Object.values(salvati || {}).map(x => (
+        <div key={x.nome} style={{ border: `1px solid ${C.filo}`, borderRadius: 12, padding: '11px 14px', marginBottom: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Icona nome="fattura" size={17} colore={C.attenuato} />
+          <div style={{ flex: 1, minWidth: 220, fontSize: 13, lineHeight: 1.45 }}>
+            <b>{x.nome}</b> <span style={{ color: C.attenuato }}>· abbinato{x.il ? ` il ${new Date(x.il).toLocaleDateString('it-IT')}` : ''}</span>
+            <div style={{ color: C.attenuato, fontSize: 12.5 }}>{x.andate} andate: {corriere} {euro(x.corriereAndate)}, i clienti hanno pagato {euro(x.prezzoClienti)} ({conSegno(r2(x.prezzoClienti - x.corriereAndate))}){x.rettifiche ? ` · ${x.rettifiche} rettifiche nel file per il gestionale` : ''}. Per rivedere spedizione per spedizione, ricaricalo.</div>
+          </div>
+          {x.rettifiche > 0 && azioniFile?.(x.nome)}
+        </div>
+      ))}
+      {!esiti.length && dropzone(conSalvati)}
 
       {esiti.map(e => {
         const andate = e.abbinate.filter(a => a.andata)
@@ -180,23 +234,33 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 10, border: 'none', fontSize: 13.5, fontWeight: 700, background: C.arancio, color: '#fff', cursor: 'pointer' }}>
                   <Icona nome="scarica" size={16} /> Scarica il file di rettifiche
                 </button>
+                {/* Caricato là e rettificato: segnarlo chiude la voce nel conto del documento. */}
+                {azioniFile && <div style={{ flexBasis: '100%' }}>{azioniFile(e.nome)}</div>}
               </div>
             )}
           </div>
         )
       })}
 
-      {esiti.length > 0 && nonAbbinate.length > 0 && (
+      {(esiti.length > 0 || conSalvati) && nonAbbinate.length > 0 && (
         <div style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', gap: 8, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 9, padding: '9px 11px', marginBottom: 10, lineHeight: 1.45 }}>
+          <div style={{ display: 'flex', gap: 8, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 9, padding: '9px 11px', marginBottom: 8, lineHeight: 1.45 }}>
             <Icona nome="avviso" size={16} />
-            <span>
-              {nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione in nessun file:{' '}
-              {nonAbbinate.slice(0, 6).map(r => `${r.andata ? 'andata' : r.tipoBolla === 'Arrivo' ? 'arrivo' : r.tipoBolla.startsWith('A') ? 'reso' : 'bolla accessoria'} ${r.segnacollo} (${!r.andata && r.tipoBolla.startsWith('A') ? r.mittente || r.destinatario : r.destinatario}, ${euro(r.totale)})`).join('; ')}
-              {nonAbbinate.length > 6 ? '…' : ''}. Di solito è un pacco partito in un periodo che l'export non copre.
-            </span>
+            <span>{nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione né in Moove né {esiti.length > 1 || Object.keys(salvati || {}).length > 1 ? 'negli export' : 'nell\'export'}: qui sotto cosa sono e com'è finita.</span>
           </div>
-          {dropzone(true)}
+          <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+            {nonAbbinate.slice(0, 30).map(r => (
+              <div key={r.segnacollo + r.numeroSpedizione} style={{ border: `1px solid ${C.filo}`, borderRadius: 9, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+                <b>{r.andata ? 'Andata' : r.tipoBolla === 'Arrivo' ? 'Arrivo' : r.tipoBolla.startsWith('A') ? 'Reso' : 'Bolla accessoria'} {r.segnacollo}</b>
+                <span style={{ color: C.attenuato }}> · {r.dataRitiro ? new Date(r.dataRitiro).toLocaleDateString('it-IT') : '—'} · {r.destinatario || r.mittente} · {r.localita} · {kg(r.pesoTassato)}{r.rifAlfabetico ? ` · rif. ${r.rifAlfabetico}` : ''}</span>
+                {' '}· <b style={cifre}>{euro(r.totale)}</b>
+                <div style={{ color: '#475467', marginTop: 2 }}>{perche(r)}</div>
+                {azioniRiga?.(r)}
+              </div>
+            ))}
+            {nonAbbinate.length > 30 && <div style={{ fontSize: 12, color: C.attenuato }}>…e altre {nonAbbinate.length - 30}.</div>}
+          </div>
+          {esiti.length > 0 && dropzone(true)}
         </div>
       )}
       {esiti.length > 0 && !nonAbbinate.length && (

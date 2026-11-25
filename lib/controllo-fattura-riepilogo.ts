@@ -67,4 +67,6 @@ export const fatturaConAzioni = (f: { rettifiche_file_id?: string | null; riepil
   !!f && (!!f.rettifiche_file_id || (Array.isArray(f.riepilogo?.fileEsterni) && f.riepilogo.fileEsterni.length > 0)
     || (Array.isArray(f.riepilogo?.rettificheEsterne?.ids) && f.riepilogo.rettificheEsterne.ids.length > 0)
     // una voce di "Cosa fare" segnata (contestata, chiesta a GLS, fatta…): anche quella è un'azione da ricordare
-    || (!!f.riepilogo?.stati && Object.keys(f.riepilogo.stati).length > 0))
+    || (!!f.riepilogo?.stati && Object.keys(f.riepilogo.stati).length > 0)
+    // l'export di un altro gestionale abbinato: anche quello serve al conto del documento
+    || (!!f.riepilogo?.esterni && Object.keys(f.riepilogo.esterni).length > 0))

@@ -6,7 +6,7 @@ import { leggiFatturaBrt, descriviVoce, pesoTassatoBrt, KG_PER_M3_BRT, sigleScon
 import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import { eGls, espandiRigaGls, righeControlloGls, ricalcolaCarburanteGls, type ParteAllinea, type RigaFatturaGls } from '@/lib/fattura-gls'
 import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera, Pillola } from './ui'
-import AltriGestionali, { type EsternoIniziale } from './AltriGestionali'
+import AltriGestionali, { type EsternoIniziale, type EsternoSalvato } from './AltriGestionali'
 
 /* CONTROLLO FATTURA CORRIERE. Il detentore carica la fattura di BRT (il file TIVAF) o il PDF di GLS (borderò
  * settimanale o allegato della fattura, lib/fattura-gls) e vede spedizione per
@@ -28,7 +28,7 @@ type InfoGls = {
 }
 type GruppoGls = 'contestare' | 'clienti' | 'chiarire' | 'listino'
 // A che punto è una voce di "Cosa fare" (riepilogo.stati della fattura, rotta analizza).
-type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato'; il: string; nota?: string; importo?: number; numero?: string; storia?: { stato: string; il: string }[] }
+type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato' | 'assorbito' | 'fatturato'; il: string; nota?: string; importo?: number; numero?: string; storia?: { stato: string; il: string }[] }
 type FatturaStorico = {
   id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; etichetta: string | null; data_fattura: string | null; nome_file: string | null
   righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
@@ -118,6 +118,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // Una voce GLS scelta nel riquadro "cosa fare": la tabella mostra solo le spedizioni che ce l'hanno.
   const [voceScelta, setVoceScelta] = useState<string | null>(null)
   const [stati, setStati] = useState<Record<string, StatoSalvato>>({})
+  const [esterniSalvati, setEsterniSalvati] = useState<Record<string, EsternoSalvato>>({})
+  // Cresce quando si torna sulla scheda: il perché delle non girate si rifà (il listino può essere stato corretto).
+  const [ritorni, setRitorni] = useState(0)
   const pdfRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -162,7 +165,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   useEffect(() => {
     if (iniziale || !fatturaId || !rettificheInviate) return
     // Scheda che torna visibile, o finestra che torna in primo piano (Rettifica Costi in un'altra finestra).
-    const torna = () => { if (document.visibilityState === 'visible') caricaStorico() }
+    const torna = () => { if (document.visibilityState === 'visible') { caricaStorico(); setRitorni(n => n + 1) } }
     document.addEventListener('visibilitychange', torna); window.addEventListener('focus', torna)
     return () => { document.removeEventListener('visibilitychange', torna); window.removeEventListener('focus', torna) }
   }, [iniziale, fatturaId, rettificheInviate])
@@ -176,7 +179,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setEtichettaAperta(d.fattura.etichetta || null)
     // Mandate col pulsante, o già girate con un file proprio dalla pagina Rettifica.
     setRettificheInviate(!!d.fattura.rettifiche_file_id || !!d.fattura.riepilogo?.rettificheEsterne?.ids?.length)
-    setLegenda(d.fattura.riepilogo?.legenda || null); setNotePdf([]); setInfoGls(d.fattura.riepilogo?.gls || null); setVoceScelta(null); setStati(d.fattura.riepilogo?.stati || {})
+    setLegenda(d.fattura.riepilogo?.legenda || null); setNotePdf([]); setInfoGls(d.fattura.riepilogo?.gls || null); setVoceScelta(null); setStati(d.fattura.riepilogo?.stati || {}); setEsterniSalvati(d.fattura.riepilogo?.esterni || {})
     if (d.fattura.corriere_id) setContrattoId(d.fattura.corriere_id)
     // Le fatture salvate prima del 02/11 hanno il peso tassato senza l'arrotondamento di BRT: si rifà qui dai
     // quattro pesi della riga, così il file di rettifiche esce col peso che BRT ha davvero tassato (3, non 2,8).
@@ -190,7 +193,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     if (!daIndirizzo) window.scrollTo({ top: 0, behavior: 'smooth' })
     caricaStorico(id)   // com'è andata la Rettifica di questa fattura, spedizione per spedizione
   }
-  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null); setLegenda(null); setNotePdf([]); setInfoGls(null); setVoceScelta(null); setStati({}) }
+  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null); setLegenda(null); setNotePdf([]); setInfoGls(null); setVoceScelta(null); setStati({}); setEsterniSalvati({}) }
 
   // IL PDF DELLA FATTURA: lo legge il server (legenda, numero, totali); qui si confronta col file.
   async function base64(f: File) {
@@ -231,6 +234,15 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     if (fatturaId) await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, legenda: r.legenda }) }).catch(() => null)
   }
 
+  // L'export di un altro gestionale appena abbinato: si salva con la fattura (cosa ne è uscito, non il file), così il
+  // conto del documento sa quanto hanno pagato quei clienti anche riaprendola.
+  async function registraEsterno(x: EsternoSalvato) {
+    if (!fatturaId) return
+    const d: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, esterno: x }) })
+      .then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
+    if (d.error) { setAvvisi(a => [...a, `L'export «${x.nome}» non si è salvato con la fattura: ${d.error}`]); return }
+    setEsterniSalvati(d.esterni || {})
+  }
   // Scaricare il file di rettifiche per un altro gestionale è un'azione: da qui la fattura resta nello storico.
   async function registraFileEsterno(x: { nome: string; righe: number }) {
     if (!fatturaId) return
@@ -333,7 +345,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     // I totali dello storico li rifà il server dalle righe salvate. Dice anche se le differenze sono già nella
     // Rettifica (fattura rifatta, o già girate da un file): allora il riquadro mostra com'è andata, non il pulsante.
     const chiusa: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId: id, chiudi: true }) }).then(r => r.json()).catch(() => null)
-    setFatturaId(id); setAvanz(null); setEsiti(tutti); setRettificheInviate(!!chiusa?.rettificheInviate); setStati(chiusa?.stati || {})
+    setFatturaId(id); setAvanz(null); setEsiti(tutti); setRettificheInviate(!!chiusa?.rettificheInviate); setStati(chiusa?.stati || {}); setEsterniSalvati(chiusa?.esterni || {})
     caricaStorico(id)
   }
 
@@ -351,17 +363,17 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     if (!rettificheInviate || !fatte) return []
     return daRettificare.filter(e => !fatte.includes(e.spedizione!.id))
   }, [rettificheInviate, girateAperta, daRettificare])
-  const [perche, setPerche] = useState<Record<string, { motivo: string; listino: boolean }>>(iniziale?.perche ?? {})
+  const [perche, setPerche] = useState<Record<string, { motivo: string; listino: boolean; listinoDaCorreggere?: { id: string; nome: string; di: string } }>>(iniziale?.perche ?? {})
   const chiaveNonGirate = nonGirate.map(e => e.spedizione!.id).join(',')
   useEffect(() => {
     if (iniziale || !fatturaId || !nonGirate.length) return
     let vivo = true
     fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fatturaId, perche: nonGirate.map(e => ({ id: e.spedizione!.id, peso: r2(e.riga.pesoTassato) })) }) })
-      .then(r => r.json()).then(d => { if (vivo && Array.isArray(d.perche)) setPerche(Object.fromEntries(d.perche.map((x: any) => [x.id, { motivo: String(x.motivo || ''), listino: !!x.listino }]))) })
+      .then(r => r.json()).then(d => { if (vivo && Array.isArray(d.perche)) setPerche(Object.fromEntries(d.perche.map((x: any) => [x.id, { motivo: String(x.motivo || ''), listino: !!x.listino, ...(x.listinoDaCorreggere ? { listinoDaCorreggere: x.listinoDaCorreggere } : {}) }]))) })
       .catch(() => null)
     return () => { vivo = false }
-  }, [iniziale, fatturaId, chiaveNonGirate])
+  }, [iniziale, fatturaId, chiaveNonGirate, ritorni])
   const arriviResiFuori = useMemo(() => esiti.filter(e => !e.spedizione && !e.riga.andata).length, [esiti])
   const totali = useMemo(() => riepilogaFattura(esiti), [esiti])
 
@@ -452,6 +464,31 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     return { n: l.length, euro: r2(l.reduce((t, m) => t + m.importo, 0)) }
   }, [esiti])
 
+  // ARRIVI E RESI PAGATI PIÙ DELLE PARTENZE (Lorenzo, 25/11: "qui paga più di quanto deve! sono tutte fascia fino a
+  // 5 kg"). Il riferimento si legge dalle partenze dello stesso documento: il nolo che il corriere chiede in Italia a
+  // quel peso (fra i noli il cui intervallo di pesi lo comprende, il più frequente, se almeno 5 partenze). Senza
+  // partenze di quel peso (l'arrivo da 303,9 kg di ottobre) non si confronta: meglio niente che un numero inventato.
+  // Va contestato: se il contratto prevede un prezzo diverso per gli arrivi lo dirà il corriere, e la voce si chiude.
+  const arriviSopra = useMemo(() => {
+    if (!gls) return null
+    const estero = (r: any) => /parcel/i.test(String(r.servizio || ''))
+    const fasce = new Map<number, { min: number; max: number; n: number }>()
+    for (const e of esiti) {
+      const r: any = e.riga
+      if (!r.andata || estero(r) || !(r.nolo > 0)) continue
+      const f = fasce.get(r.nolo) || { min: Infinity, max: 0, n: 0 }
+      f.min = Math.min(f.min, r.pesoTassato); f.max = Math.max(f.max, r.pesoTassato); f.n++; fasce.set(r.nolo, f)
+    }
+    const righe: { e: EsitoControllo; riferimento: number; inPiu: number }[] = []
+    for (const e of esiti) {
+      const r: any = e.riga
+      if (r.andata || estero(r) || !(r.nolo > 0)) continue
+      const cand = Array.from(fasce.entries()).filter(([, f]) => f.n >= 5 && f.min <= r.pesoTassato + 1e-9 && r.pesoTassato <= f.max + 1e-9).sort((a, b) => b[1].n - a[1].n)
+      if (cand.length && r.nolo > cand[0][0] + 0.005) righe.push({ e, riferimento: cand[0][0], inPiu: r2(r.nolo - cand[0][0]) })
+    }
+    return righe.length ? { righe, euro: r2(righe.reduce((t, x) => t + x.inPiu, 0)), noli: Array.from(new Set(righe.map(x => x.e.riga.nolo))), riferimenti: Array.from(new Set(righe.map(x => x.riferimento))) } : null
+  }, [esiti, gls])
+
   // Il carburante di tutto il documento contro quello del listino: anche sulle spedizioni fuori Moove,
   // perché è GLS che lo conta su tutto il nolo, ed è tutto da contestare.
   const carburanteGls = useMemo(() => {
@@ -462,6 +499,55 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       return { ...c, listino, sopra, inPiu: sopra ? r2(c.nolo * (c.percentuale! - listino!) / 100) : 0 }
     })
   }, [infoGls])
+
+  // IL CONTO DEL DOCUMENTO. Lorenzo, 25/11: "alla fine di tutti i giochi lui deve capire che ha pagato ad esempio
+  // 2700 € e ha fatturato 3000 € per un guadagno di 300 €... appena non ha più operazioni da fare deve avere il quadro
+  // completo di quello che ha speso e di quello che ha guadagnato". Uscito: quanto il corriere ha scalato per questo
+  // documento, meno le note di credito ricevute. Entrato: quanto hanno pagato a te i clienti e i sotto-master delle
+  // spedizioni Moove (movimenti, rettifiche già confermate comprese, all'ultimo controllo), quelli dell'altro gestionale
+  // (dall'export), e le spedizioni fuori da tutto fatte pagare a mano. E cosa resta da fare, voce per voce, prima che
+  // il conto sia definitivo. Per ora solo GLS: BRT, Poste e UPS arriveranno con lo stesso ragionamento.
+  const conto = useMemo(() => {
+    if (!gls || !esiti.length) return null
+    const st = (k: string) => stati[k]?.stato
+    const pagato = r2(infoGls?.totaleCliente ?? totali.totaleCorriere)
+    const note = r2(Object.values(stati).filter(x => x.stato === 'accreditato').reduce((t, x) => t + (x.importo || 0), 0))
+    const moove = r2(esiti.filter(e => e.spedizione && e.riga.andata && e.incasso).reduce((t, e) => t + e.incasso!.importo, 0))
+    const altro = r2(Object.values(esterniSalvati).reduce((t, x) => t + (x.prezzoClienti || 0), 0))
+    const aMano = r2(Object.entries(stati).filter(([k, x]) => k.startsWith('fuori:') && x.stato === 'fatturato').reduce((t, [, x]) => t + (x.importo || 0), 0))
+    const incassato = r2(moove + altro + aMano)
+    const speso = r2(pagato - note)
+    // Le spedizioni fuori Moove: con l'export, quelle che non ha trovato; senza, tutte (manca il loro incasso).
+    const abbinate = new Set(Object.values(esterniSalvati).flatMap(x => x.abbinate || []))
+    const fuori = esiti.filter(e => !e.spedizione && e.riga.andata)
+    const senzaExport = !Object.keys(esterniSalvati).length
+    const daFare: { testo: string; euro?: number }[] = []
+    const voce = (k: string, nome: string, gruppo: GruppoGls, euroV: number) => {
+      const s = st(k)
+      if (gruppo === 'contestare') {
+        if (!s) daFare.push({ testo: `Contestare a ${cr}: ${nome}`, euro: euroV })
+        else if (s === 'contestato') daFare.push({ testo: `Aspettare la risposta di ${cr}: ${nome}`, euro: euroV })
+        else if (s === 'respinto') daFare.push({ testo: `${cr} ha respinto «${nome}»: assorbire o girare ai clienti`, euro: euroV })
+      } else if (gruppo === 'chiarire') {
+        if (!s) daFare.push({ testo: `Chiedere a ${cr}: ${nome}`, euro: euroV })
+        else if (s === 'chiesto') daFare.push({ testo: `Aspettare la risposta di ${cr}: ${nome}`, euro: euroV })
+      } else if (gruppo === 'listino') { if (!s) daFare.push({ testo: `Sistemare in Moove: ${nome}`, euro: euroV }) }
+      else if (!s) daFare.push({ testo: `Girare ai clienti: ${nome}`, euro: euroV })
+    }
+    for (const c of carburanteGls.filter(c => c.sopra)) voce(`carburante-doc:${c.codice}`, `carburante al ${pct(c.percentuale!)} invece del ${pct(c.listino!)}`, 'contestare', c.inPiu)
+    if (arriviSopra) voce('arrivi-sopra', 'arrivi e resi pagati più delle partenze', 'contestare', arriviSopra.euro)
+    for (const [g, m] of cosaFare || new Map()) for (const [k, v] of m) {
+      if (v.tipo === 'peso') continue   // i pesi hanno le loro righe qui sotto
+      voce(`${g}|${k}`, v.nome, g, v.euro)
+    }
+    if (daRettificare.length && !rettificheInviate) daFare.push({ testo: `Mandare alla Rettifica ${daRettificare.length === 1 ? '1 differenza' : `${daRettificare.length} differenze`} di peso`, euro: r2(daRettificare.reduce((t, e) => t + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0)) })
+    if (nonGirate.length) daFare.push({ testo: `${nonGirate.length} differenz${nonGirate.length === 1 ? 'a' : 'e'} di peso non girat${nonGirate.length === 1 ? 'a' : 'e'}: vedi il perché e rimanda`, euro: r2(nonGirate.reduce((t, e) => t + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0)) })
+    if (girateAperta && girateAperta.inviate > girateAperta.confermate) daFare.push({ testo: `Confermare ${girateAperta.inviate - girateAperta.confermate} rettifiche in Rettifica Costi`, euro: girateAperta.euroInAttesa })
+    if (senzaExport && fuori.length) daFare.push({ testo: `Caricare l'export dell'altro gestionale: ${fuori.length} spedizioni fuori Moove, di cui manca l'incasso`, euro: r2(fuori.reduce((t, e) => t + e.brt, 0)) })
+    else for (const e of fuori.filter(e => !abbinate.has(e.riga.segnacollo) && !st(`fuori:${e.riga.segnacollo}`))) daFare.push({ testo: `Dire chi ha pagato la ${e.riga.segnacollo} (${e.riga.destinatario || e.riga.localita})`, euro: e.brt })
+    for (const x of Object.values(esterniSalvati)) if (x.rettifiche > 0 && st(`esterno:${x.nome}`) !== 'fatto') daFare.push({ testo: `Caricare nel gestionale le ${x.rettifiche} rettifiche di «${x.nome}»` })
+    return { pagato, note, speso, moove, altro, aMano, incassato, guadagno: r2(incassato - speso), daFare, senzaExport: senzaExport && fuori.length > 0 }
+  }, [gls, esiti, stati, infoGls, totali, esterniSalvati, carburanteGls, arriviSopra, cosaFare, daRettificare, rettificheInviate, nonGirate, girateAperta, cr])
   const pagine = Math.max(1, Math.ceil(filtrate.length / PER_PAGINA))
   const pag = Math.min(pagina, pagine)
   const visibili = filtrate.slice((pag - 1) * PER_PAGINA, pag * PER_PAGINA)
@@ -524,32 +610,43 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     await esitoInvio(x, righe.length)
   }
 
-  // LE VOCI DEL CORRIERE DA GIRARE AI CLIENTI (l'Oversize, la Zona ZTL…): alla Rettifica come SUPPLEMENTO FISSO, come il
-  // fuori sagoma: ognuno lungo la catena paga lo stesso importo, col nome della voce. Prima non c'era modo di girarle
-  // (Lorenzo, 25/11: "l'oversize come lo addebita?"). Il peso è quello di Moove, salvo che il corriere abbia anche
-  // tassato di più: allora quello del corriere, e la stessa rettifica porta peso e supplemento.
-  async function mandaVoceAllaRettifica(chiave: string, k: string) {
-    const conVoce = esiti.filter(e => e.spedizione && e.riga.andata && e.spedizione.stato !== 'annullata')
-      .map(e => ({ e, m: e.motivi.find(m => m.gruppo === 'clienti' && m.tipo !== 'peso' && (m.voce || `${m.tipo}:${m.gruppo}`) === k) }))
-      .filter((x): x is { e: EsitoControllo; m: NonNullable<typeof x.m> } => !!x.m && x.m.importo > 0.005)
-    if (!conVoce.length) return
-    const nomeVoce = conVoce[0].m.voce || k
-    const totale = r2(conVoce.reduce((t, x) => t + x.m.importo, 0))
+  // UN SUPPLEMENTO FISSO AI CLIENTI, SPEDIZIONE PER SPEDIZIONE: alla Rettifica come il fuori sagoma, ognuno lungo la
+  // catena paga lo stesso importo, col nome della voce. Serve alle voci del corriere da girare (l'Oversize, la Zona
+  // ZTL: Lorenzo, 25/11 "l'oversize come lo addebita?") e al carburante oltre il contratto che il corriere non ha
+  // accreditato ("oppure può rettificare i clienti di quelle spedizioni al 12% per recuperare i soldi"). Il peso è
+  // quello di Moove, salvo che il corriere abbia anche tassato di più: allora quello del corriere, e la stessa
+  // rettifica porta peso e supplemento.
+  async function mandaSupplementi(chiave: string, nomeVoce: string, lista: { e: EsitoControllo; importo: number }[], spiega: string) {
+    const valide = lista.filter(x => x.e.spedizione && x.e.riga.andata && x.e.spedizione.stato !== 'annullata' && x.importo > 0.005)
+    if (!valide.length) { await dialog.alert({ title: 'Niente da girare', message: 'Nessuna spedizione Moove su cui girare questa voce.' }); return }
+    const totale = r2(valide.reduce((t, x) => t + x.importo, 0))
     const ok = await dialog.confirm({
       title: `Girare «${nomeVoce}» ai clienti?`,
-      message: `${conVoce.length} spedizion${conVoce.length === 1 ? 'e' : 'i'}, ${euro(totale)} in tutto. Diventano rettifiche "da confermare" in Rettifica Costi, `
-        + `con «${nomeVoce}» come supplemento fisso: chi ha spedito (cliente o sotto-master) paga lo stesso importo che ha chiesto ${cr}. Finché non le confermi non si muove un euro.`,
+      message: `${valide.length} spedizion${valide.length === 1 ? 'e' : 'i'}, ${euro(totale)} in tutto. ${spiega} Diventano rettifiche "da confermare" in Rettifica Costi: `
+        + `chi ha spedito (cliente o sotto-master) paga lo stesso importo. Finché non le confermi non si muove un euro.`,
       confirmText: 'Manda alla Rettifica',
     })
     if (!ok) return
-    const righe = conVoce.map(({ e, m }) => {
+    const righe = valide.map(({ e, importo }) => {
       const conPeso = e.motivi.some(x => x.tipo === 'peso' && x.gruppo === 'clienti' && x.importo > 0.005)
       const peso = conPeso || !(e.spedizione!.peso > 0) ? r2(e.riga.pesoTassato) : e.spedizione!.peso
-      return { ldv: e.spedizione!.numero, peso, supplemento: r2(m.importo), voce: nomeVoce }
+      return { ldv: e.spedizione!.numero, peso, supplemento: r2(importo), voce: nomeVoce }
     })
     const x = await inviaAllaRettifica(righe, `${cr} ${esiti[0]?.riga.numeroFattura || ''} - ${nomeVoce}`)
-    if (!x.errore && x.creati + x.supplementiDopo > 0) await segnaStato(chiave, 'girato', { nota: `${x.creati + x.supplementiDopo} rettifiche in Rettifica Costi` })
+    if (!x.errore && x.creati + x.supplementiDopo > 0) await segnaStato(chiave, 'girato', { nota: `${x.creati + x.supplementiDopo} rettifiche in Rettifica Costi`, importo: totale })
     await esitoInvio(x, righe.length)
+  }
+  // Le voci del corriere da girare (gruppo "clienti", non i pesi): una voce, tutte le sue spedizioni.
+  async function mandaVoceAllaRettifica(chiave: string, k: string) {
+    const lista = esiti.map(e => ({ e, m: e.motivi.find(m => m.gruppo === 'clienti' && m.tipo !== 'peso' && (m.voce || `${m.tipo}:${m.gruppo}`) === k) }))
+      .filter((x): x is { e: EsitoControllo; m: NonNullable<typeof x.m> } => !!x.m)
+    await mandaSupplementi(chiave, lista[0]?.m.voce || k, lista.map(x => ({ e: x.e, importo: x.m.importo })), `È la voce che ${cr} ha messo sulle spedizioni.`)
+  }
+  // Il carburante oltre il contratto, quando il corriere non l'ha accreditato: la parte in più di ogni spedizione
+  // Moove (il motivo "carburante" della riga) ai clienti.
+  async function carburanteAiClienti(chiave: string) {
+    const lista = esiti.flatMap(e => e.motivi.filter(m => m.tipo === 'carburante' && m.gruppo === 'contestare').map(m => ({ e, importo: m.importo })))
+    await mandaSupplementi(chiave, 'Carburante oltre il contratto', lista, `${cr} ha applicato un carburante più alto del contratto e non l'ha accreditato: la parte in più di ogni spedizione.`)
   }
 
   // RIFARE IL DOCUMENTO APERTO CON LE REGOLE DI OGGI, dalle righe già salvate: non serve il file. Il 25/11 Wave
@@ -593,8 +690,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     await segnaStato(chiave, 'accreditato', { numero, importo })
   }
   const dataBreve = (iso: string) => new Date(iso).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
-  // La riga di stato sotto una voce: cosa è stato fatto, e il prossimo passo.
-  function rigaStato(gruppo: GruppoGls, chiave: string, proposto: number, peso = false) {
+  // La riga di stato sotto una voce: cosa è stato fatto, e il prossimo passo, fino all'esito finale. Lorenzo, 25/11:
+  // "lui dopo la risposta di GLS scriverà ok questi soldi li ho recuperati oppure no, GLS non ha accettato e quindi
+  // assorbe lui, oppure può rettificare i clienti". Ogni voce finisce in uno di questi: accreditata (nota di
+  // credito), girata ai clienti, assorbita, fatta (listino sistemato, file caricato), fatturata (a chi e quanto).
+  //   gruppo 'fuori'   → una spedizione della fattura che non è né in Moove né nell'export dell'altro gestionale
+  //   gruppo 'esterno' → il file di rettifiche scaricato per l'altro gestionale: caricato là, o no
+  function rigaStato(gruppo: GruppoGls | 'fuori' | 'esterno', chiave: string, proposto: number, peso = false) {
     // I pesi da girare hanno il loro riquadro (Manda alla Rettifica); quelli tassati di meno non chiedono niente.
     if (!fatturaId || peso) return null
     const st = stati[chiave]
@@ -604,22 +706,45 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     )
     const verde = (t: string) => <Pillola key={t} colore={C.verde} fondo={C.verdeTenue} orlo={C.verdeOrlo}>{t}</Pillola>
     const giallo = (t: string) => <Pillola key={t} colore={C.ambra} fondo={C.ambraTenue} orlo={C.ambraOrlo}>{t}</Pillola>
+    const grigio = (t: string) => <Pillola key={t} colore={C.attenuato} fondo={C.fondoTenue} orlo={C.filo}>{t}</Pillola>
     const annulla = st ? tasto('Annulla', () => segnaStato(chiave, null)) : null
+    const assorbo = () => segnaStato(chiave, 'assorbito', { importo: proposto })
     const respinta = async () => { const n = await dialog.prompt({ title: `Respinta da ${cr}`, message: `Cosa ha risposto ${cr}? (facoltativo)`, confirmText: 'Salva' }); if (n != null) segnaStato(chiave, 'respinto', { nota: n }) }
     const risposta = async () => { const n = await dialog.prompt({ title: `Cosa ha risposto ${cr}?`, message: 'Cos\'è questa voce secondo il corriere: resta scritto qui per la prossima volta.', confirmText: 'Salva' }); if (n) segnaStato(chiave, 'risposto', { nota: n }) }
+    const fatturata = async () => {
+      const chi = await dialog.prompt({ title: 'A chi l\'hai fatta pagare?', message: 'Il cliente a cui l\'hai fatturata fuori da Moove.', confirmText: 'Avanti' })
+      if (chi == null) return
+      const imp = await dialog.prompt({ title: 'Quanto gli hai fatto pagare?', message: `${cr} te l'ha fatta pagare ${euro(proposto)}.`, defaultValue: proposto.toFixed(2).replace('.', ','), confirmText: 'Salva' })
+      if (imp == null) return
+      const importo = leggiEuro(imp)
+      if (!(importo >= 0)) { await dialog.alert({ title: 'Importo non valido', message: 'Scrivi un importo in euro, per esempio 493,86.' }); return }
+      await segnaStato(chiave, 'fatturato', { nota: chi, importo })
+    }
+    // Il carburante oltre il contratto si può girare ai clienti; le altre voci contestate (annullate fatturate,
+    // arrivi pagati più delle partenze) non sono spedizioni da ripassare a qualcuno.
+    const giroPossibile = chiave.startsWith('carburante-doc:') || chiave === 'contestare|carburante:contestare'
     const parti = gruppo === 'contestare'
       ? !st ? [tasto('Segna contestata', () => segnaStato(chiave, 'contestato'), true)]
         : st.stato === 'contestato' ? [giallo(`Contestata il ${dataBreve(st.il)}`), tasto('Nota di credito ricevuta', () => notaDiCredito(chiave, proposto), true), tasto('Respinta', respinta), annulla]
-        : st.stato === 'accreditato' ? [verde(`Nota di credito${st.numero ? ' ' + st.numero : ''}: ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), annulla]
-        : [<Pillola key="r" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Respinta il ${dataBreve(st.il)}${st.nota ? ': ' + st.nota : ''}`}</Pillola>, annulla]
+        : st.stato === 'accreditato' ? [verde(`Recuperata: nota di credito${st.numero ? ' ' + st.numero : ''} ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), annulla]
+        : st.stato === 'respinto' ? [<Pillola key="r" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Respinta il ${dataBreve(st.il)}${st.nota ? ': ' + st.nota : ''}`}</Pillola>,
+            ...(giroPossibile ? [tasto('Giro ai clienti', () => carburanteAiClienti(chiave), true)] : []), tasto('Assorbo io', assorbo, !giroPossibile), annulla]
+        : st.stato === 'girato' ? [verde(`Respinta, girata ai clienti il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
+        : [grigio(`Respinta, assorbita da te (${euro(st.importo ?? proposto)})`), annulla]
       : gruppo === 'chiarire'
         ? !st ? [tasto(`Chiesta a ${cr}`, () => segnaStato(chiave, 'chiesto'), true)]
           : st.stato === 'chiesto' ? [giallo(`Chiesta il ${dataBreve(st.il)}`), tasto(`Risposta di ${cr}`, risposta, true), annulla]
           : [verde(`${cr}: ${st.nota || 'ha risposto'} (${dataBreve(st.il)})`), annulla]
         : gruppo === 'listino'
           ? !st ? [tasto('Fatto', () => segnaStato(chiave, 'fatto'))] : [verde(`Fatto il ${dataBreve(st.il)}`), annulla]
-          : !st ? [tasto('Manda alla Rettifica', () => mandaVoceAllaRettifica(chiave, chiave.slice(gruppo.length + 1)), true)]
-            : [verde(`Mandata alla Rettifica il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
+          : gruppo === 'fuori'
+            ? !st ? [tasto('L\'ho fatta pagare', fatturata, true), tasto('Assorbo io', assorbo)]
+              : st.stato === 'fatturato' ? [verde(`Fatta pagare a ${st.nota || '?'}: ${euro(st.importo || 0)}`), annulla]
+              : [grigio(`Assorbita da te (${euro(st.importo ?? proposto)})`), annulla]
+            : gruppo === 'esterno'
+              ? !st ? [tasto('Fatto: caricato nel gestionale', () => segnaStato(chiave, 'fatto'), true)] : [verde(`Caricato nel gestionale il ${dataBreve(st.il)}`), annulla]
+              : !st ? [tasto('Manda alla Rettifica', () => mandaVoceAllaRettifica(chiave, chiave.slice(gruppo.length + 1)), true)]
+                : [verde(`Mandata alla Rettifica il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
     return <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 7 }}>{parti}</div>
   }
 
@@ -635,6 +760,10 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       punti.push(`Carburante applicato al ${pct(c.percentuale!)} invece del ${pct(c.listino!)} previsto dal contratto ${c.codice}: ${euro(c.carburante || 0)} su ${euro(c.nolo)} di nolo, al ${pct(c.listino!)} sarebbero ${euro(r2(c.nolo * c.listino! / 100))}. Da accreditare ${euro(c.inPiu)}.`)
       totale += c.inPiu
     }
+    if (arriviSopra) {
+      punti.push(`Arrivi e resi fatturati con un nolo più alto delle partenze dello stesso peso (${arriviSopra.noli.map(n => euro(n)).join(' / ')} invece di ${arriviSopra.riferimenti.map(n => euro(n)).join(' / ')}): ${arriviSopra.righe.map(x => x.e.riga.segnacollo).join(', ')}. Da accreditare ${euro(arriviSopra.euro)} di nolo.`)
+      totale += arriviSopra.euro
+    }
     const righe = esiti.flatMap(e => e.motivi.filter(m => m.gruppo === 'contestare' && !(docSopra && m.tipo === 'carburante')).map(m => ({ e, m })))
     const perTipo = new Map<string, { n: number; euro: number }>()
     for (const { m } of righe) { const v = perTipo.get(m.tipo) || { n: 0, euro: 0 }; v.n++; v.euro = r2(v.euro + m.importo); perTipo.set(m.tipo, v) }
@@ -645,9 +774,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     const { utils, writeFile } = await import('xlsx')
     const wb = utils.book_new()
     utils.book_append_sheet(wb, utils.json_to_sheet(testo.split('\n').map(r => ({ Contestazione: r }))), 'Contestazione')
-    if (righe.length) utils.book_append_sheet(wb, utils.json_to_sheet(righe.map(({ e, m }) => ({
+    const foglio = [
+      ...righe.map(({ e, m }) => ({ e, importo: m.importo, motivo: m.testo })),
+      ...(arriviSopra?.righe || []).map(x => ({ e: x.e, importo: x.inPiu, motivo: `${x.e.riga.tipoBolla}: nolo ${euro(x.e.riga.nolo)}, alle partenze dello stesso peso ${euro(x.riferimento)}` })),
+    ]
+    if (foglio.length) utils.book_append_sheet(wb, utils.json_to_sheet(foglio.map(({ e, importo, motivo }) => ({
       [gls ? 'Tracking GLS' : 'Segnacollo']: e.riga.segnacollo, 'Data': e.riga.dataRitiro || '', 'Destinatario': e.riga.destinatario, 'Località': e.riga.localita,
-      [`Fatturato ${cr} (€)`]: e.brt, 'Contestato (€)': m.importo, 'Motivo': m.testo,
+      [`Fatturato ${cr} (€)`]: e.brt, 'Contestato (€)': importo, 'Motivo': motivo,
     }))), 'Spedizioni')
     writeFile(wb, `contestazione-${cr.toLowerCase()}-${(esiti[0]?.riga.numeroFattura || 'documento').replace(/[^\w-]+/g, '-')}.xlsx`)
     let copiato = false
@@ -980,6 +1113,49 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
           ))}
         </div>
 
+        {/* ── IL CONTO DEL DOCUMENTO: uscito, entrato, guadagno, e cosa manca perché sia definitivo ── */}
+        {conto && (
+          <div style={{ ...carta, padding: '16px 18px', marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>Il conto del documento</div>
+                <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2 }}>Quanto hai pagato a {cr}, quanto ti hanno pagato i tuoi clienti, quanto ti resta</div>
+              </div>
+              {conto.daFare.length === 0
+                ? <Pillola colore={C.verde} fondo={C.verdeTenue} orlo={C.verdeOrlo}>Tutto fatto: il conto è definitivo</Pillola>
+                : <Pillola colore={C.ambra} fondo={C.ambraTenue} orlo={C.ambraOrlo}>{conto.daFare.length} cos{conto.daFare.length === 1 ? 'a' : 'e'} da fare</Pillola>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: 10, marginTop: 12 }}>
+              {[
+                { t: `Pagato a ${cr}`, v: euro(conto.speso), n: conto.note ? `${euro(conto.pagato)} meno ${euro(conto.note)} di note di credito` : 'quanto ha scalato per questo documento', c: C.testo },
+                { t: 'Ti hanno pagato', v: euro(conto.incassato), n: [`spedizioni Moove ${euro(conto.moove)}`, conto.altro ? `altro gestionale ${euro(conto.altro)}` : '', conto.aMano ? `fatte pagare a mano ${euro(conto.aMano)}` : ''].filter(Boolean).join(' · '), c: C.testo },
+                // Senza l'incasso delle spedizioni fuori Moove il risultato non è vero: si dice "per ora", in giallo.
+                { t: conto.senzaExport ? 'Per ora (manca un incasso)' : conto.guadagno >= 0 ? 'Ti resta' : 'Ci perdi', v: conSegno(conto.guadagno), n: conto.senzaExport ? 'manca l\'incasso delle spedizioni fuori Moove: carica l\'export' : conto.daFare.length ? 'può cambiare: ci sono cose da fare' : 'definitivo', c: conto.senzaExport ? C.ambra : conto.guadagno >= 0 ? C.verde : C.rosso },
+              ].map(k => (
+                <div key={k.t} style={{ background: C.fondoTenue, borderRadius: 10, padding: '11px 13px', minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.attenuato }}>{k.t}</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: k.c, marginTop: 4, ...cifre }}>{k.v}</div>
+                  <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 2, lineHeight: 1.35 }}>{k.n}</div>
+                </div>
+              ))}
+            </div>
+            {conto.daFare.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Da fare</div>
+                <div style={{ display: 'grid', gap: 4 }}>
+                  {conto.daFare.map((d, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12.5, lineHeight: 1.4 }}>
+                      <span style={{ color: C.ambra }}>•</span>
+                      <span style={{ flex: 1, minWidth: 0 }}>{d.testo}</span>
+                      {d.euro != null && <span style={{ color: C.attenuato, whiteSpace: 'nowrap', ...cifre }}>{euro(d.euro)}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── GLS: COSA FARE, VOCE PER VOCE. GLS sulla riga scrive solo l'importo: qui ogni voce ha il suo nome,
             quante sono, dove, e in quale dei quattro gesti cade. Un clic filtra la tabella sotto. ── */}
         {gls && cosaFare && cosaFare.size > 0 && (
@@ -999,13 +1175,14 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
               {GRUPPI_GLS.map(gr => {
                 const voci = Array.from((cosaFare.get(gr.k) || new Map()).entries()).sort((a, b) => Math.abs(b[1].euro) - Math.abs(a[1].euro))
                 const extra = gr.k === 'contestare' ? carburanteGls.filter(c => c.sopra) : []
-                const totale = r2(voci.reduce((t, [, v]) => t + v.euro, 0) + extra.reduce((t, c) => t + c.inPiu, 0))
+                const arrivi = gr.k === 'contestare' ? arriviSopra : null
+                const totale = r2(voci.reduce((t, [, v]) => t + v.euro, 0) + extra.reduce((t, c) => t + c.inPiu, 0) + (arrivi?.euro || 0))
                 return (
                   <div key={gr.k} style={{ border: `1px solid ${gr.orlo}`, background: gr.fondo, borderRadius: 12, padding: 14 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: gr.colore }}>
                       <Icona nome={gr.icona} size={17} />
                       <span style={{ fontSize: 13.5, fontWeight: 700, flex: 1 }}>{gr.titolo}</span>
-                      <span style={{ fontSize: 14, fontWeight: 700, ...cifre }}>{voci.length || extra.length ? conSegno(totale) : '—'}</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, ...cifre }}>{voci.length || extra.length || arrivi ? conSegno(totale) : '—'}</span>
                     </div>
                     <div style={{ fontSize: 12, color: C.attenuato, marginTop: 3, lineHeight: 1.4 }}>{gr.sotto}</div>
                     <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
@@ -1021,6 +1198,20 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                           {rigaStato('contestare', `carburante-doc:${c.codice}`, c.inPiu)}
                         </div>
                       ))}
+                      {arrivi && (
+                        <div style={{ background: '#fff', borderRadius: 9, padding: '8px 10px', border: `1px solid ${C.filo}` }}>
+                          <div style={{ display: 'flex', gap: 8, fontSize: 13 }}>
+                            <span style={{ flex: 1, fontWeight: 600 }}>Arrivi e resi pagati più delle partenze</span>
+                            <span style={{ color: C.attenuato, ...cifre }}>{arrivi.righe.length}</span>
+                            <span style={{ fontWeight: 700, minWidth: 70, textAlign: 'right', ...cifre }}>{conSegno(arrivi.euro)}</span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 2, lineHeight: 1.4 }}>
+                            {cr} chiede {arrivi.noli.map(n => euro(n)).join(' / ')} di nolo, alle partenze dello stesso peso {arrivi.riferimenti.map(n => euro(n)).join(' / ')}: {arrivi.righe.map(x => `${x.e.riga.segnacollo} ${kg(x.e.riga.pesoTassato)}`).join(', ')}.
+                            Se il contratto non prevede un prezzo diverso per gli arrivi, va contestato.
+                          </div>
+                          {rigaStato('contestare', 'arrivi-sopra', arrivi.euro)}
+                        </div>
+                      )}
                       {voci.map(([k, v]) => (
                         <div key={k} style={{ background: voceScelta === k ? '#fff' : 'rgba(255,255,255,.7)', borderRadius: 9, padding: '8px 10px',
                             border: `1px solid ${voceScelta === k ? gr.colore : C.filo}`, boxShadow: voceScelta === k ? '0 1px 3px rgba(16,24,40,.12)' : 'none' }}>
@@ -1044,8 +1235,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                         {rigaStato(gr.k, `${gr.k}|${k}`, v.euro, v.tipo === 'peso')}
                         </div>
                       ))}
-                      {!voci.length && !extra.length && <div style={{ fontSize: 12.5, color: C.attenuato }}>Niente.</div>}
-                      {gr.k === 'contestare' && (voci.length > 0 || extra.length > 0) && (
+                      {!voci.length && !extra.length && !arrivi && <div style={{ fontSize: 12.5, color: C.attenuato }}>Niente.</div>}
+                      {gr.k === 'contestare' && (voci.length > 0 || extra.length > 0 || !!arrivi) && (
                         <button onClick={preparaContestazione}
                           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '8px 12px', borderRadius: 9, border: `1px solid ${gr.orlo}`, background: '#fff', color: gr.colore, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
                           <Icona nome="scarica" size={15} /> Prepara la contestazione
@@ -1186,6 +1377,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                         <b>Non girata: {sp.numero}</b> <span style={{ color: C.attenuato }}>· {sp.chi} · Moove {kg(sp.peso)}, {cr} {kg(e.riga.pesoTassato)}</span>{' '}
                         · <b style={{ color: C.rosso, ...cifre }}>{conSegno(imp)}</b> <span style={{ color: C.attenuato }}>per ora a tuo carico</span>
                         <div style={{ color: '#475467', marginTop: 2 }}>{p ? p.motivo : 'Cerco perché la Rettifica non l\'ha creata…'}</div>
+                        {/* Il listino da correggere si apre in un'altra scheda: tornando qui il perché si rifà da solo, e si rimanda. */}
+                        {p?.listinoDaCorreggere && (
+                          <a href={`/dashboard/listini/clienti/${p.listinoDaCorreggere.id}`} target="_blank" rel="noopener"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6, padding: '5px 10px', borderRadius: 8, border: `1px solid ${C.arancioOrlo}`, background: C.arancioTenue, color: C.arancioScuro, fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+                            Correggi il listino «{p.listinoDaCorreggere.nome}» di {p.listinoDaCorreggere.di} <Icona nome="freccia" size={13} />
+                          </a>
+                        )}
                       </div>
                     )
                   })}
@@ -1222,7 +1420,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
 
         {/* ── LE SPEDIZIONI FATTE ALTROVE: si abbinano all'export di quel gestionale ── */}
         {totali.nonTrovate > 0 && (
-          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} righeFattura={esiti.map(e => e.riga)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} onScaricato={registraFileEsterno} legenda={legenda} corriere={cr} />
+          <AltriGestionali righe={esiti.filter(e => !e.spedizione).map(e => e.riga)} righeFattura={esiti.map(e => e.riga)} salvati={esterniSalvati} onAbbinato={registraEsterno}
+            azioniRiga={r => rigaStato('fuori', `fuori:${r.segnacollo}`, r.totale)} azioniFile={nome => rigaStato('esterno', `esterno:${nome}`, 0)} numeroFattura={esiti[0]?.riga.numeroFattura || ''} iniziali={iniziale?.esterni} onScaricato={registraFileEsterno} legenda={legenda} corriere={cr} />
         )}
 
         {/* ── LE SPEDIZIONI ── */}

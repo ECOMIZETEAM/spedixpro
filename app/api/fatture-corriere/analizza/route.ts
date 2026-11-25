@@ -48,6 +48,7 @@ type Corpo = {
   rifai?: boolean                    // rifare con le regole di oggi una fattura già controllata, tenendo le azioni
   perche?: { id: string; peso: number }[]   // spedizioni da girare rimaste senza rettifica: perché
   statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string }   // a che punto è una voce di "Cosa fare"
+  esterno?: { nome: string; formato?: string; righeFile?: number; abbinate?: string[]; andate?: number; corriereAndate?: number; prezzoClienti?: number; rientri?: number; rettifiche?: number }   // l'export di un altro gestionale abbinato
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
   legenda?: Record<string, string>   // il PDF aggiunto dopo, a fattura già controllata
@@ -140,7 +141,9 @@ export async function POST(req: NextRequest) {
   if (corpo.statoVoce && fattura) {
     const sv = corpo.statoVoce
     const chiave = String(sv.chiave || '').trim().slice(0, 160)
-    const STATI = ['contestato', 'accreditato', 'respinto', 'chiesto', 'risposto', 'fatto', 'girato']
+    // Gli esiti finali: 'assorbito' (resta a te), 'girato' (girato ai clienti con la Rettifica), 'fatturato' (una
+    // spedizione fuori da tutto, fatta pagare a qualcuno: importo e a chi).
+    const STATI = ['contestato', 'accreditato', 'respinto', 'chiesto', 'risposto', 'fatto', 'girato', 'assorbito', 'fatturato']
     if (!chiave) return NextResponse.json({ error: 'Voce mancante.' }, { status: 400 })
     if (sv.stato != null && !STATI.includes(sv.stato)) return NextResponse.json({ error: 'Stato non valido.' }, { status: 400 })
     const importo = sv.importo == null || (sv.importo as any) === '' ? null : Number(sv.importo)
@@ -162,6 +165,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, stati })
   }
 
+  // ── L'EXPORT DI UN ALTRO GESTIONALE, ABBINATO ──
+  // Il file l'abbina la pagina e non si salva; qui si salva cosa ne è uscito (quali righe della fattura hanno
+  // trovato la spedizione, quanto hanno pagato i clienti di quel gestionale), così riaprendo la fattura il conto
+  // del documento c'è ancora senza ricaricarlo (Lorenzo, 25/11: alla fine deve sapere quanto ha speso e incassato).
+  if (corpo.esterno && fattura) {
+    const x = corpo.esterno
+    const nome = String(x.nome || '').trim().slice(0, 200)
+    if (!nome) return NextResponse.json({ error: 'Nome del file mancante.' }, { status: 400 })
+    const n = (v: any) => (Number.isFinite(Number(v)) ? Math.round(Number(v) * 100) / 100 : 0)
+    const voce = { nome, formato: String(x.formato || '').slice(0, 60), il: new Date().toISOString(), righeFile: Math.max(0, Math.round(n(x.righeFile))),
+      abbinate: (Array.isArray(x.abbinate) ? x.abbinate : []).map(t => String(t).slice(0, 40)).slice(0, 20000),
+      andate: Math.max(0, Math.round(n(x.andate))), corriereAndate: n(x.corriereAndate), prezzoClienti: n(x.prezzoClienti), rientri: n(x.rientri), rettifiche: Math.max(0, Math.round(n(x.rettifiche))) }
+    const { data: f2, error: errF2 } = await admin.from('fatture_corriere').select('riepilogo').eq('id', fattura.id).maybeSingle()
+    if (errF2) return NextResponse.json({ error: 'Lettura fattura non riuscita: ' + errF2.message }, { status: 500 })
+    const riepilogo = f2?.riepilogo || {}
+    const esterni = { ...(riepilogo.esterni || {}), [nome]: voce }
+    const { error } = await admin.from('fatture_corriere').update({ riepilogo: { ...riepilogo, esterni } }).eq('id', fattura.id)
+    if (error) return NextResponse.json({ error: 'Export non salvato: ' + error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, esterni })
+  }
+
   // ── PERCHÉ NON È DIVENTATA UNA RETTIFICA ──
   // La Rettifica dice quante spedizioni ha scartato, non quali né perché: il 25/11 Wave vedeva "1 non è diventata
   // una rettifica" e in Rettifica Costi non c'era niente da cercare. Era la NI665520237: Moove 50 kg, GLS 130, e il
@@ -175,7 +199,7 @@ export async function POST(req: NextRequest) {
     if (errR) return NextResponse.json({ error: 'Lettura righe non riuscita: ' + errR.message }, { status: 500 })
     const ammesse = new Set((dellaFattura || []).map((r: any) => r.spedizione_id))
     const kg = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 2 })
-    const out: { id: string; motivo: string; listino: boolean }[] = []
+    const out: { id: string; motivo: string; listino: boolean; listinoDaCorreggere?: { id: string; nome: string; di: string } }[] = []
     for (const p of richieste) {
       const peso = Number(p?.peso)
       if (!ammesse.has(p?.id) || !(peso > 0)) continue
@@ -195,8 +219,25 @@ export async function POST(req: NextRequest) {
         corriereNome: corr.nome_contratto, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
         mittCap: s.mitt_cap || '', mittProvincia: s.mitt_provincia || '', mittPaese: 'IT',
       })
+      // Quale listino correggere: quello che il padre ha assegnato al master dove la catena si ferma (lib/cascata,
+      // parent_listino_id). Si cerca risalendo dal master della spedizione, per nome come lo dice l'errore.
+      let daCorreggere: { id: string; nome: string; di: string } | null = null
+      const chi = errore?.match(/listino del master "([^"]+)"/)?.[1]
+      if (chi) {
+        let cur: string | null = s.master_id
+        for (let i = 0; i < 12 && cur; i++) {
+          const { data: m } = await admin.from('masters').select('id,nome,parent_master_id,parent_listino_id').eq('id', cur).maybeSingle()
+          if (!m) break
+          if (m.nome === chi && m.parent_listino_id) {
+            const { data: l } = await admin.from('listini_clienti').select('id,nome').eq('id', m.parent_listino_id).maybeSingle()
+            if (l) daCorreggere = { id: l.id, nome: l.nome || 'listino', di: m.nome }
+            break
+          }
+          cur = m.parent_master_id
+        }
+      }
       out.push(errore
-        ? { id: p.id, listino: true, motivo: `A ${kg(peso)} kg la catena dei prezzi si ferma: ${errore.trim().replace(/\.$/, '')}. Di solito manca quella fascia di peso nel listino di chi sta sotto: aggiungila, poi rimandala alla Rettifica. Finché non la giri, la differenza la paghi tu.` }
+        ? { id: p.id, listino: true, ...(daCorreggere ? { listinoDaCorreggere: daCorreggere } : {}), motivo: `A ${kg(peso)} kg la catena dei prezzi si ferma: ${errore.trim().replace(/\.$/, '')}. Di solito manca quella fascia di peso nel listino di chi sta sotto: aggiungila, poi rimandala alla Rettifica. Finché non la giri, la differenza la paghi tu.` }
         : { id: p.id, listino: false, motivo: `A ${kg(peso)} kg i prezzi della catena ci sono: la Rettifica non ci ha trovato niente da chiedere a chi ha spedito. Puoi rimandarla per riprovare.` })
     }
     return NextResponse.json({ perche: out })
@@ -240,7 +281,7 @@ export async function POST(req: NextRequest) {
       riepilogo: { ...(fattura.riepilogo || {}), perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri, ...(esterne?.length ? { rettificheEsterne: { ids: esterne } } : {}) },
     }).eq('id', fattura.id)
     // La pagina deve sapere se le differenze sono già nella Rettifica (fattura rifatta, o già girate da un file).
-    return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length, stati: fattura.riepilogo?.stati || {} })
+    return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length, stati: fattura.riepilogo?.stati || {}, esterni: fattura.riepilogo?.esterni || {} })
   }
 
   // ── UN PACCHETTO DI RIGHE ──
@@ -292,7 +333,7 @@ export async function POST(req: NextRequest) {
     if (esistente) {
       // Le azioni restano sempre, anche se il rifacimento si era interrotto a metà e si riprende senza `rifai`.
       const conAzioni = fatturaConAzioni(esistente)
-      const tenuti = conAzioni ? Object.fromEntries(['fileEsterni', 'rettificheEsterne', 'stati'].filter(k => esistente.riepilogo?.[k]).map(k => [k, esistente.riepilogo[k]])) : {}
+      const tenuti = conAzioni ? Object.fromEntries(['fileEsterni', 'rettificheEsterne', 'stati', 'esterni'].filter(k => esistente.riepilogo?.[k]).map(k => [k, esistente.riepilogo[k]])) : {}
       const riepilogo = riepilogoIniziale || Object.keys(tenuti).length ? { ...(riepilogoIniziale || {}), ...tenuti } : null
       await admin.from('fatture_corriere_righe').delete().eq('fattura_id', esistente.id)
       await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo, etichetta: conAzioni ? esistente.etichetta ?? null : null, completata_at: null,
