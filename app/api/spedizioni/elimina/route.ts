@@ -144,6 +144,20 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, manuale: true, message: 'Richiesta di annullo inviata: questo corriere non consente la cancellazione automatica in questo caso, quindi verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
   }
 
+  // ── PACCO POSTE DIRETTO (SDA EXPRESS L, L2, CONSEGNA DIRETTA): SUBITO, sul pacco intero. ──
+  // Regola di Lorenzo (25/11/2026): alla richiesta si annulla e si rimborsa tutta la catena; se poi il
+  // pacco risulta affidato al corriere, la sorveglianza lo riaddebita (lib/annullo-poste). Prima aspettava
+  // 48 ore col cliente addebitato, senza nessun annullo da mandare: Poste non ne ha uno via API.
+  if (corr?.tipo === 'moovexpress' || corr?.tipo === 'poste') {
+    const { annullaSubitoPoste } = await import('@/lib/annullo-poste')
+    const r = await annullaSubitoPoste(admin, (sped as any).tracking_number, { da: user.id })
+    if (r.esito === 'annullata') return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete. Se il pacco viene comunque affidato al corriere, verrà riaddebitata.' })
+    if (r.esito === 'partito') {
+      await admin.from('spedizioni').update({ annullamento_errore: r.messaggio }).eq('id', spedizioneId)
+      return NextResponse.json({ error: r.messaggio }, { status: 400 })
+    }
+  }
+
   // ── PACCO GLS CONDIVISO FRA RETI: come il GLS diretto qui sotto, SUBITO, ma sul pacco intero. ──
   // Da qualunque gamba si chieda (il cliente sulla sua gamba-ponte, o il detentore sulla gamba GLS): si
   // toglie da GLS e si annullano e stornano tutte le gambe (lib/annullo-gls). Annullando una gamba sola

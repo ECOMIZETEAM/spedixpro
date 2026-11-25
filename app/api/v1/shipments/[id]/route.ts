@@ -121,6 +121,19 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ success: true, stato: 'annullamento_manuale', message: 'Annullamento richiesto: verrà completato dall\'assistenza e il credito stornato alla conferma.' })
   }
 
+  // PACCO POSTE DIRETTO (SDA EXPRESS L, L2, CONSEGNA DIRETTA): stesso ramo di spedizioni/elimina, SUBITO
+  // e sul pacco intero, poi la sorveglianza riaddebita se il pacco parte lo stesso (lib/annullo-poste).
+  if (corr?.tipo === 'moovexpress' || corr?.tipo === 'poste') {
+    const { data: tr } = await admin.from('spedizioni').select('tracking_number').eq('id', id).maybeSingle()
+    const { annullaSubitoPoste } = await import('@/lib/annullo-poste')
+    const r = await annullaSubitoPoste(admin, tr?.tracking_number, { da: null })
+    if (r.esito === 'annullata') return NextResponse.json({ success: true, stato: 'annullata', message: 'Spedizione annullata e credito stornato. Se il pacco viene comunque affidato al corriere, verrà riaddebitata.' })
+    if (r.esito === 'partito') {
+      await admin.from('spedizioni').update({ annullamento_errore: r.messaggio }).eq('id', id)
+      return NextResponse.json({ error: r.messaggio }, { status: 409 })
+    }
+  }
+
   // PACCO GLS CONDIVISO FRA RETI: stesso ramo di spedizioni/elimina, SUBITO e sul pacco intero (lib/annullo-gls).
   // Con le 48 ore la gamba GLS del detentore non sarebbe stata in attesa, e la chiusura di sera l'avrebbe
   // trasmessa a GLS prima dell'annullo.

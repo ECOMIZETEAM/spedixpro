@@ -11,6 +11,23 @@ export const maxDuration = 300
 // l'annullo al corriere. Se il corriere accetta (o la considera già inesistente) → 'annullata'
 // + storno credito. Se rifiuta (già spedita/chiusa) → torna allo stato precedente con la nota
 // d'errore, così resta tracciabile e non sparisce.
+// Una richiesta in attesa su un pacco Poste diretto: annullata subito, oppure rimessa com'era se il pacco
+// e' gia' nelle mani del corriere (resta addebitata). null = non e' un pacco Poste.
+async function chiudiRichiestaPoste(admin: any, s: any): Promise<'annullata' | 'rifiutata' | null> {
+  const { annullaSubitoPoste } = await import('@/lib/annullo-poste')
+  const r = await annullaSubitoPoste(admin, s.tracking_number, { da: s.annullamento_da || null, richiestoAt: s.annullamento_richiesto_at })
+  if (r.esito === 'annullata') return 'annullata'
+  if (r.esito === 'partito') {
+    await admin.from('spedizioni').update({
+      stato: s.stato_precedente || 'in_lavorazione',
+      annullamento_richiesto_at: null,
+      annullamento_errore: r.messaggio,
+    }).eq('id', s.id)
+    return 'rifiutata'
+  }
+  return null
+}
+
 export async function GET(req: NextRequest) {
   const _cron = bloccaCronNonAutorizzato(req); if (_cron) return _cron
   const admin = createAdminSupabase()
@@ -46,6 +63,32 @@ export async function GET(req: NextRequest) {
   }
 
   let annullate = 0, rifiutate = 0, manuali = 0, errori = 0
+
+  // POSTE DIRETTO (SDA EXPRESS L, L2, CONSEGNA DIRETTA): NIENTE 48 ORE (Lorenzo, 25/11/2026). Le richieste
+  // nuove le chiudono gia' il cestino e l'API; qui quelle rimaste in attesa da prima di qualunque eta'
+  // (quelle oltre le 48 ore le prende il giro di sotto, con la stessa funzione).
+  const { data: attesaRecente } = await admin.from('spedizioni')
+    .select('id,numero,corriere_id,tracking_number,stato_precedente,annullamento_da,annullamento_richiesto_at')
+    .eq('stato', 'annullamento_pending').not('annullamento_richiesto_at', 'is', null).gt('annullamento_richiesto_at', soglia)
+    .order('annullamento_richiesto_at', { ascending: true }).limit(300)
+  const tipoCorriere = new Map<string, string | null>()
+  for (const s of (attesaRecente || [])) {
+    try {
+      if (!tipoCorriere.has(s.corriere_id)) {
+        const { data: c } = await admin.from('corrieri').select('tipo').eq('id', s.corriere_id).maybeSingle()
+        tipoCorriere.set(s.corriere_id, c?.tipo || null)
+      }
+      const t = tipoCorriere.get(s.corriere_id)
+      if (t !== 'moovexpress' && t !== 'poste') continue
+      const r = await chiudiRichiestaPoste(admin, s)
+      if (r === 'annullata') annullate++
+      else if (r === 'rifiutata') rifiutate++
+    } catch (e) {
+      console.error('Errore cron annullamento spedizione (Poste)', s.id, e)
+      errori++
+    }
+  }
+
   for (const s of (pendenti || [])) {
     try {
       // Il corriere della spedizione: Spedisci non è annullabile via API (contratto non nostro)
@@ -55,23 +98,9 @@ export async function GET(req: NextRequest) {
       // 30 giorni (vedi lib/annullo-poste). Prima qui il ponte rispondeva "va gestito dall'assistenza" e
       // la richiesta tornava indietro col cliente addebitato: non se ne chiudeva nessuna.
       if (corr?.tipo === 'moovexpress' || corr?.tipo === 'poste') {
-        const { gambePaccoPoste, paccoPartito, annullaPaccoPoste } = await import('@/lib/annullo-poste')
-        const gambe = await gambePaccoPoste(admin, (s as any).tracking_number)
-        if (gambe) {
-          // Gia' affidato al corriere: non c'e' niente da annullare, la spedizione resta addebitata.
-          if ((await paccoPartito(admin, gambe)).partito) {
-            await admin.from('spedizioni').update({
-              stato: (s as any).stato_precedente || 'in_lavorazione',
-              annullamento_richiesto_at: null,
-              annullamento_errore: 'Non annullata: il pacco risulta già affidato al corriere.',
-            }).eq('id', s.id)
-            rifiutate++
-            continue
-          }
-          await annullaPaccoPoste(admin, gambe, { richiestoAt: (s as any).annullamento_richiesto_at, da: (s as any).annullamento_da || null })
-          annullate++
-          continue
-        }
+        const r = await chiudiRichiestaPoste(admin, s)
+        if (r === 'annullata') { annullate++; continue }
+        if (r === 'rifiutata') { rifiutate++; continue }
       }
       // PACCO GLS CONDIVISO FRA RETI: le richieste nuove si chiudono subito (spedizioni/elimina, v1 DELETE);
       // qui arrivano solo quelle rimaste in attesa da prima, o da una porta che non lo sa ancora. Stessa

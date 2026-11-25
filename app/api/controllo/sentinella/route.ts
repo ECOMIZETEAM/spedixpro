@@ -57,6 +57,16 @@ export async function GET(req: NextRequest) {
       righe.push(...(data as any[]))
     }
   }
+  // La quinta e' l'annullo delle SDA EXPRESS L (25/11/2026): annullate subito alla richiesta, riaddebitate
+  // se partono lo stesso. Sta nel codice (lib/annullo-poste) perche' la decisione "e' partito" legge il
+  // testo degli eventi Poste, e la regola dev'essere la stessa della sorveglianza che riaddebita.
+  try {
+    const { controlloAnnulliPoste } = await import('@/lib/annullo-poste')
+    righe.push(...await controlloAnnulliPoste(admin))
+  } catch (e: any) {
+    console.error('[SENTINELLA] controllo annulli SDA EXPRESS L non eseguito:', e?.message)
+    righe.push({ area: 'sentinella', controllo: `controllo annulli SDA EXPRESS L NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
+  }
   if (righe.every(r => r.area === 'sentinella')) {
     // Se non riesco nemmeno a fare le domande, quello E' l'allarme: si dice, non si tace.
     return NextResponse.json({ error: 'Controllo non eseguito' }, { status: 500 })
