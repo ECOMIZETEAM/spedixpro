@@ -32,7 +32,7 @@
 import { calcolaPrezzoCorriereDettaglio, type DettaglioCorriere } from '@/lib/pricing'
 import { accessoriDelLivello } from '@/lib/cascata'
 import { movimentiDelNolo } from '@/lib/ripesature-calcolo'
-import { descriviVoceGls, VOCI_GLS, type RigaFatturaGls } from '@/lib/fattura-gls'
+import { descriviVoceGls, VOCI_GLS, type AllineaGls, type ParteAllinea, type RigaFatturaGls } from '@/lib/fattura-gls'
 import type { CategoriaVoce } from '@/lib/fattura-brt'
 import type { EsitoRiga, Motivo, SpedizioneAbbinata } from '@/lib/controllo-fattura'
 
@@ -84,6 +84,11 @@ export async function analizzaFatturaGls(
   if (errF) throw new Error('lettura contratti non riuscita: ' + errF.message)
   const radice = new Map<string, string>((famiglia || []).map((c: any) => [c.id, c.contratto_id]))
   for (const id of contrattiIds) radice.set(id, id)
+  // Il nome di ogni contratto del detentore, che è anche il nome del suo listino ("GLS NI W", "GLS NI W LIGHT"):
+  // in "Cosa allineare nel listino" dice QUALE listino toccare.
+  const { data: propri, error: errP } = await admin.from('corrieri').select('id,nome_contratto').in('id', contrattiIds)
+  if (errP) throw new Error('lettura contratti non riuscita: ' + errP.message)
+  const nomeContratto = new Map<string, string>((propri || []).map((c: any) => [c.id, String(c.nome_contratto || '')]))
   const corrieriIds = Array.from(radice.keys())
 
   const perTracking = new Map<string, any[]>()
@@ -129,6 +134,31 @@ export async function analizzaFatturaGls(
     })
     if (!memo.has(k)) memo.set(k, calcola().then(async d => d ?? (await new Promise(ok => setTimeout(ok, 400)), calcola())))
     return memo.get(k)!
+  }
+
+  // Le fasce "fino a" del listino del detentore, zona per zona, una lettura per contratto: dicono se il nolo
+  // chiesto da GLS è il prezzo di un'ALTRA zona dello stesso listino. Sul borderò del 23/11 pacchi da 7 a 21 kg
+  // "Italia" (Afragola, Giugliano, Pompei, Barra…) a cui GLS chiede 5,25 €, il prezzo della zona Napoli: senza
+  // questo il controllo diceva "nel listino 8,00 €, GLS chiede 5,25 €" e invitava ad abbassare l'Italia. È solo un
+  // suggerimento: se la lettura non riesce non c'è, e nessun numero cambia.
+  const fasceMemo = new Map<string, Promise<{ zona: string; max: number; prezzo: number }[]>>()
+  const fasceDi = (corriereId: string) => {
+    if (!fasceMemo.has(corriereId)) fasceMemo.set(corriereId, (async () => {
+      const { data: ls, error: e1 } = await admin.from('listini_corrieri').select('id').eq('master_id', masterId).eq('corriere_id', corriereId)
+      if (e1 || !ls?.length) { if (e1) console.warn('[controllo-gls] fasce non lette', e1.message); return [] }
+      const { data: f, error: e2 } = await admin.from('listini_corrieri_fasce').select('peso_max,prezzo,tipo,zone(nome)').in('listino_id', ls.map((l: any) => l.id)).eq('tipo', 'fino_a').limit(2000)
+      if (e2) { console.warn('[controllo-gls] fasce non lette', e2.message); return [] }
+      return (f || []).map((x: any) => ({ zona: String(x.zone?.nome || ''), max: Number(x.peso_max), prezzo: Number(x.prezzo) })).filter((x: { zona: string; max: number }) => x.zona && Number.isFinite(x.max))
+    })())
+    return fasceMemo.get(corriereId)!
+  }
+  const zoneColPrezzo = async (corriereId: string, zonaVista: string, peso: number, nolo: number) => {
+    const perZona = new Map<string, { max: number; prezzo: number }>()
+    for (const f of await fasceDi(corriereId)) {
+      if (f.zona === zonaVista || f.max < peso - 1e-9) continue
+      const v = perZona.get(f.zona); if (!v || f.max < v.max) perZona.set(f.zona, f)
+    }
+    return Array.from(perZona.entries()).filter(([, f]) => Math.abs(f.prezzo - nolo) < 0.005).map(([z]) => z)
   }
 
   return aOndate(righe, 8, async (r): Promise<EsitoRiga> => {
@@ -248,7 +278,33 @@ export async function analizzaFatturaGls(
       motivi.push({ tipo: 'tariffa', importo: tariffa, gruppo: 'listino', testo: `A parità di peso GLS chiede ${euro(glsTariffa)} (${cosa}), in Moove il costo registrato è ${euro(mooveAlPeso)}`
         + (cambiato ? `. Il tuo listino è cambiato dopo: oggi direbbe ${euro(totG)}${Math.abs(scartoListino) < 0.01 ? ', come GLS' : ''}.` : tariffa > 0 ? ': listino più basso del vero.' : ': listino più alto del vero.') })
     }
-    return { ...base, spedizione, moove, listino, differenza, motivi, scartoListino }
-    return { ...base, spedizione, moove, listino, differenza, motivi }
+
+    // Lo scarto col listino di oggi, voce per voce (lib/fattura-gls, AllineaGls). Le parti di una riga sommano
+    // lo scarto: quello che nolo e contrassegno non spiegano va in "altro". Sotto i 5 centesimi è il carburante
+    // di GLS (2,97% sul contratto contro il 3% del listino), non una voce da correggere: resta sulla prima parte,
+    // o non si mostra (sull'allegato di ottobre erano 15 righe "altro" da 1 centesimo).
+    const parti: ParteAllinea[] = []
+    if (Math.abs(scartoListino) >= 0.01) {
+      const pctL = pctListino ?? 0
+      const glsNolo = r2(r.nolo + (isola ? r.varie : 0))
+      if (Math.abs(glsNolo - listino.nolo) >= 0.01) {
+        const zone = await zoneColPrezzo(corriereRadice, listino.zona || '', r.pesoTassato, glsNolo)
+        parti.push({ voce: 'nolo', listino: r2(listino.nolo), gls: glsNolo, euro: r2((glsNolo - listino.nolo) * (1 + pctL / 100)), ...(zone.length ? { zonaGls: zone.join(', ') } : {}) })
+      }
+      const glsCod = r2(r.voci.find(v => v.sigla === 'gls:contrassegno')?.importo ?? 0)
+      const lCod = r2(Number(listino.contrassegno || 0))
+      if (Math.abs(glsCod - lCod) >= 0.01) parti.push({ voce: 'contrassegno', listino: lCod, gls: glsCod, euro: r2(glsCod - lCod) })
+      const resto = r2(scartoListino - parti.reduce((s, p) => s + p.euro, 0))
+      if (parti.length && Math.abs(resto) < 0.05) parti[0].euro = r2(parti[0].euro + resto)
+      else if (Math.abs(resto) >= 0.05) parti.push({ voce: 'altro', listino: totG, gls: glsTariffa, euro: resto })
+    }
+    // Il carburante che il listino non ha (la zona Europa): non è nello scarto, è un motivo a sé, ma è il listino
+    // che va sistemato.
+    if (carburante >= 0.01 && pctListino != null && !(pctListino > 0)) parti.push({ voce: 'carburante', listino: 0, gls: r2(r.percentualeCarburante), euro: carburante })
+    const allinea: AllineaGls | undefined = parti.length
+      ? { listino: nomeContratto.get(corriereRadice) || '', zona: listino.zona || '', peso: r.pesoTassato,
+          luogo: [s.dest_citta || r.localita, s.dest_cap].filter(Boolean).join(' '), parti }
+      : undefined
+    return { ...base, spedizione, moove, listino, differenza, motivi, scartoListino, ...(allinea ? { allinea } : {}) }
   })
 }

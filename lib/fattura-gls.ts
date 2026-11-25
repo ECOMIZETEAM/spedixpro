@@ -83,6 +83,24 @@ export type RigaFatturaGls = RigaFatturaBrt & {
 
 export const eGls = (r: any): r is RigaFatturaGls => r?.corriere === 'gls'
 
+/* COSA ALLINEARE NEL LISTINO, riga per riga: dove il listino del detentore di OGGI, allo stesso peso, non dice
+ * quello che chiede GLS, e in quale voce. Prima la pagina diceva solo "Italia fino a 5 kg: più alto di 1,80 €",
+ * senza dire quale dei tre listini GLS di Wave né cosa c'era scritto: Wave non sapeva cosa toccare (Lorenzo,
+ * 25/11: "deve correggere i suoi listini? quale? perché?"). Ora ogni parte dice listino, zona, voce, quanto
+ * dice il listino e quanto chiede GLS; la pagina le somma.
+ *   nolo         → il prezzo della fascia (per isole e Venezia GLS mette il supplemento fra le varie: si somma)
+ *   contrassegno → il diritto di contrassegno
+ *   carburante   → la percentuale, solo dove il listino non ne ha (dove ne ha meno di GLS è da contestare)
+ *   altro        → il resto: supplementi del listino che GLS non chiede, o il contrario
+ * La somma delle parti di una riga è lo scarto col listino (più il carburante che il listino non ha). */
+// `zonaGls`: le altre zone dello stesso listino che a quel peso hanno proprio il nolo chiesto da GLS. Vuol dire
+// che GLS ha tassato il pacco come quella zona: va allargata la zona, non cambiato il prezzo.
+export type ParteAllinea = { voce: 'nolo' | 'contrassegno' | 'carburante' | 'altro'; listino: number; gls: number; euro: number; zonaGls?: string }
+// Il luogo (città e CAP) serve quando il prezzo di GLS è quello di un'altra zona: sul borderò del 23/11 pacchi
+// da 18 kg "Italia" a cui GLS chiede 5,25 €, il prezzo della zona Napoli. Lì non va cambiato il prezzo, va
+// guardata la zona: senza la città sembrava che il listino Italia fosse troppo caro.
+export type AllineaGls = { listino: string; zona: string; peso: number; luogo?: string; parti: ParteAllinea[] }
+
 // Le voci della riga GLS nel formato del controllo (sigla → nome). Le sigle BRT sono di un carattere: con il
 // prefisso "gls:" non si possono confondere.
 export const VOCI_GLS: Record<string, SiglaBrt> = {
@@ -117,15 +135,38 @@ export const espandiRigaGls = (x: Partial<RigaGls>): RigaGls => ({
   nolo: 0, assicurazione: 0, contrassegno: 0, varie: 0, servizi: 0, dettagli: [], ...x,
 })
 
-// Le righe del PDF come righe del controllo. Il carburante non è sulla riga: è una percentuale del nolo
-// stampata per contratto, e qui si ripartisce sul nolo di ogni riga con quella percentuale.
-export function righeControlloGls(l: Pick<LetturaGls, 'al' | 'cliente' | 'righe'> & { contratti: { codice: string; percentualeCarburante: number | null }[] }, numero: string): RigaFatturaGls[] {
+// Il carburante stampato per contratto, ripartito sulle righe in proporzione al nolo e AL CENTESIMO: ogni riga
+// prende la sua parte arrotondata per difetto, e i centesimi che restano vanno alle righe col resto più grande.
+// Così la somma delle righe è esattamente il carburante stampato da GLS e ogni riga è in centesimi.
+// Prima andava a quattro decimali (al centesimo riga per riga, su 3.482 righe da 3,50 €, la somma perdeva 10 €),
+// ma la riga si arrotondava poi a schermo: sull'allegato di ottobre di Wave (25/11) la testata diceva +512,45 e
+// i motivi riga per riga +512,58, perché quasi ogni riga finiva a 0,0004 sotto il centesimo (3,9196 → 3,92).
+function carburantePerRiga(righe: RigaGls[], contratti: { codice: string; percentualeCarburante: number | null; carburante?: number | null }[]): number[] {
+  const out = righe.map(() => 0)
+  for (const c of contratti) {
+    const idx = righe.map((r, i) => r.contratto === c.codice && r.nolo > 0 ? i : -1).filter(i => i >= 0)
+    const nolo = idx.reduce((s, i) => s + righe[i].nolo, 0)
+    if (!idx.length || nolo <= 0) continue
+    // Senza l'importo stampato (una risposta di prima), la percentuale sul nolo del contratto: lo stesso totale.
+    const totale = c.carburante != null ? c.carburante : (c.percentualeCarburante ?? 0) * nolo / 100
+    const cent = Math.round(totale * 100)
+    const quote = idx.map(i => ({ i, esatta: cent * righe[i].nolo / nolo }))
+    let resto = cent
+    for (const q of quote) { const giu = Math.floor(q.esatta + 1e-9); out[q.i] = giu; resto -= giu }
+    quote.sort((a, b) => (b.esatta - Math.floor(b.esatta + 1e-9)) - (a.esatta - Math.floor(a.esatta + 1e-9)) || a.i - b.i)
+    for (let k = 0; k < resto && k < quote.length; k++) out[quote[k].i] += 1
+  }
+  return out.map(c => c / 100)
+}
+
+// Le righe del PDF come righe del controllo. Il carburante non è sulla riga: è stampato per contratto, e qui si
+// ripartisce sul nolo di ogni riga (carburantePerRiga).
+export function righeControlloGls(l: Pick<LetturaGls, 'al' | 'cliente' | 'righe'> & { contratti: { codice: string; percentualeCarburante: number | null; carburante?: number | null }[] }, numero: string): RigaFatturaGls[] {
   const pct = new Map(l.contratti.map(c => [c.codice, c.percentualeCarburante ?? 0]))
-  return l.righe.map(r => {
+  const fuel = carburantePerRiga(l.righe, l.contratti)
+  return l.righe.map((r, i) => {
     const p = pct.get(r.contratto) ?? 0
-    // A quattro decimali, non al centesimo: arrotondata riga per riga, su 3.482 righe da 3,50 € la somma
-    // perdeva 10 € rispetto al carburante stampato.
-    const carburante = Math.round(r.nolo * p * 100) / 10000
+    const carburante = fuel[i]
     const voci = [
       { sigla: 'gls:carburante', importo: carburante },
       { sigla: 'gls:assicurazione', importo: r.assicurazione },
@@ -151,7 +192,7 @@ export function righeControlloGls(l: Pick<LetturaGls, 'al' | 'cliente' | 'righe'
       cap: '', localita: r.localita, provincia: '', nazione: '',
       destinatario: r.destinatario, mittente: r.mittente, capMittente: '', mittenteOriginale: '',
       nolo: r.nolo, voci, altreVarie: 0,
-      totale: Math.round((r.nolo + voci.reduce((s, v) => s + v.importo, 0)) * 10000) / 10000,
+      totale: r2(r.nolo + voci.reduce((s, v) => s + v.importo, 0)),
       quadra: true,
     }
   })

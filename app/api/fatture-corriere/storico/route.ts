@@ -28,27 +28,39 @@ export async function GET(req: NextRequest) {
     .eq('master_id', u.masterId).eq('stato', 'completa').order('data_fattura', { ascending: false }).order('created_at', { ascending: false }).limit(240)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Quanto è stato davvero girato ai clienti: le rettifiche nate da "Manda alla Rettifica" su quella fattura,
-  // separate fra confermate (soldi mossi) e ancora da confermare. La differenza è negativa = addebito.
-  const fileIds = (fatture || []).map((f: any) => f.rettifiche_file_id).filter(Boolean)
-  const perFile = new Map<string, { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number }>()
-  for (let i = 0; i < fileIds.length; i += 100) {
-    const { data } = await admin.from('rettifiche').select('file_id,confermata,differenza,fuori_sagoma')
-      .eq('master_id', u.masterId).in('file_id', fileIds.slice(i, i + 100)).or('propagazione.is.null,propagazione.neq.annullata')
-    for (const r of data || []) {
-      const v = perFile.get(r.file_id) || { inviate: 0, confermate: 0, euroConfermati: 0, euroInAttesa: 0 }
-      const euro = -(Number(r.differenza) || 0) + (Number(r.fuori_sagoma) || 0)
-      v.inviate++
-      if (r.confermata) { v.confermate++; v.euroConfermati += euro } else v.euroInAttesa += euro
-      perFile.set(r.file_id, v)
+  // Quanto è stato davvero girato ai clienti, separato fra confermate (soldi mossi) e ancora da confermare. Le
+  // rettifiche della fattura sono quelle nate da "Manda alla Rettifica" (il suo file) più quelle fatte con un file
+  // proprio nella pagina Rettifica sulle sue spedizioni (riepilogo.rettificheEsterne): una rettifica che sta in
+  // tutte e due si conta una volta. La differenza è negativa = addebito.
+  const fileIds = Array.from(new Set((fatture || []).map((f: any) => f.rettifiche_file_id).filter(Boolean))) as string[]
+  const esterneIds = Array.from(new Set((fatture || []).flatMap((f: any) => Array.isArray(f.riepilogo?.rettificheEsterne?.ids) ? f.riepilogo.rettificheEsterne.ids : []))) as string[]
+  type Rett = { id: string; file_id: string | null; confermata: boolean; euro: number }
+  const perId = new Map<string, Rett>()
+  const leggi = async (campo: 'file_id' | 'id', valori: string[]) => {
+    for (let i = 0; i < valori.length; i += 100) {
+      for (let da = 0; ; da += 1000) {
+        const { data, error } = await admin.from('rettifiche').select('id,file_id,confermata,differenza,fuori_sagoma')
+          .eq('master_id', u.masterId).in(campo, valori.slice(i, i + 100)).or('propagazione.is.null,propagazione.neq.annullata').order('id').range(da, da + 999)
+        if (error) throw new Error(error.message)
+        for (const r of data || []) perId.set(r.id, { id: r.id, file_id: r.file_id, confermata: !!r.confermata, euro: -(Number(r.differenza) || 0) + (Number(r.fuori_sagoma) || 0) })
+        if ((data || []).length < 1000) break
+      }
     }
   }
+  try { await leggi('file_id', fileIds); await leggi('id', esterneIds) }
+  catch (e: any) { return NextResponse.json({ error: 'Lettura delle rettifiche non riuscita: ' + String(e?.message || e) }, { status: 500 }) }
   const r2 = (n: number) => Math.round(n * 100) / 100
   return NextResponse.json({
     fatture: (fatture || []).filter(fatturaConAzioni).map((f: any) => {
-      const g = f.rettifiche_file_id ? perFile.get(f.rettifiche_file_id) : null
+      const sue = new Map<string, Rett>()
+      if (f.rettifiche_file_id) for (const r of perId.values()) if (r.file_id === f.rettifiche_file_id) sue.set(r.id, r)
+      for (const id of f.riepilogo?.rettificheEsterne?.ids || []) { const r = perId.get(id); if (r) sue.set(id, r) }
+      const g = sue.size || f.rettifiche_file_id ? { inviate: 0, confermate: 0, euroConfermati: 0, euroInAttesa: 0 } : null
+      for (const r of sue.values()) { g!.inviate++; if (r.confermata) { g!.confermate++; g!.euroConfermati += r.euro } else g!.euroInAttesa += r.euro }
       const recuperato = r2(g?.euroConfermati || 0)
-      return { ...f, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa) } : null, aTuoCarico: r2(Number(f.differenza) - recuperato) }
+      // Gli id delle rettifiche servono solo qui: nell'elenco non viaggiano.
+      const riepilogo = f.riepilogo ? { ...f.riepilogo, rettificheEsterne: undefined } : f.riepilogo
+      return { ...f, riepilogo, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa) } : null, aTuoCarico: r2(Number(f.differenza) - recuperato) }
     }),
   })
 }

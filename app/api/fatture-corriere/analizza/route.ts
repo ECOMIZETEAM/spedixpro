@@ -57,6 +57,33 @@ const pulisciLegenda = (l: any): Record<string, string> | null => {
   return Object.keys(out).length ? out : null
 }
 
+// LE RETTIFICHE FATTE FUORI DAL PULSANTE. Le differenze si possono girare anche caricando un proprio file nella
+// pagina Rettifica: il 24/11 Wave ha girato così le 25 della BRT 74855 (file del suo altro gestionale), la fattura
+// non lo sapeva, risultava "senza azioni" e il 25/11 il caricamento dell'allegato GLS l'ha tolta dallo storico.
+// Per ogni fattura: le rettifiche del detentore, non annullate, sulle spedizioni abbinate. Una lettura non
+// riuscita torna null: chi decide se togliere una fattura, nel dubbio la tiene.
+async function rettificheSulleSpedizioni(admin: any, masterId: string, fattureIds: string[]): Promise<Map<string, string[]> | null> {
+  const out = new Map<string, string[]>()
+  for (const fid of fattureIds) {
+    const sped = new Set<string>()
+    for (let da = 0; ; da += 1000) {
+      const { data, error } = await admin.from('fatture_corriere_righe').select('spedizione_id').eq('fattura_id', fid).not('spedizione_id', 'is', null).order('id').range(da, da + 999)
+      if (error) return null
+      for (const r of data || []) sped.add(r.spedizione_id)
+      if ((data || []).length < 1000) break
+    }
+    const ids = Array.from(sped), trovate: string[] = []
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data, error } = await admin.from('rettifiche').select('id').eq('master_id', masterId).in('spedizione_id', ids.slice(i, i + 200))
+        .or('propagazione.is.null,propagazione.neq.annullata').limit(1000)
+      if (error || (data || []).length >= 1000) return null
+      trovate.push(...(data || []).map((r: any) => r.id))
+    }
+    if (trovate.length) out.set(fid, trovate)
+  }
+  return out
+}
+
 // Quello che la pagina sa del documento GLS (tracciato, periodo, carburante per contratto): si salva con la
 // fattura, così riaprendola dallo storico l'avviso sul carburante c'è ancora. Arriva dal browser: si tengono
 // solo numeri e testi corti.
@@ -124,12 +151,15 @@ export async function POST(req: NextRequest) {
       righe.push(...(data || []).map((r: any) => r.esito)); if ((data || []).length < 1000) break
     }
     const t = riepilogaFattura(righe as EsitoPagina[])
+    // Spedizioni già rettificate da un file della pagina Rettifica (la fattura ricaricata dopo averle girate):
+    // l'azione c'è già, e lo storico la conta fra il girato.
+    const esterne = (await rettificheSulleSpedizioni(admin, u.masterId, [fattura.id]))?.get(fattura.id)
     await admin.from('fatture_corriere').update({
       stato: 'completa', completata_at: new Date().toISOString(),
       righe: t.righe, andate: t.andate, rientri: t.rientri,
       totale_corriere: t.totaleCorriere, totale_trovate: t.totaleTrovate, costo_moove: t.costoMoove, differenza: t.differenza,
       non_trovate: t.nonTrovate, totale_non_trovate: t.totaleNonTrovate, da_girare: t.daGirare, euro_da_girare: t.euroDaGirare,
-      riepilogo: { ...(fattura.riepilogo || {}), perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri },
+      riepilogo: { ...(fattura.riepilogo || {}), perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri, ...(esterne?.length ? { rettificheEsterne: { ids: esterne } } : {}) },
     }).eq('id', fattura.id)
     return NextResponse.json({ ok: true })
   }
@@ -159,9 +189,19 @@ export async function POST(req: NextRequest) {
     const riepilogoIniziale = legendaTestata || glsTestata ? { ...(legendaTestata ? { legenda: legendaTestata } : {}), ...(glsTestata ? { gls: glsTestata } : {}) } : null
     const { data: sue } = await admin.from('fatture_corriere').select('id,numero_fattura,corriere_id,stato,created_at,rettifiche_file_id,riepilogo').eq('master_id', u.masterId)
     const ieri = Date.now() - 86400000
-    const daTogliere = (sue || []).filter((f: any) => !(f.numero_fattura === numero && f.corriere_id === contratto.id) && !fatturaConAzioni(f)
-      && (f.stato === 'completa' || new Date(f.created_at).getTime() < ieri)).map((f: any) => f.id)
-    if (daTogliere.length) await admin.from('fatture_corriere').delete().in('id', daTogliere)
+    const candidate = (sue || []).filter((f: any) => !(f.numero_fattura === numero && f.corriere_id === contratto.id) && !fatturaConAzioni(f)
+      && (f.stato === 'completa' || new Date(f.created_at).getTime() < ieri))
+    // Prima di togliere una fattura "senza azioni": se le sue spedizioni sono state rettificate da un file della
+    // pagina Rettifica, l'azione c'è. Si segna sulla fattura, che resta. Se la lettura non riesce, non si toglie niente.
+    const esterne = candidate.length ? await rettificheSulleSpedizioni(admin, u.masterId, candidate.map((f: any) => f.id)) : new Map<string, string[]>()
+    if (esterne) {
+      for (const [fid, ids] of esterne) {
+        const f = candidate.find((x: any) => x.id === fid)
+        await admin.from('fatture_corriere').update({ riepilogo: { ...(f?.riepilogo || {}), rettificheEsterne: { ids } } }).eq('id', fid)
+      }
+      const daTogliere = candidate.filter((f: any) => !esterne.has(f.id)).map((f: any) => f.id)
+      if (daTogliere.length) await admin.from('fatture_corriere').delete().in('id', daTogliere)
+    }
     const esistente = (sue || []).find((f: any) => f.numero_fattura === numero && f.corriere_id === contratto.id)
     if (esistente?.stato === 'completa' && fatturaConAzioni(esistente)) return NextResponse.json({ giaCaricata: { id: esistente.id, il: esistente.created_at } })
     if (esistente) {

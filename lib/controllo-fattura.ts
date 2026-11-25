@@ -17,6 +17,7 @@
 import { fetchAllStretto } from '@/lib/fetch-all'
 import { calcolaPrezzoCorriereDettaglio, type DettaglioCorriere } from '@/lib/pricing'
 import { descriviVoce, type RigaFatturaBrt, type CategoriaVoce } from '@/lib/fattura-brt'
+import type { AllineaGls } from '@/lib/fattura-gls'
 import { prezziSupplementoDa, TIPO_SUPPLEMENTO_CORRIERE } from '@/lib/supplementi-corriere'
 
 export type TipoMotivo = 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile' | 'carburante' | 'storico'
@@ -52,6 +53,7 @@ export type EsitoRiga = {
   listino: DettaglioCorriere | null
   differenza: number | null              // BRT − Moove: positivo = il detentore ha speso più di quanto vede
   scartoListino?: number | null          // GLS: corriere − listino di OGGI allo stesso peso (lib/controllo-fattura-gls)
+  allinea?: AllineaGls                   // GLS: quello scarto diviso per listino, zona e voce (lib/fattura-gls)
   motivi: Motivo[]
   vociPerCategoria: Partial<Record<CategoriaVoce | 'nolo', number>>
 }

@@ -4,7 +4,7 @@ import BarraAvanzamento from '@/app/components/BarraAvanzamento'
 import { useDialog } from '@/app/components/DialogProvider'
 import { leggiFatturaBrt, descriviVoce, pesoTassatoBrt, KG_PER_M3_BRT, sigleSconosciute, type RigaFatturaBrt } from '@/lib/fattura-brt'
 import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
-import { eGls, espandiRigaGls, righeControlloGls } from '@/lib/fattura-gls'
+import { eGls, espandiRigaGls, righeControlloGls, type ParteAllinea } from '@/lib/fattura-gls'
 import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera, Pillola } from './ui'
 import AltriGestionali, { type EsternoIniziale } from './AltriGestionali'
 
@@ -73,6 +73,18 @@ const NOTE_GLS: Record<string, string> = {
   'annullata:contestare': 'Annullate e rimborsate in Moove, ma GLS le ha fatturate.',
   'non_calcolabile:listino': 'Il listino non ha un prezzo per quella zona o fascia.',
 }
+// Una riga di "Cosa allineare nel listino" per GLS: le parti uguali (stesso listino, zona, voce e valori) sommate.
+type GruppoAllinea = { chiave: string; listino: string; zona: string; voce: ParteAllinea['voce']; valListino: number; valGls: number; zonaGls?: string; n: number; euro: number; pesoMin: number; pesoMax: number; luoghi: string[] }
+// Cosa c'è scritto nel listino e cosa chiede GLS, con le parole di chi lo deve correggere.
+function descriviAllinea(a: GruppoAllinea): string {
+  const pesi = a.pesoMin === a.pesoMax ? `a ${kg(a.pesoMin)}` : `da ${kg(a.pesoMin)} a ${kg(a.pesoMax)}`
+  // Il prezzo di GLS è quello di un'altra zona del listino: è la zona da allargare, non il prezzo da cambiare.
+  if (a.voce === 'nolo' && a.zonaGls) return `Pacchi ${pesi}: GLS chiede il prezzo della tua zona ${a.zonaGls}${Number.isFinite(a.valGls) ? ` (${euro(a.valGls)})` : ''}, per Moove sono zona ${a.zona}. GLS li tassa come ${a.zonaGls}: sono quelle località da aggiungere alla zona ${a.zonaGls}, non il prezzo da cambiare.`
+  if (a.voce === 'nolo') return `Nolo ${pesi}: nel listino ${euro(a.valListino)}, GLS chiede ${euro(a.valGls)}.`
+  if (a.voce === 'contrassegno') return `Diritto di contrassegno: nel listino ${euro(a.valListino)}, GLS chiede ${euro(a.valGls)}.`
+  if (a.voce === 'carburante') return `Carburante: in questa zona il listino non ne ha, GLS lo mette (${pct(a.valGls)} sul nolo).`
+  return `Altre differenze ${pesi} (supplementi del listino che GLS non chiede, o il contrario): in media ${euro(r2(a.euro / a.n))} a spedizione.`
+}
 const dataIt = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleDateString('it-IT') : ''
 // Il numero della fattura BRT si scrive "n. 68967"; quello del documento GLS è già una frase.
 const nDoc = (x: string) => /^\d/.test(x) ? `n. ${x}` : x
@@ -123,7 +135,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   async function apriFattura(id: string) {
     const d = await fetch('/api/fatture-corriere/storico?fattura=' + id).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
     if (d.error) { await dialog.alert({ title: 'Fattura non aperta', message: d.error }); return }
-    setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setRettificheInviate(!!d.fattura.rettifiche_file_id); setEtichettaAperta(d.fattura.etichetta || null)
+    setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setEtichettaAperta(d.fattura.etichetta || null)
+    // Mandate col pulsante, o già girate con un file proprio dalla pagina Rettifica.
+    setRettificheInviate(!!d.fattura.rettifiche_file_id || !!d.fattura.riepilogo?.rettificheEsterne?.ids?.length)
     setLegenda(d.fattura.riepilogo?.legenda || null); setNotePdf([]); setInfoGls(d.fattura.riepilogo?.gls || null); setVoceScelta(null)
     if (d.fattura.corriere_id) setContrattoId(d.fattura.corriere_id)
     // Le fatture salvate prima del 02/11 hanno il peso tassato senza l'arrotondamento di BRT: si rifà qui dai
@@ -233,7 +247,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     setInfoGls(info); setNomeFile(pdf.name)
     setAvvisi([...(d.errori || []), ...(d.avvisi || [])]); setPagina(1); setFiltro('perdita'); setCerca('')
     const righe = righeControlloGls({ al: d.al, cliente: d.cliente, righe: d.righe.map(espandiRigaGls),
-      contratti: d.contratti.map((c: any) => ({ codice: c.codice, percentualeCarburante: c.percentuale })) }, d.numero)
+      contratti: d.contratti.map((c: any) => ({ codice: c.codice, percentualeCarburante: c.percentuale, carburante: c.carburante })) }, d.numero)
     await controlla(righe, { numeroFattura: d.numero, dataFattura: d.al, nomeFile: pdf.name, gls: info })
   }
 
@@ -295,6 +309,30 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     }
     return Array.from(g.values()).filter(v => v.n >= 3).sort((a, b) => Math.abs(b.tariffa) - Math.abs(a.tariffa))
   }, [trovate])
+
+  // GLS, LISTINO PER LISTINO (lib/fattura-gls, AllineaGls): quale listino, quale zona, quale voce, cosa c'è
+  // scritto e cosa chiede GLS. "Italia fino a 5 kg: più alto di 1,80 €" non diceva a Wave quale dei suoi tre
+  // listini GLS toccare né cosa scriverci (Lorenzo, 25/11). Qui niente soglia di tre spedizioni: una voce del
+  // listino sbagliata lo è anche su un pacco solo. I documenti salvati prima non hanno il dettaglio: per quelli
+  // resta la tabella per zona e fascia.
+  const allineareGls = useMemo(() => {
+    if (!gls || !trovate.some(e => e.allinea) && trovate.some(e => Math.abs(e.scartoListino ?? 0) >= 0.01)) return null
+    const g = new Map<string, GruppoAllinea>()
+    for (const e of trovate) for (const p of e.allinea?.parti || []) {
+      const a = e.allinea!
+      // "Altro" ha valori diversi riga per riga: si somma per listino e zona.
+      // Una zona vista diversa da GLS è una riga sola per listino, qualunque sia la fascia di peso.
+      const valori = p.voce === 'altro' || p.zonaGls ? '' : `${p.listino}|${p.gls}`
+      const chiave = [a.listino, a.zona, p.voce, valori, p.zonaGls || ''].join('|')
+      const v = g.get(chiave) || { chiave, listino: a.listino, zona: a.zona, voce: p.voce, valListino: p.listino, valGls: p.gls, zonaGls: p.zonaGls, n: 0, euro: 0, pesoMin: Infinity, pesoMax: 0, luoghi: [] }
+      if (p.zonaGls && Math.abs(v.valGls - p.gls) >= 0.005) v.valGls = NaN   // fasce diverse: prezzi diversi
+      v.n++; v.euro = r2(v.euro + p.euro); v.pesoMin = Math.min(v.pesoMin, a.peso); v.pesoMax = Math.max(v.pesoMax, a.peso)
+      if (a.luogo && v.luoghi.length < 6 && !v.luoghi.includes(a.luogo)) v.luoghi.push(a.luogo)
+      g.set(chiave, v)
+    }
+    return Array.from(g.values()).filter(v => Math.abs(v.euro) >= 0.01).sort((a, b) => Math.abs(b.euro) - Math.abs(a.euro))
+  }, [trovate, gls])
+  const [tuttiAllinea, setTuttiAllinea] = useState(false)
 
   const passa = (e: EsitoControllo, f: Filtro) => {
     if (voceScelta && !e.motivi.some(m => (m.voce || `${m.tipo}:${m.gruppo}`) === voceScelta)) return false
@@ -814,6 +852,34 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
 
           <div style={{ ...carta, padding: '16px 18px', minWidth: 0, overflowX: 'auto' }}>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Cosa allineare nel listino</div>
+            {allineareGls ? (<>
+              <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2, marginBottom: 10 }}>Il tuo listino di oggi contro quello che GLS ha chiesto, allo stesso peso: quale listino, quale voce, cosa c'è scritto e cosa scriverci</div>
+              {allineareGls.length ? (
+                <div>
+                  {(tuttiAllinea ? allineareGls : allineareGls.slice(0, 8)).map(a => (
+                    <div key={a.chiave} style={{ borderTop: `1px solid ${C.filo}`, padding: '9px 0', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13 }}><b>{a.listino || 'Listino'}</b> <span style={{ color: C.attenuato }}>· {a.zona || 'zona ?'}</span></div>
+                        <div style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.4 }}>{descriviAllinea(a)}</div>
+                        {a.luoghi.length > 0 && <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 2, overflowWrap: 'anywhere' }}>{a.n > a.luoghi.length ? 'Per esempio: ' : 'Dove: '}{a.luoghi.join(' · ')}</div>}
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: coloreImporto(a.euro), ...cifre }}>{conSegno(a.euro)}</div>
+                        <div style={{ fontSize: 11.5, color: C.attenuato, ...cifre }}>{a.n} sped.</div>
+                      </div>
+                    </div>
+                  ))}
+                  {allineareGls.length > 8 && (
+                    <button onClick={() => setTuttiAllinea(v => !v)} style={{ background: 'none', border: 'none', padding: '6px 0 0', color: C.testo, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                      {tuttiAllinea ? 'Mostra meno' : `Mostra tutte (${allineareGls.length})`}
+                    </button>
+                  )}
+                </div>
+              ) : <div style={{ fontSize: 13, color: C.attenuato }}>Il tuo listino di oggi dice quello che chiede GLS.</div>}
+              <div style={{ fontSize: 12, color: C.attenuato, marginTop: 10, lineHeight: 1.45 }}>
+                In rosso il listino dice meno di GLS: Moove registra un costo più basso del vero e il margine che leggi è gonfiato. In verde dice di più: il costo in Moove è più alto del vero e il margine sembra più basso. Il confronto è col listino di oggi: se l'hai cambiato dopo queste spedizioni, ti dice se adesso è giusto.
+              </div>
+            </>) : (<>
             <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 2, marginBottom: 12 }}>A parità di peso: scarto medio fra il tuo listino e {cr}, per zona e fascia (almeno 3 spedizioni)</div>
             {allineare.length ? (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -838,6 +904,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             <div style={{ fontSize: 12, color: C.attenuato, marginTop: 10, lineHeight: 1.45 }}>
               "Più basso" vuol dire che il listino ti fa vedere un costo minore di quello vero: il margine che leggi è gonfiato. "Più alto" il contrario.
             </div>
+            </>)}
           </div>
         </div>
 

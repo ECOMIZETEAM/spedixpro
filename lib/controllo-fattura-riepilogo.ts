@@ -2,6 +2,7 @@
  * storico): stessa funzione, così il totale salvato nello storico è quello che il detentore ha visto.
  * Niente database qui: gira nel browser e sul server. */
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
+import type { AllineaGls } from '@/lib/fattura-gls'
 
 export type MotivoPagina = { tipo: 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile' | 'carburante' | 'storico'; importo: number; testo: string
   voce?: string; gruppo?: 'contestare' | 'clienti' | 'chiarire' | 'listino' }
@@ -11,6 +12,7 @@ export type EsitoPagina = {
   abbinataPer: 'riferimento' | 'segnacollo' | null
   brt: number; moove: number | null; listino: number | null; zona: string | null; differenza: number | null
   scartoListino?: number | null
+  allinea?: AllineaGls
   motivi: MotivoPagina[]; voci: Record<string, number>
 }
 
@@ -56,5 +58,9 @@ export function riepilogaFattura(esiti: EsitoPagina[]) {
 // UNA FATTURA RESTA NELLO STORICO SOLO SE CI SI È FATTO QUALCOSA (Lorenzo, 02/11): differenze mandate alla
 // Rettifica, oppure il file di rettifiche scaricato per un altro gestionale. Caricata e guardata e basta
 // impiccia: non compare, si può ricaricare da capo, e il caricamento successivo la toglie.
+// Conta anche la Rettifica fatta FUORI dal pulsante (`rettificheEsterne`: le rettifiche del detentore sulle
+// spedizioni della fattura): il 24/11 Wave ha girato le 25 differenze della BRT 74855 caricando un suo file nella
+// pagina Rettifica, e il 25/11 il caricamento dell'allegato GLS ha tolto la 74855 dallo storico come "senza azioni".
 export const fatturaConAzioni = (f: { rettifiche_file_id?: string | null; riepilogo?: any } | null | undefined) =>
-  !!f && (!!f.rettifiche_file_id || (Array.isArray(f.riepilogo?.fileEsterni) && f.riepilogo.fileEsterni.length > 0))
+  !!f && (!!f.rettifiche_file_id || (Array.isArray(f.riepilogo?.fileEsterni) && f.riepilogo.fileEsterni.length > 0)
+    || (Array.isArray(f.riepilogo?.rettificheEsterne?.ids) && f.riepilogo.rettificheEsterne.ids.length > 0))
