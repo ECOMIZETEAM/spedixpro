@@ -1,4 +1,5 @@
 import { calcolaPrezzoListino, calcolaSupplementiCliente, calcolaPesoFatturato, fattoreVolumeCorriere, calcolaPrezzoCorriereDettaglio, zonaDaProvincia } from '@/lib/pricing'
+import { listiniDopoPartenza, listinoDiPartenza } from '@/lib/prezzi-archivio'
 import { costruisciCatena } from '@/lib/cascata'
 import { catenaDaCorriere } from '@/lib/condivisione-catena'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
@@ -359,10 +360,21 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         let fattoreCliente: number | null = null
         let zonaCliente: string | null = null
         let fatturatoCliente: number | null = null
-        if (cl?.listino_cliente_id) {
-          const ris = await calcolaPrezzoListino(admin, {
-            listinoId: cl.listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest, zonaForzata,
-          })
+        // Dopo la partenza si paga sempre (lib/prezzi-archivio.ts): il listino di oggi, poi quello con
+        // cui il pacco e' partito; per ognuno i prezzi vivi o, a contratto tolto, quelli archiviati.
+        // Il primo che prezza il collo ripesato e' il listino della rettifica: contrassegno e
+        // assicurazione si ricalcolano sullo stesso. Prima, a contratto tolto, la rettifica del cliente
+        // non si scriveva e la differenza restava al master.
+        const listiniCli = listiniDopoPartenza(cl?.listino_cliente_id, { listino_cliente_id: await listinoDiPartenza(admin, s) })
+        if (listiniCli.length) {
+          let ris: Awaited<ReturnType<typeof calcolaPrezzoListino>> = null
+          let listinoRett = listiniCli[0]
+          for (const l of listiniCli) {
+            ris = await calcolaPrezzoListino(admin, {
+              listinoId: l, corriereId: s.corriere_id, packages: pk, ...dest, zonaForzata, dopoPartenza: true,
+            })
+            if (ris) { listinoRett = l; break }
+          }
           if (ris) {
             zone.push(ris.zona)
             zonaCliente = ris.zona ?? null
@@ -380,10 +392,10 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
             // dentro la stessa funzione. La fee si RICALCOLA sul nolo nuovo, come fa la creazione,
             // perche' certi scaglioni sono in percentuale sul nolo.
             const sup = await calcolaSupplementiCliente(admin, {
-              listinoId: cl.listino_cliente_id, corriereId: s.corriere_id,
+              listinoId: listinoRett, corriereId: s.corriere_id,
               contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
               valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo,
-              pesoReale: Number(s.peso_reale || 0),
+              pesoReale: Number(s.peso_reale || 0), dopoPartenza: true,
             })
             // `disponibile: false` NON e' "fee zero", e' "non so quanto vale": quel listino non
             // prezza contrassegno o assicurazione per quel contratto, e la funzione lo dice cosi',
@@ -478,13 +490,20 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         let volumeCliente: number | null = null
         let fattoreCliente: number | null = null
         let fatturatoCliente: number | null = null
-        if ((cl as any)?.listino_cliente_id) {
-          const ris = await calcolaPrezzoListino(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, packages: pk, ...dest })
+        // Dopo la partenza si paga sempre: stessa sequenza di listini del ramo d'albero (sopra).
+        const listiniCli = listiniDopoPartenza((cl as any)?.listino_cliente_id, { listino_cliente_id: await listinoDiPartenza(admin, s) })
+        if (listiniCli.length) {
+          let ris: Awaited<ReturnType<typeof calcolaPrezzoListino>> = null
+          let listinoRett = listiniCli[0]
+          for (const l of listiniCli) {
+            ris = await calcolaPrezzoListino(admin, { listinoId: l, corriereId: s.corriere_id, packages: pk, ...dest, dopoPartenza: true })
+            if (ris) { listinoRett = l; break }
+          }
           if (ris) {
             volumeCliente = arrotonda(Number(ris.peso_volume) || 0)
             fattoreCliente = Number(ris.fattore_volume) || null
             fatturatoCliente = Number(ris.peso_fatturato) > 0 ? arrotonda(Number(ris.peso_fatturato)) : null
-            const sup = await calcolaSupplementiCliente(admin, { listinoId: (cl as any).listino_cliente_id, corriereId: s.corriere_id, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
+            const sup = await calcolaSupplementiCliente(admin, { listinoId: listinoRett, corriereId: s.corriere_id, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0), dopoPartenza: true })
             if (sup.disponibile) {
               const acc = Array.isArray(s.servizi_accessori) ? s.servizi_accessori.reduce((a: number, x: any) => a + (Number(x?.importo) || 0), 0) : 0
               dovuto = arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione + acc)
@@ -507,11 +526,12 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto)
           pag = arrotonda(pagatoPerCliente.get(liv.ledgerClienteId) || 0)
           if ((lc as any)?.listino_cliente_id && corrVend) {
-            const ris = await calcolaPrezzoListino(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, packages: pk, ...dest })
+            // Il ledger e' un cliente del venditore: a contratto tolto dal suo listino, prezzi archiviati.
+            const ris = await calcolaPrezzoListino(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, packages: pk, ...dest, dopoPartenza: true })
             if (ris) {
               volume = arrotonda(Number(ris.peso_volume) || 0)
               fattore = Number(ris.fattore_volume) || null
-              const sup = await calcolaSupplementiCliente(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0) })
+              const sup = await calcolaSupplementiCliente(admin, { listinoId: (lc as any).listino_cliente_id, corriereId: corrVend, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), valoreMerce: Number(s.valore_merce || 0), nolo: ris.prezzo, pesoReale: Number(s.peso_reale || 0), dopoPartenza: true })
               dovuto = sup.disponibile ? arrotonda(ris.prezzo + sup.contrassegno + sup.assicurazione) : arrotonda(ris.prezzo)
             } else catenaCompleta = false
           } else catenaCompleta = false

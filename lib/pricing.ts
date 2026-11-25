@@ -11,6 +11,7 @@
 
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
+import { archivioSeTolto } from '@/lib/prezzi-archivio'
 import { leggiZoneCap } from '@/lib/zone-cap'
 import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
 import { leggiSupplementiMulticollo, noloMulticolloDaFasce, pesoMulticolloFornitore, zonaMulticolloDi, TIPO_MULTICOLLO_SUPPLEMENTI, type EsitoMulticollo } from '@/lib/multicollo-zone'
@@ -622,6 +623,11 @@ export async function calcolaPrezzoListino(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
+    // SOLO eventi DOPO LA PARTENZA (reso, giacenza, rettifica), e solo col client di servizio: se il
+    // listino non ha piu' nessuna fascia di `corriereId` (contratto tolto), si prezza con le sue righe
+    // archiviate (lib/prezzi-archivio.ts). La creazione, i preventivi e ogni porta che vende non lo
+    // passano mai: per loro un contratto tolto resta tolto.
+    dopoPartenza?: boolean
   }
 ): Promise<RisultatoPrezzo> {
   const { listinoId, provincia } = params
@@ -632,12 +638,17 @@ export async function calcolaPrezzoListino(
   const { data: listino } = await supabase
     .from('listini_clienti').select('fattore_volume,solo_peso_reale,master_id').eq('id', listinoId).single()
   let fattore = parseFloat(listino?.fattore_volume) || 5000
+  const arch = params.dopoPartenza && params.corriereId
+    ? await archivioSeTolto(supabase, listinoId, params.corriereId)
+    : null
   // Override PER-CORRIERE (come nel listino corriere): il peso fatturato deve usare lo stesso fattore.
   if (params.corriereId) {
     const { data: agg } = await supabase.from('listini_clienti_corrieri')
       .select('fattore_volume').eq('listino_id', listinoId).eq('corriere_id', params.corriereId).maybeSingle()
     const fv = parseFloat(agg?.fattore_volume)
+    const fvArch = parseFloat(arch?.aggancio?.fattore_volume)
     if (fv > 0) fattore = fv
+    else if (fvArch > 0) fattore = fvArch
   }
 
   // UNA FUNZIONE SOLA, non una copia qui e una piu' giu'.
@@ -660,6 +671,19 @@ export async function calcolaPrezzoListino(
     .select('*, zone(id,nome,su_mittente,multicollo)')
     .eq('listino_id', listinoId)
     .order('peso_max', { ascending: true }).order('id', { ascending: true }))
+
+  // Contratto tolto dal listino, evento dopo la partenza: le sue fasce archiviate tornano nel calcolo,
+  // insieme a quelle vive degli altri contratti (servono uguali per le zone esclusive e il match).
+  // Le zone si attaccano a mano: l'archivio non ha il legame con `zone` che la lettura incorpora.
+  if (arch) {
+    const zonaIds = Array.from(new Set(arch.fasce.map((f: any) => f.zona_id).filter(Boolean)))
+    const { data: zoneA } = zonaIds.length
+      ? await supabase.from('zone').select('id,nome,su_mittente,multicollo').in('id', zonaIds)
+      : { data: [] as any[] }
+    const perZona = new Map((zoneA || []).map((z: any) => [z.id, z]))
+    for (const f of arch.fasce) fasceLette.push({ ...f, zone: perZona.get(f.zona_id) ?? null })
+    fasceLette.sort((a: any, b: any) => (Number(a.peso_max) - Number(b.peso_max)) || String(a.id).localeCompare(String(b.id)))
+  }
 
   if (!fasceLette?.length) return null
   // Il contratto si legge una volta, non una per fascia (vedi attaccaCorrieri). Lettura fallita =
@@ -762,7 +786,12 @@ export async function calcolaPrezzoListino(
         .eq('listino_id', listinoId).in('tipo', [TIPO_MINIMO_COLLO, TIPO_MULTICOLLO_SUPPLEMENTI]).in('corriere_id', idsC),
       regoleMulticollo(idsC),
     ])
-    for (const s of (supM || []) as any[]) {
+    // Contratto tolto: i suoi supplementi multicollo sono quelli archiviati con le fasce.
+    const supMEff = arch
+      ? [...((supM || []) as any[]).filter((s: any) => s.corriere_id !== params.corriereId),
+         ...arch.supplementi.filter((s: any) => s.tipo === TIPO_MINIMO_COLLO || s.tipo === TIPO_MULTICOLLO_SUPPLEMENTI)]
+      : (supM || [])
+    for (const s of supMEff as any[]) {
       if (!supplMCPerCorr.has(s.corriere_id)) supplMCPerCorr.set(s.corriere_id, [])
       supplMCPerCorr.get(s.corriere_id)!.push(s)
       if (s.tipo === TIPO_MINIMO_COLLO) minimoPerCorr.set(s.corriere_id, Math.max(minimoPerCorr.get(s.corriere_id) || 0, minimoACollo([s])))
@@ -858,8 +887,10 @@ export async function calcolaPrezzoListino(
   // controllare una fattura trovava un'altra regola.
   let sponda = 0
   try {
-    const { data: sp } = await supabase.from('listini_clienti_supplementi')
-      .select('descrizione,valore').eq('listino_id', listinoId).eq('corriere_id', miglior.corriereId).eq('tipo', 'sponda').maybeSingle()
+    const sp = arch && miglior.corriereId === params.corriereId
+      ? (arch.supplementi.find((s: any) => s.tipo === 'sponda') ?? null)
+      : (await supabase.from('listini_clienti_supplementi')
+          .select('descrizione,valore').eq('listino_id', listinoId).eq('corriere_id', miglior.corriereId).eq('tipo', 'sponda').maybeSingle()).data
     sponda = importoSponda(sp, pesoRealeSponda(packages, pesoReale))
   } catch {}
 
@@ -1197,7 +1228,8 @@ export async function calcolaPrezzoCorriere(
 // supera il massimo scaglione (il contratto non copre quell'importo).
 export async function calcolaSupplementiCliente(
   supabase: any,
-  params: { listinoId: string; corriereId: string; contrassegno?: number; assicurazione?: number; valoreMerce?: number; nolo: number; pesoReale?: number }
+  // dopoPartenza: come in calcolaPrezzoListino (contratto tolto → supplementi archiviati). Solo rettifiche.
+  params: { listinoId: string; corriereId: string; contrassegno?: number; assicurazione?: number; valoreMerce?: number; nolo: number; pesoReale?: number; dopoPartenza?: boolean }
 ): Promise<{ contrassegno: number; assicurazione: number; disponibile: boolean }> {
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
@@ -1205,12 +1237,15 @@ export async function calcolaSupplementiCliente(
   const nolo = Number(params.nolo) || 0
   if (cod <= 0 && ass <= 0) return { contrassegno: 0, assicurazione: 0, disponibile: true }
 
-  const { data: suppl } = await supabase
-    .from('listini_clienti_supplementi')
-    .select('tipo, descrizione, valore, tipo_calcolo')
-    .eq('listino_id', params.listinoId)
-    .eq('corriere_id', params.corriereId)
-    .in('tipo', ['contrassegno', 'assicurazione'])
+  const arch = params.dopoPartenza ? await archivioSeTolto(supabase, params.listinoId, params.corriereId) : null
+  const suppl = arch
+    ? arch.supplementi.filter((s: any) => s.tipo === 'contrassegno' || s.tipo === 'assicurazione')
+    : (await supabase
+        .from('listini_clienti_supplementi')
+        .select('tipo, descrizione, valore, tipo_calcolo')
+        .eq('listino_id', params.listinoId)
+        .eq('corriere_id', params.corriereId)
+        .in('tipo', ['contrassegno', 'assicurazione'])).data
 
   // STESSA logica a scaglioni condivisa (con banda-peso), ma qui null = contratto NON disponibile
   // (servizio richiesto ma non prezzato, o importo oltre il max della banda peso applicabile).

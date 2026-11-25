@@ -1,9 +1,10 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
-import { noloMaster, noloCliente, noloClienteDopoPartenza, applicaServizio, addebitaResi, resoPagato, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloMaster, noloCliente, noloClienteDopoPartenzaCon, applicaServizio, addebitaResi, resoPagato, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
 import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
+import { archivioCoppia, haFasceVive, listiniDopoPartenza, listinoDiPartenza } from '@/lib/prezzi-archivio'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -184,11 +185,13 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
   const catena = await catenaDaCorriere(admin, full.corriere_id, { master: full.master_id, nomeContratto })
   if (!catena.length) return { addebitato: false, importoCliente: 0 }
   const righe: RigaReso[] = []
-  // CLIENTE finale (originante): nolo dal SUO listino cliente (0 se contratto tolto → vedi noloClienteDopoPartenza).
+  // CLIENTE finale (originante): nolo dal SUO listino cliente, anche a contratto tolto o listino cambiato
+  // (vedi noloClienteDopoPartenzaCon); la percentuale dallo stesso listino (listino_id).
   if (full.cliente_id) {
     const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', full.cliente_id).maybeSingle()
+    const n = await noloClienteDopoPartenzaCon(admin, full, (cli as any)?.listino_cliente_id)
     righe.push({ spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id, corriere_id: full.corriere_id,
-      nolo: await noloClienteDopoPartenza(admin, full, (cli as any)?.listino_cliente_id), da_giacenza: daGiacenza })
+      nolo: n.nolo, listino_id: n.listinoId, da_giacenza: daGiacenza })
   }
   for (const liv of catena) {
     if (liv.ruolo === 'codice' && liv.ledgerClienteId && liv.fornitore) {
@@ -268,11 +271,13 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
 
   if (full.cliente_id) {
     const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', full.cliente_id).maybeSingle()
+    // Dopo la partenza si paga sempre: contratto tolto o listino cambiato non azzerano il reso
+    // (noloClienteDopoPartenzaCon). La percentuale dallo stesso listino del nolo (listino_id).
+    const n = await noloClienteDopoPartenzaCon(admin, full, cli?.listino_cliente_id)
     righe.push({
       spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id,
       corriere_id: full.corriere_id,
-      // Contratto tolto dal listino del cliente = nolo 0: vedi noloClienteDopoPartenza.
-      nolo: await noloClienteDopoPartenza(admin, full, cli?.listino_cliente_id),
+      nolo: n.nolo, listino_id: n.listinoId,
       da_giacenza: daGiacenza,
     })
   }
@@ -433,19 +438,41 @@ export async function catenaContratto(
 const OP_LABEL: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_nuovo: 'Riconsegna a nuovo destinatario', reso: 'Reso al mittente' }
 
 // Prezzo giacenza dal listino del CLIENTE (apertura + servizio dell'operazione) per un corriere.
-async function prezzoGiacenzaClienteListino(admin: any, clienteId: string, corriereId: string, operazione: string): Promise<{ apertura: number; servizio: number }> {
+// Dopo la partenza si paga sempre (lib/prezzi-archivio.ts): il listino di oggi, poi quello con cui il
+// pacco e' partito (`spedizioneId`, solo per il cliente finale); per ognuno i supplementi vivi se il
+// listino prezza ancora il contratto, altrimenti quelli archiviati quando e' stato tolto.
+async function prezzoGiacenzaClienteListino(admin: any, clienteId: string, corriereId: string, operazione: string, spedizioneId?: string): Promise<{ apertura: number; servizio: number }> {
   const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', clienteId).maybeSingle()
-  if (!cli?.listino_cliente_id) return { apertura: 0, servizio: 0 }
-  let q = admin.from('listini_clienti_supplementi').select('id,tipo,nome,valore')
-    .eq('listino_id', cli.listino_cliente_id).in('tipo', ['giacenza', 'giacenza_apertura']).order('id', { ascending: true })
-  if (corriereId) q = q.eq('corriere_id', corriereId)
-  const { data: suppl } = await q
-  let apertura = 0, servizio = 0, aSet = false, sSet = false
-  for (const s of (suppl || [])) {
-    if (s.tipo === 'giacenza_apertura') { if (!aSet) { apertura = Number(s.valore) || 0; aSet = true } continue }
-    if (chiaveServizio(s.nome) === operazione && !sSet) { servizio = Number(s.valore) || 0; sSet = true }
+  const daRighe = (suppl: any[]) => {
+    let apertura = 0, servizio = 0, aSet = false, sSet = false
+    for (const s of suppl) {
+      if (s.tipo === 'giacenza_apertura') { if (!aSet) { apertura = Number(s.valore) || 0; aSet = true } continue }
+      if (chiaveServizio(s.nome) === operazione && !sSet) { servizio = Number(s.valore) || 0; sSet = true }
+    }
+    return { apertura, servizio }
   }
-  return { apertura, servizio }
+  const vive = async (listinoId: string) => {
+    let q = admin.from('listini_clienti_supplementi').select('id,tipo,nome,valore')
+      .eq('listino_id', listinoId).in('tipo', ['giacenza', 'giacenza_apertura']).order('id', { ascending: true })
+    if (corriereId) q = q.eq('corriere_id', corriereId)
+    const { data: suppl } = await q
+    return daRighe(suppl || [])
+  }
+  if (corriereId) {
+    const partenza = spedizioneId ? await listinoDiPartenza(admin, { id: spedizioneId }) : null
+    for (const l of listiniDopoPartenza(cli?.listino_cliente_id, { listino_cliente_id: partenza })) {
+      if (await haFasceVive(admin, l, corriereId)) return vive(l)
+      const arch = await archivioCoppia(admin, l, corriereId)
+      if (arch) {
+        return daRighe(arch.supplementi
+          .filter((s: any) => s.tipo === 'giacenza' || s.tipo === 'giacenza_apertura')
+          .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id))))
+      }
+    }
+  }
+  // Nessun listino prezza piu' il contratto: come prima, quello che c'e' nel listino di oggi.
+  if (!cli?.listino_cliente_id) return { apertura: 0, servizio: 0 }
+  return vive(cli.listino_cliente_id)
 }
 
 type SpedGiac = { id: string; numero: string; cliente_id: string | null; master_id: string; corriere_id: string; giacenza_apertura_addebitata?: boolean; tracking_number?: string | null }
@@ -492,7 +519,7 @@ export async function pianoAperturaGiacenzaCondivisione(admin: any, originanteId
   if (!catena.length) throw new Error('fila del contratto interrotta: apertura giacenza rimandata')
   const piano: VoceGiacenza[] = []
   if (o.cliente_id) {
-    const pr = await prezzoGiacenzaClienteListino(admin, o.cliente_id, o.corriere_id, 'riconsegna')
+    const pr = await prezzoGiacenzaClienteListino(admin, o.cliente_id, o.corriere_id, 'riconsegna', o.id)
     if (pr.apertura > 0) piano.push({ cliente: { masterId: o.master_id, clienteId: o.cliente_id }, importo: pr.apertura })
   }
   for (const liv of catena) {
@@ -566,7 +593,7 @@ export async function addebitaAperturaGiacenza(sped: SpedGiac): Promise<void> {
   // Ponte senza altre gambe (dati incompleti): niente catena da cui addebitare, come prima.
   if ((corr as any)?.tipo === 'moovexpress') return
   if (sped.cliente_id) {
-    const pr = await prezzoGiacenzaClienteListino(admin, sped.cliente_id, sped.corriere_id, 'riconsegna')
+    const pr = await prezzoGiacenzaClienteListino(admin, sped.cliente_id, sped.corriere_id, 'riconsegna', sped.id)
     if (pr.apertura > 0) {
       try {
         await registraMovimento(admin, { masterId: sped.master_id, clienteId: sped.cliente_id, tipo: 'giacenza',

@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloClienteDopoPartenzaCon, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { gambePerTracking } from '@/lib/condivisione-catena'
 import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi } from '@/lib/distinte-resi'
@@ -103,10 +103,11 @@ export async function POST(req: NextRequest) {
     const righe: RigaReso[] = []
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
+      // Dopo la partenza si paga sempre (noloClienteDopoPartenzaCon): la percentuale dallo stesso listino.
+      const n = await noloClienteDopoPartenzaCon(admin, s, cli?.listino_cliente_id)
       righe.push({
         spedizione_id: s.id, cliente_id: clienteId, master_owner_id: mio, corriere_id: s.corriere_id || null,
-        // Contratto tolto dal listino del cliente = nolo 0: vedi noloClienteDopoPartenza.
-        nolo: await noloClienteDopoPartenza(admin, s, cli?.listino_cliente_id),
+        nolo: n.nolo, listino_id: n.listinoId,
       })
     }
     // La percentuale, la guardia contro il doppio addebito (compreso il reso già pagato allo

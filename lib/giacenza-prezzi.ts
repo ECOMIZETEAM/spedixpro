@@ -8,6 +8,7 @@
 // Il calcolo deve essere UNO solo, per il portale e per l'API.
 
 import { noloClienteDopoPartenza } from '@/lib/reso-prezzi'
+import { archivioCoppia, haFasceVive, listiniDopoPartenza, listinoDiPartenza } from '@/lib/prezzi-archivio'
 
 // Mappa i nomi dei servizi giacenza del listino sulle 3 operazioni
 export function chiaveServizio(nome: string): string | null {
@@ -22,11 +23,16 @@ export const prezziVuoti = () => ({ apertura: 0, servizi: { riconsegna: { valore
 
 // Legge i prezzi giacenza da un listino CLIENTE (o agente, che è un listino cliente assegnato).
 export async function leggiPrezziDaListino(admin: any, listinoId: string | null | undefined, corriereId: string | null) {
-  const out = prezziVuoti()
-  if (!listinoId) return out
+  if (!listinoId) return prezziVuoti()
   let q = admin.from('listini_clienti_supplementi').select('tipo,nome,valore,descrizione,corriere_id').eq('listino_id', listinoId).in('tipo', ['giacenza', 'giacenza_apertura'])
   if (corriereId) q = q.eq('corriere_id', corriereId)
   const { data: suppl } = await q.order('id', { ascending: true })   // duplicati: vince il primo, come sopra
+  return prezziDaRighe(suppl || [])
+}
+
+// Le righe giacenza di un listino (vive o archiviate), gia' in ordine di id, nei prezzi delle 3 operazioni.
+function prezziDaRighe(suppl: any[]) {
+  const out = prezziVuoti()
   let aperturaSet = false
   const servizioSet: Record<string, boolean> = {}
   for (const s of (suppl || [])) {
@@ -42,13 +48,31 @@ export async function leggiPrezziDaListino(admin: any, listinoId: string | null 
 }
 
 // Legge i prezzi giacenza dal listino del cliente della spedizione (prezzo CLIENTE).
+// Dopo la partenza si paga sempre (lib/prezzi-archivio.ts): il listino di oggi, poi quello con cui il
+// pacco e' partito; per ognuno i supplementi vivi se il listino prezza ancora il contratto, altrimenti
+// quelli archiviati quando e' stato tolto. Stesso ordine del nolo (noloClienteDopoPartenza).
 export async function leggiPrezzi(admin: any, sped: any) {
   const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  return leggiPrezziDaListino(admin, cliente?.listino_cliente_id, sped.corriere_id)
+  const oggi = cliente?.listino_cliente_id
+  if (sped?.corriere_id) {
+    const partenza = await listinoDiPartenza(admin, sped)
+    for (const l of listiniDopoPartenza(oggi, { listino_cliente_id: partenza })) {
+      if (await haFasceVive(admin, l, sped.corriere_id)) return leggiPrezziDaListino(admin, l, sped.corriere_id)
+      const arch = await archivioCoppia(admin, l, sped.corriere_id)
+      if (arch) {
+        const righe = arch.supplementi
+          .filter((s: any) => s.tipo === 'giacenza' || s.tipo === 'giacenza_apertura')
+          .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id)))
+        return prezziDaRighe(righe)
+      }
+    }
+  }
+  // Nessun listino prezza piu' il contratto: come prima, quello che c'e' nel listino di oggi.
+  return leggiPrezziDaListino(admin, oggi, sped.corriere_id)
 }
 
 // RIPIEGO per le spedizioni SENZA cliente (del master stesso): quanto era costata l'andata. Per un
-// cliente non si usa piu': se il suo listino non da' il nolo, paga zero (noloClienteDopoPartenza).
+// cliente non si usa piu': il nolo viene dal suo listino, anche a contratto tolto (noloClienteDopoPartenza).
 //
 // ATTENZIONE — qui c'era una trappola di unita' di misura. `spedizioni.assicurazione` NON e' la
 // commissione dell'assicurazione: e' il VALORE dichiarato della merce (lo stesso numero che parte
@@ -68,8 +92,8 @@ export function noloBase(sped: any) {
 export async function noloClienteSpedizione(admin: any, sped: any): Promise<number> {
   if (!sped?.cliente_id) return noloBase(sped)
   const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  // Contratto tolto dal listino del cliente = nolo 0 (niente ripiego sul prezzo pieno): vedi
-  // noloClienteDopoPartenza. Senza cliente (spedizione del master stesso) resta il ripiego sopra.
+  // Dal listino, anche a contratto tolto o listino cambiato (noloClienteDopoPartenza); mai il ripiego sul
+  // prezzo pieno, che ha dentro le commissioni. Senza cliente (spedizione del master) resta il ripiego sopra.
   return noloClienteDopoPartenza(admin, sped, cliente?.listino_cliente_id)
 }
 

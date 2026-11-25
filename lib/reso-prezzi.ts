@@ -1,4 +1,5 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
+import { listiniDopoPartenza, listinoDiPartenza } from '@/lib/prezzi-archivio'
 
 // QUANTO COSTA UN RESO — una regola sola, per tutti e due i modi in cui un reso nasce.
 //
@@ -85,7 +86,8 @@ export async function pacchiVeri(admin: any, sped: any): Promise<any[]> {
 // percentuale della fascia stessa e non un servizio a parte). Niente contrassegno, niente
 // assicurazione, niente sponda: il pacco torna indietro e basta, non c'è niente da incassare, da
 // assicurare o da scaricare con la sponda — quei supplementi il cliente li ha già pagati all'andata.
-// null se non calcolabile.
+// null se non calcolabile. E' sempre un conto DOPO la partenza: se il contratto e' stato tolto da quel
+// listino, il motore usa i suoi prezzi archiviati (lib/prezzi-archivio.ts).
 export async function noloCliente(admin: any, sped: any, listinoId: string | null | undefined): Promise<number | null> {
   if (!listinoId) return null
   const ris = await calcolaPrezzoListino(admin, {
@@ -96,6 +98,7 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
     citta: sped?.dest_citta || '',   // CAP condivisi fra piu' comuni
     packages: await pacchiVeri(admin, sped),
     corriereId: sped?.corriere_id,
+    dopoPartenza: true,
   })
   if (!ris || !(ris.prezzo > 0)) return null
   // Il motore somma la sponda al prezzo di fascia: si toglie quella che ha sommato lui (ris.sponda).
@@ -104,22 +107,39 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
   return Math.max(0, r2(ris.prezzo - (Number(ris.sponda) || 0))) || null
 }
 
-// IL NOLO DEL CLIENTE PER CIO' CHE SUCCEDE DOPO LA PARTENZA (reso, riconsegna, nuovo destinatario):
-// dal listino che il cliente ha OGGI. Se da li' non esce, al cliente non si addebita niente.
+// IL NOLO DEL CLIENTE PER CIO' CHE SUCCEDE DOPO LA PARTENZA (reso, riconsegna, nuovo destinatario).
 //
-// Prima, in quattro punti, si ripiegava su quanto aveva pagato l'andata (costo_totale): dentro ci
-// sono la commissione contrassegno e l'assicurazione, che su un ritorno non si pagano mai. Caso
-// vero del 18/09/2026, NN668406880: il 17/09 il master aveva tolto il contratto dal listino del
-// cliente, il reso del giorno dopo non trovava fasce e gli ha addebitato 17,41 EUR — nolo piu'
-// commissione su 407 EUR di contrassegno.
-// La regola (Lorenzo, 18/09): contratto CANCELLATO dal listino del cliente = al cliente non si
-// addebita niente; lo assorbe il master che l'ha cancellato, come gia' succede per le rettifiche.
-// PAUSA e "nascosto per quel cliente" non toccano le fasce (valgono solo quando si offrono le
-// tariffe in creazione), quindi li' il nolo si ricalcola normalmente.
-// Il reso resta comunque registrato: con nolo 0 fn_addebita_resi scrive al cliente una riga a
-// -0 EUR, e la catena sopra paga ciascuno il proprio nolo come sempre.
-export async function noloClienteDopoPartenza(admin: any, sped: any, listinoId: string | null | undefined): Promise<number> {
-  return (await noloCliente(admin, sped, listinoId)) ?? 0
+// Regola di Lorenzo del 25/11/2026: dopo la partenza SI PAGA SEMPRE, anche se il master ha tolto il
+// contratto dal listino del cliente o l'ha spostato su un altro listino. Si prova, in ordine:
+//   1. il listino che il cliente ha oggi (come sempre);
+//   2. il listino con cui il pacco e' partito, se e' un altro (spedizioni.listino_cliente_id);
+// e per ognuno i prezzi vivi o, se il contratto e' stato tolto, quelli archiviati.
+//
+// Sostituisce la regola del 18/09 ("contratto tolto = al cliente niente, lo assorbe il master"),
+// nata da un caso vero che resta valido: NN668406880, il 17/09 il master aveva tolto il contratto
+// dal listino del cliente e il reso del giorno dopo, non trovando fasce, ripiego' su quanto pagato
+// all'andata (costo_totale) e gli addebito' 17,41 EUR — nolo PIU' commissione su 407 EUR di
+// contrassegno. Il ripiego sull'andata resta vietato: si prezza dal listino, con le sue fasce.
+// Solo se nessun listino prezza piu' il contratto il nolo vale 0 e il cliente ha la sua riga a -0 EUR
+// (fn_addebita_resi): sono i casi che il controllo giornaliero elenca, da addebitare a mano.
+//
+// `listinoId` dice da quale listino viene il nolo: fn_addebita_resi ne legge la percentuale del reso,
+// che deve venire dallo stesso listino.
+// `opz.spedizioneId`: per chi ha letto la spedizione senza il suo id (resi/distinte) e trovarne comunque
+// il listino di partenza, senza cambiare i colli su cui si calcola il nolo (pacchiVeri guarda sped.id).
+export async function noloClienteDopoPartenzaCon(
+  admin: any, sped: any, listinoOggi: string | null | undefined, opz?: { spedizioneId?: string },
+): Promise<{ nolo: number; listinoId: string | null }> {
+  const partenza = await listinoDiPartenza(admin, opz?.spedizioneId ? { ...sped, id: opz.spedizioneId } : sped)
+  for (const l of listiniDopoPartenza(listinoOggi, { listino_cliente_id: partenza })) {
+    const n = await noloCliente(admin, sped, l)
+    if (n != null) return { nolo: n, listinoId: l }
+  }
+  return { nolo: 0, listinoId: null }
+}
+
+export async function noloClienteDopoPartenza(admin: any, sped: any, listinoOggi: string | null | undefined): Promise<number> {
+  return (await noloClienteDopoPartenzaCon(admin, sped, listinoOggi)).nolo
 }
 
 
@@ -164,6 +184,7 @@ export type RigaReso = {
   nolo: number
   pagato?: number                     // ripiego se il reso non e' configurato nel suo listino
   da_giacenza?: boolean               // e' lo svincolo stesso a chiamare: la guardia non si applica
+  listino_id?: string | null          // SOLO riga cliente: il listino da cui viene il nolo, e quindi la percentuale
 }
 
 // 'costo_fornitore_gia_registrato': la riga del titolare non si scrive perche' il corriere gli ha gia'

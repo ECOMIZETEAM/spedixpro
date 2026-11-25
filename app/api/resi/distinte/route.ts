@@ -4,7 +4,7 @@ import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib/agente'
-import { noloClienteDopoPartenza, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
+import { noloClienteDopoPartenzaCon, noloMaster, addebitaResi, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { pacchiGiaInDistintaResi, prossimoNumeroDistintaResi, FILTRO_SENZA_DOPPIONI } from '@/lib/distinte-resi'
 
@@ -299,13 +299,14 @@ export async function POST(req: NextRequest) {
     const { data: sp } = await supabase.from('spedizioni')
       .select('costo_totale,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id')
       .eq('id', v.id).single()
+    // Dopo la partenza si paga sempre (noloClienteDopoPartenzaCon): la percentuale dallo stesso listino.
+    const n = await noloClienteDopoPartenzaCon(adminDb, sp, cliRec?.listino_cliente_id, { spedizioneId: v.id })
     righeCli.push({
       spedizione_id: v.id,
       cliente_id: clienteId,
       master_owner_id: utente!.master_id!,
       corriere_id: sp?.corriere_id || null,
-      // Contratto tolto dal listino del cliente = nolo 0: vedi noloClienteDopoPartenza.
-      nolo: await noloClienteDopoPartenza(adminDb, sp, cliRec?.listino_cliente_id),
+      nolo: n.nolo, listino_id: n.listinoId,
     })
   }
 
