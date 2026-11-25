@@ -285,7 +285,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   }
 
   // Le righe a pacchetti verso il server, che le confronta e le salva nello storico. Uguale per BRT e GLS.
-  async function controlla(righe: RigaFatturaBrt[], testata: { numeroFattura: string; dataFattura: string | null; nomeFile: string; legenda?: Record<string, string>; gls?: InfoGls }) {
+  async function controlla(righe: RigaFatturaBrt[], testata: { numeroFattura: string; dataFattura: string | null; nomeFile: string; legenda?: Record<string, string>; gls?: InfoGls }, rifai = false) {
     const tutti: EsitoControllo[] = []
     const inizio = Date.now()
     let id: string | null = null
@@ -295,13 +295,22 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(id
           ? { fatturaId: id, righe: righe.slice(i, i + PACCHETTO) }
-          : { contrattoId, righe: righe.slice(i, i + PACCHETTO), testata }),
+          : { contrattoId, righe: righe.slice(i, i + PACCHETTO), testata, ...(rifai ? { rifai: true } : {}) }),
       })
       const d: any = await res.json().catch(() => ({ error: 'Risposta non valida' }))
-      // La stessa fattura già controllata non si rifà: si riapre quella salvata.
+      // La stessa fattura già controllata, con qualcosa già fatto: si sceglie se riaprire quella salvata o rifarla
+      // con le regole di oggi. Prima si riapriva e basta: il 25/11 Wave aveva l'allegato GLS di ottobre salvato
+      // prima delle correzioni del giorno e non c'era modo di rifarlo.
       if (d.giaCaricata) {
         setAvanz(null)
-        await dialog.alert({ title: 'Fattura già caricata', message: `${gls ? 'Il documento' : 'La fattura'} ${nDoc(testata.numeroFattura)} l'hai già controllat${gls ? 'o' : 'a'} il ${new Date(d.giaCaricata.il).toLocaleDateString('it-IT')}: l${gls ? 'o' : 'a'} riapro.` })
+        const doc = `${gls ? 'Il documento' : 'La fattura'} ${nDoc(testata.numeroFattura)}`
+        const rifare = await dialog.confirm({
+          title: `${gls ? 'Documento già controllato' : 'Fattura già controllata'}`,
+          message: `${doc} l'hai già controllat${gls ? 'o' : 'a'} il ${new Date(d.giaCaricata.il).toLocaleDateString('it-IT')}. Lo riapro com'era, o lo rifaccio con le regole di oggi? `
+            + 'Rifacendolo, quello che hai già fatto resta: le rettifiche già mandate restano collegate, e rimandandole quelle già create vengono saltate.',
+          confirmText: 'Rifallo con le regole di oggi', cancelText: 'Riapri com\'era',
+        })
+        if (rifare && !rifai) return controlla(righe, testata, true)
         await apriFattura(d.giaCaricata.id); return
       }
       // A metà: si ferma e lo dice. Un controllo parziale presentato come completo farebbe credere che
@@ -315,9 +324,10 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       tutti.push(...d.esiti)
       setAvanz({ fatti: Math.min(i + PACCHETTO, righe.length), totale: righe.length, da: inizio, etichetta: 'Confronto la fattura con le tue spedizioni' })
     }
-    // I totali dello storico li rifà il server dalle righe salvate.
-    await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId: id, chiudi: true }) }).catch(() => null)
-    setFatturaId(id); setAvanz(null); setEsiti(tutti)
+    // I totali dello storico li rifà il server dalle righe salvate. Dice anche se le differenze sono già nella
+    // Rettifica (fattura rifatta, o già girate da un file): allora il riquadro mostra com'è andata, non il pulsante.
+    const chiusa: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId: id, chiudi: true }) }).then(r => r.json()).catch(() => null)
+    setFatturaId(id); setAvanz(null); setEsiti(tutti); setRettificheInviate(!!chiusa?.rettificheInviate)
     caricaStorico()
   }
 

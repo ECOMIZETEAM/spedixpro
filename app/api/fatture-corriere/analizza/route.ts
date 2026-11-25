@@ -44,6 +44,7 @@ type Corpo = {
   fatturaId?: string
   testata?: { numeroFattura?: string; dataFattura?: string | null; nomeFile?: string; legenda?: Record<string, string>; gls?: any }
   chiudi?: boolean
+  rifai?: boolean                    // rifare con le regole di oggi una fattura già controllata, tenendo le azioni
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
   legenda?: Record<string, string>   // il PDF aggiunto dopo, a fattura già controllata
@@ -111,7 +112,7 @@ export async function POST(req: NextRequest) {
   // Una fattura già aperta si tocca solo se è del master e di un suo contratto BRT o GLS.
   let fattura: any = null
   if (corpo.fatturaId) {
-    const { data } = await admin.from('fatture_corriere').select('id,master_id,corriere_id,stato,riepilogo').eq('id', corpo.fatturaId).maybeSingle()
+    const { data } = await admin.from('fatture_corriere').select('id,master_id,corriere_id,stato,riepilogo,rettifiche_file_id').eq('id', corpo.fatturaId).maybeSingle()
     if (!data || data.master_id !== u.masterId) return NextResponse.json({ error: 'Fattura non trovata.' }, { status: 404 })
     fattura = data
   }
@@ -161,7 +162,8 @@ export async function POST(req: NextRequest) {
       non_trovate: t.nonTrovate, totale_non_trovate: t.totaleNonTrovate, da_girare: t.daGirare, euro_da_girare: t.euroDaGirare,
       riepilogo: { ...(fattura.riepilogo || {}), perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri, ...(esterne?.length ? { rettificheEsterne: { ids: esterne } } : {}) },
     }).eq('id', fattura.id)
-    return NextResponse.json({ ok: true })
+    // La pagina deve sapere se le differenze sono già nella Rettifica (fattura rifatta, o già girate da un file).
+    return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length })
   }
 
   // ── UN PACCHETTO DI RIGHE ──
@@ -187,7 +189,7 @@ export async function POST(req: NextRequest) {
     // Quelle in corso solo se ferme da più di un giorno (un'altra scheda potrebbe starne caricando una).
     const glsTestata = contratto.tipo === 'gls' ? pulisciGls(corpo.testata?.gls) : null
     const riepilogoIniziale = legendaTestata || glsTestata ? { ...(legendaTestata ? { legenda: legendaTestata } : {}), ...(glsTestata ? { gls: glsTestata } : {}) } : null
-    const { data: sue } = await admin.from('fatture_corriere').select('id,numero_fattura,corriere_id,stato,created_at,rettifiche_file_id,riepilogo').eq('master_id', u.masterId)
+    const { data: sue } = await admin.from('fatture_corriere').select('id,numero_fattura,corriere_id,stato,created_at,rettifiche_file_id,riepilogo,etichetta').eq('master_id', u.masterId)
     const ieri = Date.now() - 86400000
     const candidate = (sue || []).filter((f: any) => !(f.numero_fattura === numero && f.corriere_id === contratto.id) && !fatturaConAzioni(f)
       && (f.stato === 'completa' || new Date(f.created_at).getTime() < ieri))
@@ -203,10 +205,20 @@ export async function POST(req: NextRequest) {
       if (daTogliere.length) await admin.from('fatture_corriere').delete().in('id', daTogliere)
     }
     const esistente = (sue || []).find((f: any) => f.numero_fattura === numero && f.corriere_id === contratto.id)
-    if (esistente?.stato === 'completa' && fatturaConAzioni(esistente)) return NextResponse.json({ giaCaricata: { id: esistente.id, il: esistente.created_at } })
+    // RIFATTA CON LE REGOLE DI OGGI (`rifai`, chiesto dalla pagina dopo "già controllata"): una fattura su cui si
+    // è già fatto qualcosa si rifà, e quello che c'è stato fatto resta. Il 25/11 Wave aveva l'allegato GLS di
+    // ottobre salvato prima delle correzioni del giorno (carburante, listini) e non poteva rifarlo: ricaricando il
+    // PDF la pagina riapriva sempre la copia vecchia. Restano il file delle rettifiche mandate (rettifiche_file_id,
+    // non si tocca), i file scaricati per gli altri gestionali, le rettifiche fatte dalla pagina Rettifica e il nome.
+    const rifai = corpo.rifai === true && !!esistente && fatturaConAzioni(esistente)
+    if (esistente?.stato === 'completa' && fatturaConAzioni(esistente) && !rifai) return NextResponse.json({ giaCaricata: { id: esistente.id, il: esistente.created_at } })
     if (esistente) {
+      // Le azioni restano sempre, anche se il rifacimento si era interrotto a metà e si riprende senza `rifai`.
+      const conAzioni = fatturaConAzioni(esistente)
+      const tenuti = conAzioni ? Object.fromEntries(['fileEsterni', 'rettificheEsterne'].filter(k => esistente.riepilogo?.[k]).map(k => [k, esistente.riepilogo[k]])) : {}
+      const riepilogo = riepilogoIniziale || Object.keys(tenuti).length ? { ...(riepilogoIniziale || {}), ...tenuti } : null
       await admin.from('fatture_corriere_righe').delete().eq('fattura_id', esistente.id)
-      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo: riepilogoIniziale, etichetta: null, completata_at: null,
+      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo, etichetta: conAzioni ? esistente.etichetta ?? null : null, completata_at: null,
         nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId, created_at: new Date().toISOString() }).eq('id', esistente.id)
       fattura = { id: esistente.id, stato: 'in_corso' }
     } else {
