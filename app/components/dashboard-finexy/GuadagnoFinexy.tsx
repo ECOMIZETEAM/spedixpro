@@ -44,44 +44,41 @@ function useLettura(url: string | null) {
   return { d, loading }
 }
 
-// GUADAGNO TOTALE: la scheda nera, la cifra che riassume le voci.
+// GUADAGNO TOTALE: una fascia nera come quella delle spedizioni del mese (Lorenzo 25/11, sul guadagno: «sono veramente
+// brutti»; della fascia del mese: «mi piace questo»). Il totale, quanto resta di ogni euro incassato con la barra, e a
+// destra l'utile netto coi costi di gestione (solo al titolare: la rotta li manda soltanto a lui) o, per gli altri,
+// incassato e costo. Cosa il totale comprende sta nella nota al passaggio del mouse, non in un paragrafo.
+const SPIEGA_TOTALE = 'Spedizioni, rettifiche, rimborsi, resi, giacenze, commissioni, accessori, logistica e canone, senza contare due volte niente e senza i soldi che passano soltanto (ricariche, contrassegni).'
 function Totale({ dal, al }: { dal: string, al: string }) {
   const { d, loading } = useLettura(`${TOTALE}?dal=${dal}&al=${al}`)
-  return (
-    <section className="fx-scheda fx-report fx-report--nera">
-      <div className="fx-testa"><h2>Guadagno totale</h2><span className="fx-chip fx-chip--vetro">tutte le voci</span></div>
-      <div className="fx-report-cifra">{loading ? '…' : eur(Number(d?.guadagno || 0))}</div>
-      <div className="fx-report-sotto">
-        <span>Incassato <b>{loading ? '…' : eur(d?.ricavi || 0)}</b></span>
-        <span>Costo <b>{loading ? '…' : eur(d?.costi || 0)}</b></span>
-      </div>
-      <Margine guadagno={Number(d?.guadagno || 0)} incassato={Number(d?.ricavi || 0)} pronto={!loading} />
-      {/* Solo per il titolare: la rotta manda costiGestione soltanto a lui. */}
-      {!loading && d?.costiGestione !== undefined && (
-        <div className="fx-report-netto">
-          <span>Costi di gestione <b style={{ color: '#FF8A80' }}>{eur(d.costiGestione)}</b></span>
-          <span>Utile netto <b style={{ fontSize: 14, color: Number(d.utileNetto) < 0 ? '#FF8A80' : '#7EE2A0' }}>{eur(d.utileNetto)}</b></span>
-        </div>
-      )}
-      <p className="fx-report-spiega">Spedizioni, rettifiche, rimborsi, resi, giacenze, commissioni, accessori, logistica e canone, senza contare
-        due volte niente e senza i soldi che passano soltanto (ricariche, contrassegni). Accanto e sotto, il dettaglio per voce.</p>
-    </section>
-  )
-}
-
-// QUANTO RESTA di ogni euro incassato: il guadagno diviso l'incassato, con la barra divisa fra costo e guadagno. Sono
-// le due cifre scritte sopra, nient'altro; senza incassato non c'e' una quota da mostrare.
-function Margine({ guadagno, incassato, pronto }: { guadagno: number, incassato: number, pronto: boolean }) {
-  if (!pronto || incassato <= 0) return null
-  const quota = guadagno / incassato * 100
-  const larga = Math.max(0, Math.min(100, quota))
+  const guadagno = Number(d?.guadagno || 0), incassato = Number(d?.ricavi || 0), costo = Number(d?.costi || 0)
+  const quota = incassato > 0 ? guadagno / incassato * 100 : null
   const pct = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'
+  const conNetto = !loading && d?.costiGestione !== undefined
   return (
-    <div className="fx-margine">
-      <div className="fx-margine-testa"><span>Ti resta di ogni euro incassato</span><b style={{ color: quota < 0 ? '#FF8A80' : '#7EE2A0' }}>{pct(quota)}</b></div>
-      <div className="fx-margine-barra" role="img" aria-label={`Guadagno ${pct(quota)} dell'incassato`}><i style={{ width: `${larga}%` }} /></div>
-      <div className="fx-margine-legenda"><span><i className="fx-margine-costo" />costo {pct(100 - quota)}</span><span><i className="fx-margine-tuo" />guadagno {pct(quota)}</span></div>
-    </div>
+    <section className="fx-mese fx-guadagno" aria-label="Guadagno totale">
+      <div className="fx-mese-totale" title={SPIEGA_TOTALE}>
+        <span>Guadagno totale</span>
+        <b className={!loading && guadagno < 0 ? 'fx-guadagno-meno' : undefined}>{loading ? '…' : eur(guadagno)}</b>
+        <small>tutte le voci del periodo</small>
+      </div>
+      <div className="fx-mese-piano">
+        <div className="fx-mese-riga"><span>Ti resta di ogni euro incassato</span><b className={quota != null && quota < 0 ? 'fx-guadagno-meno' : 'fx-guadagno-piu'}>{loading || quota == null ? '…' : pct(quota)}</b></div>
+        <div className={`fx-mese-barra fx-guadagno-barra${quota != null && quota < 0 ? ' fx-guadagno-barra--meno' : ''}`}>
+          <i style={{ width: `${quota == null ? 0 : Math.max(1, Math.min(100, Math.abs(quota)))}%` }} />
+        </div>
+        <div className="fx-mese-riga"><small>incassato {loading ? '…' : eur(incassato)} · costo {loading ? '…' : eur(costo)}</small></div>
+      </div>
+      <div className="fx-mese-ritmo">
+        {conNetto ? <>
+          <div><span>Utile netto</span><b className={Number(d.utileNetto) < 0 ? 'fx-guadagno-meno' : undefined}>{eur(d.utileNetto)}</b><small>meno i costi di gestione</small></div>
+          <div><span>Costi di gestione</span><b>{eur(d.costiGestione)}</b><small><a href="/dashboard/costi-gestione">aggiorna →</a></small></div>
+        </> : <>
+          <div><span>Incassato</span><b>{loading ? '…' : eur(incassato)}</b><small>nel periodo</small></div>
+          <div><span>Costo</span><b>{loading ? '…' : eur(costo)}</b><small>nel periodo</small></div>
+        </>}
+      </div>
+    </section>
   )
 }
 
@@ -92,7 +89,7 @@ function Voce({ titolo, endpoint, dal, al }: { titolo: string, endpoint: string,
   return (
     <div className="fx-cella fx-voce">
       <div className="fx-cella-nome">{titolo}</div>
-      <div className={`fx-cella-cifra${loading ? '' : g < 0 ? ' fx-grande--male' : ' fx-grande--bene'}${eur(g).length > 12 ? ' fx-cella-cifra--lunga' : ''}`}>{loading ? '…' : eur(g)}</div>
+      <div className={`fx-cella-cifra${!loading && g < 0 ? ' fx-grande--male' : ''}${eur(g).length > 12 ? ' fx-cella-cifra--lunga' : ''}`}>{loading ? '…' : eur(g)}</div>
       <div className="fx-voce-sotto"><span>incassato <b>{loading ? '…' : eur(d?.ricavi || 0)}</b></span><span>costo <b>{loading ? '…' : eur(d?.costi || 0)}</b></span></div>
     </div>
   )
@@ -118,7 +115,7 @@ function CostiGestione({ dal, al }: { dal: string, al: string }) {
   return (
     <a className="fx-cella fx-voce" href="/dashboard/costi-gestione" title={categorie.map(c => `${c.categoria}: ${eur(c.importo)}`).join('\n') || undefined}>
       <div className="fx-cella-nome">Costi di gestione</div>
-      <div className={`fx-cella-cifra${loading ? '' : ' fx-grande--male'}`}>{loading ? '…' : eur(d?.totale || 0)}</div>
+      <div className={`fx-cella-cifra${!loading && Number(d?.totale || 0) > 0 ? ' fx-grande--male' : ''}`}>{loading ? '…' : eur(d?.totale || 0)}</div>
       <div className="fx-voce-sotto">
         {loading ? <span>…</span> : categorie.length
           ? <span>{prima.categoria} <b>{eur(prima.importo)}</b>{categorie.length > 1 ? ` e altre ${categorie.length - 1}` : ''}</span>
@@ -141,17 +138,17 @@ function Grafico({ dal, al }: { dal: string, al: string }) {
   const margine = Number(d?.guadagno || 0)
   const serie = (d?.serie || []).map((s: any) => ({ ...s, label: giorno(s.giorno) }))
   return (
-    <section className="fx-scheda fx-largo">
+    <section className="fx-scheda fx-tutta">
       <div className="fx-testa">
         <div><h2>Guadagno spedizioni</h2><p className="fx-sotto">Rettifiche escluse: sono nella loro voce, qui sotto</p></div>
       </div>
       <div className="fx-guadagno-numeri">
         <div>
           <div className="fx-cella-nome">Margine</div>
-          <div className={`fx-report-cifra${loading ? '' : margine < 0 ? ' fx-grande--male' : ' fx-grande--bene'}`} style={{ marginTop: 6 }}>{loading ? '…' : eur(margine)}</div>
+          <div className={`fx-report-cifra${!loading && margine < 0 ? ' fx-grande--male' : ''}`} style={{ marginTop: 6 }}>{loading ? '…' : eur(margine)}</div>
         </div>
-        <div><div className="fx-cella-nome"><i className="fx-pallino" style={{ background: 'var(--fx-bene)' }} />Fatturato</div><b>{loading ? '…' : eur(d?.ricavi || 0)}</b></div>
-        <div><div className="fx-cella-nome"><i className="fx-pallino" style={{ background: 'var(--fx-male)' }} />Costi</div><b>{loading ? '…' : eur(d?.costi || 0)}</b></div>
+        <div><div className="fx-cella-nome"><i className="fx-pallino" style={{ background: 'var(--fx-nero)' }} />Fatturato</div><b>{loading ? '…' : eur(d?.ricavi || 0)}</b></div>
+        <div><div className="fx-cella-nome"><i className="fx-pallino" style={{ background: 'var(--fx-arancio)' }} />Costi</div><b>{loading ? '…' : eur(d?.costi || 0)}</b></div>
         <div>
           <div className="fx-cella-nome">Media per spedizione</div>
           <b style={{ color: Number(d?.mediaSped) < 0 ? 'var(--fx-male)' : undefined }}>{loading ? '…' : eur(d?.mediaSped || 0)}</b>
@@ -170,16 +167,16 @@ function Grafico({ dal, al }: { dal: string, al: string }) {
           ))}
         </div>
       )}
-      <div className="fx-pannello" style={{ height: 190 }}>
+      <div className="fx-pannello" style={{ height: 230 }}>
         {loading ? <div className="fx-vuoto">Carico il guadagno…</div> : !serie.length ? <div className="fx-vuoto">Nessun dato nel periodo</div> : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={serie} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
               <CartesianGrid stroke="var(--fx-filo)" strokeWidth={0.6} vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#8E8E93' }} tickLine={false} axisLine={false} minTickGap={16} />
-              <YAxis tick={{ fontSize: 10, fill: '#8E8E93' }} tickLine={false} axisLine={false} width={58} tickFormatter={(v: number) => '€ ' + intero(Number(v))} />
+              <YAxis tick={{ fontSize: 10, fill: '#8E8E93' }} tickLine={false} axisLine={false} width={76} tickFormatter={(v: number) => '€ ' + intero(Number(v))} />
               <Tooltip formatter={(v: any, name: any) => [eur(Number(v)), name === 'ricavi' ? 'Fatturato' : name === 'costi' ? 'Costi' : 'Margine']} labelStyle={{ color: '#111', fontWeight: 600 }} contentStyle={{ borderRadius: '10px', border: '1px solid #ECECEC', fontSize: '12px', boxShadow: '0 6px 22px rgba(0,0,0,.06)' }} />
-              <Line type="monotone" dataKey="ricavi" name="ricavi" stroke="#2E9B55" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-              <Line type="monotone" dataKey="costi" name="costi" stroke="#D9474E" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              <Line type="monotone" dataKey="ricavi" name="ricavi" stroke="var(--fx-nero)" strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />
+              <Line type="monotone" dataKey="costi" name="costi" stroke="var(--fx-arancio)" strokeWidth={2.2} dot={false} activeDot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         )}

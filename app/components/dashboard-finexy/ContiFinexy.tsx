@@ -2,20 +2,22 @@
 import { useEffect, useState } from 'react'
 import { euro, intero } from './formati'
 
-// I CONTI DEL MASTER nella Dashboard nuova. Sono gli stessi della tendina «I tuoi conti» in alto e della Lista
-// Movimenti (lib/movimenti-sezioni, /api/master/credito?dettaglio=1), uno per riga, ognuno col suo saldo.
-// Il 25/11 Wave (7 conti) vedeva solo «MULTIEXPRESS € 0,00»: la scheda leggeva rete + proprio da /api/dashboard, cioè
-// un conto solo, e non diceva che su LOGIXIA SRLS Wave aveva 12.433,16 € con cui spediva tutto il giorno. Era lo
-// stesso errore già fatto il 23/11: qui non si sommano e non si scelgono conti, si mostrano tutti.
-//
-// - I conti da cui si spende (rete e fornitori) stanno in chiaro, con la cifra grande. Rosso solo se sotto zero su un
-//   conto a scalare: un master a fattura (QUICK, MULTI) va sotto zero per forza fino alla fattura, e non è un allarme.
-// - I contratti propri sono quanto è costato il corriere da sempre (negativi per forza, li paga il master al
-//   corriere): una riga sottile col totale, che si apre per vederli uno per uno (QUICK ne ha 21). Sotto, le
-//   commissioni MoovExpress quando ci sono.
-// Ogni riga apre la sua sezione in Lista Movimenti.
+// I CONTI DEL MASTER nella Dashboard nuova, come un portafoglio (Lorenzo 25/11: «anche i wallet, ovvero i conti, non mi
+// piace come li hai fatti»): ogni conto è una carta, impilate come nel Wallet dell'iPhone. Delle carte dietro si vede la
+// testa (nome e saldo); quella davanti mostra il saldo grande, cosa è e il collegamento ai movimenti. Un clic su una
+// carta dietro la porta davanti.
+// I conti sono gli stessi della tendina «I tuoi conti» in alto e della Lista Movimenti (lib/movimenti-sezioni,
+// /api/master/credito?dettaglio=1). Il 25/11 Wave (7 conti) vedeva solo «MULTIEXPRESS € 0,00»: la scheda leggeva
+// rete + proprio da /api/dashboard, un conto solo, e non diceva che su LOGIXIA SRLS Wave aveva 12.433,16 €. Qui non si
+// sommano e non si scelgono conti, ci sono tutti:
+// - la rete (carta nera) e i fornitori (carta arancio), i conti da cui si spende. Rosso solo se sotto zero su un conto
+//   a scalare: un master a fattura (QUICK, MULTI) va sotto zero per forza fino alla fattura;
+// - i contratti propri, quanto è costato il corriere da sempre (negativi per forza, li paga il master al corriere): una
+//   carta sola col totale; davanti, sotto la pila, li elenca uno per uno (QUICK ne ha 21);
+// - le commissioni MoovExpress, quando ci sono.
 
 type Sezione = { id: string; tipo: 'rete' | 'fornitore' | 'proprio' | 'commissioni'; titolo: string; sottotitolo: string; saldo: number }
+type Carta = { id: string; tinta: 'rete' | 'fornitore' | 'propri' | 'commissioni'; titolo: string; tipo: string; nota: string; saldo: number; href?: string; allarme: boolean; righe?: Sezione[] }
 
 const URL_CONTI = '/api/master/credito?dettaglio=1'
 const vai = (id: string) => `/dashboard/movimenti?sezione=${encodeURIComponent(id)}`
@@ -23,7 +25,7 @@ const vai = (id: string) => `/dashboard/movimenti?sezione=${encodeURIComponent(i
 export default function ContiFinexy({ aScalare, codDaRimettere }: { aScalare: boolean; codDaRimettere: number }) {
   const [sezioni, setSezioni] = useState<Sezione[] | null>(null)
   const [errore, setErrore] = useState(false)
-  const [aperti, setAperti] = useState(false)
+  const [davanti, setDavanti] = useState<string | null>(null)
   useEffect(() => {
     let vivo = true
     fetch(URL_CONTI, { cache: 'no-store' }).then(r => r.json())
@@ -32,14 +34,31 @@ export default function ContiFinexy({ aScalare, codDaRimettere }: { aScalare: bo
     return () => { vivo = false }
   }, [])
 
-  const principali = (sezioni || []).filter(s => s.tipo === 'rete' || s.tipo === 'fornitore')
-  const propri = (sezioni || []).filter(s => s.tipo === 'proprio')
-  const commissioni = (sezioni || []).filter(s => s.tipo === 'commissioni')
-  const costoPropri = propri.reduce((t, s) => t + Number(s.saldo || 0), 0)
-
-  // sotto zero è un allarme solo dove il conto si consuma: la rete a scalare e i fornitori (credito prepagato)
-  const allarme = (s: Sezione) => s.saldo < 0 && (s.tipo === 'fornitore' || aScalare)
-  const nota = (s: Sezione) => s.tipo === 'rete' ? (aScalare ? 'a scalare · ti vende i contratti' : 'a fattura · lo saldi con la fattura') : s.sottotitolo
+  const tutte = sezioni || []
+  const propri = tutte.filter(s => s.tipo === 'proprio')
+  const carte: Carta[] = [
+    ...tutte.filter(s => s.tipo === 'rete' || s.tipo === 'fornitore').map(s => ({
+      id: s.id, tinta: s.tipo as 'rete' | 'fornitore', titolo: s.titolo, saldo: s.saldo, href: vai(s.id),
+      tipo: s.tipo === 'rete' ? (aScalare ? 'a scalare' : 'a fattura') : 'fornitore',
+      nota: s.tipo === 'rete' ? (aScalare ? 'ti vende i contratti, si ricarica' : 'ti vende i contratti, a fattura') : s.sottotitolo,
+      // sotto zero è un allarme solo dove il conto si consuma: la rete a scalare e i fornitori (credito prepagato)
+      allarme: s.saldo < 0 && (s.tipo === 'fornitore' || aScalare),
+    })),
+    ...(propri.length ? [{
+      id: 'propri', tinta: 'propri' as const, titolo: 'Contratti tuoi', tipo: `${intero(propri.length)} ${propri.length === 1 ? 'contratto' : 'contratti'}`,
+      nota: 'quanto ti è costato il corriere da sempre · lo paghi tu', saldo: propri.reduce((t, s) => t + Number(s.saldo || 0), 0),
+      allarme: false, righe: propri,
+    }] : []),
+    ...tutte.filter(s => s.tipo === 'commissioni').map(s => ({
+      id: s.id, tinta: 'commissioni' as const, titolo: 'Commissioni', tipo: 'MoovExpress', nota: s.sottotitolo, saldo: s.saldo, href: vai(s.id), allarme: false,
+    })),
+  ]
+  // la carta davanti è l'ultima della pila (sta in basso, intera); le altre restano nel loro ordine. Di partenza davanti
+  // c'è il conto da cui si spende con più soldi in gioco: per Wave LOGIXIA SRLS (12.433,16), non MULTIEXPRESS a zero
+  const daSpendere = carte.filter(c => c.tinta === 'rete' || c.tinta === 'fornitore')
+  const primo = daSpendere.reduce<Carta | undefined>((m, c) => !m || Math.abs(c.saldo) > Math.abs(m.saldo) ? c : m, undefined)
+  const scelta = carte.find(c => c.id === davanti) || primo || carte[0]
+  const pila = scelta ? [...carte.filter(c => c !== scelta), scelta] : []
 
   return (
     <section className="fx-scheda fx-conti">
@@ -48,43 +67,35 @@ export default function ContiFinexy({ aScalare, codDaRimettere }: { aScalare: bo
         {sezioni && <span className="fx-chip fx-chip--neutro">{sezioni.length} {sezioni.length === 1 ? 'conto' : 'conti'}</span>}
       </div>
 
-      <div className="fx-conti-lista">
-        {!sezioni ? <div className="fx-vuoto">{errore ? 'Conti non disponibili: aprili da Movimenti.' : 'Carico i conti…'}</div> : (
-          <>
-            {principali.map(s => (
-              <a key={s.id} className="fx-conto" href={vai(s.id)} title={`${s.titolo}: apri i movimenti`}>
-                <span className="fx-conto-nome"><b>{s.titolo}</b><small>{nota(s)}</small></span>
-                <span className={`fx-conto-cifra${allarme(s) ? ' fx-conto-cifra--male' : s.saldo === 0 ? ' fx-conto-cifra--zero' : ''}`}>{euro(s.saldo)}</span>
-              </a>
-            ))}
-            {/* contratti propri e commissioni: righe sottili in un riquadro solo, così i conti di Wave (7) stanno tutti in
-                vista senza scorrere; i contratti si aprono uno per uno (QUICK ne ha 21) */}
-            {(propri.length > 0 || commissioni.length > 0) && (
-              <div className="fx-conti-altri">
-                {propri.length > 0 && (
-                  <button type="button" className="fx-conto-riga" onClick={() => setAperti(a => !a)} aria-expanded={aperti}
-                    title="Quanto ti è costato il corriere da sempre sui contratti tuoi: lo paghi tu al corriere">
-                    <span><i className={aperti ? 'fx-giu' : undefined} aria-hidden="true">›</i>Contratti tuoi · {intero(propri.length)}</span>
-                    <b>{euro(costoPropri)}</b>
-                  </button>
-                )}
-                {aperti && (
-                  <div className="fx-conti-propri">
-                    {propri.map(s => (
-                      <a key={s.id} href={vai(s.id)} title={`${s.titolo}: apri i movimenti`}><span>{s.titolo}</span><b>{euro(s.saldo)}</b></a>
-                    ))}
+      {!sezioni ? <div className="fx-vuoto">{errore ? 'Conti non disponibili: aprili da Movimenti.' : 'Carico i conti…'}</div> : !carte.length ? <div className="fx-vuoto">Nessun conto.</div> : (
+        <div className="fx-wallet">
+          {pila.map(c => {
+            const su = c === scelta
+            return (
+              <div key={c.id} className={`fx-cc fx-cc--${c.tinta}${su ? ' fx-cc--su' : ''}`}
+                {...(su ? {} : { role: 'button', tabIndex: 0, title: `Porta davanti: ${c.titolo}`, onClick: () => setDavanti(c.id),
+                  onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDavanti(c.id) } } })}>
+                <div className="fx-cc-testa">
+                  <b>{c.titolo}</b>
+                  {su ? <span className="fx-cc-tipo">{c.tipo}</span> : <span className={c.allarme ? 'fx-cc-meno' : undefined}>{euro(c.saldo)}</span>}
+                </div>
+                {su && <>
+                  <div className={`fx-cc-cifra${c.allarme ? ' fx-cc-meno' : ''}`}>{euro(c.saldo)}</div>
+                  <div className="fx-cc-piede">
+                    <span title={c.nota}>{c.nota}</span>
+                    {c.href && <a href={c.href}>Movimenti →</a>}
                   </div>
-                )}
-                {commissioni.map(s => (
-                  <a key={s.id} className="fx-conto-riga" href={vai(s.id)} title={`${s.titolo}: ${s.sottotitolo}`}>
-                    <span><i aria-hidden="true" />{s.titolo}</span><b>{euro(s.saldo)}</b>
-                  </a>
-                ))}
+                </>}
               </div>
-            )}
-          </>
-        )}
-      </div>
+            )
+          })}
+        </div>
+      )}
+      {scelta?.righe && (
+        <div className="fx-cc-righe">
+          {scelta.righe.map(r => <a key={r.id} href={vai(r.id)} title={`${r.titolo}: apri i movimenti`}><span>{r.titolo}</span><b>{euro(r.saldo)}</b></a>)}
+        </div>
+      )}
 
       <a className="fx-conti-cod" href="/dashboard/contrassegni" title="Contrassegni incassati sui pacchi consegnati, da rimettere ai clienti">
         <span><b />Contrassegni da rimettere</span><strong>{euro(codDaRimettere)}</strong>

@@ -36,7 +36,6 @@
 .fx-chip--bene { background: var(--fx-bene-tinta); color: var(--fx-bene); }
 .fx-chip--male { background: var(--fx-male-tinta); color: var(--fx-male); }
 .fx-chip--neutro { background: #EDEDED; color: #555; }
-.fx-chip--vetro { background: rgba(255,255,255,.2); color: rgba(255,255,255,.95); }
 .fx-nota { display: flex; align-items: center; gap: 7px; margin-top: 8px; font-size: 11.5px; color: var(--fx-grigio); }
 
 /* Credito */
@@ -48,35 +47,49 @@
 .fx a.fx-tasto--nero, .fx a.fx-tasto--nero:visited { color: #fff; }
 .fx-tasto--chiaro { background: #fff; color: var(--fx-testo); box-shadow: 0 0 0 1px #EFEFEF, 0 2px 8px rgba(0,0,0,.04); }
 .fx-tasto:hover { filter: brightness(1.06); }
-/* I tuoi conti: uno per riga (ContiFinexy). I conti da cui si spende con la cifra grande; contratti propri e commissioni
-   in piccolo; la lista scorre dentro la scheda se i conti sono tanti (QUICK ne ha 23), la riga non si allunga */
+/* I tuoi conti come un portafoglio (ContiFinexy): carte impilate come nel Wallet dell'iPhone. Delle carte dietro si vede
+   la testa (44 px), quella davanti è intera in fondo alla pila. Rete nera, fornitori arancio, contratti propri argento,
+   commissioni grafite. */
 .fx-conti { display: flex; flex-direction: column; }
 .fx-conti .fx-testa h2 { font-size: 17px; }
-.fx-conti-lista { margin-top: 10px; max-height: 214px; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px; scrollbar-width: thin; }
-.fx-conto { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
-  padding: 10px 12px; border-radius: 11px; background: var(--fx-riquadro); cursor: pointer; transition: background .15s ease; }
-.fx-conto:hover { background: #EFEFEF; }
-.fx-conto:focus-visible { outline: 2px solid var(--fx-arancio); outline-offset: 1px; }
-.fx-conto-nome { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.fx-conto-nome b { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fx-conto-nome small { font-size: 11px; color: var(--fx-grigio); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fx-conto-cifra { flex-shrink: 0; font-size: 19px; font-weight: 500; letter-spacing: -0.3px; white-space: nowrap; }
-.fx-conto-cifra--male { color: var(--fx-male); }
-.fx-conto-cifra--zero { color: var(--fx-grigio); }
-.fx-conti-altri { display: flex; flex-direction: column; padding: 4px; border-radius: 11px; box-shadow: inset 0 0 0 1px var(--fx-filo); }
-.fx-conto-riga { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
-  padding: 7px 8px; border-radius: 8px; font-size: 12.5px; color: var(--fx-grigio); cursor: pointer; }
-.fx-conto-riga:hover { background: var(--fx-riquadro); color: var(--fx-testo); }
-.fx-conto-riga:focus-visible { outline: 2px solid var(--fx-arancio); outline-offset: -2px; }
-.fx-conto-riga span { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fx-conto-riga span i { font-style: normal; display: inline-block; width: 10px; flex-shrink: 0; text-align: center; transition: transform .2s ease; }
-.fx-conto-riga span i.fx-giu { transform: rotate(90deg); }
-.fx-conto-riga b { font-weight: 600; color: var(--fx-testo); white-space: nowrap; }
-.fx-conti-propri { display: flex; flex-direction: column; padding: 0 0 4px 18px; }
-.fx-conti-propri a { display: flex; justify-content: space-between; gap: 12px; padding: 5px 8px; border-radius: 8px; font-size: 12px; color: var(--fx-grigio); }
-.fx-conti-propri a:hover { background: var(--fx-riquadro); color: var(--fx-testo); }
-.fx-conti-propri a span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fx-conti-propri a b { font-weight: 600; white-space: nowrap; }
+.fx-wallet { display: flex; flex-direction: column; margin-top: 14px; }
+.fx-cc { position: relative; box-sizing: border-box; height: 148px; padding: 13px 16px; border-radius: 16px; overflow: hidden; color: #fff;
+  box-shadow: 0 -1px 0 rgba(255,255,255,.12) inset, 0 10px 24px -14px rgba(0,0,0,.45); transition: transform .2s ease; }
+.fx-cc + .fx-cc { margin-top: -104px; }
+.fx-cc[role="button"] { cursor: pointer; }
+.fx-cc[role="button"]:hover { transform: translateY(-4px); }
+.fx-cc[role="button"]:focus-visible { outline: 2px solid var(--fx-arancio); outline-offset: 2px; }
+/* la luce che attraversa la carta e i due cerchi del circuito, in basso a destra */
+.fx-cc::before { content: ''; position: absolute; inset: 0; background: radial-gradient(120% 80% at 0% 0%, rgba(255,255,255,.18), rgba(255,255,255,0) 55%); pointer-events: none; }
+.fx-cc::after { content: ''; position: absolute; right: 16px; bottom: 14px; width: 40px; height: 24px; opacity: .35; pointer-events: none;
+  background: radial-gradient(circle at 12px 12px, currentColor 11px, transparent 11.5px), radial-gradient(circle at 28px 12px, currentColor 11px, transparent 11.5px); }
+.fx-cc--rete { background: linear-gradient(135deg, #3C3C3E 0%, #161617 58%, #0B0B0C 100%); }
+.fx-cc--fornitore { background: linear-gradient(135deg, #FFA57E 0%, #F06B38 46%, #D8481B 100%); }
+.fx-cc--propri { background: linear-gradient(135deg, #FAFAFB 0%, #E4E4E7 100%); color: #111; box-shadow: 0 0 0 1px rgba(0,0,0,.05) inset, 0 10px 24px -14px rgba(0,0,0,.3); }
+.fx-cc--commissioni { background: linear-gradient(135deg, #727277 0%, #45454A 100%); }
+.fx-cc-testa { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 18px; font-size: 13px; }
+.fx-cc-testa b { min-width: 0; font-weight: 600; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-cc-testa span { flex-shrink: 0; font-weight: 500; opacity: .9; white-space: nowrap; }
+.fx-cc-tipo { padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.18); font-size: 10.5px; font-weight: 600 !important; letter-spacing: .04em; text-transform: uppercase; }
+.fx-cc--propri .fx-cc-tipo { background: rgba(0,0,0,.07); }
+.fx-cc-cifra { position: relative; margin-top: 20px; font-size: 30px; font-weight: 500; letter-spacing: -0.8px; line-height: 1.05; white-space: nowrap; }
+.fx-cc-piede { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-right: 52px; font-size: 11.5px; }
+.fx-cc-piede span { min-width: 0; opacity: .72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-cc-piede a { flex-shrink: 0; font-weight: 600; white-space: nowrap; }
+.fx-cc-piede a:hover { text-decoration: underline; }
+.fx-cc-meno { color: #FFB4AE !important; }
+.fx-cc--propri .fx-cc-meno, .fx-cc--fornitore .fx-cc-meno { color: inherit !important; }
+/* i contratti propri uno per uno, sotto la pila quando la carta argento è davanti */
+.fx-cc-righe { display: flex; flex-direction: column; margin-top: 10px; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.fx-cc-righe a { display: flex; justify-content: space-between; gap: 12px; padding: 6px 4px; border-top: 1px solid var(--fx-filo); font-size: 12px; color: var(--fx-grigio); }
+.fx-cc-righe a:first-child { border-top: 0; }
+.fx-cc-righe a:hover { color: var(--fx-testo); }
+.fx-cc-righe a span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-cc-righe a b { font-weight: 600; color: var(--fx-testo); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) {
+  .fx-cc--su { animation: fx-carta-su .35s cubic-bezier(.2, .8, .2, 1) both; }
+}
+@keyframes fx-carta-su { from { transform: translateY(14px); } }
 .fx-conti-cod { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding: 12px 2px 0; font-size: 12.5px; color: var(--fx-grigio); }
 .fx-conti-cod span { display: flex; align-items: center; gap: 7px; }
 .fx-conti-cod span b { width: 9px; height: 9px; border-radius: 50%; background: var(--fx-bene); }
@@ -102,6 +115,15 @@
 .fx-mese-ritmo div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .fx-mese-ritmo b { font-size: 22px; font-weight: 500; letter-spacing: -0.4px; }
 .fx-mese-oltre { color: #FF9C7A !important; font-weight: 600; }
+/* IL GUADAGNO TOTALE: la stessa fascia nera, larga quanto la griglia; la barra è quanto resta di ogni euro incassato,
+   verde se si guadagna, rossa se si perde */
+.fx-griglia > .fx-mese { grid-column: 1 / -1; }
+.fx-guadagno-piu { color: #7EE2A0; }
+.fx-guadagno-meno { color: #FF8A80 !important; }
+.fx-guadagno-barra i { background: linear-gradient(90deg, #3FBF6E, #7EE2A0); box-shadow: 0 0 14px rgba(126,226,160,.45); }
+.fx-guadagno-barra--meno i { background: linear-gradient(90deg, #FF8A80, #E5484D); box-shadow: 0 0 14px rgba(229,72,77,.45); }
+.fx-mese-ritmo small a { color: #FF9C7A; }
+.fx-mese-ritmo small a:hover { text-decoration: underline; }
 /* OGGI: la disposizione della fascia del mese, ma chiara come le schede: quattro voci divise da un filo; la prima
    (create oggi) col numero arancio */
 .fx-oggi { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; padding: 0; align-items: stretch; overflow: hidden;
@@ -227,10 +249,6 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
 
 /* Il guadagno: le schede con il periodo a scelta */
 .fx-report-cifra { margin-top: 12px; font-size: 26px; font-weight: 500; letter-spacing: -0.4px; line-height: 1.05; }
-.fx-report-sotto { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; font-size: 11.5px; color: var(--fx-grigio); }
-.fx-report-sotto b { color: var(--fx-testo); font-weight: 600; }
-.fx-report-netto { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--fx-filo); font-size: 11.5px; color: var(--fx-grigio); }
-.fx-periodo { margin-top: 10px; }
 
 /* Il guadagno spedizioni: i numeri in fila sopra il grafico */
 .fx-guadagno-numeri { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; margin-top: 14px; }
@@ -238,28 +256,6 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
 .fx-guadagno-numeri small { display: block; margin-top: 2px; font-size: 11px; color: var(--fx-grigio); }
 .fx-guadagno-numeri .fx-cella-nome { display: flex; align-items: center; }
 .fx-guadagno-fornitori { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
-.fx-report--nera { background: linear-gradient(160deg, #2A2A2A, #0E0E0E); color: #fff; }
-.fx-report--nera .fx-testa h2 { color: #fff; }
-.fx-report--nera .fx-report-cifra { font-size: 32px; }
-.fx-report--nera .fx-report-sotto, .fx-report--nera .fx-report-netto { color: rgba(255,255,255,.62); border-top-color: rgba(255,255,255,.16); }
-.fx-report--nera .fx-report-sotto b { color: #fff; }
-.fx-report--nera { display: flex; flex-direction: column; }
-/* la scheda nera tiene il titolo bianco anche contro la regola dei titoli della cornice (:root .fx h2, piu' sotto) */
-:root .fx .fx-report--nera h2 { color: #fff; }
-/* quanto resta di ogni euro incassato: la barra e' l'incassato, il verde (a destra) e' il guadagno */
-.fx-margine { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.16); }
-.fx-margine-testa { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 11.5px; color: rgba(255,255,255,.62); }
-.fx-margine-testa b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.fx-margine-barra { display: flex; justify-content: flex-end; height: 12px; margin-top: 10px; border-radius: 999px; overflow: hidden;
-  background: repeating-linear-gradient(135deg, rgba(255,255,255,.14) 0 6px, rgba(255,255,255,.07) 6px 12px); }
-.fx-margine-barra i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #3FBF6E, #7EE2A0);
-  box-shadow: 0 0 12px rgba(126,226,160,.45); animation: fx-allunga .9s cubic-bezier(.2,.8,.2,1) both; }
-.fx-margine-legenda { display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
-.fx-margine-legenda span { display: inline-flex; align-items: center; gap: 6px; }
-.fx-margine-legenda i { width: 8px; height: 8px; border-radius: 2px; }
-.fx-margine-costo { background: rgba(255,255,255,.3); }
-.fx-margine-tuo { background: #7EE2A0; }
-.fx-report-spiega { margin: auto 0 0; padding-top: 18px; font-size: 11.5px; line-height: 1.5; color: rgba(255,255,255,.55); }
 .fx-coppia a { background: var(--fx-riquadro); border-radius: 11px; padding: 11px 12px; min-width: 0; }
 .fx-coppia a:hover { filter: brightness(.985); }
 
@@ -339,7 +335,6 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
 }
 .gx[data-luce="notte"] .fx-tasto--chiaro { background: var(--fx-riquadro); color: var(--fx-testo); box-shadow: 0 0 0 1px var(--fx-filo); }
 .gx[data-luce="notte"] .fx-chip--neutro { background: #34343A; color: #C9C9CE; }
-.gx[data-luce="notte"] .fx-conto:hover { background: #333338; }
 .gx[data-luce="notte"] .fx-mese:not(.fx-oggi) { background: linear-gradient(160deg, #2E2E32, #1A1A1D); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
 .gx[data-luce="notte"] .fx-barretta, .gx[data-luce="notte"] .fx-corriere-barra { background: #34343A; }
 .gx[data-luce="notte"] .fx-tasto--nero { background: linear-gradient(180deg, #4A4A4F, #222225); }
