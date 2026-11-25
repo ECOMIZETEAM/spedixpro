@@ -613,9 +613,9 @@
   padding: 2px 7px; border-radius: 6px; background: color-mix(in srgb, var(--gx-bene) 13%, transparent); }
 .gx .gx-elenco .el-riga2 .el-soldi b[style*="220, 38, 38"], .gx .gx-elenco .el-riga2 .el-soldi b[style*="#dc2626"] {
   padding: 2px 7px; border-radius: 6px; color: var(--gx-problema) !important; background: color-mix(in srgb, var(--gx-problema) 12%, transparent); }
-/* i filtri sul computer largo: due righe invece di tre (nove campi per riga, la data larga due); sotto i 1280 px restano
-   le tre righe di oggi, sul telefono la tendina */
-@media (min-width: 1280px) {
+/* i filtri sul computer largo: due righe invece di tre (nove campi per riga, la data larga due); sotto i 1360 px restano
+   le tre righe di oggi, sul telefono la tendina. A 1280 i campi erano da 95 px e «Stato Contrassegni» andava a capo */
+@media (min-width: 1360px) {
   .gx .gx-elenco .el-filtri { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); column-gap: 8px; row-gap: 12px; align-items: end; }
   .gx .gx-elenco .el-filtri > .el-sezione { grid-column: 1 / -1; margin-bottom: 0 !important; }
   .gx .gx-elenco .el-filtri > div[style*="grid-template-columns"] { display: contents !important; }

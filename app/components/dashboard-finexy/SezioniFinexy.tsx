@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { euro, intero, meseItaliano, percento, statoDi } from './formati'
 import { Barra3D, DefsBarre, profondita } from './Barre3D'
 import Conta from './Conta'
+import { nomeClientePulito } from '@/lib/numero-spedizione'
 
 // LE PARTI DELLA DASHBOARD NUOVA CHE LA DASHBOARD DI OGGI GIA' AVEVA. Lorenzo, 25/11: «nella vecchia versione nella home
 // ci stavano tanti blocchi, ora non se li ritrovano piu'... applica il design, ma la sistemazione falla in base a tutti
@@ -71,7 +72,8 @@ export function LaTuaRete({ data }: { data: DatiDashboard }) {
       <div className="fx-coppia">
         <div>
           <div className="fx-cella-nome">Primo cliente</div>
-          <strong title={data.topCliente?.nome || ''}>{data.topCliente?.nome || '—'}</strong>
+          {/* il nome pulito: per Wave il primo cliente era «MULTIEXPRESS (ingrosso)», il nome interno del conto (25/11) */}
+          <strong title={nomeClientePulito(data.topCliente?.nome)}>{nomeClientePulito(data.topCliente?.nome) || '—'}</strong>
           <small>{data.topCliente?.n ? `${intero(Number(data.topCliente.n))} spedizioni` : 'nessun dato'}</small>
         </div>
         <div>

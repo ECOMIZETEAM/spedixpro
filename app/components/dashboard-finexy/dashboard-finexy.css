@@ -113,11 +113,15 @@
   animation: fx-allunga 1.1s cubic-bezier(.2, .8, .2, 1) both .35s; }
 .fx-mese-ritmo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding-left: 26px; border-left: 1px solid rgba(255,255,255,.14); }
 .fx-mese-ritmo div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.fx-mese-ritmo b { font-size: 22px; font-weight: 500; letter-spacing: -0.4px; }
+.fx-mese-ritmo b { font-size: 22px; font-weight: 500; letter-spacing: -0.4px; white-space: nowrap; }
 .fx-mese-oltre { color: #FF9C7A !important; font-weight: 600; }
 /* IL GUADAGNO TOTALE: la stessa fascia nera, larga quanto la griglia; la barra è quanto resta di ogni euro incassato,
    verde se si guadagna, rossa se si perde */
 .fx-griglia > .fx-mese { grid-column: 1 / -1; }
+/* nel guadagno le cifre a destra sono euro (utile netto, costi di gestione): più spazio a quella colonna, e su un
+   portatile un filo più piccole, così «€ -21.205,43» non va a capo lasciando il «€» da solo (25/11) */
+.fx-guadagno { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 1.15fr); }
+@media (max-width: 1360px) { .fx-guadagno .fx-mese-ritmo b { font-size: 19px; } .fx-guadagno .fx-mese-totale b { font-size: 34px; } }
 .fx-guadagno-piu { color: #7EE2A0; }
 .fx-guadagno-meno { color: #FF8A80 !important; }
 .fx-guadagno-barra i { background: linear-gradient(90deg, #3FBF6E, #7EE2A0); box-shadow: 0 0 14px rgba(126,226,160,.45); }
@@ -235,9 +239,11 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
 .fx-coppia small { display: block; margin-top: 3px; font-size: 11px; color: var(--fx-grigio); }
 
 /* Gli stati degli ultimi 30 giorni */
-.fx-ciambella { display: flex; gap: 18px; align-items: center; margin-top: 14px; }
+/* l'elenco non scende sotto 180 px: su un portatile da 1280 la scheda è stretta e le scritte si tagliavano («Cons»,
+   «In trans», 25/11); lì l'elenco va sotto la ciambella */
+.fx-ciambella { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 18px; align-items: center; margin-top: 14px; }
 .fx-ciambella svg { width: 128px; height: 128px; flex-shrink: 0; }
-.fx-ciambella .fx-righe { flex: 1; min-width: 0; margin-top: 0; }
+.fx-ciambella .fx-righe { flex: 1 1 180px; min-width: 0; margin-top: 0; }
 .fx-ciambella .fx-riga { padding: 6px 2px; }
 
 /* Mese per mese */

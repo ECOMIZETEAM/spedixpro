@@ -172,7 +172,9 @@
 
 /* ── la colonna a destra: la barra in alto e la pagina ── */
 .gx-destra { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.gx-alto { position: relative; z-index: 5; flex: none; display: flex; align-items: center; gap: 10px; padding: 16px 16px 0 16px; height: 66px; }
+/* lo stesso spazio sopra e sotto i pulsanti (Lorenzo 25/11, foto dell'intestazione: «quando scorri si vede che le cose
+   nell'header non sono centrali»): era 16 sopra e 0 sotto, e la pagina che scorre arrivava a toccare le pillole */
+.gx-alto { position: relative; z-index: 5; flex: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; }
 .gx-tasto { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 44px; min-width: 44px; padding: 0 12px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: 13.5px; color: var(--gx-testo); cursor: pointer; white-space: nowrap; }
 .gx-tasto:hover { color: var(--gx-inchiostro); background: var(--gx-incavo); }
 .gx-cerca { display: flex; align-items: center; gap: 10px; flex: 0 1 440px; min-width: 0; height: 50px; padding: 0 8px 0 7px; border: 0; font: inherit; font-size: 14.5px; color: var(--gx-attenuato); cursor: pointer; text-align: left; transition: box-shadow .25s; }
@@ -195,7 +197,7 @@
 .gx-segno { position: relative; }
 .gx-segno__pallino { position: absolute; top: 7px; right: 8px; min-width: 8px; height: 8px; border-radius: 999px; background: var(--gx-pallino); }
 .gx-segno__pallino--n { top: 2px; right: 1px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 600; line-height: 18px; color: #fff; text-align: center; }
-.gx-pagina { flex: 1; min-height: 0; overflow-y: auto; padding: 26px 16px 24px 16px; }
+.gx-pagina { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px 24px 16px; }
 
 /* ── le transizioni fra le pagine e fra giorno e notte (View Transitions) ── */
 .gx-lato { view-transition-name: gx-menu; }
@@ -218,10 +220,10 @@
 @media (max-width: 899px) {
   .gx-lato { position: fixed; left: 0; top: 0; bottom: 0; margin: 10px; z-index: 1000; transform: translateX(calc(-100% - 20px)); transition: transform .25s ease; }
   .gx-lato--aperto { transform: none; }
-  .gx-alto { padding: 10px 10px 0; height: 60px; gap: 6px; }
+  .gx-alto { padding: 10px; gap: 6px; }
   .gx-cerca { flex: 1; }
   .gx-cerca kbd, .gx-solo-largo { display: none; }
-  .gx-pagina { padding: 14px 10px 20px; }
+  .gx-pagina { padding: 4px 10px 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .gx-rami, .gx-lato, .gx-freccia { animation: none !important; transition: none !important; }
