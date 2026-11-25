@@ -27,11 +27,14 @@ type InfoGls = {
   contratti: { codice: string; righe: number; nolo: number; carburante: number | null; percentuale: number | null; quadra: boolean }[]
 }
 type GruppoGls = 'contestare' | 'clienti' | 'chiarire' | 'listino'
+// A che punto è una voce di "Cosa fare" (riepilogo.stati della fattura, rotta analizza).
+type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato'; il: string; nota?: string; importo?: number; numero?: string; storia?: { stato: string; il: string }[] }
 type FatturaStorico = {
   id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; etichetta: string | null; data_fattura: string | null; nome_file: string | null
   righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
   da_girare: number; euro_da_girare: number; rettifiche_file_id: string | null; created_at: string
   girate: { inviate: number; confermate: number; euroConfermati: number; euroInAttesa: number; spedizioni?: string[] } | null; aTuoCarico: number
+  noteDiCredito?: number; inAttesa?: number
   riepilogo?: { fileEsterni?: { nome: string; righe: number; il: string }[] } | null
 }
 type Filtro = 'perdita' | 'tutte' | 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_trovata' | 'rientri' | 'carburante' | 'storico'
@@ -114,6 +117,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const [infoGls, setInfoGls] = useState<InfoGls | null>(iniziale?.gls ?? null)
   // Una voce GLS scelta nel riquadro "cosa fare": la tabella mostra solo le spedizioni che ce l'hanno.
   const [voceScelta, setVoceScelta] = useState<string | null>(null)
+  const [stati, setStati] = useState<Record<string, StatoSalvato>>({})
   const pdfRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -172,7 +176,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     setFatturaId(id); setNomeFile(d.fattura.nome_file || ''); setEtichettaAperta(d.fattura.etichetta || null)
     // Mandate col pulsante, o già girate con un file proprio dalla pagina Rettifica.
     setRettificheInviate(!!d.fattura.rettifiche_file_id || !!d.fattura.riepilogo?.rettificheEsterne?.ids?.length)
-    setLegenda(d.fattura.riepilogo?.legenda || null); setNotePdf([]); setInfoGls(d.fattura.riepilogo?.gls || null); setVoceScelta(null)
+    setLegenda(d.fattura.riepilogo?.legenda || null); setNotePdf([]); setInfoGls(d.fattura.riepilogo?.gls || null); setVoceScelta(null); setStati(d.fattura.riepilogo?.stati || {})
     if (d.fattura.corriere_id) setContrattoId(d.fattura.corriere_id)
     // Le fatture salvate prima del 02/11 hanno il peso tassato senza l'arrotondamento di BRT: si rifà qui dai
     // quattro pesi della riga, così il file di rettifiche esce col peso che BRT ha davvero tassato (3, non 2,8).
@@ -186,7 +190,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     if (!daIndirizzo) window.scrollTo({ top: 0, behavior: 'smooth' })
     caricaStorico(id)   // com'è andata la Rettifica di questa fattura, spedizione per spedizione
   }
-  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null); setLegenda(null); setNotePdf([]); setInfoGls(null); setVoceScelta(null) }
+  const chiudiFattura = () => { setEsiti([]); setFatturaId(null); setNomeFile(''); setAvvisi([]); setRettificheInviate(false); setEtichettaAperta(null); setLegenda(null); setNotePdf([]); setInfoGls(null); setVoceScelta(null); setStati({}) }
 
   // IL PDF DELLA FATTURA: lo legge il server (legenda, numero, totali); qui si confronta col file.
   async function base64(f: File) {
@@ -329,7 +333,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     // I totali dello storico li rifà il server dalle righe salvate. Dice anche se le differenze sono già nella
     // Rettifica (fattura rifatta, o già girate da un file): allora il riquadro mostra com'è andata, non il pulsante.
     const chiusa: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId: id, chiudi: true }) }).then(r => r.json()).catch(() => null)
-    setFatturaId(id); setAvanz(null); setEsiti(tutti); setRettificheInviate(!!chiusa?.rettificheInviate)
+    setFatturaId(id); setAvanz(null); setEsiti(tutti); setRettificheInviate(!!chiusa?.rettificheInviate); setStati(chiusa?.stati || {})
     caricaStorico(id)
   }
 
@@ -462,6 +466,48 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const pag = Math.min(pagina, pagine)
   const visibili = filtrate.slice((pag - 1) * PER_PAGINA, pag * PER_PAGINA)
 
+  // L'INVIO ALLA RETTIFICA, comune a pesi e voci: lo stesso formato e lo stesso giro della pagina Rettifica (lettera
+  // di vettura e peso, più `supplemento` e `voce` per le voci del corriere: lib/ripesature, file "solo pesi"), a
+  // pacchetti, coi controlli del motore delle rettifiche. Il peso come NUMERO: la Rettifica legge i chili col punto
+  // decimale e un numero lo prende così com'è. Alla fine la fattura ricorda il file (lo storico conta il girato).
+  async function inviaAllaRettifica(righe: { ldv: string; peso: number; supplemento?: number; voce?: string }[], nome: string) {
+    const quante = 50
+    let da = 0, fileId: string | undefined, creati = 0, gia = 0, nonTrovate = 0, supplementiDopo = 0, errore = ''
+    const inizio = Date.now()
+    setInviando(true)
+    setAvanz({ fatti: 0, totale: righe.length, da: inizio, etichetta: 'Creo le rettifiche' })
+    while (da < righe.length) {
+      const res = await fetch('/api/rettifiche/upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nomeFile: nome, righe, da, quante, fileId }),
+      })
+      const d = await res.json().catch(() => ({ error: 'Risposta non valida' }))
+      if (d?.error) { errore = d.error; break }
+      if (d?.tipo !== 'ripesature') { errore = 'La Rettifica non ha riconosciuto le righe come file di pesi.'; break }
+      creati += d.creato || 0; gia += d.giaCaricate || 0; nonTrovate += d.totali?.nonTrovate || 0; supplementiDopo += d.supplementiArrivatiDopo || 0
+      fileId = d.fileId || fileId
+      const avanti = (d.da || 0) + (d.quante || 0)
+      if (avanti <= da) break
+      da = avanti
+      setAvanz({ fatti: Math.min(da, righe.length), totale: righe.length, da: inizio, etichetta: 'Creo le rettifiche' })
+      if (d.finito) break
+    }
+    setAvanz(null); setInviando(false)
+    if (fileId && fatturaId) {
+      await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, rettificheFileId: fileId }) }).catch(() => null)
+      setRettificheInviate(true); caricaStorico()
+    }
+    return { fileId, creati, gia, nonTrovate, supplementiDopo, errore }
+  }
+  const esitoInvio = async (x: Awaited<ReturnType<typeof inviaAllaRettifica>>, totale: number) => dialog.alert({
+    title: x.errore ? 'Invio interrotto' : 'Rettifiche create',
+    message: (x.errore ? x.errore + ' — ' : '') + `Create ${x.creati + x.supplementiDopo} rettifiche su ${totale} spedizioni.`
+      + (x.supplementiDopo ? ` Di queste ${x.supplementiDopo} su spedizioni già rettificate per il peso: si aggiunge solo il supplemento.` : '')
+      + (x.gia > x.supplementiDopo ? ` ${x.gia - x.supplementiDopo} erano già state rettificate e sono state saltate.` : '')
+      + (x.nonTrovate ? ` ${x.nonTrovate} non sono state trovate dalla Rettifica.` : '')
+      + ' Le trovi in Rettifica Costi (il tasto qui sotto la apre in un\'altra scheda, questa resta aperta): controllale e premi Conferma.',
+  })
+
   // `lista`: di solito tutte quelle da girare; "Rimanda le non girate" passa solo quelle rimaste senza rettifica.
   async function mandaAllaRettifica(lista: EsitoControllo[] = daRettificare) {
     const euroPeso = r2(lista.reduce((s, e) => s + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0))
@@ -473,46 +519,37 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       confirmText: 'Manda alla Rettifica',
     })
     if (!ok) return
-    setInviando(true)
-    // Lo stesso formato e lo stesso giro della pagina Rettifica: due colonne, lettera di vettura e peso.
-    // La rotta li riconosce come file "solo pesi" e li passa dal motore delle rettifiche, coi suoi controlli.
-    // Il peso come NUMERO: la Rettifica legge i chili col punto decimale e un numero lo prende così com'è.
     const righe = lista.map(e => ({ ldv: e.spedizione!.numero, peso: r2(e.riga.pesoTassato) }))
-    const nome = `${gls ? '' : 'Fattura '}${cr} ${esiti[0]?.riga.numeroFattura || ''} - differenze di peso`
-    const quante = 50
-    let da = 0, fileId: string | undefined, creati = 0, gia = 0, nonTrovate = 0, errore = ''
-    const inizio = Date.now()
-    setAvanz({ fatti: 0, totale: righe.length, da: inizio, etichetta: 'Creo le rettifiche' })
-    while (da < righe.length) {
-      const res = await fetch('/api/rettifiche/upload', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nomeFile: nome, righe, da, quante, fileId }),
-      })
-      const d = await res.json().catch(() => ({ error: 'Risposta non valida' }))
-      if (d?.error) { errore = d.error; break }
-      if (d?.tipo !== 'ripesature') { errore = 'La Rettifica non ha riconosciuto le righe come file di pesi.'; break }
-      creati += d.creato || 0; gia += d.giaCaricate || 0; nonTrovate += d.totali?.nonTrovate || 0
-      fileId = d.fileId || fileId
-      const avanti = (d.da || 0) + (d.quante || 0)
-      if (avanti <= da) break
-      da = avanti
-      setAvanz({ fatti: Math.min(da, righe.length), totale: righe.length, da: inizio, etichetta: 'Creo le rettifiche' })
-      if (d.finito) break
-    }
-    setAvanz(null); setInviando(false)
-    // Nello storico la fattura ricorda in quale file di rettifiche sono finite le sue differenze: da lì si
-    // legge, mese per mese, quanto è stato davvero girato ai clienti.
-    if (fileId && fatturaId) {
-      await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, rettificheFileId: fileId }) }).catch(() => null)
-      setRettificheInviate(true); caricaStorico()
-    }
-    await dialog.alert({
-      title: errore ? 'Invio interrotto' : 'Rettifiche create',
-      message: (errore ? errore + ' — ' : '') + `Create ${creati} rettifiche su ${righe.length} spedizioni.`
-        + (gia ? ` ${gia} erano già state rettificate e sono state saltate.` : '')
-        + (nonTrovate ? ` ${nonTrovate} non sono state trovate dalla Rettifica.` : '')
-        + ' Le trovi in Rettifica Costi (il tasto qui sotto la apre in un\'altra scheda, questa resta aperta): controllale e premi Conferma.',
+    const x = await inviaAllaRettifica(righe, `${gls ? '' : 'Fattura '}${cr} ${esiti[0]?.riga.numeroFattura || ''} - differenze di peso`)
+    await esitoInvio(x, righe.length)
+  }
+
+  // LE VOCI DEL CORRIERE DA GIRARE AI CLIENTI (l'Oversize, la Zona ZTL…): alla Rettifica come SUPPLEMENTO FISSO, come il
+  // fuori sagoma: ognuno lungo la catena paga lo stesso importo, col nome della voce. Prima non c'era modo di girarle
+  // (Lorenzo, 25/11: "l'oversize come lo addebita?"). Il peso è quello di Moove, salvo che il corriere abbia anche
+  // tassato di più: allora quello del corriere, e la stessa rettifica porta peso e supplemento.
+  async function mandaVoceAllaRettifica(chiave: string, k: string) {
+    const conVoce = esiti.filter(e => e.spedizione && e.riga.andata && e.spedizione.stato !== 'annullata')
+      .map(e => ({ e, m: e.motivi.find(m => m.gruppo === 'clienti' && m.tipo !== 'peso' && (m.voce || `${m.tipo}:${m.gruppo}`) === k) }))
+      .filter((x): x is { e: EsitoControllo; m: NonNullable<typeof x.m> } => !!x.m && x.m.importo > 0.005)
+    if (!conVoce.length) return
+    const nomeVoce = conVoce[0].m.voce || k
+    const totale = r2(conVoce.reduce((t, x) => t + x.m.importo, 0))
+    const ok = await dialog.confirm({
+      title: `Girare «${nomeVoce}» ai clienti?`,
+      message: `${conVoce.length} spedizion${conVoce.length === 1 ? 'e' : 'i'}, ${euro(totale)} in tutto. Diventano rettifiche "da confermare" in Rettifica Costi, `
+        + `con «${nomeVoce}» come supplemento fisso: chi ha spedito (cliente o sotto-master) paga lo stesso importo che ha chiesto ${cr}. Finché non le confermi non si muove un euro.`,
+      confirmText: 'Manda alla Rettifica',
     })
+    if (!ok) return
+    const righe = conVoce.map(({ e, m }) => {
+      const conPeso = e.motivi.some(x => x.tipo === 'peso' && x.gruppo === 'clienti' && x.importo > 0.005)
+      const peso = conPeso || !(e.spedizione!.peso > 0) ? r2(e.riga.pesoTassato) : e.spedizione!.peso
+      return { ldv: e.spedizione!.numero, peso, supplemento: r2(m.importo), voce: nomeVoce }
+    })
+    const x = await inviaAllaRettifica(righe, `${cr} ${esiti[0]?.riga.numeroFattura || ''} - ${nomeVoce}`)
+    if (!x.errore && x.creati + x.supplementiDopo > 0) await segnaStato(chiave, 'girato', { nota: `${x.creati + x.supplementiDopo} rettifiche in Rettifica Costi` })
+    await esitoInvio(x, righe.length)
   }
 
   // RIFARE IL DOCUMENTO APERTO CON LE REGOLE DI OGGI, dalle righe già salvate: non serve il file. Il 25/11 Wave
@@ -534,6 +571,91 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     await controlla(righe, { numeroFattura: righe[0].numeroFattura, dataFattura: righe[0].dataFattura, nomeFile, legenda: legenda || undefined, gls: infoGls || undefined }, true)
   }
 
+  // A CHE PUNTO È OGNI VOCE DI "COSA FARE" (Lorenzo, 25/11: "un bottone che dice ok contestato, ok GLS mi ha fatto
+  // la nota di credito e via dicendo... devi andare avanti con il pensiero"). Si segna qui, lo salva la rotta con la
+  // fattura (riepilogo.stati) e lo storico lo ricorda: le note di credito ricevute e le voci che aspettano GLS.
+  async function segnaStato(chiave: string, stato: StatoSalvato['stato'] | null, extra: { nota?: string; importo?: number; numero?: string } = {}) {
+    if (!fatturaId) return
+    const d: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fatturaId, statoVoce: { chiave, stato, ...extra } }) }).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
+    if (d.error) { await dialog.alert({ title: 'Non salvato', message: d.error }); return }
+    setStati(d.stati || {}); caricaStorico()
+  }
+  // L'importo come lo scrive una persona: "185,24", "1.234,56" o "185.24".
+  const leggiEuro = (x: string) => { const t = String(x).trim().replace(/\s|€/g, ''); const n = Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t); return Number.isFinite(n) ? n : NaN }
+  async function notaDiCredito(chiave: string, proposto: number) {
+    const numero = await dialog.prompt({ title: `Nota di credito di ${cr}`, message: `Il numero della nota di credito, come è scritto sul documento di ${cr}.`, placeholder: 'es. NC 1234', confirmText: 'Avanti' })
+    if (numero == null) return
+    const imp = await dialog.prompt({ title: `Quanto ti ha accreditato ${cr}?`, message: `Hai contestato ${euro(proposto)}: scrivi l'importo della nota di credito (anche se è diverso).`, defaultValue: proposto.toFixed(2).replace('.', ','), confirmText: 'Salva' })
+    if (imp == null) return
+    const importo = leggiEuro(imp)
+    if (!(importo >= 0)) { await dialog.alert({ title: 'Importo non valido', message: 'Scrivi un importo in euro, per esempio 185,24.' }); return }
+    await segnaStato(chiave, 'accreditato', { numero, importo })
+  }
+  const dataBreve = (iso: string) => new Date(iso).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
+  // La riga di stato sotto una voce: cosa è stato fatto, e il prossimo passo.
+  function rigaStato(gruppo: GruppoGls, chiave: string, proposto: number, peso = false) {
+    // I pesi da girare hanno il loro riquadro (Manda alla Rettifica); quelli tassati di meno non chiedono niente.
+    if (!fatturaId || peso) return null
+    const st = stati[chiave]
+    const tasto = (testo: string, fai: () => void, forte = false) => (
+      <button key={testo} onClick={e => { e.stopPropagation(); fai() }}
+        style={{ padding: '4px 9px', borderRadius: 7, border: `1px solid ${forte ? C.arancio : C.filo}`, background: forte ? C.arancio : '#fff', color: forte ? '#fff' : C.testo, fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}>{testo}</button>
+    )
+    const verde = (t: string) => <Pillola key={t} colore={C.verde} fondo={C.verdeTenue} orlo={C.verdeOrlo}>{t}</Pillola>
+    const giallo = (t: string) => <Pillola key={t} colore={C.ambra} fondo={C.ambraTenue} orlo={C.ambraOrlo}>{t}</Pillola>
+    const annulla = st ? tasto('Annulla', () => segnaStato(chiave, null)) : null
+    const respinta = async () => { const n = await dialog.prompt({ title: `Respinta da ${cr}`, message: `Cosa ha risposto ${cr}? (facoltativo)`, confirmText: 'Salva' }); if (n != null) segnaStato(chiave, 'respinto', { nota: n }) }
+    const risposta = async () => { const n = await dialog.prompt({ title: `Cosa ha risposto ${cr}?`, message: 'Cos\'è questa voce secondo il corriere: resta scritto qui per la prossima volta.', confirmText: 'Salva' }); if (n) segnaStato(chiave, 'risposto', { nota: n }) }
+    const parti = gruppo === 'contestare'
+      ? !st ? [tasto('Segna contestata', () => segnaStato(chiave, 'contestato'), true)]
+        : st.stato === 'contestato' ? [giallo(`Contestata il ${dataBreve(st.il)}`), tasto('Nota di credito ricevuta', () => notaDiCredito(chiave, proposto), true), tasto('Respinta', respinta), annulla]
+        : st.stato === 'accreditato' ? [verde(`Nota di credito${st.numero ? ' ' + st.numero : ''}: ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), annulla]
+        : [<Pillola key="r" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Respinta il ${dataBreve(st.il)}${st.nota ? ': ' + st.nota : ''}`}</Pillola>, annulla]
+      : gruppo === 'chiarire'
+        ? !st ? [tasto(`Chiesta a ${cr}`, () => segnaStato(chiave, 'chiesto'), true)]
+          : st.stato === 'chiesto' ? [giallo(`Chiesta il ${dataBreve(st.il)}`), tasto(`Risposta di ${cr}`, risposta, true), annulla]
+          : [verde(`${cr}: ${st.nota || 'ha risposto'} (${dataBreve(st.il)})`), annulla]
+        : gruppo === 'listino'
+          ? !st ? [tasto('Fatto', () => segnaStato(chiave, 'fatto'))] : [verde(`Fatto il ${dataBreve(st.il)}`), annulla]
+          : !st ? [tasto('Manda alla Rettifica', () => mandaVoceAllaRettifica(chiave, chiave.slice(gruppo.length + 1)), true)]
+            : [verde(`Mandata alla Rettifica il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
+    return <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 7 }}>{parti}</div>
+  }
+
+  // LA CONTESTAZIONE PRONTA DA MANDARE: il testo (copiato, da incollare nella mail al corriere) e l'Excel con le
+  // spedizioni contestate. Il carburante oltre il contratto si conta su tutto il documento, come lo conta GLS.
+  async function preparaContestazione() {
+    const docSopra = carburanteGls.some(c => c.sopra)
+    const doc = infoGls?.titolo || `fattura ${esiti[0]?.riga.numeroFattura || ''}`
+    const cliente = esiti[0]?.riga.codiceCliente
+    const punti: string[] = []
+    let totale = 0
+    for (const c of carburanteGls.filter(c => c.sopra)) {
+      punti.push(`Carburante applicato al ${pct(c.percentuale!)} invece del ${pct(c.listino!)} previsto dal contratto ${c.codice}: ${euro(c.carburante || 0)} su ${euro(c.nolo)} di nolo, al ${pct(c.listino!)} sarebbero ${euro(r2(c.nolo * c.listino! / 100))}. Da accreditare ${euro(c.inPiu)}.`)
+      totale += c.inPiu
+    }
+    const righe = esiti.flatMap(e => e.motivi.filter(m => m.gruppo === 'contestare' && !(docSopra && m.tipo === 'carburante')).map(m => ({ e, m })))
+    const perTipo = new Map<string, { n: number; euro: number }>()
+    for (const { m } of righe) { const v = perTipo.get(m.tipo) || { n: 0, euro: 0 }; v.n++; v.euro = r2(v.euro + m.importo); perTipo.set(m.tipo, v) }
+    for (const [t, v] of perTipo) { punti.push(`${MOTIVI[t]?.nome || t}: ${v.n} spedizion${v.n === 1 ? 'e' : 'i'}, ${euro(v.euro)} (elenco allegato).`); totale += v.euro }
+    if (!punti.length) return
+    const testo = `Buongiorno,\ncontestiamo ${doc}${cliente ? ` (cliente ${cliente})` : ''}:\n` + punti.map((p, i) => `${i + 1}) ${p}`).join('\n')
+      + `\nTotale da accreditare: ${euro(r2(totale))}. In allegato l'elenco delle spedizioni.\nRestiamo in attesa della nota di credito.`
+    const { utils, writeFile } = await import('xlsx')
+    const wb = utils.book_new()
+    utils.book_append_sheet(wb, utils.json_to_sheet(testo.split('\n').map(r => ({ Contestazione: r }))), 'Contestazione')
+    if (righe.length) utils.book_append_sheet(wb, utils.json_to_sheet(righe.map(({ e, m }) => ({
+      [gls ? 'Tracking GLS' : 'Segnacollo']: e.riga.segnacollo, 'Data': e.riga.dataRitiro || '', 'Destinatario': e.riga.destinatario, 'Località': e.riga.localita,
+      [`Fatturato ${cr} (€)`]: e.brt, 'Contestato (€)': m.importo, 'Motivo': m.testo,
+    }))), 'Spedizioni')
+    writeFile(wb, `contestazione-${cr.toLowerCase()}-${(esiti[0]?.riga.numeroFattura || 'documento').replace(/[^\w-]+/g, '-')}.xlsx`)
+    let copiato = false
+    try { await navigator.clipboard.writeText(testo); copiato = true } catch { /* il testo resta nel primo foglio dell'Excel */ }
+    await dialog.alert({ title: 'Contestazione pronta', message: (copiato ? 'Il testo è copiato: incollalo nella mail a ' + cr + ' e allega l\'Excel appena scaricato. ' : 'Il testo è nel primo foglio dell\'Excel appena scaricato. ')
+      + 'Quando l\'hai mandata, premi «Segna contestata» sulle voci: poi segni la nota di credito quando arriva.' })
+  }
+
   async function scaricaExcel() {
     const { utils, writeFile } = await import('xlsx')
     const righe = filtrate.map(e => ({
@@ -543,6 +665,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       [`${cr} (€)`]: e.brt, [`Nolo ${cr} (€)`]: e.riga.nolo,
       [`Voci ${cr}`]: e.riga.voci.map(v => `${descriviVoce(v.sigla, legenda).nome} ${v.importo.toFixed(2)}`).join(' + '),
       'Costo Moove (€)': e.moove ?? '', [`Listino al peso ${cr} (€)`]: e.listino ?? '', 'Differenza (€)': e.differenza ?? '',
+      ...(gls ? { 'Contratto': e.contratto || '', 'Ha pagato': e.incasso?.chi || '', 'Il cliente ti ha pagato (€)': e.incasso?.importo ?? '',
+        [`Ti resta dopo ${cr} (€)`]: e.incasso && e.riga.andata ? r2(e.incasso.importo - e.brt) : '' } : {}),
       'Perché': e.spedizione ? e.motivi.map(m => m.testo).join(' | ') : 'Non trovata in Moove',
     }))
     const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Controllo fattura')
@@ -707,6 +831,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                     </td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', ...cifre }}>
                       <span style={{ display: 'inline-block', padding: '3px 9px', borderRadius: 8, fontWeight: 700, color: coloreImporto(f.aTuoCarico), background: f.aTuoCarico > 0.005 ? C.rossoTenue : f.aTuoCarico < -0.005 ? C.verdeTenue : C.fondoTenue }}>{conSegno(f.aTuoCarico)}</span>
+                      {/* Le note di credito valgono su tutto il documento: si dicono a parte, non si tolgono qui sopra. */}
+                      {!!f.noteDiCredito && <div style={{ fontSize: 12, color: C.verde, marginTop: 3 }}>{euro(f.noteDiCredito)} di note di credito</div>}
+                      {!!f.inAttesa && <div style={{ fontSize: 12, color: C.ambra, marginTop: 2 }}>{f.inAttesa} {f.inAttesa === 1 ? 'voce aspetta' : 'voci aspettano'} il corriere</div>}
                     </td>
                     <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                       <button onClick={() => apriFattura(f.id)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 12.5, fontWeight: 600, color: C.testo, cursor: 'pointer' }}>
@@ -891,12 +1018,15 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                           <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 2 }}>
                             Contratto {c.codice}, tutte le {c.righe.toLocaleString('it-IT')} spedizioni del documento{carburanteMoove.n ? `; di questi, ${euro(carburanteMoove.euro)} sulle ${carburanteMoove.n} spedizioni Moove` : ''}
                           </div>
+                          {rigaStato('contestare', `carburante-doc:${c.codice}`, c.inPiu)}
                         </div>
                       ))}
                       {voci.map(([k, v]) => (
-                        <button key={k} onClick={() => { setVoceScelta(voceScelta === k ? null : k); setFiltro('tutte'); setPagina(1) }}
-                          style={{ textAlign: 'left', background: voceScelta === k ? '#fff' : 'rgba(255,255,255,.7)', borderRadius: 9, padding: '8px 10px', cursor: 'pointer',
-                            border: `1px solid ${voceScelta === k ? gr.colore : C.filo}`, boxShadow: voceScelta === k ? '0 1px 3px rgba(16,24,40,.12)' : 'none', color: C.testo }}>
+                        <div key={k} style={{ background: voceScelta === k ? '#fff' : 'rgba(255,255,255,.7)', borderRadius: 9, padding: '8px 10px',
+                            border: `1px solid ${voceScelta === k ? gr.colore : C.filo}`, boxShadow: voceScelta === k ? '0 1px 3px rgba(16,24,40,.12)' : 'none' }}>
+                        {/* La voce filtra le spedizioni; sotto, il suo stato (contestata, chiesta, fatta…). */}
+                        <button onClick={() => { setVoceScelta(voceScelta === k ? null : k); setFiltro('tutte'); setPagina(1) }}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: C.testo, font: 'inherit' }}>
                           <div style={{ display: 'flex', gap: 8, fontSize: 13 }}>
                             <span style={{ flex: 1, fontWeight: 600 }}>{v.nome}</span>
                             <span style={{ color: C.attenuato, ...cifre }}>{v.n}</span>
@@ -911,8 +1041,16 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                             </div>
                           )}
                         </button>
+                        {rigaStato(gr.k, `${gr.k}|${k}`, v.euro, v.tipo === 'peso')}
+                        </div>
                       ))}
                       {!voci.length && !extra.length && <div style={{ fontSize: 12.5, color: C.attenuato }}>Niente.</div>}
+                      {gr.k === 'contestare' && (voci.length > 0 || extra.length > 0) && (
+                        <button onClick={preparaContestazione}
+                          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '8px 12px', borderRadius: 9, border: `1px solid ${gr.orlo}`, background: '#fff', color: gr.colore, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+                          <Icona nome="scarica" size={15} /> Prepara la contestazione
+                        </button>
+                      )}
                     </div>
                   </div>
                 )
@@ -1115,7 +1253,11 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: C.fondoTenue, textAlign: 'left' }}>
-                  {[['Spedizione', 'left'], ['Destinazione', 'left'], [`Peso Moove → ${cr}`, 'left'], [cr, 'right'], ['Moove', 'right'], ['Differenza', 'right'], ['Perché', 'left']].map(([h, a]) => (
+                  {/* GLS: anche quanto ha pagato chi sta sotto e cosa resta dopo GLS (Lorenzo, 25/11: per ogni spedizione
+                      "quanto ha pagato lui, il cliente e quanto gli ha fatto pagare GLS"). */}
+                  {(gls
+                    ? [['Spedizione', 'left'], ['Destinazione', 'left'], [`Peso Moove → ${cr}`, 'left'], [`${cr} ti chiede`, 'right'], ['Costo in Moove', 'right'], ['Differenza', 'right'], ['Il cliente ti ha pagato', 'right'], ['Ti resta', 'right'], ['Perché', 'left']]
+                    : [['Spedizione', 'left'], ['Destinazione', 'left'], [`Peso Moove → ${cr}`, 'left'], [cr, 'right'], ['Moove', 'right'], ['Differenza', 'right'], ['Perché', 'left']]).map(([h, a]) => (
                     <th key={h} style={{ padding: '10px 14px', fontSize: 11.5, fontWeight: 600, color: C.attenuato, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', textAlign: a as any, borderBottom: `1px solid ${C.filo}` }}>{h}</th>
                   ))}
                 </tr>
@@ -1128,6 +1270,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                       <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: 700, color: e.spedizione ? C.arancioScuro : C.testo, fontFamily: 'var(--font-geist-mono), ui-monospace, monospace', fontSize: 12.5 }}>{e.spedizione?.numero || e.riga.segnacollo || '—'}</div>
                         <div style={{ fontSize: 12.5, color: C.attenuato, marginTop: 3 }}>{e.spedizione?.chi || 'Non in Moove'}</div>
+                        {e.contratto && <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 1 }}>{e.contratto}</div>}
                         <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
                           {!e.riga.andata && <Pillola colore={C.attenuato} fondo={C.fondoTenue} orlo={C.filo}>{gls ? e.riga.tipoBolla : 'Rientro'}</Pillola>}
                           {e.spedizione?.stato === 'annullata' && <Pillola colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>Annullata</Pillola>}
@@ -1156,6 +1299,18 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                               background: e.differenza > 0.005 ? C.rossoTenue : e.differenza < -0.005 ? C.verdeTenue : C.fondoTenue }}>{conSegno(e.differenza)}</span>
                           : <span style={{ color: '#98a2b3' }}>—</span>}
                       </td>
+                      {gls && (<>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', ...cifre }}>
+                          {e.incasso ? <><div style={{ fontWeight: 600 }}>{euro(e.incasso.importo)}</div>
+                            {e.incasso.chi !== e.spedizione?.chi && <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 2 }}>{e.incasso.chi}</div>}</>
+                            : <span style={{ color: '#98a2b3' }}>—</span>}
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {e.incasso && e.riga.andata
+                            ? (() => { const resta = r2(e.incasso.importo - e.brt); return <span style={{ fontWeight: 700, fontSize: 13, color: resta < -0.005 ? C.rosso : C.verde, ...cifre }}>{conSegno(resta)}</span> })()
+                            : <span style={{ color: '#98a2b3' }}>—</span>}
+                        </td>
+                      </>)}
                       <td style={{ padding: '12px 14px', minWidth: 340, maxWidth: 520 }}>
                         {!e.spedizione ? <span style={{ color: C.attenuato, fontSize: 12.5 }}>{gls
                             ? `Nessuna spedizione dei tuoi contratti col tracking ${e.riga.segnacollo || '—'}${e.riga.rifAlfabetico && e.riga.rifAlfabetico !== '0' ? ` (riferimento ${e.riga.rifAlfabetico})` : ''}.`
@@ -1175,7 +1330,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                   )
                 })}
                 {!visibili.length && (
-                  <tr><td colSpan={7} style={{ padding: '36px 16px', textAlign: 'center', color: C.attenuato }}>
+                  <tr><td colSpan={gls ? 9 : 7} style={{ padding: '36px 16px', textAlign: 'center', color: C.attenuato }}>
                     {filtro === 'perdita' ? 'Nessuna spedizione in perdita: su questa fattura non hai speso più di quanto vedi in Moove.' : 'Nessuna riga con questo filtro.'}
                   </td></tr>
                 )}

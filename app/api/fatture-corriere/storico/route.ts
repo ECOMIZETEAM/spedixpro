@@ -61,10 +61,16 @@ export async function GET(req: NextRequest) {
       const g = sue.size || f.rettifiche_file_id ? { inviate: 0, confermate: 0, euroConfermati: 0, euroInAttesa: 0 } : null
       for (const r of sue.values()) { g!.inviate++; if (r.confermata) { g!.confermate++; g!.euroConfermati += r.euro } else g!.euroInAttesa += r.euro }
       const recuperato = r2(g?.euroConfermati || 0)
+      // Le note di credito del corriere (voci contestate e accreditate) e quante voci aspettano ancora il corriere.
+      // A parte da "a tuo carico": quella del carburante vale su tutto il documento (anche le spedizioni fatte fuori
+      // Moove), la differenza solo sulle spedizioni Moove: sottraendola il numero non sarebbe più vero.
+      const stati = Object.values(f.riepilogo?.stati || {}) as any[]
+      const noteDiCredito = r2(stati.filter(x => x?.stato === 'accreditato').reduce((t, x) => t + (Number(x.importo) || 0), 0))
+      const inAttesa = stati.filter(x => x?.stato === 'contestato' || x?.stato === 'chiesto').length
       // Gli id delle rettifiche servono solo qui: nell'elenco non viaggiano.
       const riepilogo = f.riepilogo ? { ...f.riepilogo, rettificheEsterne: undefined } : f.riepilogo
       const spedizioni = f.id === aperta ? Array.from(new Set(Array.from(sue.values()).map(r => r.spedizione_id).filter(Boolean))) : undefined
-      return { ...f, riepilogo, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa), ...(spedizioni ? { spedizioni } : {}) } : null, aTuoCarico: r2(Number(f.differenza) - recuperato) }
+      return { ...f, riepilogo, girate: g ? { ...g, euroConfermati: recuperato, euroInAttesa: r2(g.euroInAttesa), ...(spedizioni ? { spedizioni } : {}) } : null, noteDiCredito, inAttesa, aTuoCarico: r2(Number(f.differenza) - recuperato) }
     }),
   })
 }

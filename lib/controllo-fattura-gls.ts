@@ -118,6 +118,35 @@ export async function analizzaFatturaGls(
     return { costo: r2(conta.reduce((t, m) => t - Number(m.importo || 0), 0)), movimenti: conta.length }
   }
 
+  // QUANTO HA INCASSATO IL DETENTORE da chi sta sotto (Lorenzo, 25/11: per ogni spedizione "quanto ha pagato lui, il
+  // cliente e quanto gli ha fatto pagare GLS"). Le stesse regole del margine del pacco (lib/rettifiche-margine-pacco):
+  // il cliente diretto coi movimenti scritti dal detentore, il sotto-master figlio coi suoi movimenti d'albero e con
+  // le rettifiche che il detentore gli ha addebitato. Sui contratti condivisi chi paga è il cliente "ingrosso" del
+  // detentore, sulla gamba (NI…-1d6ac50d): si leggono tutte le righe del tracking, come per il costo.
+  const { data: figli, error: errFi } = await admin.from('masters').select('id').eq('parent_master_id', masterId)
+  if (errFi) throw new Error('lettura sotto-master non riuscita: ' + errFi.message)
+  const idsFigli = (figli || []).map((m: any) => m.id as string)
+  const incassiPerSped = new Map<string, any[]>()
+  for (const g of aGruppi(ids, 100)) {
+    const { data, error } = await admin.from('movimenti').select('spedizione_id,importo,cliente_id,master_id,master_target_id,tipo,riferimento')
+      .in('spedizione_id', g).in('tipo', TIPI_LETTI)
+      .or(`and(master_id.eq.${masterId},cliente_id.not.is.null)${idsFigli.length ? `,master_target_id.in.(${idsFigli.join(',')})` : ''}`)
+    if (error) throw new Error('lettura incassi non riuscita: ' + error.message)
+    if ((data || []).length >= TETTO) throw new Error('troppi movimenti in una lettura: rischio di perderne')
+    for (const m of data || []) {
+      if (!m.cliente_id && !(m.master_id === m.master_target_id || m.master_id === masterId)) continue
+      const v = incassiPerSped.get(m.spedizione_id) || []; v.push(m); incassiPerSped.set(m.spedizione_id, v)
+    }
+  }
+  const incassoDi = (l: any[]): { importo: number; chi: 'cliente' | 'master'; id: string } | null => {
+    const mov = l.flatMap(s => incassiPerSped.get(s.id) || [])
+    if (!mov.length) return null
+    const nolo = movimentiDelNolo(mov.filter(m => m.tipo !== 'rimborso' && m.tipo !== 'accessorio'))
+    const conta = [...nolo, ...mov.filter(m => m.tipo === 'rimborso' || m.tipo === 'accessorio')]
+    const primo = mov.find(m => m.tipo === 'spedizione') || mov[0]
+    return { importo: r2(conta.reduce((t, m) => t - Number(m.importo || 0), 0)), chi: primo.cliente_id ? 'cliente' : 'master', id: primo.cliente_id || primo.master_target_id }
+  }
+
   // Il listino si rifà con la funzione dell'addebito. Quella, se una lettura non riesce, torna null come
   // quando la zona non ha prezzo: provato il 24/11 sul borderò del 23/11, 16 righe "senza prezzo" che rifatte
   // subito dopo davano 3,61 e 8,76 €. Un null si riprova una volta; un errore vero ferma il pacchetto (la
@@ -173,18 +202,21 @@ export async function analizzaFatturaGls(
     const { costo: moove, movimenti: nMov } = costoDi(tutte)
     const differenza = r2(gls - moove)
     const motivi: Motivo[] = []
+    // La spedizione, col contratto (= il listino di costo) e quanto ha pagato chi sta sotto: valgono per ogni riga
+    // trovata, anche per quelle che tornano al centesimo.
     const spedizione = s as SpedizioneAbbinata
+    const conSped = { ...base, spedizione, contratto: nomeContratto.get(radice.get(s.corriere_id) || '') || '', incasso: incassoDi(tutte) }
 
     if (s.stato === 'annullata' && gls > 0) {
       motivi.push({ tipo: 'annullata', importo: differenza, gruppo: 'contestare', testo: `Annullata in Moove (costo rimborsato), ma GLS l'ha fatturata ${euro(gls)}: il pacco è partito lo stesso o l'annullo non è arrivato a GLS.` })
-      return { ...base, spedizione, moove, listino: null, differenza, motivi }
+      return { ...conSped, moove, listino: null, differenza, motivi }
     }
-    if (!r.andata) return { ...base, spedizione, moove, listino: null, differenza, motivi }
+    if (!r.andata) return { ...conSped, moove, listino: null, differenza, motivi }
     // Trovata, ma senza un movimento del detentore: il costo 0 non è un prezzo, è un costo che manca (così
     // 1.535 pacchi di novembre sembravano gratis prima di cercarli per tracking).
     if (!nMov) {
       motivi.push({ tipo: 'non_calcolabile', importo: differenza, gruppo: 'listino', testo: `In Moove non c'è il costo del detentore su questa spedizione: GLS ${euro(gls)}, costo registrato nessuno.` })
-      return { ...base, spedizione, moove, listino: null, differenza, motivi }
+      return { ...conSped, moove, listino: null, differenza, motivi }
     }
 
     const pesoMoove = Number(s.peso_fatturato || s.peso_reale || 0)
@@ -192,18 +224,18 @@ export async function analizzaFatturaGls(
     // la riga può uscire 3,60 contro 3,61): non c'è niente da spiegare né da girare, anche se il peso è diverso
     // (stessa fascia), e il listino non si rifà. Sono l'85% delle righe di novembre (2.417 su 2.789), e ogni
     // listino rifatto sono cinque letture sul database di produzione.
-    if (Math.abs(differenza) < 0.015) return { ...base, spedizione, moove, listino: null, differenza, motivi }
+    if (Math.abs(differenza) < 0.015) return { ...conSped, moove, listino: null, differenza, motivi }
     const listino = await listinoDi(r, s, r.pesoTassato)
     if (!listino) {
       motivi.push({ tipo: 'non_calcolabile', importo: differenza, gruppo: 'listino', testo: `Il listino non dà un prezzo per ${s.dest_cap || ''} ${s.dest_citta || r.localita} a ${kg(r.pesoTassato)} kg: zona o fascia mancante (o una lettura non riuscita: ricaricando si rifà).` })
-      return { ...base, spedizione, moove, listino, differenza, motivi }
+      return { ...conSped, moove, listino, differenza, motivi }
     }
     const listinoMoove = Math.abs(pesoMoove - r.pesoTassato) < 0.001 ? listino : await listinoDi(r, s, pesoMoove)
     // Senza il listino al peso di Moove l'effetto del peso non si separa: finirebbe tutto nella tariffa come
     // "listino più basso", e la spedizione non andrebbe alla Rettifica. Meglio dire che non si calcola.
     if (!listinoMoove) {
       motivi.push({ tipo: 'non_calcolabile', importo: differenza, gruppo: 'listino', testo: `Il listino non dà un prezzo per ${s.dest_cap || ''} ${s.dest_citta || r.localita} al peso di Moove (${kg(pesoMoove)} kg): l'effetto del peso di GLS non si può separare.` })
-      return { ...base, spedizione, moove, listino, differenza, motivi }
+      return { ...conSped, moove, listino, differenza, motivi }
     }
     // I servizi chiesti (Exchange…) col prezzo del listino del detentore, come li somma la creazione.
     const corriereRadice = radice.get(s.corriere_id) || contrattiIds[0]
@@ -305,6 +337,6 @@ export async function analizzaFatturaGls(
       ? { listino: nomeContratto.get(corriereRadice) || '', zona: listino.zona || '', peso: r.pesoTassato,
           luogo: [s.dest_citta || r.localita, s.dest_cap].filter(Boolean).join(' '), parti }
       : undefined
-    return { ...base, spedizione, moove, listino, differenza, motivi, scartoListino, ...(allinea ? { allinea } : {}) }
+    return { ...conSped, moove, listino, differenza, motivi, scartoListino, ...(allinea ? { allinea } : {}) }
   })
 }

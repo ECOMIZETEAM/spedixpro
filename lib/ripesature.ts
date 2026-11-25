@@ -250,38 +250,55 @@ function leggiRipesatureXL(righe: any[]): { righe: Ripesatura[]; scartate: numbe
 // "rettifiche gls 2909.csv" (947 righe, zero rettifiche). Ora passano dal motore delle rettifiche, a
 // pacchetti: pagato dai movimenti, catena vera, contratti condivisi.
 // SOLO i file fatti di quelle due colonne: uno con altre colonne non si indovina, resta com'era.
+// Con due eccezioni, facoltative: `supplemento` e `voce` (le manda il controllo fattura del corriere, dal 25/11): un
+// supplemento FISSO del corriere sulla spedizione, come l'Oversize di GLS (15 €) che Wave non aveva modo di girare
+// ai clienti, e il suo nome. Cascano invariati come i supplementi del fornitore (fuori sagoma): ognuno paga
+// quell'importo, e col nome nella descrizione del movimento. Un file con due colonne si legge esattamente come prima.
 const CHIAVI_LDV = ['ldv', 'nspedizione', 'numero']
 const CHIAVI_PESO = ['peso', 'pesoreale', 'newweight']
+const CHIAVI_FACOLTATIVE = ['supplemento', 'voce']
 export function sembraRipesaturePesi(righe: any[]): boolean {
   const chiavi = new Set<string>()
   for (const r of (righe || []).slice(0, 50)) {
     for (const [k, v] of Object.entries(normalizza(r))) if (String(v ?? '').trim()) chiavi.add(k)
   }
-  return chiavi.size === 2
-    && CHIAVI_LDV.filter(k => chiavi.has(k)).length === 1
-    && CHIAVI_PESO.filter(k => chiavi.has(k)).length === 1
+  const ldv = CHIAVI_LDV.filter(k => chiavi.has(k)).length, peso = CHIAVI_PESO.filter(k => chiavi.has(k)).length
+  const altre = [...chiavi].filter(k => !CHIAVI_LDV.includes(k) && !CHIAVI_PESO.includes(k))
+  return ldv === 1 && peso === 1 && altre.every(k => CHIAVI_FACOLTATIVE.includes(k))
 }
 
 // Un collo solo col peso del file e senza misure: e' quello che il file dice. Se la spedizione ha piu'
 // colli, la rotta divide il peso sui colli dichiarati (lib/ripesature-pesi). La stessa LDV con due pesi
 // diversi non si indovina: si scarta, come faceva il ramo vecchio.
 function leggiRipesaturePesi(righe: any[]): { righe: Ripesatura[]; scartate: number; totaleFornitore: number } {
-  const perLdv = new Map<string, number[]>()
+  const perLdv = new Map<string, { pesi: number[]; supplementi: number[]; voci: string[] }>()
   let scartate = 0
   for (const grezza of (righe || [])) {
     const c = normalizza(grezza)
     const ldv = String(c.ldv ?? c.nspedizione ?? c.numero ?? '').trim()
     const peso = kg(c.peso ?? c.pesoreale ?? c.newweight)
     if (!ldv || !(peso > 0)) { scartate++; continue }
-    perLdv.set(ldv, [...(perLdv.get(ldv) || []), peso])
+    const v = perLdv.get(ldv) || { pesi: [], supplementi: [], voci: [] }
+    v.pesi.push(peso)
+    const sup = Math.round(euro(c.supplemento) * 100) / 100
+    if (sup > 0) { v.supplementi.push(sup); const nome = String(c.voce ?? '').trim().slice(0, 60); if (nome) v.voci.push(nome) }
+    perLdv.set(ldv, v)
   }
   const out: Ripesatura[] = []
-  for (const [ldv, pesi] of perLdv) {
+  for (const [ldv, { pesi, supplementi, voci }] of perLdv) {
     if (new Set(pesi.map(p => p.toFixed(3))).size > 1) { scartate++; continue }
+    // Lo stesso supplemento ripetuto su piu' righe della stessa spedizione conta una volta; due diversi si sommano.
+    const sup = Array.from(new Set(supplementi.map(x => x.toFixed(2)))).reduce((t, x) => t + Number(x), 0)
+    const nomi = Array.from(new Set(voci))
     out.push({
-      idOrdine: ldv, idVerifiche: [], ldv, addebitoFornitore: 0,
+      // Col supplemento il riferimento e' "LDV·voce" (NI665520237·Oversize), non la LDV: l'anti-doppione della
+      // rotta salta ogni riga con lo stesso riferimento gia' rettificato, e su una spedizione gia' mandata per il
+      // peso il supplemento sarebbe stato scartato in silenzio. Cosi' passa come "supplemento arrivato dopo i chili"
+      // (gira solo il supplemento), e la stessa voce rimandata non si chiede due volte.
+      idOrdine: sup > 0 ? `${ldv}·${nomi.join('+') || 'supplemento'}`.slice(0, 120) : ldv, idVerifiche: [], ldv, addebitoFornitore: 0,
       colli: [{ peso: pesi[0], lunghezza: 0, larghezza: 0, altezza: 0 }],
       dataChiusura: '', mittente: '', destinatario: '', formato: 'pesi',
+      ...(sup > 0 ? { supplementi: Math.round(sup * 100) / 100, supplementiNomi: nomi.length ? nomi : ['supplemento del corriere'] } : {}),
     })
   }
   return { righe: out, scartate, totaleFornitore: 0 }

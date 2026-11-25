@@ -47,6 +47,7 @@ type Corpo = {
   chiudi?: boolean
   rifai?: boolean                    // rifare con le regole di oggi una fattura già controllata, tenendo le azioni
   perche?: { id: string; peso: number }[]   // spedizioni da girare rimaste senza rettifica: perché
+  statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string }   // a che punto è una voce di "Cosa fare"
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
   legenda?: Record<string, string>   // il PDF aggiunto dopo, a fattura già controllata
@@ -131,6 +132,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // ── A CHE PUNTO È UNA VOCE DI "COSA FARE" ──
+  // Lorenzo, 25/11: "ci deve stare un bottone che dice ok contestato, ok GLS mi ha fatto la nota di credito e via
+  // dicendo". Ogni voce ha il suo stato (contestata → nota di credito o respinta; chiesta a GLS → risposta; fatto),
+  // con la data, chi l'ha segnato e i passaggi di prima. Si salva con la fattura (riepilogo.stati), così resta
+  // nello storico, e le note di credito tornano nel conto di quello che resta a carico. `stato: null` = annulla.
+  if (corpo.statoVoce && fattura) {
+    const sv = corpo.statoVoce
+    const chiave = String(sv.chiave || '').trim().slice(0, 160)
+    const STATI = ['contestato', 'accreditato', 'respinto', 'chiesto', 'risposto', 'fatto', 'girato']
+    if (!chiave) return NextResponse.json({ error: 'Voce mancante.' }, { status: 400 })
+    if (sv.stato != null && !STATI.includes(sv.stato)) return NextResponse.json({ error: 'Stato non valido.' }, { status: 400 })
+    const importo = sv.importo == null || (sv.importo as any) === '' ? null : Number(sv.importo)
+    if (importo != null && !(Number.isFinite(importo) && importo >= 0 && importo <= 1000000)) return NextResponse.json({ error: 'Importo non valido.' }, { status: 400 })
+    const { data: f2, error: errF2 } = await admin.from('fatture_corriere').select('riepilogo').eq('id', fattura.id).maybeSingle()
+    if (errF2) return NextResponse.json({ error: 'Lettura fattura non riuscita: ' + errF2.message }, { status: 500 })
+    const riepilogo = f2?.riepilogo || {}
+    const stati: Record<string, any> = { ...(riepilogo.stati || {}) }
+    if (sv.stato == null) delete stati[chiave]
+    else {
+      const prima = stati[chiave]
+      const storia = [...(prima?.storia || []), ...(prima ? [{ stato: prima.stato, il: prima.il }] : [])].slice(-10)
+      const nota = String(sv.nota ?? '').trim().slice(0, 500), numero = String(sv.numero ?? '').trim().slice(0, 60)
+      stati[chiave] = { stato: sv.stato, il: new Date().toISOString(), da: u.userId,
+        ...(nota ? { nota } : {}), ...(importo != null ? { importo: Math.round(importo * 100) / 100 } : {}), ...(numero ? { numero } : {}), ...(storia.length ? { storia } : {}) }
+    }
+    const { error } = await admin.from('fatture_corriere').update({ riepilogo: { ...riepilogo, stati } }).eq('id', fattura.id)
+    if (error) return NextResponse.json({ error: 'Stato non salvato: ' + error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, stati })
+  }
+
   // ── PERCHÉ NON È DIVENTATA UNA RETTIFICA ──
   // La Rettifica dice quante spedizioni ha scartato, non quali né perché: il 25/11 Wave vedeva "1 non è diventata
   // una rettifica" e in Rettifica Costi non c'era niente da cercare. Era la NI665520237: Moove 50 kg, GLS 130, e il
@@ -209,7 +240,7 @@ export async function POST(req: NextRequest) {
       riepilogo: { ...(fattura.riepilogo || {}), perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri, ...(esterne?.length ? { rettificheEsterne: { ids: esterne } } : {}) },
     }).eq('id', fattura.id)
     // La pagina deve sapere se le differenze sono già nella Rettifica (fattura rifatta, o già girate da un file).
-    return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length })
+    return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length, stati: fattura.riepilogo?.stati || {} })
   }
 
   // ── UN PACCHETTO DI RIGHE ──
@@ -261,7 +292,7 @@ export async function POST(req: NextRequest) {
     if (esistente) {
       // Le azioni restano sempre, anche se il rifacimento si era interrotto a metà e si riprende senza `rifai`.
       const conAzioni = fatturaConAzioni(esistente)
-      const tenuti = conAzioni ? Object.fromEntries(['fileEsterni', 'rettificheEsterne'].filter(k => esistente.riepilogo?.[k]).map(k => [k, esistente.riepilogo[k]])) : {}
+      const tenuti = conAzioni ? Object.fromEntries(['fileEsterni', 'rettificheEsterne', 'stati'].filter(k => esistente.riepilogo?.[k]).map(k => [k, esistente.riepilogo[k]])) : {}
       const riepilogo = riepilogoIniziale || Object.keys(tenuti).length ? { ...(riepilogoIniziale || {}), ...tenuti } : null
       await admin.from('fatture_corriere_righe').delete().eq('fattura_id', esistente.id)
       await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo, etichetta: conAzioni ? esistente.etichetta ?? null : null, completata_at: null,
@@ -292,8 +323,9 @@ export async function POST(req: NextRequest) {
   }
 
   // Chi ha spedito: cliente diretto del detentore oppure sotto-master che gli compra il contratto.
-  const clientiIds = Array.from(new Set(esiti.map(e => e.spedizione?.cliente_id).filter(Boolean))) as string[]
-  const masterIds = Array.from(new Set(esiti.map(e => e.spedizione?.master_id).filter(m => m && m !== u.masterId))) as string[]
+  // (anche chi ha pagato il detentore, GLS: il cliente "ingrosso" sulle gambe condivise, o il sotto-master figlio)
+  const clientiIds = Array.from(new Set([...esiti.map(e => e.spedizione?.cliente_id), ...esiti.map(e => e.incasso?.chi === 'cliente' ? e.incasso.id : null)].filter(Boolean))) as string[]
+  const masterIds = Array.from(new Set([...esiti.map(e => e.spedizione?.master_id), ...esiti.map(e => e.incasso?.chi === 'master' ? e.incasso.id : null)].filter(m => m && m !== u.masterId))) as string[]
   const nomi: Record<string, string> = {}
   for (let i = 0; i < clientiIds.length; i += 200) {
     const { data } = await admin.from('clienti').select('id,ragione_sociale').in('id', clientiIds.slice(i, i + 200))
@@ -321,6 +353,8 @@ export async function POST(req: NextRequest) {
     // Il dettaglio di "Cosa allineare nel listino" (quale listino, voce, zona, luogo). Mancava: il controllo lo
     // calcolava e qui si perdeva, e il 25/11 l'allegato di ottobre rifatto da Wave usciva ancora senza.
     ...(e.allinea ? { allinea: e.allinea } : {}),
+    ...(e.contratto ? { contratto: e.contratto } : {}),
+    ...(e.incasso ? { incasso: { importo: e.incasso.importo, chi: nomi[e.incasso.id] || (e.incasso.chi === 'master' ? 'Sotto-master' : 'Cliente') } } : {}),
   }))
 
   const { error: errRighe } = await admin.from('fatture_corriere_righe')

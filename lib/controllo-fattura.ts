@@ -54,6 +54,8 @@ export type EsitoRiga = {
   differenza: number | null              // BRT − Moove: positivo = il detentore ha speso più di quanto vede
   scartoListino?: number | null          // GLS: corriere − listino di OGGI allo stesso peso (lib/controllo-fattura-gls)
   allinea?: AllineaGls                   // GLS: quello scarto diviso per listino, zona e voce (lib/fattura-gls)
+  contratto?: string                     // GLS: il contratto del detentore (= il suo listino di costo)
+  incasso?: { importo: number; chi: 'cliente' | 'master'; id: string } | null   // GLS: quanto ha pagato chi sta sotto
   motivi: Motivo[]
   vociPerCategoria: Partial<Record<CategoriaVoce | 'nolo', number>>
 }

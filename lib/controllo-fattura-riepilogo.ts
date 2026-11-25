@@ -13,6 +13,8 @@ export type EsitoPagina = {
   brt: number; moove: number | null; listino: number | null; zona: string | null; differenza: number | null
   scartoListino?: number | null
   allinea?: AllineaGls
+  contratto?: string
+  incasso?: { importo: number; chi: string } | null   // quanto ha pagato al detentore chi sta sotto, e chi è
   motivi: MotivoPagina[]; voci: Record<string, number>
 }
 
@@ -63,4 +65,6 @@ export function riepilogaFattura(esiti: EsitoPagina[]) {
 // pagina Rettifica, e il 25/11 il caricamento dell'allegato GLS ha tolto la 74855 dallo storico come "senza azioni".
 export const fatturaConAzioni = (f: { rettifiche_file_id?: string | null; riepilogo?: any } | null | undefined) =>
   !!f && (!!f.rettifiche_file_id || (Array.isArray(f.riepilogo?.fileEsterni) && f.riepilogo.fileEsterni.length > 0)
-    || (Array.isArray(f.riepilogo?.rettificheEsterne?.ids) && f.riepilogo.rettificheEsterne.ids.length > 0))
+    || (Array.isArray(f.riepilogo?.rettificheEsterne?.ids) && f.riepilogo.rettificheEsterne.ids.length > 0)
+    // una voce di "Cosa fare" segnata (contestata, chiesta a GLS, fatta…): anche quella è un'azione da ricordare
+    || (!!f.riepilogo?.stati && Object.keys(f.riepilogo.stati).length > 0))
