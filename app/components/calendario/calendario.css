@@ -349,3 +349,66 @@
 .cal-avviso button.x { width: 32px; padding: 0; display: grid; place-items: center; }
 .cal-avviso button.x svg.ic { width: 14px; height: 14px; }
 @media (max-width: 760px) { .cal-finestra-piede small { display: none; } }
+
+/* ── Fase 2: ripetizioni, inviti, Google e iPhone ── */
+.cal-riga-campi { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cal-campo--stretto { flex: 0 1 290px; }
+.cal-campo--stretto select { height: 38px; }
+.cal-nascosto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.cal-ripeti { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 12px; background: var(--c-riquadro); }
+.cal-ripeti-riga { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.cal-ripeti-riga > span { color: var(--c-grigio); font-weight: 500; min-width: 34px; }
+.cal-ripeti-riga input[type="number"] { width: 64px; height: 34px; padding: 0 8px; border-radius: 8px; border: 0; background: var(--c-carta); color: var(--c-testo); box-shadow: inset 0 0 0 1px var(--c-filo); }
+.cal-ripeti-riga select, .cal-ripeti-riga input[type="date"] { height: 34px; padding: 0 8px; border-radius: 8px; border: 0; background: var(--c-carta); color: var(--c-testo); box-shadow: inset 0 0 0 1px var(--c-filo); color-scheme: light; }
+.cal[data-notte="1"] .cal-ripeti-riga :is(select, input) { color-scheme: dark; }
+.cal-ripeti-fine label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.cal-ripeti-fine input[type="radio"] { accent-color: var(--c-arancio); margin: 0; }
+.cal-ripeti-frase { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--c-grigio); }
+.cal-ripeti-frase svg.ic { color: var(--c-arancio); width: 14px; height: 14px; }
+.cal-giorni { display: flex; gap: 6px; }
+.cal-giorni button { width: 34px; height: 34px; border-radius: 50%; font-size: 12.5px; font-weight: 600; text-align: center; background: var(--c-carta); box-shadow: inset 0 0 0 1px var(--c-filo); color: var(--c-grigio); }
+.cal-giorni button[aria-pressed="true"] { background: var(--c-arancio); color: #fff; box-shadow: none; }
+.cal-invita { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border-radius: 10px; background: var(--c-riquadro); }
+.cal-persona { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 4px 0 11px; border-radius: 999px; background: var(--c-carta); box-shadow: inset 0 0 0 1px var(--c-filo); font-size: 13px; font-weight: 500; max-width: 100%; }
+.cal-persona small { font-size: 11px; font-weight: 400; color: var(--c-grigio); white-space: nowrap; }
+.cal-persona button { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: var(--c-grigio); }
+.cal-persona button:hover { background: var(--c-riquadro); color: var(--c-testo); }
+.cal-persona button svg.ic { width: 12px; height: 12px; }
+.cal-persona--accettato { box-shadow: inset 0 0 0 1.5px var(--t-evento); }
+.cal-persona--rifiutato { opacity: .6; }
+.cal-invita-cerca { position: relative; flex: 1; min-width: 200px; }
+.cal-invita-cerca input { width: 100%; height: 34px; padding: 0 10px; border: 0; background: transparent; color: var(--c-testo); font-size: 13.5px; outline: none; }
+.cal-invita-elenco { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 5; max-height: 240px; overflow-y: auto; padding: 4px; border-radius: 12px; background: var(--c-carta); box-shadow: var(--c-ombra-alta); }
+.cal-invita-elenco button { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 10px; border-radius: 8px; }
+.cal-invita-elenco button:hover { background: var(--c-riquadro); }
+.cal-invita-elenco b { font-size: 13px; font-weight: 500; }
+.cal-invita-elenco small { font-size: 11.5px; color: var(--c-grigio); }
+.cal-invita-vuoto { padding: 10px; font-size: 12.5px; color: var(--c-grigio); }
+.cal-aiuto { font-size: 11.5px; color: var(--c-grigio); line-height: 1.45; }
+.cal-sottotitolo { font-size: 12px; font-weight: 600; color: var(--c-grigio); padding: 2px 2px 6px; }
+.cal-risposta { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; background: var(--c-riquadro); }
+.cal-risposta b { font-size: 14px; font-weight: 600; }
+.cal-risposta > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.cal-risposta .cal-tasto { flex: 1; min-width: 130px; }
+.cal-risposta .cal-tasto[aria-pressed="true"] { background: var(--c-testo); color: var(--c-carta); box-shadow: none; }
+.cal-risposta small { font-size: 12px; color: var(--c-grigio); }
+/* gli inviti: in attesa tratteggiati, rifiutati in grigio */
+.cal-invito--in_attesa.cal-pill, .cal-invito--in_attesa.cal-blocco { background: transparent; box-shadow: inset 0 0 0 1.5px var(--colore); background-image: repeating-linear-gradient(135deg, var(--tinta) 0 6px, transparent 6px 12px); }
+.cal-invito--rifiutato { opacity: .45; }
+.cal-invito--rifiutato :is(span, b) { text-decoration: line-through; }
+.cal-feed-titolo { display: inline-flex; align-items: center; gap: 7px; }
+.cal-feed-titolo svg.ic { width: 15px; height: 15px; color: var(--c-arancio); }
+.cal-feed-testo { margin: 0 0 10px; font-size: 12.5px; line-height: 1.45; color: var(--c-grigio); }
+.cal-feed-nota { margin: 10px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--c-grigio); }
+.cal-feed-link { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--c-riquadro); }
+.cal-feed-link input { flex: 1; min-width: 0; height: 30px; border: 0; background: transparent; color: var(--c-testo); font-size: 12px; outline: none; }
+.cal-feed-tasti { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.cal-feed-tasti .cal-tasto { flex: 1; height: 36px; padding: 0 12px; font-size: 12.5px; }
+/* il titolo della scheda «Google e iPhone» non è un numeretto: lo stile grigio dei contatori accanto ai titoli non vale */
+.cal-lato h3 .cal-feed-titolo { font-size: 13.5px; font-weight: 600; color: var(--c-testo); }
+.cal-lato h3 .cal-chip { font-size: 11px; font-weight: 600; }
+.cal-lato h3 .cal-chip--bene { color: var(--t-evento); }
+@media (max-width: 760px) {
+  .cal-campi.cal-campi--due { grid-template-columns: minmax(0, 1fr); }
+  .cal-campo--stretto { flex: 1 1 100%; }
+}

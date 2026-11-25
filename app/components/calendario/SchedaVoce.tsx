@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import type { Voce, RitiroCal, GiacenzaCal } from './tipi'
 import { NOME_TIPO, STATO_RITIRO, STATO_RITIRO_PLURALE, ORDINE_STATO_RITIRO, RITIRO_CHIUSO, RITIRO_FALLITO, AVVISI } from './tipi'
 import { dataLunga, ora, stessoGiorno, inizioGiorno, daChiave } from './date'
+import { descriviRicorrenza } from '@/lib/calendario-ricorrenza'
 import Ic from './icone'
 
 function quando(v: Voce): string {
@@ -27,13 +28,20 @@ function classeStato(stato: string) {
 const giorniDa = (giorno: string) => Math.max(0, Math.round((inizioGiorno(new Date()).getTime() - daChiave(giorno).getTime()) / 86400000))
 const daQuanto = (giorno: string) => { const n = giorniDa(giorno); return n === 0 ? 'entrata oggi' : n === 1 ? 'da 1 giorno' : `da ${n} giorni` }
 
-export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElimina, onFatto, onApriSpedizione }: {
+const NOME_RUOLO: Record<string, string> = { master: 'titolare', admin: 'admin', operatore: 'operatore', agente: 'agente', cliente: 'cliente' }
+const STATO_INVITO: Record<string, { l: string; c: string }> = {
+  accettato: { l: 'Partecipa', c: 'cal-chip cal-chip--bene' }, rifiutato: { l: 'Non partecipa', c: 'cal-chip cal-chip--male' }, in_attesa: { l: 'In attesa', c: 'cal-chip cal-chip--neutro' },
+}
+
+export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElimina, onSaltaQuesta, onFatto, onRispondi, onApriSpedizione }: {
   voce: Voce
   cliente: boolean
   onChiudi: () => void
   onModifica: () => void
   onElimina: () => Promise<void>
+  onSaltaQuesta: () => Promise<void>
   onFatto: (fatto: boolean) => Promise<void>
+  onRispondi: (risposta: 'accettato' | 'rifiutato') => Promise<void>
   onApriSpedizione: (id: string) => void
 }) {
   const [conferma, setConferma] = useState(false)
@@ -47,6 +55,9 @@ export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElim
   useEffect(() => { setConferma(false); setErrore('') }, [voce.chiave])
 
   const m = voce.mio
+  // una voce a cui sono invitato: la leggo e rispondo, non la cambio
+  const invitato = m?.ruolo === 'invitato'
+  const mia = !!m && !invitato
   // nel gruppo prima quelli ancora da fare, poi quelli andati male, in fondo quelli fatti; a parità, per mittente
   const ritiri = [...(voce.ritiri || [])].sort((a, b) => (ORDINE_STATO_RITIRO[a.stato] ?? 9) - (ORDINE_STATO_RITIRO[b.stato] ?? 9) || String(a.mittente || a.cliente || '').localeCompare(String(b.mittente || b.cliente || '')))
   const giacenze = voce.giacenze || []
@@ -70,7 +81,7 @@ export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElim
       <aside className={`cal-foglio cal-t--${voce.tipo}`} role="dialog" aria-modal="true" aria-labelledby="cal-foglio-titolo">
         <div className="cal-foglio-testa">
           <div style={{ minWidth: 0 }}>
-            <span className="cal-chip"><i style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--colore)' }} />{gruppo ? (voce.tipo === 'ritiro' ? 'Ritiri del giorno' : 'Giacenze del giorno') : NOME_TIPO[voce.tipo]}</span>
+            <span className="cal-chip"><i style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--colore)' }} />{gruppo ? (voce.tipo === 'ritiro' ? 'Ritiri del giorno' : 'Giacenze del giorno') : NOME_TIPO[voce.tipo] + (voce.mio?.ruolo === 'invitato' ? ' · invito' : '')}</span>
             <h2 id="cal-foglio-titolo">{voce.titolo}</h2>
           </div>
           <button className="cal-tondo" onClick={onChiudi} aria-label="Chiudi"><Ic n="x" /></button>
@@ -80,7 +91,9 @@ export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElim
           <div className="cal-dati">
             <div className="cal-dato"><Ic n="calendario" /><div>{quando(voce)}{voce.tipo === 'giacenza' && giacenze.length === 1 && <small>In giacenza {daQuanto(giacenze[0].giorno)}</small>}</div></div>
 
-            {m && m.avviso_minuti != null && (
+            {m?.ricorrenza && <div className="cal-dato"><Ic n="ripeti" /><div>{descriviRicorrenza(m.ricorrenza, m.serie_inizio || m.inizio)}</div></div>}
+            {invitato && m?.invito && <div className="cal-dato"><Ic n="persona" /><div>{m.invito.organizzatore}<small>ti ha invitato</small></div></div>}
+            {m && m.avviso_minuti != null && (m.invito?.stato !== 'rifiutato') && (
               <div className="cal-dato"><Ic n="campanella" /><div>{AVVISI.find(a => a.v === m.avviso_minuti)?.l || `${m.avviso_minuti} minuti prima`}<small>{m.tutto_il_giorno ? 'alle 9, ' : ''}nella campanella e per email</small></div></div>
             )}
             {m?.luogo && <div className="cal-dato"><Ic n="luogo" /><div>{m.luogo}</div></div>}
@@ -91,6 +104,28 @@ export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElim
             {giacenze.length === 1 && <DettaglioGiacenza g={giacenze[0]} cliente={cliente} />}
           </div>
 
+          {mia && !!m?.invitati?.length && (
+            <div className="cal-gruppo-righe">
+              <div className="cal-sottotitolo">Invitati · {m.invitati.filter(i => i.stato === 'accettato').length} su {m.invitati.length} partecipano</div>
+              {m.invitati.map(i => (
+                <div key={i.utente_id} className="cal-gruppo-riga">
+                  <b>{i.nome}</b>
+                  <span className={STATO_INVITO[i.stato]?.c || 'cal-chip cal-chip--neutro'}>{STATO_INVITO[i.stato]?.l || i.stato}</span>
+                  <small>{NOME_RUOLO[i.ruolo] || i.ruolo}</small>
+                </div>
+              ))}
+            </div>
+          )}
+          {invitato && m?.invito && (
+            <div className="cal-risposta">
+              <b>Partecipi?</b>
+              <div>
+                <button className="cal-tasto cal-tasto--chiaro" aria-pressed={m.invito.stato === 'accettato'} disabled={occupato} onClick={() => fai(() => onRispondi('accettato'))}><Ic n="spunta" />Partecipo</button>
+                <button className="cal-tasto cal-tasto--chiaro" aria-pressed={m.invito.stato === 'rifiutato'} disabled={occupato} onClick={() => fai(() => onRispondi('rifiutato'))}><Ic n="x" />Non partecipo</button>
+              </div>
+              {m.invito.stato === 'rifiutato' && <small>Non ricevi avvisi per questa voce. Puoi cambiare idea quando vuoi.</small>}
+            </div>
+          )}
           {m?.collegamento && (
             <button className="cal-legame" onClick={() => onApriSpedizione(m.collegamento!.id)}>
               <i><Ic n="pacco" /></i>
@@ -138,22 +173,30 @@ export default function SchedaVoce({ voce, cliente, onChiudi, onModifica, onElim
         </div>
 
         <div className="cal-foglio-piede">
-          {m && !conferma && (
+          {mia && !conferma && (
             <>
-              {m.tipo === 'promemoria' && (
-                <button className="cal-tasto cal-tasto--nero" disabled={occupato} onClick={() => fai(() => onFatto(!m.fatto))}>
-                  <Ic n="spunta" />{m.fatto ? 'Da rifare' : 'Fatto'}
+              {m!.tipo === 'promemoria' && (
+                <button className="cal-tasto cal-tasto--nero" disabled={occupato} onClick={() => fai(() => onFatto(!m!.fatto))}>
+                  <Ic n="spunta" />{m!.fatto ? 'Da rifare' : 'Fatto'}
                 </button>
               )}
               <button className="cal-tasto cal-tasto--chiaro" onClick={onModifica}><Ic n="matita" />Modifica</button>
               <button className="cal-tasto cal-tasto--rosso" onClick={() => setConferma(true)} aria-label="Elimina"><Ic n="cestino" />Elimina</button>
             </>
           )}
-          {m && conferma && (
+          {mia && conferma && !m!.ricorrenza && (
             <>
-              <span style={{ flexBasis: '100%', fontSize: 13 }}>Eliminare «{m.titolo}»?</span>
+              <span style={{ flexBasis: '100%', fontSize: 13 }}>Eliminare «{m!.titolo}»?{m!.invitati?.length ? ' Sparisce anche dal calendario degli invitati.' : ''}</span>
               <button className="cal-tasto cal-tasto--chiaro" onClick={() => setConferma(false)}>No, tienila</button>
               <button className="cal-tasto cal-tasto--rosso" disabled={occupato} onClick={() => fai(onElimina)}>Sì, elimina</button>
+            </>
+          )}
+          {mia && conferma && m!.ricorrenza && (
+            <>
+              <span style={{ flexBasis: '100%', fontSize: 13 }}>«{m!.titolo}» si ripete. Cosa elimini?</span>
+              <button className="cal-tasto cal-tasto--chiaro" disabled={occupato} onClick={() => fai(onSaltaQuesta)}>Solo questa</button>
+              <button className="cal-tasto cal-tasto--rosso" disabled={occupato} onClick={() => fai(onElimina)}>Tutta la serie</button>
+              <button className="cal-tasto cal-tasto--chiaro" onClick={() => setConferma(false)}>Annulla</button>
             </>
           )}
           {voce.tipo === 'ritiro' && <a className="cal-tasto cal-tasto--chiaro" href={hrefRitiri}><Ic n="esterno" />Elenco ritiri</a>}

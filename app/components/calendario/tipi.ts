@@ -5,6 +5,9 @@
 //  - quelle AUTOMATICHE: ritiri prenotati e giacenze da gestire. Non si scrivono: si leggono dai dati veri, quindi
 //    un ritiro spostato si sposta anche qui e non esistono due versioni che si contraddicono.
 
+import type { Ricorrenza } from '@/lib/calendario-ricorrenza'
+export type { Ricorrenza }
+
 export type TipoMio = 'promemoria' | 'evento' | 'riunione'
 export type TipoAuto = 'ritiro' | 'giacenza'
 export type Tipo = TipoMio | TipoAuto
@@ -12,7 +15,11 @@ export type Tipo = TipoMio | TipoAuto
 // a cosa è attaccato un promemoria (per ora la spedizione; poi cliente e ticket)
 export type Collegamento = { tipo: 'spedizione'; id: string; etichetta: string }
 
-// una voce scritta da chi guarda
+export type Invitato = { utente_id: string; nome: string; ruolo: string; stato: StatoInvito }
+export type StatoInvito = 'in_attesa' | 'accettato' | 'rifiutato'
+
+// una voce del calendario di chi guarda: scritta da lui, o a cui è invitato. Per quelle che si ripetono il server
+// manda una voce per occorrenza: inizio e fine sono quelli dell'occorrenza, serie_inizio e serie_fine quelli della serie
 export type EventoMio = {
   id: string
   tipo: TipoMio
@@ -26,6 +33,13 @@ export type EventoMio = {
   collegamento: Collegamento | null
   fatto: boolean
   creato_il: string
+  ricorrenza?: Ricorrenza | null
+  occorrenza?: string | null      // il giorno dell'occorrenza ('YYYY-MM-DD') per le voci che si ripetono
+  serie_inizio?: string
+  serie_fine?: string | null
+  ruolo?: 'mio' | 'invitato'
+  invito?: { stato: StatoInvito; organizzatore: string }   // a cui sono invitato
+  invitati?: Invitato[]                                    // che ho organizzato io
 }
 
 // un ritiro prenotato, come lo mostra l'Elenco Ritiri (solo i campi che servono qui, niente importi)

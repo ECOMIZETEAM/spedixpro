@@ -11,8 +11,8 @@ import {
   GIORNI_BREVI, chiaveGiorno, giorniMese, giorniSettimana, inizioGiorno, piuGiorni, piuMesi, stessoGiorno,
   ora, oraBreve, dataLunga, quandoRelativo, titoloPeriodo, MESI, MESI_BREVI, GIORNI, giornoSettimana,
 } from './date'
-import { costruisciGiorni, disponi } from './voci'
-import { leggiMiei, leggiDaFare, eliminaMio, segnaFatto, CAMBIATO } from './deposito'
+import { costruisciGiorni, disponi, voceDaMio } from './voci'
+import { leggiMiei, leggiDaFare, eliminaMio, segnaFatto, azioneOccorrenza, rispondiInvito, leggiFeed, creaFeed, spegniFeed, CAMBIATO, type StatoFeed } from './deposito'
 import { momentoAvviso } from '@/lib/calendario-avviso'
 import FinestraEvento, { type Bozza } from './FinestraEvento'
 import SchedaVoce from './SchedaVoce'
@@ -35,7 +35,7 @@ function salvaComodita(k: string, v: unknown) { try { localStorage.setItem(k, JS
 
 type Avviso = { id: string; etichetta?: string; titolo: string; sotto?: string; evento?: EventoMio }
 
-export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { portale: 'master' | 'cliente'; vedeRitiri: boolean; vedeGiacenze: boolean }) {
+export default function Calendario({ portale, vedeRitiri, vedeGiacenze, puoInvitare = false }: { portale: 'master' | 'cliente'; vedeRitiri: boolean; vedeGiacenze: boolean; puoInvitare?: boolean }) {
   const grafica = useContext(GraficaNuova)
   const notte = grafica.attiva && grafica.luce === 'notte'
   const cliente = portale === 'cliente'
@@ -166,7 +166,7 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
   useEffect(() => {
     if (!montato) return
     const tutti = new Map<string, EventoMio>()
-    for (const e of [...miei, ...daFare]) tutti.set(e.id, e)
+    for (const e of [...miei, ...daFare]) if (e.invito?.stato !== 'rifiutato') tutti.set(e.id + '|' + (e.occorrenza || ''), e)
     const nuovi: Avviso[] = []
     for (const e of tutti.values()) {
       if (e.fatto) continue
@@ -200,13 +200,11 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
   const salvata = (e: EventoMio, nuovo: boolean) => {
     setFinestra(null); setAperta(null)
     conferma(nuovo ? `${NOME_TIPO[e.tipo]} salvato` : 'Modifiche salvate', `${quandoRelativo(new Date(e.inizio))}${e.tutto_il_giorno ? '' : ' alle ' + ora(new Date(e.inizio))} · ${e.titolo}`)
+    // una voce nuova fuori dal periodo: ci si sposta lì; modificando una serie no (il suo inizio è la prima occorrenza)
     const d = new Date(e.inizio)
-    if (d < dal || d >= al) setAncora(inizioGiorno(d))
+    if (nuovo && (d < dal || d >= al)) setAncora(inizioGiorno(d))
   }
-  const voceDi = (e: EventoMio): Voce => ({
-    chiave: 'mio:' + e.id, tipo: e.tipo, titolo: e.titolo, sotto: null, inizio: new Date(e.inizio), fine: e.fine ? new Date(e.fine) : null,
-    tuttoIlGiorno: e.tutto_il_giorno, fatto: e.fatto, mio: e, ritiri: null, giacenze: null,
-  })
+  const voceDi = (e: EventoMio): Voce => voceDaMio(e)
 
   // ── disegno ──
   const contaRitiri = auto.ritiri.length, contaGiacenze = auto.giacenze.length
@@ -214,7 +212,7 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
   const pill = (v: Voce, compatta = false) => {
     const conOra = !v.tuttoIlGiorno
     return (
-      <button key={v.chiave} className={`cal-pill cal-t--${v.tipo}${conOra ? ' cal-pill--ora' : ''}${v.fatto ? ' cal-pill--fatto' : ''}${v.ritiri && v.ritiri.length > 1 || v.giacenze && v.giacenze.length > 1 ? ' cal-pill--gruppo' : ''}`}
+      <button key={v.chiave} className={`cal-pill cal-t--${v.tipo}${conOra ? ' cal-pill--ora' : ''}${v.fatto ? ' cal-pill--fatto' : ''}${v.mio?.invito ? ' cal-invito--' + v.mio.invito.stato : ''}${v.ritiri && v.ritiri.length > 1 || v.giacenze && v.giacenze.length > 1 ? ' cal-pill--gruppo' : ''}`}
         title={[v.titolo, v.sotto].filter(Boolean).join(' · ')}
         onClick={ev => { ev.stopPropagation(); setAperta(v) }}>
         <i />{conOra && !compatta && <b>{oraBreve(v.inizio)}</b>}<span>{v.titolo}</span>
@@ -227,11 +225,12 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
       : <>{ora(v.inizio)}{v.fine && <em> – {ora(v.fine)}</em>}</>
     const gruppo = (v.ritiri?.length || 0) > 1 || (v.giacenze?.length || 0) > 1
     return (
-      <button key={v.chiave} className={`cal-riga cal-t--${v.tipo}${v.fatto ? ' cal-riga--fatto' : ''}`} onClick={() => setAperta(v)}>
+      <button key={v.chiave} className={`cal-riga cal-t--${v.tipo}${v.fatto ? ' cal-riga--fatto' : ''}${v.mio?.invito ? ' cal-invito--' + v.mio.invito.stato : ''}`} onClick={() => setAperta(v)}>
         <span className="cal-riga-ora">{quando}</span>
         <i />
         <span className="cal-riga-testo"><b>{v.titolo}</b>{v.sotto && <span>{v.sotto}</span>}</span>
         {gruppo ? <span className="cal-chip">{v.ritiri ? 'vedi tutti' : 'da gestire'}</span>
+          : v.mio?.invito ? <span className="cal-chip cal-chip--neutro"><Ic n="persona" />{v.mio.invito.stato === 'in_attesa' ? 'da rispondere' : v.mio.invito.stato === 'accettato' ? 'partecipi' : 'non partecipi'}</span>
           : v.mio?.collegamento ? <span className="cal-chip cal-chip--neutro"><Ic n="pacco" />spedizione</span>
             : v.mio ? <span className="cal-chip cal-chip--neutro">{NOME_TIPO[v.tipo]}</span> : null}
       </button>
@@ -331,7 +330,7 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
                     // sotto i 40 px (un promemoria, mezz'ora) ora e titolo stanno su una riga: su due si tagliavano a metà
                     const corto = alto < 40
                     return (
-                      <button key={x.v.chiave} className={`cal-blocco cal-t--${x.v.tipo}${x.v.fatto ? ' cal-blocco--fatto' : ''}${corto ? ' cal-blocco--corto' : ''}`}
+                      <button key={x.v.chiave} className={`cal-blocco cal-t--${x.v.tipo}${x.v.fatto ? ' cal-blocco--fatto' : ''}${corto ? ' cal-blocco--corto' : ''}${x.v.mio?.invito ? ' cal-invito--' + x.v.mio.invito.stato : ''}`}
                         style={{ top: x.inizioMin / 60 * ORA_PX + 1, height: alto, left: `calc(${x.col * largo}% + 3px)`, width: `calc(${largo}% - 6px)`, right: 'auto' }}
                         onClick={e => { e.stopPropagation(); setAperta(x.v) }} title={[ora(x.v.inizio), x.v.titolo].join(' ')}>
                         {corto
@@ -421,13 +420,13 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
             const d = new Date(e.inizio)
             const tardi = d < inizioGiorno(adesso)
             return (
-              <div key={e.id} className="cal-dafare-voce">
+              <div key={e.id + (e.occorrenza || '')} className="cal-dafare-voce">
                 <button className="cal-spunta" aria-label={`Segna «${e.titolo}» come fatto`} onClick={async () => {
                   try { await segnaFatto(e, true); conferma('Fatto', e.titolo) } catch (err: any) { setErroreMiei(err?.message || 'Non riuscito') }
                 }}><Ic n="spunta" /></button>
                 <button style={{ minWidth: 0 }} onClick={() => setAperta(voceDi(e))}>
                   <b>{e.titolo}</b>
-                  <span className={tardi ? 'tardi' : undefined}>{quandoRelativo(d, adesso)}{e.tutto_il_giorno ? '' : ' alle ' + ora(d)}{e.collegamento ? ' · spedizione' : ''}</span>
+                  <span className={tardi ? 'tardi' : undefined}>{quandoRelativo(d, adesso)}{e.tutto_il_giorno ? '' : ' alle ' + ora(d)}{e.ricorrenza ? ' · si ripete' : ''}{e.collegamento ? ' · spedizione' : ''}</span>
                 </button>
               </div>
             )
@@ -455,6 +454,7 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
         </div>
       </div>
 
+      <SchedaFeed />
       {auto.troncati && (
         <div className="cal-nota"><Ic n="info" /><div>In questo periodo ci sono più di 5.000 ritiri: ne mostro i primi. L’elenco completo è in Elenco Ritiri.</div></div>
       )}
@@ -497,11 +497,13 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
         <SchedaVoce voce={aperta} cliente={cliente}
           onChiudi={() => setAperta(null)}
           onModifica={() => { if (aperta.mio) { setFinestra({ evento: aperta.mio }); setAperta(null) } }}
-          onElimina={async () => { if (aperta.mio) { await eliminaMio(aperta.mio.id); setAperta(null); conferma('Voce eliminata', aperta.mio.titolo) } }}
+          onElimina={async () => { if (aperta.mio) { await eliminaMio(aperta.mio.id); setAperta(null); conferma(aperta.mio.ricorrenza ? 'Serie eliminata' : 'Voce eliminata', aperta.mio.titolo) } }}
+          onSaltaQuesta={async () => { if (aperta.mio?.occorrenza) { await azioneOccorrenza(aperta.mio.id, aperta.mio.occorrenza, 'salta'); setAperta(null); conferma('Tolta solo questa', `${aperta.mio.titolo} · ${dataLunga(new Date(aperta.mio.inizio))}`) } }}
+          onRispondi={async (r) => { if (aperta.mio) { await rispondiInvito(aperta.mio.id, r); setAperta(null); conferma(r === 'accettato' ? 'Parteciperai' : 'Non parteciperai', aperta.mio.titolo) } }}
           onFatto={async (f) => { if (aperta.mio) { await segnaFatto(aperta.mio, f); setAperta(null); conferma(f ? 'Fatto' : 'Di nuovo da fare', aperta.mio.titolo) } }}
           onApriSpedizione={(id) => { setAperta(null); setSpedizione(id) }} />
       )}
-      {finestra && <FinestraEvento evento={finestra.evento} bozza={finestra.bozza} onChiudi={() => setFinestra(null)} onSalvato={salvata} />}
+      {finestra && <FinestraEvento evento={finestra.evento} bozza={finestra.bozza} puoInvitare={puoInvitare} onChiudi={() => setFinestra(null)} onSalvato={salvata} />}
       {spedRiga && <DettaglioSpedizione s={spedRiga} onClose={() => setSpedizione(null)} />}
 
       {avvisi.length > 0 && (
@@ -520,3 +522,52 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze }: { port
   )
 }
 
+
+// GOOGLE E IPHONE: il link privato del proprio calendario (fase 2). Si mostra una volta, quando si crea: dopo resta solo
+// «attivo dal …», e per riaverlo si rigenera (il vecchio smette di funzionare).
+function SchedaFeed() {
+  const [stato, setStato] = useState<StatoFeed | null>(null)
+  const [link, setLink] = useState<{ url: string; webcal: string } | null>(null)
+  const [occupato, setOccupato] = useState(false)
+  const [errore, setErrore] = useState('')
+  const [copiato, setCopiato] = useState(false)
+  const [aperta, setAperta] = useState(false)
+  useEffect(() => { leggiFeed().then(setStato).catch(() => setStato({ attivo: false, creato_il: null, ultimo_uso: null })) }, [])
+  const fai = async (f: () => Promise<void>) => { setOccupato(true); setErrore(''); try { await f() } catch (e: any) { setErrore(e?.message || 'Non riuscito') } finally { setOccupato(false) } }
+  const crea = () => fai(async () => { const l = await creaFeed(); setLink(l); setStato({ attivo: true, creato_il: new Date().toISOString(), ultimo_uso: null }); setAperta(true) })
+  const spegni = () => fai(async () => { await spegniFeed(); setLink(null); setStato({ attivo: false, creato_il: null, ultimo_uso: null }) })
+  const copia = async () => { if (!link) return; try { await navigator.clipboard.writeText(link.url); setCopiato(true); setTimeout(() => setCopiato(false), 2000) } catch { setErrore('Copia non riuscita: seleziona il link e copialo a mano') } }
+  const giorno = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }) : ''
+  return (
+    <div className="cal-scheda cal-feed">
+      <h3><span className="cal-feed-titolo"><Ic n="link" />Google e iPhone</span>{stato?.attivo && <span className="cal-chip cal-chip--bene">attivo</span>}</h3>
+      {!stato ? <div className="cal-dafare-vuoto">Un attimo…</div> : link ? (
+        <>
+          <p className="cal-feed-testo">Incolla questo link in Google Calendar o aprilo sull’iPhone: le tue voci compaiono lì e si aggiornano da sole.</p>
+          <div className="cal-feed-link"><input readOnly value={link.url} onFocus={e => e.currentTarget.select()} aria-label="Link del calendario" />
+            <button className="cal-tondo" onClick={copia} aria-label="Copia il link" title="Copia"><Ic n={copiato ? 'spunta' : 'copia'} /></button></div>
+          <div className="cal-feed-tasti">
+            <a className="cal-tasto cal-tasto--chiaro" href={link.webcal}>Apri su iPhone o Mac</a>
+            <a className="cal-tasto cal-tasto--chiaro" href={'https://calendar.google.com/calendar/render?cid=' + encodeURIComponent(link.webcal)} target="_blank" rel="noopener noreferrer">Aggiungi a Google</a>
+          </div>
+          <p className="cal-feed-nota">Il link lo vede solo chi lo ha: non condividerlo. Escono titolo, orari e luogo delle tue voci; niente note, ritiri, giacenze né nomi di destinatari. Google lo rilegge ogni qualche ora.</p>
+        </>
+      ) : stato.attivo ? (
+        <>
+          <p className="cal-feed-testo">Collegamento attivo dal {giorno(stato.creato_il)}{stato.ultimo_uso ? `, letto l’ultima volta il ${giorno(stato.ultimo_uso)}` : ''}.</p>
+          {aperta || <p className="cal-feed-nota">Per motivi di sicurezza il link si vede solo quando lo crei: se ti serve di nuovo, rigeneralo (quello vecchio smette di funzionare).</p>}
+          <div className="cal-feed-tasti">
+            <button className="cal-tasto cal-tasto--chiaro" disabled={occupato} onClick={crea}>Rigenera il link</button>
+            <button className="cal-tasto cal-tasto--rosso" disabled={occupato} onClick={spegni}>Disattiva</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="cal-feed-testo">Vedi le tue voci anche in Google Calendar o nel calendario dell’iPhone.</p>
+          <button className="cal-tasto cal-tasto--chiaro" disabled={occupato} onClick={crea} style={{ width: '100%' }}>{occupato ? 'Creo…' : 'Crea il link'}</button>
+        </>
+      )}
+      {errore && <div className="cal-msg" role="alert" style={{ marginTop: 8 }}>{errore}</div>}
+    </div>
+  )
+}

@@ -654,6 +654,8 @@ export async function inviaEmailPromemoria(p: {
   luogo?: string | null
   note?: string | null
   spedizione?: string | null
+  organizzatore?: string | null   // per chi è invitato: chi ha organizzato
+  ripetizione?: string | null     // «Ogni lunedì»
   link: string
   brand?: { logo?: string | null; nome?: string | null }
 }): Promise<{ ok: boolean; error?: string }> {
@@ -667,7 +669,9 @@ export async function inviaEmailPromemoria(p: {
     <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 16px;line-height:1.3">${esc(p.titolo)}</h2>
     <div style="background:#f7f7f7;border-radius:8px;padding:6px 16px;margin-bottom:20px">
       ${riga('Quando', esc(p.quando))}
+      ${p.ripetizione ? riga('Si ripete', esc(p.ripetizione)) : ''}
       ${p.luogo ? riga('Dove', esc(p.luogo)) : ''}
+      ${p.organizzatore ? riga('Organizza', esc(p.organizzatore)) : ''}
       ${p.spedizione ? riga('Spedizione', esc(p.spedizione)) : ''}
       ${p.note ? riga('Note', esc(p.note).replace(/\n/g, '<br>')) : ''}
     </div>
@@ -681,6 +685,53 @@ export async function inviaEmailPromemoria(p: {
     await invia({
       from, to: dest,
       subject: `${nomeTipo}: ${p.titolo}`.slice(0, 180),
+      html: (p.brand?.logo || p.brand?.nome) ? wrapBrand(corpo, { logo: p.brand?.logo, nome: p.brand?.nome }) : wrap(corpo),
+    })
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'invio non riuscito' }
+  }
+}
+
+// L'INVITO A UNA RIUNIONE O A UN EVENTO DEL CALENDARIO (fase 2, 25/11/2026): a chi è invitato, una volta. Col marchio del
+// master (chi invita e chi è invitato sono dello stesso master). Si risponde dal calendario, non dall'email.
+export async function inviaEmailInvito(p: {
+  to: string
+  tipo: 'evento' | 'riunione'
+  titolo: string
+  quando: string
+  ripetizione?: string | null
+  luogo?: string | null
+  note?: string | null
+  organizzatore: string
+  link: string
+  brand?: { logo?: string | null; nome?: string | null }
+}): Promise<{ ok: boolean; error?: string }> {
+  const dest = String(p.to || '').trim().toLowerCase()
+  if (!EMAIL_RE.test(dest)) return { ok: false, error: 'email non valida' }
+  const nomeTipo = p.tipo === 'riunione' ? 'riunione' : 'evento'
+  const riga = (etichetta: string, valore: string) =>
+    `<div style="padding:8px 0;border-bottom:1px solid #efefef;font-size:13px"><span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;display:block;margin-bottom:2px">${etichetta}</span><span style="color:#1a1a1a">${valore}</span></div>`
+  const corpo = `
+    <p style="color:#999;font-size:12px;text-transform:uppercase;letter-spacing:0.6px;margin:0 0 6px">Invito</p>
+    <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 8px;line-height:1.3">${esc(p.titolo)}</h2>
+    <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 16px"><strong>${esc(p.organizzatore)}</strong> ti ha invitato a questa ${nomeTipo}.</p>
+    <div style="background:#f7f7f7;border-radius:8px;padding:6px 16px;margin-bottom:20px">
+      ${riga('Quando', esc(p.quando))}
+      ${p.ripetizione ? riga('Si ripete', esc(p.ripetizione)) : ''}
+      ${p.luogo ? riga('Dove', esc(p.luogo)) : ''}
+      ${p.note ? riga('Note', esc(p.note).replace(/\n/g, '<br>')) : ''}
+    </div>
+    <a href="${p.link}" style="display:inline-block;background:#1a1a1a;color:#fff;padding:12px 26px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px">Rispondi dal calendario \u2192</a>
+    <p style="color:#999;font-size:12px;line-height:1.6;margin:22px 0 0">Dal calendario dici se partecipi; prima dell'inizio ti arriva l'avviso.</p>
+  `
+  const nomeBrand = (p.brand?.nome || '').replace(/["<>]/g, '').slice(0, 60)
+  const fromAddr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+  const from = nomeBrand ? `${nomeBrand} <${fromAddr}>` : FROM
+  try {
+    await invia({
+      from, to: dest,
+      subject: `Invito: ${p.titolo}`.slice(0, 180),
       html: (p.brand?.logo || p.brand?.nome) ? wrapBrand(corpo, { logo: p.brand?.logo, nome: p.brand?.nome }) : wrap(corpo),
     })
     return { ok: true }

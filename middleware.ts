@@ -19,6 +19,10 @@ const SCRITTURE_AGENTE = [
   '/api/moovy/',                      // assistente (ha i suoi limiti dentro)
   '/api/auth/',                       // uscita/sessione
   '/api/account/chiusura',            // chiedere la chiusura del PROPRIO account (Apple 5.1.1(v)): non scrive dati della rete
+  // il SUO calendario (25/11/2026): promemoria propri, risposta agli inviti, il suo link per Google e iPhone. Le rotte
+  // scrivono solo righe con utente_id = chi chiama; gli inviti li manda solo lo staff (controllato nella rotta). Senza,
+  // l'agente vedeva il calendario ma ogni «Salva» tornava «gli agenti hanno accesso in sola lettura».
+  '/api/calendario/',
 ]
 
 // SCRITTURE CONSENTITE ALL'AUTISTA: la sua schermata e la sessione, e basta.

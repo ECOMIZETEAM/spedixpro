@@ -14,9 +14,10 @@ const unisci = (...p: (string | null | undefined | false)[]) => p.filter(Boolean
 
 export function voceDaMio(e: EventoMio): Voce {
   return {
-    chiave: 'mio:' + e.id, tipo: e.tipo, titolo: e.titolo,
-    // la spedizione collegata ha già il suo cartellino nella riga: qui solo il luogo
-    sotto: e.luogo || null,
+    // una voce che si ripete ha una chiave per occorrenza
+    chiave: 'mio:' + e.id + (e.occorrenza ? ':' + e.occorrenza : ''), tipo: e.tipo, titolo: e.titolo,
+    // la spedizione collegata ha già il suo cartellino nella riga: qui il luogo, e per un invito chi l'ha mandato
+    sotto: [e.luogo, e.ruolo === 'invitato' && e.invito ? 'invito di ' + e.invito.organizzatore : null].filter(Boolean).join(' · ') || null,
     inizio: new Date(e.inizio), fine: e.fine ? new Date(e.fine) : null,
     tuttoIlGiorno: e.tutto_il_giorno, fatto: e.fatto, mio: e, ritiri: null, giacenze: null,
   }
