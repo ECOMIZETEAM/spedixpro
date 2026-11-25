@@ -83,6 +83,11 @@ const ORDINABILE: Record<string,string> = {
   'Colli':'colli', 'Contrassegno':'contrassegno', 'Data e Ora':'data', 'Stato':'stato',
   'Prezzo Cliente':'prezzo', 'Margine':'margine',
 }
+// Le scorciatoie per stato sopra la tabella (grafica nuova): gli stati che si guardano ogni giorno.
+const SCORCIATOIE_STATO: [string, string][] = [
+  ['', 'Tutte'], ['in_lavorazione', 'In lavorazione'], ['spedita', 'Spedite'], ['in_transito', 'In transito'],
+  ['in_consegna', 'In consegna'], ['in_giacenza', 'In giacenza'], ['consegnata', 'Consegnate'], ['reso_mittente', 'Resi al mittente'],
+]
 // Etichettina della SECONDA riga (corriere/guadagni sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 
@@ -613,7 +618,9 @@ async function apriTracking(s: any) {
       <div className="el-scheda el-tabella" style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div className="el-testa" style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px'}}>
           <div className="gruppo-titolo-selettore">
-          <span className="el-conta" style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{nuova ? 'Spedizioni ' : '📋 Spedizioni '}<span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({totale} risultati)</span></span>
+          {nuova
+            ? <span className="el-conta">Spedizioni <span className="el-conta-n">{totale.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)}</span></span>
+            : <span className="el-conta" style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Spedizioni <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({totale} risultati)</span></span>}
           <span style={{display:'block',marginTop:'4px',fontSize:'12px',fontWeight:'400',color:'#666'}}>
             Mostra{' '}
             <select value={perPage} onChange={e=>{setPerPage(Number(e.target.value));setPagina(1)}}
@@ -648,7 +655,7 @@ async function apriTracking(s: any) {
             {nuova && <button type="button" className="el-blocco-x" onClick={()=>setSelectedIds([])} title="Togli la scelta" aria-label="Togli la scelta">×</button>}
             </div>
             <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Ordina:</span>
+              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>{nuova ? 'Ordina' : 'Ordina:'}</span>
               <select value={filtri.ordina} onChange={e=>setFiltri(f=>({...f,ordina:e.target.value}))}
                 style={{padding:'5px 8px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff'}}>
                 <option value="">Data (recente)</option>
@@ -667,7 +674,7 @@ async function apriTracking(s: any) {
                 style={{padding:'5px 9px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',background:'#fff',color:'#1a1a1a',cursor:'pointer'}}>{filtri.dir==='asc'?'↑':'↓'}</button>
             </div>
             <div className="el-cerca" style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
+              <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>{nuova ? 'Cerca' : 'Cerca:'}</span>
               <input value={cerca} onChange={e=>setCerca(e.target.value)}
                 placeholder="N. spedizione o destinatario..."
                 style={{padding:'5px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',width:'220px',color:'#1a1a1a',background:'#fff'}}/>
@@ -675,6 +682,17 @@ async function apriTracking(s: any) {
           </div>
         </div>
 
+        {/* LE SCORCIATOIE PER STATO (grafica nuova, 25/11): un clic e si vedono solo le giacenze, o solo quelle in
+            consegna. È lo stesso filtro «Stato» qui sopra, che resta: le due cose si muovono insieme. Niente conteggi:
+            costerebbero una lettura per stato a ogni filtro. */}
+        {nuova && (
+          <div className="el-stati" role="group" aria-label="Mostra solo uno stato">
+            {SCORCIATOIE_STATO.map(([k, etichetta]) => (
+              <button key={k || 'tutte'} type="button" data-stato={k || undefined} aria-pressed={filtri.stato === k}
+                onClick={() => setF('stato', filtri.stato === k ? '' : k)}>{etichetta}</button>
+            ))}
+          </div>
+        )}
         {loading && !spedizioniPaginate.length ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : !spedizioniVisibili.length ? (
@@ -839,7 +857,7 @@ async function apriTracking(s: any) {
             {totalePagine > 0 && (
               <div className="el-pagine" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 16px',borderTop:'1px solid #e5e7eb',flexWrap:'wrap',gap:'8px'}}>
                 <span style={{fontSize:'12px',color:'#666'}}>
-                  {totale === 0 ? '0' : `${(paginaCorr - 1) * perPage + 1}-${Math.min(paginaCorr * perPage, totale)}`} di {totale}
+                  {totale === 0 ? '0' : `${(paginaCorr - 1) * perPage + 1}-${Math.min(paginaCorr * perPage, totale)}`} di {nuova ? totale.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions) : totale}
                 </span>
                 <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
                   <button onClick={()=>vaiAPagina(paginaCorr-1)} disabled={paginaCorr<=1}

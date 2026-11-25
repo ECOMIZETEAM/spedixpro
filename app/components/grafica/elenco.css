@@ -4,8 +4,21 @@
    Le tendine di cliente e date si aprono in finestre fisse con fondo bianco: restano come sono (:not(...fixed *)),
    altrimenti di notte il testo diventerebbe chiaro su bianco. */
 
-.gx .gx-elenco { --el-r: 20px; font-variant-numeric: tabular-nums; }
-.gx[data-luce="notte"] .gx-elenco { color-scheme: dark; }
+/* 25/11, stile «Finexy» come la Dashboard nuova (Lorenzo 25/11: «ora passa all'elenco spedizioni»): schede bianche
+   sul fondo, tasto principale nero, testate su una fascia grigia, stato a pallino, l'arancio solo dove serve. Le regole
+   qui sotto usano le variabili della cornice (--gx-*): dentro l'elenco prendono i valori della dashboard
+   (app/components/dashboard-finexy/dashboard-finexy.css, .fx), così le due pagine hanno gli stessi colori. Il tasto pieno
+   (--gx-accento-pieno) resta arancio: lo usano anche le finestre (dettaglio, reso) col testo bianco; il nero lo prendono
+   solo il tasto principale, la pagina corrente e la barra delle scelte (--el-nero). */
+.gx .gx-elenco { --el-r: 15px; --gx-inchiostro: #111111; --gx-testo: #1F1F1F; --gx-attenuato: #6E6E73; --gx-filo: #ECECEC;
+  --gx-incavo: #F6F6F6; --gx-vetro: #FFFFFF;
+  --gx-accento: #EA5326; --gx-accento-testo: #C2410C; --gx-bene: #2E9B55; --gx-problema: #D9474E;
+  --el-nero: linear-gradient(180deg, #3A3A38, #121212); --el-ombra: 0 1px 3px rgba(0,0,0,.035), 0 6px 22px rgba(0,0,0,.035);
+  font-family: var(--font-inter, 'Inter'), system-ui, -apple-system, sans-serif; font-variant-numeric: tabular-nums; }
+.gx[data-luce="notte"] .gx-elenco { color-scheme: dark; --gx-inchiostro: #F2F2F3; --gx-testo: #E6E6E8; --gx-attenuato: #A4A4AA;
+  --gx-filo: #36363A; --gx-incavo: #2A2A2E; --gx-vetro: #1E1E21; --gx-accento-testo: #FF9C7A;
+  --gx-bene: #4CC37A; --gx-problema: #FF6B6B; --el-nero: linear-gradient(180deg, #4A4A4F, #222225);
+  --el-ombra: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.35); }
 .gx .gx-elenco input[type="checkbox"] { accent-color: var(--gx-accento-pieno); width: 15px; height: 15px; }
 
 /* i colori scritti a mano (#1a1a1a, grigi, bordi, arancio) presi dai colori del tema */
@@ -20,19 +33,17 @@
 .gx .gx-elenco [style*="background: rgb(255, 79, 0)"] { background: var(--gx-accento-pieno) !important; }
 
 /* titolo e pulsante principale */
-.gx .gx-elenco .el-titolo { font-size: 30px !important; font-weight: 500 !important; letter-spacing: -.02em; color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco .el-titolo { font-size: 34px !important; font-weight: 500 !important; letter-spacing: -0.6px; color: var(--gx-inchiostro) !important; }
 .gx .gx-elenco .el-primario { display: inline-flex; align-items: center; height: 42px; padding: 0 22px !important; border-radius: 999px !important;
-  background: var(--gx-accento-pieno) !important; font-size: 14px !important; font-weight: 600 !important; letter-spacing: .01em;
-  box-shadow: 0 10px 24px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); transition: transform .2s ease, box-shadow .2s ease; }
-.gx .gx-elenco .el-primario:hover { transform: translateY(-1px); box-shadow: 0 14px 28px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); }
+  background: var(--el-nero) !important; color: #fff !important; font-size: 14px !important; font-weight: 500 !important;
+  box-shadow: 0 3px 9px rgba(0, 0, 0, .2); transition: transform .2s ease, filter .2s ease; }
+.gx .gx-elenco .el-primario:hover { transform: translateY(-1px); filter: brightness(1.08); }
 
 /* le due schede: vetro senza sfocatura (una sfocatura chiuderebbe dentro la scheda le finestre fisse delle righe) */
-.gx .gx-elenco .el-scheda { background: var(--gx-vetro) !important; border: 0 !important; border-radius: var(--el-r) !important;
-  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(40, 37, 33, .04), 0 22px 48px -30px rgba(40, 37, 33, .28); }
-.gx[data-luce="notte"] .gx-elenco .el-scheda { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -30px rgba(0, 0, 0, .6); }
+.gx .gx-elenco .el-scheda { background: var(--gx-vetro) !important; border: 0 !important; border-radius: var(--el-r) !important; box-shadow: var(--el-ombra); }
 .gx .gx-elenco .el-filtri { padding: 20px 22px 22px !important; margin-bottom: 18px !important; }
-.gx .gx-elenco .el-sezione { display: flex; align-items: center; gap: 8px; margin-bottom: 14px !important; font-size: 13px !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; }
-.gx .gx-elenco .el-sezione .gx-ico { width: 16px; height: 16px; color: var(--gx-accento); }
+.gx .gx-elenco .el-sezione { display: flex; align-items: center; gap: 8px; margin-bottom: 14px !important; font-size: 17px !important; font-weight: 500 !important; letter-spacing: -0.2px; color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco .el-sezione .gx-ico { width: 17px; height: 17px; color: var(--gx-inchiostro); }
 /* i filtri sul telefono (Lorenzo 20/11, «sistema anche i filtri»; filtri-telefono.tsx): 16 campi uno sotto l'altro e la
    prima spedizione a 1.481 px. Chiusi dietro «Filtri» col numero di quelli attivi, aperti su due colonne (la data
    larga). Sul computer il titolo è solo un titolo */
@@ -57,45 +68,58 @@
 }
 
 /* filtri: etichette piccole maiuscole, campi incavati e tondi */
-.gx .gx-elenco .el-filtri label { color: var(--gx-attenuato) !important; font-size: 10.5px !important; font-weight: 600 !important; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px !important; }
+.gx .gx-elenco .el-filtri label { color: var(--gx-attenuato) !important; font-size: 12px !important; font-weight: 400 !important; margin-bottom: 6px !important; }
 .gx .gx-elenco .el-filtri input:not([type="checkbox"]),
 .gx .gx-elenco .el-filtri select,
 .gx .gx-elenco .el-filtri button:not(.el-secondario):not(.el-filtri__apri):not([style*="position: fixed"] *),
 .gx .gx-elenco .el-testa input,
-.gx .gx-elenco .el-testa select { height: 38px; background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important; border-radius: 12px !important;
+.gx .gx-elenco .el-testa select { height: 38px; background: var(--gx-incavo) !important; border: 1px solid transparent !important; border-radius: 10px !important;
   color: var(--gx-testo) !important; font-size: 13px !important; box-shadow: none !important; transition: border-color .15s ease, background .15s ease; }
 .gx .gx-elenco .el-testa input, .gx .gx-elenco .el-testa select { height: 34px; }
 .gx .gx-elenco .el-filtri input:focus, .gx .gx-elenco .el-filtri select:focus, .gx .gx-elenco .el-testa input:focus {
   outline: none; border-color: var(--gx-accento) !important; background: var(--gx-vetro) !important; }
-.gx .gx-elenco .el-secondario { height: 38px; padding: 0 20px !important; border-radius: 999px !important; background: transparent !important;
-  border: 1px solid var(--gx-filo) !important; color: var(--gx-testo) !important; font-weight: 600 !important; font-size: 13px !important; }
+.gx .gx-elenco .el-secondario { height: 38px; padding: 0 20px !important; border-radius: 999px !important; background: var(--gx-vetro) !important;
+  border: 0 !important; box-shadow: 0 0 0 1px var(--gx-filo), 0 2px 8px rgba(0,0,0,.04); color: var(--gx-testo) !important; font-weight: 500 !important; font-size: 13px !important; }
 .gx .gx-elenco .el-secondario:hover { border-color: var(--gx-accento) !important; color: var(--gx-accento-testo) !important; }
 
 /* testata della tabella: conteggio, azioni in blocco, ordina, cerca */
-.gx .gx-elenco .el-testa { padding: 16px 20px !important; border-bottom: 1px solid var(--gx-filo) !important; }
-.gx .gx-elenco .el-conta { font-size: 15px !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco .el-testa { padding: 18px 20px 14px !important; border-bottom: 0 !important; }
+.gx .gx-elenco .el-conta { font-size: 17px !important; font-weight: 500 !important; letter-spacing: -0.2px; color: var(--gx-inchiostro) !important; }
 .gx .gx-elenco .el-testa button { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 15px !important; border-radius: 999px !important;
   font-size: 12.5px !important; font-weight: 600 !important; }
 .gx .gx-elenco .el-testa button .gx-ico { width: 15px; height: 15px; }
 .gx .gx-elenco .el-testa button[style*="not-allowed"] { background: var(--gx-incavo) !important; color: var(--gx-attenuato) !important; }
 
 /* la tabella: righe senza riquadri, divise da un filo, numeri allineati */
+.gx .gx-elenco .el-tab { border-collapse: separate !important; border-spacing: 0; }
+.gx .gx-elenco .el-tabella > div[style*="overflow"] { padding: 0 12px; }
 .gx .gx-elenco .el-tab thead tr { background: transparent !important; }
-.gx .gx-elenco .el-tab th { padding: 12px 14px !important; background: transparent !important; border-bottom: 1px solid var(--gx-filo) !important;
-  font-size: 10.5px !important; font-weight: 600 !important; letter-spacing: .09em !important; color: var(--gx-attenuato) !important; }
+.gx .gx-elenco .el-tab th { padding: 12px 14px !important; background: var(--gx-incavo) !important; border-bottom: 0 !important;
+  font-size: 12px !important; font-weight: 400 !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--gx-attenuato) !important; }
+.gx .gx-elenco .el-tab th:first-child { border-radius: 11px 0 0 11px; }
+.gx .gx-elenco .el-tab th:last-child { border-radius: 0 11px 11px 0; }
 .gx .gx-elenco .el-riga, .gx .gx-elenco .el-riga2 { background: transparent !important; transition: background .15s ease; }
 .gx .gx-elenco .el-riga td { padding-top: 14px !important; }
 .gx .gx-elenco .el-riga2 { border-bottom: 1px solid var(--gx-filo) !important; }
 .gx .gx-elenco .el-riga2 td { border-top: 0 !important; padding-bottom: 14px !important; }
 .gx .gx-elenco .el-riga:hover, .gx .gx-elenco .el-riga:hover + .el-riga2 { background: var(--gx-incavo) !important; }
 .gx .gx-elenco .el-scelta { background: color-mix(in srgb, var(--gx-accento) 8%, transparent) !important; }
-.gx .gx-elenco .el-riga td > button[style*="underline"] { color: var(--gx-accento-testo) !important; text-decoration: none !important; font-weight: 600 !important; letter-spacing: .01em; }
-.gx .gx-elenco .el-riga td > button[style*="underline"]:hover { text-decoration: underline !important; }
+.gx .gx-elenco .el-riga td > button[style*="underline"] { color: var(--gx-inchiostro) !important; text-decoration: none !important; font-weight: 600 !important; letter-spacing: .01em; }
+.gx .gx-elenco .el-riga td > button[style*="underline"]:hover { color: var(--gx-accento-testo) !important; text-decoration: underline !important; }
 .gx .gx-elenco .el-riga2 .gx-ico { width: 15px; height: 15px; color: var(--gx-attenuato); vertical-align: -3px; }
 .gx .gx-elenco .el-riga2 [style*="border-left"] { border-left-color: var(--gx-filo) !important; }
 
 /* lo stato: pillola tonda */
-.gx .gx-elenco .el-stato { display: inline-flex; padding: 4px 11px !important; border-radius: 999px !important; font-size: 11.5px !important; font-weight: 600 !important; }
+.gx .gx-elenco .el-stato { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px 4px 9px !important; border-radius: 999px !important; font-size: 12px !important; font-weight: 500 !important; }
+.gx .gx-elenco .el-stato[data-stato] { background: var(--gx-incavo) !important; color: var(--gx-inchiostro) !important; }
+.gx .gx-elenco .el-stato[data-stato]::before { content: ''; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--st-p, #9CA3AF); }
+.gx .gx-elenco [data-stato="in_lavorazione"] { --st-p: #E9A100; }
+.gx .gx-elenco [data-stato="spedita"] { --st-p: #0EA5E9; }
+.gx .gx-elenco [data-stato="in_transito"] { --st-p: #2563EB; }
+.gx .gx-elenco [data-stato="in_consegna"], .gx .gx-elenco [data-stato="annullamento_pending"], .gx .gx-elenco [data-stato="storno_richiesto"] { --st-p: #EA5326; }
+.gx .gx-elenco [data-stato="consegnata"] { --st-p: #2E9B55; }
+.gx .gx-elenco [data-stato="in_giacenza"], .gx .gx-elenco [data-stato="annullamento_manuale"] { --st-p: #D9474E; }
+.gx .gx-elenco [data-stato="reso_mittente"], .gx .gx-elenco [data-stato="annullata"], .gx .gx-elenco [data-stato="non_consegnato"] { --st-p: #9CA3AF; }
 /* i bollini di stato: i colori di oggi (scritti nel bollino, STATI in spedizioni/page.tsx) avevano lettere chiare su
    fondo chiaro (In Lavorazione 2,8) e di notte erano adesivi accesi sul titanio. Qui una tinta leggera del colore e la
    scritta piena: contrasto sopra 5,5 di giorno e di notte. data-stato lo mette la pagina, con la grafica di oggi non
@@ -131,7 +155,7 @@
 /* le azioni della riga: icone a linea in tasti tondi uguali */
 .gx .gx-elenco .el-azioni { gap: 6px !important; }
 .gx .gx-elenco .el-azioni > button, .gx .gx-elenco .el-azioni > span { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px;
-  padding: 0 !important; border-radius: 11px !important; background: var(--gx-incavo) !important; border: 1px solid var(--gx-filo) !important;
+  padding: 0 !important; border-radius: 11px !important; background: var(--gx-incavo) !important; border: 1px solid transparent !important;
   color: var(--gx-testo) !important; transition: background .15s ease, color .15s ease, border-color .15s ease; }
 .gx .gx-elenco .el-azioni > button:hover { background: var(--gx-vetro) !important; border-color: var(--gx-accento) !important; color: var(--gx-accento-testo) !important; }
 .gx .gx-elenco .el-azioni > button[title="Elimina"]:hover { border-color: var(--gx-problema) !important; color: var(--gx-problema) !important; }
@@ -140,10 +164,11 @@
 .gx .gx-elenco .el-azioni .gx-ico { width: 17px; height: 17px; }
 
 /* paginazione */
-.gx .gx-elenco .el-pagine { padding: 16px 20px !important; border-top: 1px solid var(--gx-filo) !important; }
-.gx .gx-elenco .el-pagine button { min-width: 34px; height: 34px; border-radius: 11px !important; background: var(--gx-incavo) !important;
-  border: 1px solid var(--gx-filo) !important; color: var(--gx-testo) !important; font-size: 12.5px !important; }
-.gx .gx-elenco .el-pagine button[style*="font-weight: 700"] { background: var(--gx-accento-pieno) !important; border-color: var(--gx-accento-pieno) !important; color: #fff !important; }
+.gx .gx-elenco .el-pagine { padding: 16px 8px !important; }
+.gx .gx-elenco .el-pagine { border-top: 0 !important; }
+.gx .gx-elenco .el-pagine button { min-width: 34px; height: 34px; border-radius: 999px !important; background: var(--gx-incavo) !important;
+  border: 1px solid transparent !important; color: var(--gx-testo) !important; font-size: 12.5px !important; }
+.gx .gx-elenco .el-pagine button[style*="font-weight: 700"] { background: var(--el-nero) !important; border-color: transparent !important; color: #fff !important; }
 .gx .gx-elenco .el-pagine button:disabled { opacity: .45; }
 
 /* le scritte della testata («Mostra», «Ordina:», «Cerca:», i risultati) e i campi rimasti bianchi di notte (date, ↓) */
@@ -193,17 +218,17 @@
 
 /* le azioni sulle spedizioni scelte: una barra di vetro che sale dal fondo solo quando se ne sceglie almeno una */
 .gx .gx-elenco .el-blocco { position: fixed; left: calc(50% + 120px); bottom: 26px; z-index: 30; display: flex; align-items: center; gap: 4px;
-  padding: 6px 6px 6px 18px; border-radius: 999px; background: var(--gx-vetro); -webkit-backdrop-filter: blur(22px) saturate(1.6); backdrop-filter: blur(22px) saturate(1.6);
-  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -18px rgba(20, 30, 50, .45);
+  padding: 6px 6px 6px 18px; border-radius: 999px; background: #1C1C1C; color: #fff;
+  box-shadow: 0 24px 50px -18px rgba(0, 0, 0, .55);
   transform: translate(-50%, 140%); opacity: 0; pointer-events: none; transition: transform .45s cubic-bezier(.2, .9, .25, 1.15), opacity .3s ease; }
 .gx .gx-elenco .el-blocco--su { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
-.gx .gx-elenco .el-blocco-n { margin-right: 10px; padding-right: 14px; border-right: 1px solid var(--gx-filo); font-size: 13px; color: var(--gx-testo) !important; white-space: nowrap; }
-.gx .gx-elenco .el-blocco-n b { color: var(--gx-accento-testo); font-weight: 700; }
-.gx .gx-elenco .el-blocco > button { height: 38px !important; padding: 0 15px !important; background: transparent !important; color: var(--gx-inchiostro) !important; font-size: 13px !important; }
-.gx .gx-elenco .el-blocco > button:hover { background: var(--gx-incavo) !important; }
-.gx .gx-elenco .el-blocco > button[style*="220, 38, 38"], .gx .gx-elenco .el-blocco > button[style*="#dc2626"] { color: var(--gx-problema) !important; }
+.gx .gx-elenco .el-blocco-n { margin-right: 10px; padding-right: 14px; border-right: 1px solid rgba(255,255,255,.18); font-size: 13px; color: rgba(255,255,255,.75) !important; white-space: nowrap; }
+.gx .gx-elenco .el-blocco-n b { color: #fff; font-weight: 700; }
+.gx .gx-elenco .el-blocco > button { height: 38px !important; padding: 0 15px !important; background: transparent !important; color: #fff !important; font-size: 13px !important; }
+.gx .gx-elenco .el-blocco > button:hover { background: rgba(255,255,255,.12) !important; }
+.gx .gx-elenco .el-blocco > button[style*="220, 38, 38"], .gx .gx-elenco .el-blocco > button[style*="#dc2626"] { color: #FF8A8A !important; }
 .gx .gx-elenco .el-blocco > .el-blocco-x { width: 38px; justify-content: center; padding: 0 !important; margin-left: 4px; border-radius: 50% !important;
-  font-size: 20px !important; font-weight: 400 !important; color: var(--gx-attenuato) !important; }
+  font-size: 20px !important; font-weight: 400 !important; color: rgba(255,255,255,.7) !important; }
 @media (max-width: 1100px) { .gx .gx-elenco .el-blocco { left: 50%; } }
 
 /* le righe entrano una dopo l'altra, la prima volta e a ogni pagina */
@@ -226,7 +251,7 @@
 .gx .gx-elenco .el-riga td > button[style*="underline"] { font-size: 14px !important; }
 .gx .gx-elenco .el-riga td:nth-child(3) > div:nth-child(2) { color: var(--gx-attenuato) !important; }
 .gx .gx-elenco .el-rete { display: inline-flex; align-items: center; height: 18px; margin-top: 5px !important; padding: 0 8px; border-radius: 999px;
-  background: color-mix(in srgb, var(--gx-accento) 11%, transparent); color: var(--gx-accento-testo) !important; font-size: 10px !important; letter-spacing: .04em; }
+  background: color-mix(in srgb, var(--gx-accento) 11%, transparent); color: var(--gx-accento-testo) !important; font-size: 10.5px !important; letter-spacing: .02em; }
 .gx .gx-elenco .el-luogo { margin-top: 2px; color: var(--gx-attenuato) !important; font-size: 12px !important; }
 .gx .gx-elenco .el-quando { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
 .gx .gx-elenco .el-quando b { font-weight: 500; font-size: 13px; color: var(--gx-inchiostro); }
@@ -323,7 +348,8 @@
 .gx .tl-piede .gx-ico { width: 16px; height: 16px; }
 
 /* ── 18/11, quarto giro: le azioni della riga dietro i tre puntini ─────────────────────────────────────────── */
-.gx .gx-elenco .el-azioni--menu { justify-content: flex-end; align-items: center; }
+/* «Etichetta» e «⋯» sempre sulla stessa riga: nel portale cliente la colonna è più stretta e il ⋯ andava sotto */
+.gx .gx-elenco .el-azioni--menu { display: flex; flex-wrap: nowrap; justify-content: flex-end; align-items: center; }
 .gx .gx-elenco .el-azioni.el-azioni--menu > .el-primaria { width: auto; gap: 7px; padding: 0 14px 0 12px !important; border-radius: 999px !important;
   font-size: 13px !important; font-weight: 600 !important; color: var(--gx-inchiostro) !important; white-space: nowrap; }
 .gx .gx-elenco .el-azioni.el-azioni--menu > .el-primaria .gx-ico { width: 16px; height: 16px; }
@@ -564,4 +590,45 @@
    del cartellino della rete (4,4) scendevano sotto 4,5 (controllo completo 21/11). Un tono più scuro, solo nelle schede */
 @media (max-width: 720px) {
   .gx:not([data-luce="notte"]) .gx-elenco .el-tab { --gx-bene: #0D6B4B; --gx-accento-testo: #9A3000; }
+}
+
+/* ── 25/11, stile Finexy: le cose nuove ───────────────────────────────────────────────────────────────────────── */
+/* il numero dei risultati in un cartellino accanto a «Spedizioni» */
+.gx .gx-elenco .el-conta-n { display: inline-flex; align-items: center; height: 22px; margin-left: 6px; padding: 0 8px; border-radius: 6px; vertical-align: 2px;
+  background: var(--gx-incavo); color: var(--gx-attenuato) !important; font-size: 12px; font-weight: 500; letter-spacing: 0; }
+/* le scorciatoie per stato: pillole col pallino del colore dello stato, quella scelta nera */
+.gx .gx-elenco .el-stati { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 14px; }
+.gx .gx-elenco .el-stati button { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px; border-radius: 999px;
+  background: var(--gx-incavo); color: var(--gx-testo); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background .15s ease, color .15s ease; }
+.gx .gx-elenco .el-stati button[data-stato]::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--st-p, #9CA3AF); }
+.gx .gx-elenco .el-stati button:hover { background: color-mix(in srgb, var(--gx-inchiostro) 9%, var(--gx-incavo)); }
+.gx .gx-elenco .el-stati button[aria-pressed="true"] { background: var(--el-nero); color: #fff; }
+.gx[data-luce="notte"] .gx-elenco .el-stati button[aria-pressed="true"] { color: #fff; }
+.gx .gx-elenco .el-stati button:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
+/* le etichette della seconda riga (Peso, Colli, Cliente, Costo, Margine): minuscole e grigie come nella dashboard */
+.gx .gx-elenco .el-riga2 span[style*="text-transform: uppercase"], .gx .gx-elenco .el-riga2 span[style*="text-transform:uppercase"] {
+  text-transform: none !important; letter-spacing: 0 !important; font-size: 11.5px !important; font-weight: 400 !important; }
+/* il margine in un cartellino: verde se guadagni, rosso se perdi */
+.gx .gx-elenco .el-riga2 .el-soldi b[style*="22, 163, 74"], .gx .gx-elenco .el-riga2 .el-soldi b[style*="#16a34a"] {
+  padding: 2px 7px; border-radius: 6px; background: color-mix(in srgb, var(--gx-bene) 13%, transparent); }
+.gx .gx-elenco .el-riga2 .el-soldi b[style*="220, 38, 38"], .gx .gx-elenco .el-riga2 .el-soldi b[style*="#dc2626"] {
+  padding: 2px 7px; border-radius: 6px; color: var(--gx-problema) !important; background: color-mix(in srgb, var(--gx-problema) 12%, transparent); }
+/* i filtri sul computer largo: due righe invece di tre (nove campi per riga, la data larga due); sotto i 1280 px restano
+   le tre righe di oggi, sul telefono la tendina */
+@media (min-width: 1280px) {
+  .gx .gx-elenco .el-filtri { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); column-gap: 8px; row-gap: 12px; align-items: end; }
+  .gx .gx-elenco .el-filtri > .el-sezione { grid-column: 1 / -1; margin-bottom: 0 !important; }
+  .gx .gx-elenco .el-filtri > div[style*="grid-template-columns"] { display: contents !important; }
+  .gx .gx-elenco .el-filtri .el-f-largo { grid-column: span 2; }
+  .gx .gx-elenco .el-filtri .el-f-azzera .el-secondario { width: 100%; padding: 0 10px !important; }
+}
+.gx .gx-elenco .el-comandi > div > span[style*="font-weight: 600"] { font-weight: 400 !important; font-size: 12.5px !important; }
+/* sul telefono: le scorciatoie su una riga che scorre di lato (su quattro righe spingevano giù l'elenco); la testata
+   «Seleziona tutta la pagina» senza la fascia grigia, che lì restava tagliata; le schede senza il margine in più */
+@media (max-width: 720px) {
+  .gx .gx-elenco .el-stati { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 0 16px 12px; }
+  .gx .gx-elenco .el-stati::-webkit-scrollbar { display: none; }
+  .gx .gx-elenco .el-stati button { flex-shrink: 0; height: 36px; font-size: 14px; }
+  .gx .gx-elenco .el-tab th { background: transparent !important; }
+  .gx .gx-elenco .el-tabella > div[style*="overflow"] { padding: 0; }
 }
