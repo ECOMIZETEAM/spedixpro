@@ -20,7 +20,7 @@ async function contesto() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('id,master_id,cliente_id,ruolo').eq('id', user.id).single()
+  const { data: utente } = await supabase.from('utenti').select('id,master_id,cliente_id,ruolo,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   return { supabase, admin: createAdminSupabase(), user, utente }
 }

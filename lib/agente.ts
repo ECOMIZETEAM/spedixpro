@@ -30,6 +30,9 @@ export function nomeAgente(utente: Utente): string {
 // Array vuoto se non ha clienti (→ nessun risultato nelle liste).
 export async function clientiAgente(supabase: any, utente: Utente): Promise<string[]> {
   const nome = nomeAgente(utente)
+  // Un agente senza nome qui vuol dire che la rotta non ha letto nome e cognome: la lista vuota NON è «non ha
+  // clienti» e prima passava in silenzio (25/11/2026: Elenco Ritiri, Catalogo, Circuito interno, completa LDV).
+  if (isAgente(utente) && utente?.master_id && !nome) console.error('[AGENTE] nome e cognome non letti: la rotta non trova i clienti dell\'agente')
   if (!utente?.master_id || !nome) return []
   const { data } = await supabase.from('clienti').select('id').eq('master_id', utente.master_id).eq('agente', nome)
   return (data || []).map((c: any) => c.id)

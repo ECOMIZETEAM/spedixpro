@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
 
   const { data: utente } = await supabase
-    .from('utenti').select('ruolo, cliente_id, master_id').eq('id', user.id).single()
+    .from('utenti').select('ruolo, cliente_id, master_id, nome, cognome').eq('id', user.id).single()
 
   const { id } = await req.json().catch(() => ({ id: null }))
   if (!id) return NextResponse.json({ error: 'ID spedizione mancante' }, { status: 400 })

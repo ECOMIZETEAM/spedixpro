@@ -51,12 +51,7 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminSupabase()
   const masterId = utente.master_id as string
-  // i ritiri con lo stesso utente che legge l'Elenco Ritiri (master_id, ruolo, cliente_id): stessa risposta per la
-  // stessa persona. NB: senza nome e cognome l'agente lì non trova i suoi clienti e non vede ritiri — segnalato a
-  // Lorenzo il 25/11, da decidere; finché è così, nemmeno qui.
-  const perRitiri = vedeRitiri
-    ? soloIlMioMaster(await perimetroRitiri(supabase, admin, { master_id: utente.master_id, ruolo: utente.ruolo, cliente_id: utente.cliente_id }), masterId)
-    : null
+  const perRitiri = vedeRitiri ? soloIlMioMaster(await perimetroRitiri(supabase, admin, utente), masterId) : null
   const perGiacenze = vedeGiacenze
     ? (cliente ? perimetroGiacenzeCliente(utente) : soloIlMioMaster(await perimetroGiacenze(supabase, admin, utente), masterId))
     : null

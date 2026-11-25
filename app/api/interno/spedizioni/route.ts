@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  // nome e cognome: l'agente riconosce i suoi clienti da lì (lib/agente); senza, non ne trovava nessuno
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   if (!utente?.master_id || utente.ruolo === 'cliente') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   // L'autista non entra da qui: la sua schermata e' /autista, con solo le SUE consegne.
   if ((utente.ruolo || '').toLowerCase() === 'autista') return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })

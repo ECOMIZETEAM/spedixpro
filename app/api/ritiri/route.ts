@@ -2,6 +2,8 @@
 import { createServerSupabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetch-all'
 import { perimetroRitiri, applicaPerimetro, corrieriDelPerimetro } from '@/lib/perimetro-ritiri-giacenze'
+import { isAgente } from '@/lib/agente'
+import { getPermessiUtente, haPermesso } from '@/lib/permessi'
 import { etichettaRitiriSenzaCodice } from '@/lib/ritiro-codice'
 
 
@@ -12,10 +14,16 @@ export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json([])
-  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id').eq('id', user.id).single()
+  // nome e cognome servono all'agente: i suoi clienti si riconoscono da clienti.agente (lib/agente). Senza, la lista
+  // dei suoi clienti usciva vuota e gli agenti col permesso dei Ritiri non ne vedevano nessuno (trovato il 25/11/2026:
+  // 3 agenti su 46, corretto con l'ok di Lorenzo).
+  const { data: utente } = await supabase.from('utenti').select('master_id,ruolo,cliente_id,nome,cognome').eq('id', user.id).single()
   // L'autista lavora solo da /api/autista: qui finiva nel ramo del master e leggeva i ritiri di
   // tutta la rete. Il middleware ferma le sue scritture, non le letture.
   if ((utente?.ruolo || '').toLowerCase() === 'autista') return NextResponse.json([])
+  // L'agente vede i ritiri solo se il suo master gli ha dato la pagina (admin.pickups.index, spento di serie): finché
+  // il nome mancava la rotta rispondeva vuoto a tutti gli agenti, e correggerla non deve aprirla a chi non ha il permesso.
+  if (isAgente(utente) && !haPermesso(await getPermessiUtente(), 'admin.pickups.index')) return NextResponse.json([])
   const p = req.nextUrl.searchParams
   const clienteIdRaw = p.get('clienteId')
   // "m:<masterId>" = sotto-master agganciato (trattato come cliente): i suoi ritiri
