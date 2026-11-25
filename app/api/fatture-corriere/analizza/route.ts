@@ -318,6 +318,9 @@ export async function POST(req: NextRequest) {
     brt: e.brt, moove: e.moove, listino: e.listino?.totale ?? null, zona: e.listino?.zona ?? null,
     differenza: e.differenza, motivi: e.motivi, voci: e.vociPerCategoria as Record<string, number>,
     ...(e.scartoListino != null ? { scartoListino: e.scartoListino } : {}),
+    // Il dettaglio di "Cosa allineare nel listino" (quale listino, voce, zona, luogo). Mancava: il controllo lo
+    // calcolava e qui si perdeva, e il 25/11 l'allegato di ottobre rifatto da Wave usciva ancora senza.
+    ...(e.allinea ? { allinea: e.allinea } : {}),
   }))
 
   const { error: errRighe } = await admin.from('fatture_corriere_righe')
