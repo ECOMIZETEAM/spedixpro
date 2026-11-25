@@ -844,7 +844,9 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
             <button type="button" className="ns-crea__tasto" onClick={crea} disabled={inCalcolo}>
               {inCalcolo ? 'Aggiorno i prezzi…' : selected ? `Crea spedizione · ${euro(totale)}${testoIva(selMostrata?._iva, selMostrata?._aliquota) ? ' ' + testoIva(selMostrata?._iva, selMostrata?._aliquota) : ''}` : 'Crea spedizione'}
             </button>
-            <p className="ns-nota ns-nota--centro">{notaCrea} Prezzi IVA esclusa.</p>
+            {/* la scritta dell'IVA segue il listino del corriere scelto, come il riepilogo: diceva sempre «IVA esclusa» anche sui
+                listini venduti IVA inclusa o esenti (segnalato il 24/11 nei commenti alla prova) */}
+            <p className="ns-nota ns-nota--centro">{notaCrea} {selMostrata?._iva === 'inclusa' ? 'Prezzi IVA inclusa.' : selMostrata?._iva === 'esente' ? 'Prezzi esenti IVA.' : 'Prezzi IVA esclusa.'}</p>
           </div>
         </div>
 

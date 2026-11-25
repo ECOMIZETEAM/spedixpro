@@ -3,7 +3,18 @@
    Le sezioni NON sono «gx-vetro»: la sfocatura chiude dentro di sé le finestre fisse (scelta del punto, del locker),
    come è successo sull'Elenco. Il vetro sfocato resta al riepilogo, che di finestre non ne apre. */
 
-.gx .ns { --ns-r: 20px; max-width: 1180px; margin: 0 auto; font-variant-numeric: tabular-nums; color: var(--gx-testo); }
+/* 25/11, stile della Dashboard nuova (Lorenzo: «ora passa alla nuova spedizione»): schede bianche, campi grigi senza
+   bordo, la scelta con l'anello nero, il riepilogo nero come la fascia del mese, il tasto principale nero. Le regole qui
+   sotto usano le variabili della cornice (--gx-*): dentro la pagina prendono i valori della dashboard
+   (app/components/dashboard-finexy/dashboard-finexy.css, .fx) */
+.gx .ns { --ns-r: 15px; max-width: 1180px; margin: 0 auto; font-variant-numeric: tabular-nums; color: var(--gx-testo);
+  --gx-inchiostro: #111111; --gx-testo: #1F1F1F; --gx-attenuato: #6E6E73; --gx-filo: #ECECEC; --gx-incavo: #F6F6F6; --gx-vetro: #FFFFFF;
+  --gx-accento: #EA5326; --gx-accento-testo: #C2410C; --gx-bene: #2E9B55; --gx-problema: #D9474E;
+  --ns-nero: linear-gradient(180deg, #3A3A38, #121212); --ns-scelta: #1C1C1C; --ns-ombra: 0 1px 3px rgba(0,0,0,.035), 0 6px 22px rgba(0,0,0,.035);
+  font-family: var(--font-inter, 'Inter'), system-ui, -apple-system, sans-serif; }
+.gx[data-luce="notte"] .ns { --gx-inchiostro: #F2F2F3; --gx-testo: #E6E6E8; --gx-attenuato: #A4A4AA; --gx-filo: #36363A; --gx-incavo: #2A2A2E;
+  --gx-vetro: #1E1E21; --gx-accento-testo: #FF9C7A; --gx-bene: #4CC37A; --gx-problema: #FF6B6B;
+  --ns-nero: linear-gradient(180deg, #4A4A4F, #222225); --ns-scelta: #ECECEC; --ns-ombra: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.35); }
 /* I componenti del modulo di oggi riusati qui (Punto Poste, locker, articoli del catalogo, ricarica con carta) hanno i
    colori in linea come var(--ns-v-…, colore di oggi): fuori da questa pagina la variabile non c'è e restano identici al
    pixel; qui prendono i colori della grafica nuova. Il 20/11 di notte il CAP del Punto Poste era bianco su bianco: il
@@ -18,15 +29,13 @@
 .gx .ns-griglia { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: 22px; align-items: start; }
 .gx .ns-colonna { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .gx .ns-testa { padding: 4px 4px 2px; }
-.gx .ns-titolo { margin: 0 0 4px; font-size: 30px; font-weight: 500; letter-spacing: -.02em; color: var(--gx-inchiostro); }
-.gx .ns-sottotitolo { margin: 0; font-size: 14px; color: var(--gx-attenuato); }
+.gx .ns-titolo { margin: 0 0 6px; font-size: 34px; font-weight: 500; letter-spacing: -0.6px; line-height: 1.15; color: var(--gx-inchiostro); }
+.gx .ns-sottotitolo { margin: 0; font-size: 13.5px; color: var(--gx-attenuato); }
 
-.gx .ns-sezione { padding: 20px 22px 22px; border-radius: var(--ns-r); background: var(--gx-vetro);
-  box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 1px 2px rgba(40, 37, 33, .04), 0 22px 48px -30px rgba(40, 37, 33, .28); }
-.gx[data-luce="notte"] .ns-sezione { box-shadow: inset 0 1px 0 var(--gx-vetro-luce), inset 0 0 0 1px var(--gx-vetro-orlo), 0 24px 50px -30px rgba(0, 0, 0, .6); }
+.gx .ns-sezione { padding: 20px 22px 22px; border-radius: var(--ns-r); background: var(--gx-vetro); box-shadow: var(--ns-ombra); }
 .gx .ns-sezione__testa { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.gx .ns-sezione__testa h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 17px; font-weight: 600; color: var(--gx-inchiostro); }
-.gx .ns-sezione__testa h2 .gx-ico { color: var(--gx-accento); }
+.gx .ns-sezione__testa h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 17px; font-weight: 500; letter-spacing: -0.2px; color: var(--gx-inchiostro); }
+.gx .ns-sezione__testa h2 .gx-ico { color: var(--gx-inchiostro); }
 
 .gx .ns-link { all: unset; cursor: pointer; font-size: 13.5px; color: var(--gx-accento-testo); text-decoration: underline; text-underline-offset: 3px; }
 .gx .ns-link:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; border-radius: 4px; }
@@ -41,8 +50,8 @@
 .gx .ns-campi { display: grid; gap: 10px; }
 .gx .ns-riga2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .gx .ns-riga3 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, .8fr); gap: 10px; }
-.gx .ns-campo { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 7px 12px 8px; border-radius: 12px;
-  background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); transition: box-shadow .15s ease; }
+.gx .ns-campo { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 7px 12px 8px; border-radius: 10px;
+  background: var(--gx-incavo); box-shadow: none; transition: box-shadow .15s ease; }
 .gx .ns-campo:focus-within { box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
 .gx .ns-campo--errore, .gx .ns-campo--errore:focus-within { box-shadow: inset 0 0 0 1.5px var(--gx-problema); }
 .gx .ns-campo--corto { max-width: 240px; }
@@ -63,7 +72,7 @@
 .gx[data-luce="notte"] .ns-campo select { color-scheme: dark; }
 
 /* la scheda del mittente già compilato */
-.gx .ns-scheda { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); font-size: 13.5px; }
+.gx .ns-scheda { display: grid; gap: 2px; padding: 12px 14px; border-radius: 11px; background: var(--gx-incavo); font-size: 13.5px; }
 .gx .ns-scheda b { font-size: 14.5px; font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-scheda span { color: var(--gx-attenuato); }
 .gx .ns-campo--select { margin-bottom: 10px; }
@@ -73,7 +82,7 @@
 .gx .ns-gruppo > * + * { border-top: 1px solid var(--gx-filo); }
 .gx .ns-sezione > .ns-gruppo:first-of-type { margin-top: 0; }
 .gx .ns-spunta { display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px; cursor: pointer; }
-.gx .ns-spunta input, .gx .ns-modo input, .gx .ns-corriere input, .gx .ns-extra input { accent-color: var(--gx-accento-pieno); width: 17px; height: 17px; margin: 2px 0 0; flex: none; }
+.gx .ns-spunta input, .gx .ns-modo input, .gx .ns-corriere input, .gx .ns-extra input { accent-color: var(--ns-scelta); width: 17px; height: 17px; margin: 2px 0 0; flex: none; }
 /* l'anello del fuoco di caselle e pallini: arancio come il resto, non il blu del browser (Lorenzo 20/11, foto di
    «Assicurazione»); col mouse niente anello, solo da tastiera */
 .gx .ns input[type="checkbox"]:focus-visible, .gx .ns input[type="radio"]:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; border-radius: 4px; }
@@ -93,7 +102,7 @@
 .gx .ns-ritiro__giorno { font-size: 15.5px; font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-segmenti { display: inline-flex; justify-self: start; padding: 3px; border-radius: 999px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
 .gx .ns-segmenti button { all: unset; cursor: pointer; padding: 6px 14px; border-radius: 999px; font-size: 13px; color: var(--gx-testo); }
-.gx .ns-segmenti button.ns-segmenti--su { background: var(--gx-accento-pieno); color: #fff; font-weight: 600; }
+.gx .ns-segmenti button.ns-segmenti--su { background: var(--ns-nero); color: #fff; font-weight: 600; }
 .gx .ns-segmenti button:focus-visible { outline: 2px solid var(--gx-accento); }
 .gx .ns-cal { padding: 8px 10px 10px; border-radius: 14px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
 .gx .ns-cal__testa { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
@@ -109,19 +118,19 @@
 .gx .ns-cal__g:hover:not(:disabled) { background: color-mix(in srgb, var(--gx-accento) 12%, transparent); }
 .gx .ns-cal__g:focus-visible { outline: 2px solid var(--gx-accento); }
 .gx .ns-cal__g--oggi { box-shadow: inset 0 0 0 1px var(--gx-filo); }
-.gx .ns-cal__g--su { background: var(--gx-accento-pieno) !important; color: #fff; font-weight: 600; }
+.gx .ns-cal__g--su { background: var(--ns-nero) !important; color: #fff; font-weight: 600; }
 .gx .ns-cal__g:disabled { cursor: default; color: var(--gx-attenuato); opacity: .45; }
 .gx .ns-cal__g--festa:disabled { text-decoration: line-through; }
 
 /* domicilio / a un punto */
 .gx .ns-modi { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
-.gx .ns-modo { display: flex; gap: 10px; align-items: flex-start; padding: 13px 14px; border-radius: 14px; cursor: pointer; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-modo { display: flex; gap: 10px; align-items: flex-start; padding: 13px 14px; border-radius: 12px; cursor: pointer; background: var(--gx-incavo); transition: box-shadow .15s ease, background .15s ease; }
 .gx .ns-modo .gx-ico { margin-top: 1px; color: var(--gx-attenuato); }
 .gx .ns-modo b { display: block; font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-modo small { display: block; font-size: 12.5px; color: var(--gx-attenuato); }
 .gx .ns-modo--su small { color: var(--gx-testo); }
-.gx .ns-modo--su { background: color-mix(in srgb, var(--gx-accento) 9%, var(--gx-incavo)); box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
-.gx .ns-modo--su .gx-ico { color: var(--gx-accento); }
+.gx .ns-modo--su { background: var(--gx-vetro); box-shadow: inset 0 0 0 2px var(--ns-scelta); }
+.gx .ns-modo--su .gx-ico { color: var(--gx-inchiostro); }
 
 /* colli */
 .gx .ns-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12.5px; color: var(--gx-attenuato); }
@@ -140,18 +149,18 @@
 .gx .ns-togli:disabled { opacity: .3; cursor: default; }
 .gx .ns-togli:focus-visible { outline: 2px solid var(--gx-accento); }
 .gx .ns-colli__piede { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 6px; }
-.gx .ns-tasto2 { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--gx-inchiostro); background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-tasto2 { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--gx-inchiostro); background: var(--gx-vetro); box-shadow: 0 0 0 1px var(--gx-filo), 0 2px 8px rgba(0,0,0,.04); }
 .gx .ns-tasto2:hover { box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
 .gx .ns-tasto2:focus-visible { outline: 2px solid var(--gx-accento); outline-offset: 2px; }
 .gx .ns-colli + .ns-colli__piede + .ns-nota { margin-bottom: 14px; }
 
 /* corrieri */
 .gx .ns-calcolo { font-size: 12.5px; font-weight: 500; color: var(--gx-accento-testo); }
-.gx .ns-vuoto { margin: 0; padding: 18px 16px; border-radius: 14px; text-align: center; font-size: 13.5px; color: var(--gx-attenuato); background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-vuoto { margin: 0; padding: 18px 16px; border-radius: 12px; text-align: center; font-size: 13.5px; color: var(--gx-attenuato); background: var(--gx-incavo); }
 .gx .ns-vuoto--errore { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; color: var(--gx-problema); }
 .gx .ns-gruppo--vecchio { opacity: .5; transition: opacity .2s ease; pointer-events: none; }
 .gx .ns-corriere { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
-.gx .ns-corriere--su { background: color-mix(in srgb, var(--gx-accento) 9%, transparent); box-shadow: inset 0 0 0 1.5px var(--gx-accento); }
+.gx .ns-corriere--su { background: var(--gx-vetro); box-shadow: inset 0 0 0 2px var(--ns-scelta); }
 /* La lista ha gli angoli tondi e taglia quello che sborda: il bordo arancio della voce scelta era dritto e sulla prima
    riga gli angoli venivano mangiati (Lorenzo 20/11, «taglia i bordi»). In cima e in fondo la voce prende gli angoli
    della lista, e il bordo li segue. */
@@ -173,8 +182,8 @@
 /* i limiti del collo sono un'informazione, non un errore: grigi come il resto della riga (il fuori sagoma resta arancio) */
 .gx .ns-attenz.ns-info { color: var(--gx-attenuato) !important; }
 .gx .ns-meglio { font-style: normal; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--gx-bene); background: color-mix(in srgb, var(--gx-bene) 13%, transparent); }
-.gx .ns-prezzo { font-weight: 600; font-size: 15.5px; color: var(--gx-inchiostro); white-space: nowrap; }
-.gx .ns-corriere__dentro { display: grid; gap: 8px; padding: 14px 14px 14px 43px; background: color-mix(in srgb, var(--gx-accento) 4%, transparent); border-top: 1px solid var(--gx-filo); }
+.gx .ns-prezzo { font-weight: 600; font-size: 16px; letter-spacing: -0.2px; color: var(--gx-inchiostro); white-space: nowrap; }
+.gx .ns-corriere__dentro { display: grid; gap: 8px; padding: 14px 14px 14px 43px; background: var(--gx-incavo); border-top: 1px solid var(--gx-filo); }
 .gx .ns-extra { display: flex; align-items: center; gap: 10px; font-size: 13.5px; cursor: pointer; }
 .gx .ns-extra span { flex: 1; }
 .gx .ns-extra b { font-weight: 600; color: var(--gx-inchiostro); }
@@ -186,34 +195,39 @@
 
 /* il tasto */
 .gx .ns-crea { display: grid; gap: 10px; padding-bottom: 8px; }
-/* 18,7 px in grassetto: è «testo grande», e il bianco sull'International Orange (3,3) passa la sua soglia (3); a 16 px no */
-.gx .ns-crea__tasto { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 56px; border-radius: 999px; font-size: 18.7px; font-weight: 700; color: #fff;
-  background: var(--gx-accento-pieno); box-shadow: 0 12px 26px -12px var(--gx-accento-pieno), inset 0 1px 0 rgba(255, 255, 255, .28); }
-.gx .ns-crea__tasto:hover { transform: translateY(-1px); }
+/* nero come i tasti principali della dashboard e dell'Elenco: il bianco sul nero passa qualunque soglia */
+.gx .ns-crea__tasto { all: unset; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 56px; border-radius: 999px; font-size: 17px; font-weight: 600; color: #fff;
+  background: var(--ns-nero); box-shadow: 0 12px 26px -14px rgba(0, 0, 0, .55); transition: transform .2s ease, filter .2s ease; }
+.gx .ns-crea__tasto:hover { transform: translateY(-1px); filter: brightness(1.08); }
 .gx .ns-crea__tasto:focus-visible { outline: 2px solid var(--gx-inchiostro); outline-offset: 3px; }
 /* Spento mentre ricalcola: neutro ma leggibile. Prima sbiadiva tutto (opacità .55) e «Aggiorno i prezzi…» restava a 1,9
    di contrasto sull'arancio: proprio la scritta che spiega perché non si può ancora premere. */
 .gx .ns-crea__tasto:disabled { cursor: progress; opacity: 1; transform: none; background: var(--gx-incavo); color: var(--gx-testo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
 .gx .ns-cambiato { margin: 0; padding: 9px 12px; border-radius: 12px; font-size: 13px; text-align: center; color: var(--gx-inchiostro); background: color-mix(in srgb, var(--gx-accento) 12%, transparent); }
 
-/* il riepilogo: fermo mentre si scorre */
+/* il riepilogo: fermo mentre si scorre. Nero come la fascia del mese della dashboard (l'unico nero della pagina insieme
+   al tasto): dentro, i colori chiari della notte; il totale grande in bianco */
 .gx .ns-riep { position: sticky; top: 0; align-self: start; min-width: 0; }
-.gx .ns-riep__dentro { padding: 20px 20px 18px; border-radius: var(--ns-r); }
-.gx .ns-riep h2 { margin: 0 0 14px; font-size: 17px; font-weight: 600; color: var(--gx-inchiostro); }
-.gx .ns-rotta { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; row-gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns .ns-riep__dentro, .gx .ns .ns-riep__dentro.gx-vetro { padding: 22px 22px 20px; border-radius: var(--ns-r); color: #fff;
+  background: linear-gradient(160deg, #2A2A2A, #0E0E0E); box-shadow: 0 14px 34px -16px rgba(0, 0, 0, .5); -webkit-backdrop-filter: none; backdrop-filter: none;
+  --gx-inchiostro: #FFFFFF; --gx-testo: rgba(255,255,255,.86); --gx-attenuato: rgba(255,255,255,.58); --gx-filo: rgba(255,255,255,.12); --gx-incavo: rgba(255,255,255,.06);
+  --gx-problema: #FF8A80; }
+.gx[data-luce="notte"] .ns .ns-riep__dentro { background: linear-gradient(160deg, #2E2E32, #1A1A1D); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.gx .ns-riep h2 { margin: 0 0 14px; font-size: 17px; font-weight: 500; letter-spacing: -0.2px; color: var(--gx-inchiostro); }
+.gx .ns-rotta { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; row-gap: 14px; padding: 12px 14px; border-radius: 12px; background: var(--gx-incavo); }
 .gx .ns-rotta small { display: block; font-size: 11.5px; color: var(--gx-attenuato); }
 .gx .ns-rotta b { display: block; font-weight: 600; font-size: 13.5px; color: var(--gx-inchiostro); }
 .gx .ns-rotta span:not([aria-hidden]) { display: block; font-size: 12.5px; color: var(--gx-attenuato); }
 .gx .ns-rotta__da, .gx .ns-rotta__a { position: relative; width: 11px; height: 11px; margin-top: 16px; border-radius: 50%; }
 .gx .ns-rotta__da { box-shadow: inset 0 0 0 2.5px var(--gx-inchiostro); }
-.gx .ns-rotta__a { background: var(--gx-accento-pieno); }
+.gx .ns-rotta__a { background: var(--gx-accento); box-shadow: 0 0 10px rgba(234, 83, 38, .6); }
 .gx .ns-riep__colli { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 12px; }
 .gx .ns-riep__colli li { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--gx-inchiostro); }
 .gx .ns-riep__colli li > span:nth-child(2) { flex: 1; min-width: 0; }
 .gx .ns-riep__colli b { display: block; font-weight: 600; }
 .gx .ns-riep__colli small { display: block; font-size: 12px; color: var(--gx-attenuato); }
-.gx .ns-riep__icona { position: relative; width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); color: var(--gx-attenuato); }
-.gx .ns-riep__icona em { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; font-style: normal; font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; color: var(--gx-fondo); background: var(--gx-testo); }
+.gx .ns-riep__icona { position: relative; width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--gx-incavo); color: var(--gx-attenuato); }
+.gx .ns-riep__icona em { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; font-style: normal; font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; color: #111; background: #fff; }
 .gx .ns-riep__corriere { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .gx .ns-riep__corriere b { display: block; font-size: 13.5px; font-weight: 600; color: var(--gx-inchiostro); }
 .gx .ns-riep__corriere small { display: block; font-size: 12px; color: var(--gx-attenuato); }
@@ -223,12 +237,13 @@
 .gx .ns-costi dd, .gx .ns-credito dd { margin: 0; color: var(--gx-inchiostro); }
 .gx .ns-totale { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gx-filo); }
 .gx .ns-totale span { font-size: 16px; font-weight: 600; color: var(--gx-inchiostro); }
-.gx .ns-totale b { font-size: 24px; font-weight: 600; letter-spacing: -.02em; color: var(--gx-inchiostro); }
+.gx .ns-totale { align-items: center; }
+.gx .ns-totale b { font-size: 38px; font-weight: 500; letter-spacing: -1px; line-height: 1.1; color: var(--gx-inchiostro); }
 .gx .ns-totale small { margin-right: 6px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; color: var(--gx-attenuato); }
 .gx .ns-iva { margin: 0; text-align: right; font-size: 11.5px; color: var(--gx-attenuato); }
 /* «IVA escl.» / «IVA incl.» / «Esente IVA» accanto al prezzo del corriere, solo dove il master ha scelto */
 .gx .ns-prezzo__iva { display: block; margin-top: 1px; font-size: 11px; font-weight: 600; color: var(--gx-attenuato); text-align: right; white-space: nowrap; }
-.gx .ns-credito { margin-top: 16px; padding: 10px 12px; border-radius: 12px; background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); }
+.gx .ns-credito { margin-top: 16px; padding: 10px 12px; border-radius: 12px; background: var(--gx-incavo); }
 .gx .ns-credito--basso { box-shadow: inset 0 0 0 1.5px var(--gx-problema); }
 .gx .ns-credito--basso div:last-child dd { color: var(--gx-problema); font-weight: 600; }
 
@@ -274,9 +289,9 @@
 @media (max-width: 899px) {
   .gx .ns-griglia { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .gx .ns-barra-riep { all: unset; cursor: pointer; box-sizing: border-box; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding: 12px 14px; border-radius: 16px;
-    font-size: 14px; color: var(--gx-accento-testo); background: var(--gx-vetro); box-shadow: inset 0 0 0 1px var(--gx-vetro-orlo); }
+    font-size: 14px; color: rgba(255,255,255,.8); background: linear-gradient(160deg, #2A2A2A, #0E0E0E); box-shadow: 0 10px 24px -14px rgba(0,0,0,.5); }
   .gx .ns-barra-riep span { display: inline-flex; align-items: center; gap: 8px; }
-  .gx .ns-barra-riep b { font-size: 16px; color: var(--gx-inchiostro); }
+  .gx .ns-barra-riep b { font-size: 17px; color: #fff; }
   .gx .ns-riep { position: static; order: -1; display: none; }
   .gx .ns-riep--aperto { display: block; }
   .gx .ns-sezione { padding: 16px 14px 18px; }
