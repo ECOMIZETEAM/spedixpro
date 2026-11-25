@@ -88,7 +88,12 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
     ? calcDa(prezziControparte, op, Number(noloBaseControparte ?? noloBase) || 0)
     : null
   const lblControparte = etichettaControparte === 'agente' ? 'tu (agente)' : 'tu (master)'
-  const richPending = (storico || []).find((r: any) => r.stato === 'da_confermare')
+  // Solo le richieste di QUESTA gamba si confermano o annullano da qui: quelle delle altre gambe
+  // del pacco condiviso arrivano per far vedere cosa e' stato chiesto (e dove va il pacco).
+  const richPending = (storico || []).find((r: any) => r.stato === 'da_confermare' && !r.altra_gamba)
+  const fmtDest = (n: any) => n ? [n.nome, n.indirizzo, [n.cap, n.citta].filter(Boolean).join(' ') + (n.provincia ? ` (${n.provincia})` : ''), n.telefono ? 'tel. ' + n.telefono : '']
+    .map((x: any) => String(x || '').trim()).filter(Boolean).join(', ') : ''
+  const ultimoNuovoDest = (storico || []).find((r: any) => r.operazione === 'riconsegna_nuovo' && r.stato === 'confermata' && fmtDest(r.nuovo_destinatario))
   const costiExtra = (costi || []).reduce((s: number, c: any) => s + (Number(c.importo) || 0), 0)
   const costoTotaleGiac = (richPending ? Number(richPending.costo_totale) || 0 : 0) + costiExtra
 
@@ -107,16 +112,25 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
 
       {msg && <div style={{ padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#fff', background: msg.t === 'ok' ? '#16a34a' : msg.t === 'avviso' ? '#ea580c' : '#dc2626' }}>{msg.x}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.1fr) minmax(0,1fr)', gap: '20px', alignItems: 'start' }}>
+      {/* Due colonne quando c'e' spazio, una sola sul telefono: con le due colonne fisse a 390 px le
+          schede uscivano dallo schermo e il nuovo destinatario si leggeva tagliato. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))', gap: '20px', alignItems: 'start' }}>
 
-        {/* COLONNA SINISTRA */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* COLONNA SINISTRA — minWidth 0: senza, una tabella larga allargava la colonna oltre lo schermo */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 }}>
           <div style={card}>
             <div style={cardHead}>Info Giacenza</div>
             <div style={{ padding: '16px 18px', fontSize: '13px', color: '#1a1a1a', lineHeight: 1.9 }}>
               <div>👤 <b>Destinatario:</b> {sped.dest_nome}</div>
               <div>📍 <b>Indirizzo:</b> {sped.dest_indirizzo}, {sped.dest_cap} {sped.dest_citta} {sped.dest_provincia ? '(' + sped.dest_provincia + ')' : ''}</div>
               {sped.dest_telefono && <div>📱 <b>Telefono:</b> {sped.dest_telefono}</div>}
+              {ultimoNuovoDest && (
+                <div style={{ marginTop: '8px', padding: '8px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', lineHeight: 1.5 }}>
+                  <b style={{ color: '#1d4ed8' }}>Nuovo destinatario</b>
+                  <span style={{ color: '#64748b', fontSize: '12px' }}> · svincolo del {new Date(ultimoNuovoDest.created_at).toLocaleDateString('it-IT')}</span>
+                  <div style={{ color: '#1a1a1a' }}>{fmtDest(ultimoNuovoDest.nuovo_destinatario)}</div>
+                </div>
+              )}
               <div style={{ marginTop: '6px' }}><b>Motivo:</b> <span style={{ color: '#f97316' }}>{sped.giacenza_motivo || 'INIZIO GIACENZA'}</span></div>
               <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '12px' }}>
                 <thead><tr>{['Data spedizione', 'Data apertura giacenza'].map(h => <th key={h} style={{ ...th, borderTop: '1px solid #eef2f6' }}>{h}</th>)}</tr></thead>
@@ -196,7 +210,7 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
         </div>
 
         {/* COLONNA DESTRA */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 }}>
 
           {/* COSTI APPLICATI (anteprima operazione scelta) */}
           <div style={card}>
@@ -234,11 +248,20 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
                       <tr key={r.id}>
                         <td style={{ ...td, whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                         <td style={td}>{r.creata_da || '—'}</td>
-                        <td style={{ ...td, fontWeight: 600 }}>{OP_LABEL[r.operazione] || r.operazione}</td>
-                        <td style={td}>{eur(r.costo_totale)}</td>
+                        <td style={{ ...td, fontWeight: 600 }}>
+                          {/* Larghezza massima: indirizzo e note vanno a capo invece di allargare la tabella (sul telefono si leggeva solo scorrendo) */}
+                          <div style={{ maxWidth: '300px', whiteSpace: 'normal' }}>
+                            {OP_LABEL[r.operazione] || r.operazione}
+                            {r.operazione === 'riconsegna_nuovo' && fmtDest(r.nuovo_destinatario) && (
+                              <div style={{ fontWeight: 400, fontSize: '12px', color: '#1a1a1a', marginTop: '2px' }}>→ {fmtDest(r.nuovo_destinatario)}</div>
+                            )}
+                            {r.note && <div style={{ fontWeight: 400, fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>{r.note}</div>}
+                          </div>
+                        </td>
+                        <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.altra_gamba ? '—' : eur(r.costo_totale)}</td>
                         <td style={td}>
                           <span style={{ background: b.bg, color: b.color, padding: '3px 9px', borderRadius: '5px', fontSize: '11px', fontWeight: 700 }}>{b.l}</span>
-                          {r.stato === 'da_confermare' && (
+                          {r.stato === 'da_confermare' && !r.altra_gamba && (
                             <div style={{ marginTop: '8px' }}>
                               {isMaster ? (
                                 <>

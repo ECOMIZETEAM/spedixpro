@@ -5,6 +5,7 @@ import { isAgente, clientiAgente, bloccaAgente } from '@/lib/agente'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import { senzaCostoMaster } from '@/lib/ruoli'
 import { eseguiSvincolo } from '@/lib/giacenza-svincolo'
+import { gambePerTracking } from '@/lib/condivisione-catena'
 // Il calcolo dei prezzi giacenza vive in lib/giacenza-prezzi.ts: lo usa anche l'API pubblica,
 // che prima registrava le richieste con costo zero.
 import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
@@ -150,6 +151,41 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Sanitizzato qui, nella risposta, così il nome grezzo non raggiunge nemmeno il JSON del browser.
   let storicoOut: any[] = storico || []
   let costiOut: any[] = costi || []
+
+  // LO SVINCOLO DI UN PACCO CONDIVISO SI VEDE DA TUTTE LE GAMBE.
+  // La richiesta (con il nuovo destinatario) sta sulla sola gamba di chi l'ha fatta: le altre
+  // gambe ricevevano lo stato "svincolata" ma non dove andava il pacco. Il 25/11/2026 Wave vedeva
+  // ancora Corso Potenza 153/D su 282343J078758, rispedito da MULTI in Corso Racconigi 141 a Torino
+  // (65 pacchi condivisi cosi' in 30 giorni). Qui si aggiungono le richieste delle altre gambe, in
+  // sola lettura: niente bottoni, e senza importi, perche' ogni gamba ha i prezzi del suo livello e
+  // mostrarli farebbe vedere a un master quanto paga chi sta sopra o sotto di lui.
+  if (sped.tracking_number) {
+    try {
+      const gambe = (await gambePerTracking(admin, [sped.tracking_number])).get(sped.tracking_number) || []
+      const altre = gambe.filter(g => g.spedizioneId !== id).map(g => g.spedizioneId)
+      if (gambe.length > 1 && gambe.some(g => g.spedizioneId === id) && altre.length) {
+        const { data: daAltre } = await admin.from('giacenza_richieste').select('*').in('spedizione_id', altre)
+        const nomeDiGamba = new Map<string, string>()
+        if (ruolo === 'master' && !agente) {
+          const ids = [...new Set(gambe.map(g => g.masterId).filter(Boolean))] as string[]
+          const { data: mst } = await admin.from('masters').select('id,nome').in('id', ids)
+          const nomeMaster = new Map<string, string>((mst || []).map((m: any) => [String(m.id), String(m.nome || '')]))
+          for (const g of gambe) nomeDiGamba.set(g.spedizioneId, nomeMaster.get(g.masterId) || 'Rete')
+        }
+        const fuori = (daAltre || []).map((r: any) => ({
+          id: r.id, created_at: r.created_at, operazione: r.operazione, stato: r.stato,
+          // Le note le scrive chi lavora la giacenza in un'altra gamba: al cliente non si mostrano,
+          // possono nominare la rete sopra di lui.
+          data_operazione: r.data_operazione, note: ruolo === 'master' && !agente ? r.note : null, nuovo_destinatario: r.nuovo_destinatario,
+          confermata_at: r.confermata_at,
+          // Il cliente non vede i nomi della rete: lo stesso trattamento dello storico qui sotto.
+          creata_da: ruolo === 'master' && !agente ? nomeDiGamba.get(r.spedizione_id) || 'Rete' : null,
+          costo_totale: null, altra_gamba: true,
+        }))
+        storicoOut = [...storicoOut, ...fuori].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      }
+    } catch (e) { console.error('[GIACENZA] richieste delle altre gambe non lette:', e) }
+  }
   if (ruolo === 'cliente' || agente) {
     let nomeMasterDiretto = 'Master'
     const idMasterDiretto = masterId || (sped as any).master_id

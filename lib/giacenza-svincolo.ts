@@ -30,7 +30,12 @@ export async function eseguiSvincolo(
   const totale = +((Number(rich.costo_totale) || 0) + extra).toFixed(2)
 
   const opLabel: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_nuovo: 'Riconsegna a nuovo destinatario', reso: 'Reso al mittente' }
-  const istr = `${opLabel[rich.operazione] || rich.operazione}${rich.data_operazione ? ' - data ' + rich.data_operazione : ''}${rich.note ? ' - ' + rich.note : ''}`
+  // Il nuovo destinatario va nella riga che finisce su TUTTE le gambe: prima c'era solo
+  // "Riconsegna a nuovo destinatario" e chi stava sopra (Wave, LOGIXIA) non sapeva dove andava il pacco.
+  const ndI = rich.operazione === 'riconsegna_nuovo' ? (rich.nuovo_destinatario || {}) : null
+  const dove = ndI ? [ndI.nome, ndI.indirizzo, [ndI.cap, ndI.citta].filter(Boolean).join(' ') + (ndI.provincia ? ` (${ndI.provincia})` : ''), ndI.telefono ? 'tel. ' + ndI.telefono : '']
+    .map((x: any) => String(x || '').trim()).filter(Boolean).join(', ') : ''
+  const istr = `${opLabel[rich.operazione] || rich.operazione}${dove ? ' → ' + dove : ''}${rich.data_operazione ? ' - data ' + rich.data_operazione : ''}${rich.note ? ' - ' + rich.note : ''}`
 
   // PACCO CONDIVISO (piu' gambe, la prima un ponte): chi svincola puo' essere il cliente in fondo alla fila
   // o un master qualsiasi della fila, ma l'istruzione va al corriere VERO, una volta sola, con le credenziali
