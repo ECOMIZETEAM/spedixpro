@@ -116,9 +116,9 @@
 .fx-filtri { flex-shrink: 0; display: flex; align-items: center; gap: 12px; height: 37px; padding: 0 12px; border-radius: 9px; box-shadow: 0 0 0 1px #EDEDED; font-size: 12.5px; }
 .fx-tabella-box { margin-top: 18px; overflow-x: auto; }
 .fx-tabella { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
-.fx-tabella th { text-align: left; font-weight: 400; color: var(--fx-grigio); background: var(--fx-riquadro); padding: 13px 14px; white-space: nowrap; }
+.fx-tabella th { text-align: left; font-weight: 400; color: var(--fx-grigio); background: var(--fx-riquadro); padding: 13px 12px; white-space: nowrap; }
 .fx-tabella th:first-child { border-radius: 11px 0 0 11px; } .fx-tabella th:last-child { border-radius: 0 11px 11px 0; }
-.fx-tabella td { padding: 0 14px; height: 56px; font-weight: 500; white-space: nowrap; }
+.fx-tabella td { padding: 0 12px; height: 56px; font-weight: 500; white-space: nowrap; }
 .fx-tabella tbody tr { cursor: pointer; }
 .fx-tabella tbody tr:hover td { background: #F4F4F4; }
 .fx-tabella tbody tr:hover td:first-child { border-radius: 9px 0 0 9px; } .fx-tabella tbody tr:hover td:last-child { border-radius: 0 9px 9px 0; }
@@ -126,8 +126,7 @@
 .fx-corriere { display: inline-grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; border-radius: 5px; color: #fff; font-size: 7px; font-weight: 700; letter-spacing: -0.2px; }
 .fx-stato { display: inline-flex; align-items: center; gap: 7px; }
 .fx-stato i { width: 5px; height: 5px; border-radius: 50%; }
-.fx-piccolo { display: block; font-size: 11px; color: var(--fx-grigio); font-weight: 400; margin-top: 2px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; }
-.fx-vai { color: #8A8A8E; text-align: right; }
+.fx-piccolo { display: block; font-size: 11px; color: var(--fx-grigio); font-weight: 400; margin-top: 2px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .fx-vuoto { padding: 28px; text-align: center; color: var(--fx-grigio); font-size: 12.5px; }
 
 /* Telefono e schermi stretti: una colonna, i quattro numeri restano 2x2, la tabella scorre */

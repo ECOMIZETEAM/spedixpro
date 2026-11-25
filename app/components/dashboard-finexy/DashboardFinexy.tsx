@@ -23,7 +23,7 @@ type Dashboard = {
 type Corriere = { corriere: string; n: number }
 type Plancia = {
   oggi: { totale: number; perCorriere: Corriere[] }
-  stessoGiornoSettimanaScorsa: { giorno: string; totale: number }
+  stessoGiornoSettimanaScorsa: { giorno: string; totale: number; finoAlle?: string }
   mese: { dal: string; totale: number; perCorriere: Corriere[] }
   daChiudereOggi: number
   settimane: { dal: string; create: number; consegnate: number; nonConsegnate: number }[]
@@ -117,7 +117,7 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
   const giornoSettimana = new Intl.DateTimeFormat('it-IT', { weekday: 'long', timeZone: 'Europe/Rome' }).format(new Date())
   const meseNome = new Intl.DateTimeFormat('it-IT', { month: 'long', timeZone: 'Europe/Rome' }).format(new Date())
 
-  // Partite oggi contro lo stesso giorno della settimana scorsa
+  // Partite oggi contro lo stesso giorno della settimana scorsa, fino alla stessa ora (api/dashboard/plancia)
   const oggi = plancia?.oggi.totale ?? null
   const prima = plancia?.stessoGiornoSettimanaScorsa.totale ?? 0
   const variazione = oggi != null && prima > 0 ? Math.round((oggi - prima) / prima * 100) : null
@@ -202,7 +202,8 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
               <div className="fx-numero-testa">Partite oggi<i><Icona d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" /></i></div>
               <div className="fx-numero-cifra">{oggi == null ? '…' : intero(oggi)}</div>
               <div className="fx-nota">{variazione == null ? 'dal mattino, ora di Roma'
-                : <><span className="fx-chip fx-chip--vetro">{variazione >= 0 ? '↑' : '↓'} {Math.abs(variazione)}%</span>su {giornoSettimana} scorso</>}</div>
+                : <><span className="fx-chip fx-chip--vetro">{variazione >= 0 ? '↑' : '↓'} {Math.abs(variazione)}%</span>
+                  <span title={`${giornoSettimana} scorso fino alle ${plancia?.stessoGiornoSettimanaScorsa.finoAlle || 'stessa ora'}: ${intero(prima)} spedizioni`}>su {giornoSettimana} scorso alla stessa ora</span></>}</div>
             </a>
             <a className="fx-numero" href="/dashboard/distinte/crea">
               <div className="fx-numero-testa">Da chiudere<i><Icona d="M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2zM9 9h6M9 13h6" /></i></div>
@@ -312,7 +313,10 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
           <div className="fx-tabella-box">
             {righe == null ? <div className="fx-vuoto">Carico le ultime spedizioni…</div> : !righe.length ? <div className="fx-vuoto">Nessuna spedizione ancora</div> : (
               <table className="fx-tabella">
-                <thead><tr><th>N. spedizione</th><th>Cliente e destinazione</th><th>Prezzo cliente</th><th>Stato</th><th>Data</th><th aria-label="Apri" /></tr></thead>
+                {/* La data sta sotto il numero, come il cliente sotto la destinazione, e la riga intera si apre col
+                    clic (senza la colonna della freccia): con le colonne Data e › la tabella usciva dalla scheda (25/11,
+                    Ecomize LL a 1440: 825 px su 745, la data tagliata a «25/11 1»). */}
+                <thead><tr><th>N. spedizione</th><th>Cliente e destinazione</th><th>Prezzo cliente</th><th>Stato</th></tr></thead>
                 <tbody>
                   {righe.map(r => {
                     const corr = uno(r.corrieri)?.nome_contratto || ''
@@ -324,14 +328,14 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
                     const prezzo = r.prezzo_cliente ?? r.costo_mostrato ?? r.costo_totale
                     return (
                       <tr key={r.id} onClick={() => router.push(`/dashboard/spedizioni/${r.id}`)}>
-                        <td>{ldvProvvisoria(r.numero) ? LDV_IN_ELABORAZIONE : (numeroMostrato(r.numero, r.tracking_number) || '—')}</td>
+                        <td>{ldvProvvisoria(r.numero) ? LDV_IN_ELABORAZIONE : (numeroMostrato(r.numero, r.tracking_number) || '—')}
+                          <span className="fx-piccolo" title={new Intl.DateTimeFormat('it-IT', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Europe/Rome' }).format(new Date(r.created_at))}>
+                            {new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' }).format(new Date(r.created_at)).replace(',', '')}</span></td>
                         <td><span className="fx-dest"><span className="fx-corriere" style={{ background: fondo, color: scritta }} title={corr}>{sigla}</span>
                           <span>{[r.dest_citta, r.dest_provincia ? `(${r.dest_provincia})` : ''].filter(Boolean).join(' ') || '—'}
                             {cliente && <span className="fx-piccolo" title={cliente}>{cliente}</span>}</span></span></td>
                         <td>{prezzo == null ? '—' : euro(Number(prezzo))}</td>
                         <td><span className="fx-stato"><i style={{ background: colore }} />{stato}</span></td>
-                        <td title={new Intl.DateTimeFormat('it-IT', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Europe/Rome' }).format(new Date(r.created_at))}>{new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' }).format(new Date(r.created_at)).replace(',', '')}</td>
-                        <td className="fx-vai">›</td>
                       </tr>
                     )
                   })}

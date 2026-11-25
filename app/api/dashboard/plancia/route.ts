@@ -16,6 +16,9 @@ export const dynamic = 'force-dynamic'
 //   «Partite oggi» e «di cui SDA 188» non possono mai dire due cose diverse.
 // - «Da chiudere» sono solo quelle di OGGI ancora senza distinta, con le stesse regole: daMettereInDistinta di
 //   /api/dashboard conta da sempre (Ecomize LL il 24/11/2026: 6.403, quasi tutte gia' consegnate).
+// - Il confronto con lo stesso giorno della settimana scorsa si ferma alla STESSA ORA di oggi: contro il giorno intero,
+//   alle 13 del 25/11 Ecomize LL risultava −38% (153 contro 247, tutto il mercoledi' prima), alla stessa ora era −11%. L'ora e'
+//   il tempo passato dalla mezzanotte di Roma, cosi' anche il giorno del cambio d'ora resta confrontabile.
 // - Il grafico delle settimane conta SPEDIZIONI (create e consegnate), non soldi. Il venduto settimana per settimana
 //   per chi vende all'ingrosso esce falso: acquisto e vendita cadono in settimane diverse (MULTIEXPRESS, settimana del
 //   26/10/2026: +5.670 € sulle spedizioni, −16.486 € di correzione ingrosso), e un master leggerebbe una perdita che
@@ -86,16 +89,20 @@ export async function GET() {
       }))
 
       const meseDal = oggi.slice(0, 8) + '01'
+      const giornoScorso = giorniFaRoma(7)
+      const adesso = Date.now()
+      const finoAScorso = new Date(new Date(inizioGiornoRomaISO(giornoScorso)).getTime() + (adesso - new Date(inizioGiornoRomaISO(oggi)).getTime())).toISOString()
+      const finoAlle = new Date(adesso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' })
       const [corrOggi, corrSettimana, corrMese, nDaChiudere, sett] = await Promise.all([
         corrieri(inizioGiornoRomaISO(oggi), fineGiornoRomaISO(oggi)),
-        corrieri(inizioGiornoRomaISO(giorniFaRoma(7)), fineGiornoRomaISO(giorniFaRoma(7))),
+        corrieri(inizioGiornoRomaISO(giornoScorso), finoAScorso),
         corrieri(inizioGiornoRomaISO(meseDal), fineGiornoRomaISO(oggi)),
         daChiudere(), settimane(),
       ])
       return {
         giorno: oggi, lunedi,
         oggi: { totale: somma(corrOggi), perCorriere: corrOggi },
-        stessoGiornoSettimanaScorsa: { giorno: giorniFaRoma(7), totale: somma(corrSettimana) },
+        stessoGiornoSettimanaScorsa: { giorno: giornoScorso, totale: somma(corrSettimana), finoAlle },
         mese: { dal: meseDal, totale: somma(corrMese), perCorriere: corrMese },
         daChiudereOggi: nDaChiudere,
         settimane: sett,
