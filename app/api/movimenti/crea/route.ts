@@ -3,7 +3,8 @@ import { createServerSupabase } from '@/lib/supabase'
 import { gestisceLaRete } from '@/lib/ruoli'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { contabilitaAttiva, metodoValido, pulisciNome, ricordaPagatore, type MetodoPagamento } from '@/lib/contabilita-banca'
-import { chiedeBonifico, descrizioneMovimento, erroreVoce, metodoNelCheck, numeroSpedizionePulito, pulisciTesto, tipoDiVoce, voceManuale, type VoceManuale } from '@/lib/movimento-manuale'
+import { NON_E_UNA_RICARICA, chiedeBonifico, chiedeCosto, chiedeRicaricaDaStornare, costoLetto, descrizioneMovimento, erroreVoce, euro, metodoNelCheck, numeroFatturaDaConfermare, numeroSpedizionePulito, pulisciTesto, testoDelloStorno, tipoDiVoce, voceManuale, type RicaricaDaStornare, type VoceManuale } from '@/lib/movimento-manuale'
+import { chiudiRigaDellaRicarica } from '@/lib/ricarica-stornata'
 import { sottoAlberoMasterIds } from '@/lib/rete-masters'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -100,6 +101,63 @@ async function spedizioneDellaVoce(admin: SupabaseClient, voce: VoceManuale, num
   return { spedizione: null, errore: null }
 }
 
+// A chi va il movimento: un cliente di questo master o un sotto-master della sua rete.
+type Bersaglio = { clienteId: string } | { sottoMasterId: string }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// STORNO DI UNA RICARICA: quella scelta deve essere un accredito a mano senza pacco scritto da questo master a
+// questo stesso destinatario, e lo storno non puo' togliere piu' di quanto era stato caricato.
+async function ricaricaScelta(admin: SupabaseClient, storna: unknown, masterId: string, b: Bersaglio, importo: number): Promise<{ ricarica: RicaricaDaStornare | null, errore: string | null }> {
+  const s = String(storna ?? '').trim()
+  if (!s || s === NON_E_UNA_RICARICA) return { ricarica: null, errore: null }
+  if (!UUID.test(s)) return { ricarica: null, errore: 'La ricarica scelta non è valida: ricarica la pagina e sceglila di nuovo.' }
+  const { data: m, error } = await admin.from('movimenti')
+    .select('id,master_id,cliente_id,master_target_id,tipo,importo,spedizione_id,voce,descrizione,created_at').eq('id', s).maybeSingle()
+  if (error) throw new Error(error.message)
+  const delDestinatario = !!m && ('clienteId' in b ? m.cliente_id === b.clienteId : (m.master_target_id === b.sottoMasterId && !m.cliente_id))
+  if (!m || !delDestinatario || m.master_id !== masterId || m.tipo !== 'ricarica' || !(Number(m.importo) > 0) || m.spedizione_id) {
+    return { ricarica: null, errore: 'La ricarica scelta non è fra le sue: ricarica la pagina e sceglila di nuovo.' }
+  }
+  if (Math.abs(importo) > Number(m.importo) + 0.005) {
+    return { ricarica: null, errore: `Lo storno (${euro(Math.abs(importo))} €) è più grande della ricarica scelta (${euro(Number(m.importo))} €).` }
+  }
+  return { ricarica: { id: m.id, quando: m.created_at, importo: Number(m.importo), voce: m.voce, descrizione: m.descrizione }, errore: null }
+}
+
+// SPEDIZIONE FUORI DAL PORTALE: il costo pagato dal master sta in costi_fuori_portale (solo il server la legge: i
+// clienti non vedono quanto ha speso il loro master). Si controlla che la tabella risponda PRIMA di scrivere il
+// movimento: senza costo l'addebito entrerebbe nel guadagno per intero.
+async function costiPronti(admin: SupabaseClient): Promise<boolean> {
+  const { error } = await admin.from('costi_fuori_portale').select('movimento_id', { head: true, count: 'exact' }).limit(1)
+  return !error
+}
+// La funzione del database restituisce solo il saldo: il movimento appena scritto si ritrova fra gli ultimi di chi
+// l'ha scritto, con la stessa voce, lo stesso importo e lo stesso destinatario (il primo senza costo).
+async function salvaCosto(admin: SupabaseClient, d: { masterId: string, b: Bersaglio, importo: number, costo: number, userId: string }): Promise<boolean> {
+  let q = admin.from('movimenti').select('id').eq('master_id', d.masterId).eq('created_by', d.userId)
+    .eq('voce', 'fuori_portale').eq('importo', d.importo).gte('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString())
+  q = 'clienteId' in d.b ? q.eq('cliente_id', d.b.clienteId) : q.eq('master_target_id', d.b.sottoMasterId).is('cliente_id', null)
+  const { data, error } = await q.order('created_at', { ascending: false }).limit(5)
+  if (error) throw new Error(error.message)
+  for (const m of (data || []) as { id: string }[]) {
+    const { error: e } = await admin.from('costi_fuori_portale').insert({ movimento_id: m.id, master_id: d.masterId, costo: d.costo, created_by: d.userId })
+    if (!e) return true
+    if (e.code !== '23505') throw new Error(e.message)   // 23505: quel movimento ha gia' il suo costo, si prova il precedente
+  }
+  return false
+}
+
+// Cosa dire dopo, oltre alla riga registrata.
+function avvisoDopo(esitoCheck: string | null, costoSalvato: boolean | null): string | null {
+  const parti: string[] = []
+  if (esitoCheck === 'tolta') parti.push('La ricarica corretta è uscita dal Check Ricariche.')
+  if (esitoCheck === 'ridotta') parti.push('Nel Check Ricariche la ricarica corretta è stata ridotta.')
+  if (esitoCheck === 'nota') parti.push('Il bonifico della ricarica corretta risultava già arrivato: nel Check Ricariche c\'è la nota.')
+  if (esitoCheck === 'errore') parti.push('Il Check Ricariche non si è aggiornato: togli a mano la riga della ricarica corretta.')
+  if (costoSalvato === false) parti.push('ATTENZIONE: il costo che hai pagato non è stato salvato, quindi il guadagno conta l\'addebito per intero. Avvisa l\'assistenza.')
+  return parti.length ? parti.join(' ') : null
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -124,21 +182,48 @@ export async function POST(req: NextRequest) {
   }
   const testo = pulisciTesto(body.testo)
   const numeroScritto = String(body.numero ?? '').trim()
-  const errVoce = erroreVoce(voce, importo, numeroScritto, testo)
-  if (errVoce) return NextResponse.json({ error: errVoce }, { status: 400 })
+  const extra = { storna: body.storna, costo: body.costo, numeroConfermato: body.numeroConfermato === true }
+  const errVoce = erroreVoce(voce, importo, numeroScritto, testo, extra)
+  if (errVoce) {
+    // Una pagina aperta da prima di questo rilascio non ha i campi nuovi: si dice di ricaricarla.
+    const vecchia = (chiedeRicaricaDaStornare(voce, importo) && body.storna === undefined) || (chiedeCosto(voce, importo) && body.costo === undefined)
+      || (numeroFatturaDaConfermare(voce, numeroScritto) && body.numeroConfermato === undefined)
+    return NextResponse.json({ error: vecchia ? `${errVoce} Se non vedi il campo, ricarica la pagina.` : errVoce }, { status: 400 })
+  }
   const numero = voce.campo?.chiave === 'spedizione' ? numeroSpedizionePulito(numeroScritto)! : numeroScritto
   const tipo = tipoDiVoce(voce, importo)
+  const costo = chiedeCosto(voce, importo) ? costoLetto(body.costo) : null
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
+  if (costo !== null && !(await costiPronti(admin))) {
+    return NextResponse.json({ error: 'Il costo delle spedizioni fuori dal portale non si può ancora salvare: il movimento non è stato registrato. Riprova tra poco.' }, { status: 503 })
+  }
+
+  // Lo storno e il costo, dopo che il movimento e' scritto: tutti e due best-effort, il movimento resta.
+  const dopo = async (b: Bersaglio, ricarica: RicaricaDaStornare | null, descrizione: string) => {
+    const esitoCheck = ricarica
+      ? await chiudiRigaDellaRicarica(admin, { masterId: utente.master_id, targetId: 'clienteId' in b ? b.clienteId : b.sottoMasterId, ricarica, storno: importo, descrizione, userId: user.id })
+      : null
+    let costoSalvato: boolean | null = null
+    if (costo !== null) {
+      try { costoSalvato = await salvaCosto(admin, { masterId: utente.master_id, b, importo, costo, userId: user.id }) }
+      catch (e) { console.error('[fuori-portale] costo non salvato', e); costoSalvato = false }
+      if (!costoSalvato) console.error('[fuori-portale] costo non salvato: movimento non ritrovato', { master: utente.master_id, importo })
+    }
+    return avvisoDopo(esitoCheck, costoSalvato)
+  }
 
   // Stessa scrittura per il sotto-master, che arrivi col prefisso m: o senza (vedi sotto).
   const alSottoMaster = async (targetMasterId: string, nome: string | null) => {
     try {
+      const b: Bersaglio = { sottoMasterId: targetMasterId }
       const rete = await sottoAlberoMasterIds(admin, targetMasterId)
       const { spedizione, errore } = await spedizioneDellaVoce(admin, voce, numero, (x) => !!x.master_id && rete.includes(x.master_id), (x) => x.master_id === targetMasterId)
       if (errore) return NextResponse.json({ error: errore.replace('fra le sue', `nella rete di ${nome || 'questo master'}`) }, { status: 400 })
+      const { ricarica, errore: errStorno } = chiedeRicaricaDaStornare(voce, importo) ? await ricaricaScelta(admin, body.storna, utente.master_id, b, importo) : { ricarica: null, errore: null }
+      if (errStorno) return NextResponse.json({ error: errStorno }, { status: 400 })
       const numeroVisto = spedizione ? (spedizione.tracking_number || spedizione.numero || numero) : numero
-      const descrizione = descrizioneMovimento(voce, numeroVisto, testo)
+      const descrizione = descrizioneMovimento(voce, numeroVisto, ricarica ? testoDelloStorno(ricarica, testo) : testo)
       const { saldo } = await registraMovimentoMaster(admin, {
         masterOwnerId: utente.master_id, masterTargetId: targetMasterId,
         tipo, descrizione, riferimento: spedizione?.numero || null,
@@ -147,7 +232,7 @@ export async function POST(req: NextRequest) {
       if (importo > 0 && voce.famiglia !== 'pacco') {
         await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'master', targetId: targetMasterId, targetNome: nome, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true, bonificoArrivato: body.bonificoArrivato === true, ...perIlCheck(voce, importo, body, utente.master_id, descrizione) })
       }
-      return NextResponse.json({ ok: true, saldo, descrizione })
+      return NextResponse.json({ ok: true, saldo, descrizione, avviso: await dopo(b, ricarica, descrizione) })
     } catch (e) {
       return NextResponse.json({ error: messaggioErrore(e, 'Errore movimento sotto-master') }, { status: 500 })
     }
@@ -185,10 +270,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const b: Bersaglio = { clienteId }
     const { spedizione, errore } = await spedizioneDellaVoce(admin, voce, numero, (x) => x.cliente_id === clienteId)
     if (errore) return NextResponse.json({ error: errore.replace('fra le sue', `fra le spedizioni di ${cli.ragione_sociale || 'questo cliente'}`) }, { status: 400 })
+    const { ricarica, errore: errStorno } = chiedeRicaricaDaStornare(voce, importo) ? await ricaricaScelta(admin, body.storna, utente.master_id, b, importo) : { ricarica: null, errore: null }
+    if (errStorno) return NextResponse.json({ error: errStorno }, { status: 400 })
     const numeroVisto = spedizione ? (spedizione.tracking_number || spedizione.numero || numero) : numero
-    const descrizione = descrizioneMovimento(voce, numeroVisto, testo)
+    const descrizione = descrizioneMovimento(voce, numeroVisto, ricarica ? testoDelloStorno(ricarica, testo) : testo)
     const { saldo } = await registraMovimento(supabase, {
       masterId: utente.master_id,
       clienteId,
@@ -203,7 +291,7 @@ export async function POST(req: NextRequest) {
     if (importo > 0 && voce.famiglia !== 'pacco') {
       await tracciaRicarica(admin, { masterId: utente.master_id, targetTipo: 'cliente', targetId: clienteId, targetNome: cli.ragione_sociale || null, importo, createdBy: user.id, bonificoEffettuato: body.bonificoEffettuato === true, bonificoArrivato: body.bonificoArrivato === true, ...perIlCheck(voce, importo, body, utente.master_id, descrizione) })
     }
-    return NextResponse.json({ ok: true, saldo, descrizione })
+    return NextResponse.json({ ok: true, saldo, descrizione, avviso: await dopo(b, ricarica, descrizione) })
   } catch (e) {
     return NextResponse.json({ error: messaggioErrore(e, 'Errore registrazione movimento') }, { status: 500 })
   }

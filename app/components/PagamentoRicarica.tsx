@@ -11,10 +11,15 @@ import { METODI_PAGAMENTO, type MetodoPagamento } from '@/lib/contabilita-banca'
 // compensazione o dei contanti non aspettano niente in banca.
 // "Gia' arrivato" (Lorenzo, 10/11): con il bonifico istantaneo i soldi sono sul conto mentre si ricarica, e
 // prima bisognava aprire il Check Ricariche solo per segnarlo arrivato.
+// NESSUNA SCELTA DI PARTENZA (Lorenzo, 25/11): il primo giorno 113 ricariche su 113 sono state registrate come
+// «bonifico», che era gia' scelto all'apertura, e nessuna in contanti. Come il vecchio «Accredito credito a scalare»
+// precompilato, una scelta gia' fatta non dice se qualcuno l'ha guardata: ora si sceglie.
 
 export type StatoBonifico = 'attesa' | 'effettuato' | 'arrivato'
-export type ValorePagamento = { metodo: MetodoPagamento, mittente: string, stato: StatoBonifico }
-export const PAGAMENTO_INIZIALE: ValorePagamento = { metodo: 'bonifico', mittente: '', stato: 'attesa' }
+export type ValorePagamento = { metodo: MetodoPagamento | '', mittente: string, stato: StatoBonifico }
+export const PAGAMENTO_INIZIALE: ValorePagamento = { metodo: '', mittente: '', stato: 'attesa' }
+// L'errore da mostrare se manca la scelta (la pagina lo controlla prima di registrare).
+export const erroreMetodo = (v: ValorePagamento) => v.metodo ? null : 'Scegli come ha pagato: bonifico, contrassegni compensati, contanti o altro.'
 const ALTRO = '__altro__'
 
 const STATI: { valore: StatoBonifico, etichetta: string, spiega: string, colore: string }[] = [
@@ -63,7 +68,8 @@ export default function PagamentoRicarica({ target, valore, onChange, onAttiva }
               <Pillola key={m.valore} acceso={valore.metodo === m.valore} onClick={() => onChange({ ...valore, metodo: m.valore })}>{m.etichetta}</Pillola>
             ))}
           </div>
-          {!bonifico && (
+          {!valore.metodo && <div style={nota}>Scegli come ha pagato: decide se il Check Ricariche aspetta un bonifico.</div>}
+          {!!valore.metodo && !bonifico && (
             <div style={nota}>Non è un bonifico: nel Check Ricariche non resta «in attesa di bonifico»{attiva ? ', non si cercherà sull\'estratto conto' : ''} e non risulterà mai «non pagata».</div>
           )}
         </div>

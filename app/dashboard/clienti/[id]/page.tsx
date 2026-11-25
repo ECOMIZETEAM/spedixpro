@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
-import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
+import PagamentoRicarica, { PAGAMENTO_INIZIALE, erroreMetodo, type ValorePagamento } from '@/app/components/PagamentoRicarica'
 import PagatoriBonifico from '@/app/components/PagatoriBonifico'
 import VoceMovimento, { VOCE_INIZIALE, type ValoreVoce } from '@/app/components/VoceMovimento'
 import { chiedeBonifico, erroreVoce, suggerimentoSegno, voceManuale } from '@/lib/movimento-manuale'
@@ -301,9 +301,11 @@ export default function ClienteProfiloPage() {
     if (!v) { setErrore('Scegli che movimento è.'); return }
     if (!isFinite(imp) || imp === 0) { setErrore('Inserisci un importo diverso da 0 (usa il − per togliere credito)'); return }
     if (imp !== conf) { setErrore('L\'importo e la conferma non coincidono'); return }
-    const errVoce = erroreVoce(v, imp, voce.numero, voce.testo)
+    const errVoce = erroreVoce(v, imp, voce.numero, voce.testo, { storna: voce.storna, costo: voce.costo, numeroConfermato: voce.numeroConfermato })
     if (errVoce) { setErrore(errVoce); return }
     const bonifico = chiedeBonifico(v, imp)
+    const errMetodo = bonifico ? erroreMetodo(pagamento) : null
+    if (errMetodo) { setErrore(errMetodo); return }
 
     setSaving(true)
     try {
@@ -315,6 +317,7 @@ export default function ClienteProfiloPage() {
           // NON quello dell'URL dove i due punti diventano %3A e romperebbero il ramo m:.
           clienteId: cliente?.id || id,
           voce: v.id, numero: voce.numero, testo: voce.testo,
+          storna: voce.storna, costo: voce.costo, numeroConfermato: voce.numeroConfermato,
           importo: imp,
           bonificoEffettuato: bonifico && pagamento.stato !== 'attesa',
           bonificoArrivato: bonifico && pagamento.stato === 'arrivato',
@@ -330,7 +333,7 @@ export default function ClienteProfiloPage() {
       caricaMovimenti()
       setVersionePagatori(v => v + 1)
       // Notifica verde in alto + scroll su per mostrarla
-      setSuccesso(`✓ Registrato: ${data.descrizione || v.nome}`)
+      setSuccesso(`✓ Registrato: ${data.descrizione || v.nome}${data.avviso ? ` — ${data.avviso}` : ''}`)
       if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
       setTimeout(() => setSuccesso(null), 5000)
     } catch {
@@ -537,7 +540,8 @@ export default function ClienteProfiloPage() {
             <div style={{padding:'20px',overflowY:'auto'}}>
               {errore && <div style={{marginBottom:'14px',padding:'10px 12px',borderRadius:'8px',background:'#fef2f2',border:'1px solid #fecaca',color:'#b91c1c',fontSize:'13px'}}>{errore}</div>}
               <div className="mx-griglia-movimento" style={{display:'grid',gridTemplateColumns:'150px 1fr',gap:'12px',alignItems:'center'}}>
-                <VoceMovimento layout="griglia" valore={voce} onChange={v=>{ if (v.voce !== voce.voce) setErrore(null); setVoce(v) }} dopoVoce={<>
+                <VoceMovimento layout="griglia" valore={voce} onChange={v=>{ if (v.voce !== voce.voce) setErrore(null); setVoce(v) }}
+                  importo={parseFloat((importo||'').replace(',','.'))} bersaglio={cliente?.id || String(id)} dopoVoce={<>
                   <label style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a',textAlign:'right'}}>Importo</label>
                   <div style={{position:'relative'}}>
                     <input value={importo} onChange={e=>setImporto(e.target.value)} placeholder="0.00" inputMode="decimal"

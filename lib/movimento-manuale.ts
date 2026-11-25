@@ -75,8 +75,12 @@ export const VOCI_MANUALI: VoceManuale[] = [
   { id: 'trasferimento', nome: 'Credito trasferito', famiglia: 'soldi', segno: 'entrambi', campo: null, testoObbligatorio: false,
     spiega: 'Credito spostato da o verso un altro profilo o un\'altra piattaforma.',
     esempioTesto: 'es. dalla vecchia piattaforma' },
+  // «Usa la voce del pacco» (Lorenzo, 25/11): il 25/11 Ecomize Solution ha restituito come storno due giacenze
+  // (C&D EXPRESS +20,40 «riconsegna da non pagare», PANDORA +6 «giacenza e riconsegna da non pagare»): il report
+  // Giacenze mostrava ancora l'addebito e il guadagno contava l'addebito senza la restituzione. Il reso invece si
+  // addebita una volta sola per pacco (uniq_mov_reso_*): per restituirlo si usa «Rimborso».
   { id: 'storno', nome: 'Storno o correzione', famiglia: 'soldi', segno: 'entrambi', campo: null, testoObbligatorio: true,
-    spiega: 'Annulla un movimento sbagliato, per esempio una ricarica doppia o un importo errato. Scrivi quale correggi.',
+    spiega: 'Annulla un movimento sbagliato, per esempio una ricarica doppia o un importo errato. Scrivi quale correggi. Per restituire una giacenza o una rettifica su un pacco usa la sua voce col più; per un reso usa «Rimborso» sulla stessa spedizione.',
     esempioTesto: 'es. ricarica del 12/11 registrata due volte' },
   { id: 'altro', nome: 'Altro', famiglia: 'soldi', segno: 'entrambi', campo: null, testoObbligatorio: true,
     spiega: 'Quello che non sta in nessuna voce. Scrivi di cosa si tratta.',
@@ -172,8 +176,66 @@ export function suggerimentoSegno(v: VoceManuale | null): string {
   return 'Scrivi 200 per accreditare, -200 per togliere credito.'
 }
 
+// STORNO DI UNA RICARICA (Lorenzo, 25/11). Il 25/11 QUICK ha ricaricato 500 € ad APRO SRL per sbaglio e un minuto
+// dopo li ha tolti con «Storno · ERRATA RICARICA»: il credito tornava, ma nel Check Ricariche la riga di APRO restava
+// «bonifico fatto», e dopo 4 giorni avrebbe chiesto di verificare un incasso che non esiste. Chi toglie credito con uno
+// storno ora dice quale ricarica corregge (o che non e' una ricarica), e la riga di quella ricarica si chiude.
+export const NON_E_UNA_RICARICA = 'nessuna'
+export function chiedeRicaricaDaStornare(v: VoceManuale | null, importo: number): boolean {
+  return !!v && v.id === 'storno' && importo < 0
+}
+// Le ricariche che si possono stornare: gli accrediti a mano senza pacco degli ultimi giorni, con la voce dei soldi
+// che arrivano (o senza voce, quelli di prima del 24/11/2026).
+export const GIORNI_RICARICHE_DA_STORNARE = 60
+export type RicaricaDaStornare = { id: string, quando: string, importo: number, voce: string | null, descrizione: string | null }
+// Con l'ora: MULTIEXPRESS il 25/11 ha caricato a Velox due volte 5.000 € nello stesso giorno.
+const dataBreve = (iso: string) => {
+  const d = new Date(iso)
+  const giorno = d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Rome' })
+  const ora = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' })
+  return `${giorno} alle ${ora}`
+}
+export const euro = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: true } as Intl.NumberFormatOptions)
+export function nomeRicarica(r: RicaricaDaStornare): string {
+  return `${r.voce === 'fattura' ? 'pagamento fattura' : 'ricarica'} del ${dataBreve(r.quando)} di ${euro(r.importo)} €`
+}
+// Il testo dello storno nomina la ricarica che corregge: si legge nella Lista Movimenti, da tutte e due le parti.
+export function testoDelloStorno(r: RicaricaDaStornare | null, testo: string): string {
+  const t = pulisciTesto(testo)
+  return r ? pulisciTesto(`${nomeRicarica(r)}${t ? ` · ${t}` : ''}`) : t
+}
+// Un testo che parla di un pacco su una voce dei soldi: lo si fa notare, senza bloccare (i due storni del 25/11
+// dicevano «riconsegna» e «giacenza»).
+export function sembraUnPacco(v: VoceManuale | null, testo: string): boolean {
+  return !!v && v.famiglia === 'soldi' && /giacenz|riconsegn|svincol|rettific|ripes|\breso\b|\bpod\b|\bldv\b/i.test(testo)
+}
+
+// FATTURA N° 1 (Lorenzo, 25/11): il primo giorno due pagamenti di fattura su tre portavano il numero «1» (Wave
+// 3.106,60 €, Ecomize Solution 63.333,69 €), che non permette di ritrovare la fattura. Un numero di una cifra si
+// registra solo dopo una conferma esplicita.
+export function numeroFatturaDaConfermare(v: VoceManuale | null, numero: string): boolean {
+  return !!v && v.id === 'fattura' && /^\d$/.test(String(numero || '').trim())
+}
+
+// SPEDIZIONE FUORI DAL PORTALE (Lorenzo, 25/11): addebitata al cliente entrava nel guadagno per intero, perche' il
+// costo pagato al corriere sul portale non c'e' (Ecomize Solution → PANDORA, −540 €: +540 € di guadagno). Chi la
+// addebita dice quanto l'ha pagata: il costo resta in costi_fuori_portale, che vede solo il server, e il guadagno
+// conta la differenza.
+export function chiedeCosto(v: VoceManuale | null, importo: number): boolean {
+  return !!v && v.id === 'fuori_portale' && importo < 0
+}
+export function costoLetto(x: unknown): number | null {
+  const s = String(x ?? '').trim().replace(/\s|€/g, '').replace(',', '.')
+  if (!s) return null
+  const n = Number(s)
+  return isFinite(n) && n >= 0 && n < 1_000_000 ? Math.round(n * 100) / 100 : null
+}
+
+// Quello che la voce chiede oltre a importo, numero e testo. Sul server arriva dal corpo della richiesta.
+export type ExtraVoce = { storna?: unknown, costo?: unknown, numeroConfermato?: unknown }
+
 // L'errore da mostrare, o null se il movimento si puo' registrare.
-export function erroreVoce(v: VoceManuale | null, importo: number, numero: string, testo: string): string | null {
+export function erroreVoce(v: VoceManuale | null, importo: number, numero: string, testo: string, extra: ExtraVoce = {}): string | null {
   if (!v) return 'Scegli che movimento è.'
   if (!isFinite(importo) || importo === 0) return 'Inserisci un importo diverso da 0.'
   if (v.segno === 'piu' && importo < 0) {
@@ -187,5 +249,15 @@ export function erroreVoce(v: VoceManuale | null, importo: number, numero: strin
   }
   if (n.length > 60) return `Il ${v.campo?.etichetta.toLowerCase() || 'numero'} è troppo lungo.`
   if (v.testoObbligatorio && !pulisciTesto(testo)) return `Per «${v.nome}» scrivi nel testo di cosa si tratta.`
+  if (numeroFatturaDaConfermare(v, n) && extra.numeroConfermato !== true) {
+    return `Conferma il numero della fattura: è davvero la n° ${n}?`
+  }
+  if (chiedeRicaricaDaStornare(v, importo) && !String(extra.storna ?? '').trim()) {
+    return 'Scegli quale ricarica correggi, oppure «Non è una ricarica».'
+  }
+  if (chiedeCosto(v, importo)) {
+    if (!String(extra.costo ?? '').trim()) return 'Scrivi quanto hai pagato tu questa spedizione (anche 0).'
+    if (costoLetto(extra.costo) === null) return 'Il costo che hai pagato non è valido: scrivi un importo, es. 450 o 12,50.'
+  }
   return null
 }

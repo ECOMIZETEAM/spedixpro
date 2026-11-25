@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
+import PagamentoRicarica, { PAGAMENTO_INIZIALE, erroreMetodo, type ValorePagamento } from '@/app/components/PagamentoRicarica'
 import PagatoriBonifico from '@/app/components/PagatoriBonifico'
 import AzzeraVerifica from '@/app/components/AzzeraVerifica'
 import VoceMovimento, { VOCE_INIZIALE, type ValoreVoce } from '@/app/components/VoceMovimento'
@@ -61,20 +61,23 @@ export default function ModificaMasterPage() {
     const imp = parseFloat(String(impCredito).replace(',','.'))
     const v = voceManuale(voce.voce)
     if (!v) { setErrCredito('Scegli che movimento è.'); return }
-    const errVoce = erroreVoce(v, imp, voce.numero, voce.testo)
+    const errVoce = erroreVoce(v, imp, voce.numero, voce.testo, { storna: voce.storna, costo: voce.costo, numeroConfermato: voce.numeroConfermato })
     if (errVoce) { setErrCredito(errVoce); return }
     const bonifico = chiedeBonifico(v, imp)
+    const errMetodo = bonifico ? erroreMetodo(pagamento) : null
+    if (errMetodo) { setErrCredito(errMetodo); return }
     setSavingCredito(true)
     try {
       const res = await fetch('/api/movimenti/crea', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ clienteId: `m:${id}`, voce: v.id, numero: voce.numero, testo: voce.testo, importo: imp,
+          storna: voce.storna, costo: voce.costo, numeroConfermato: voce.numeroConfermato,
           bonificoEffettuato: bonifico && pagamento.stato !== 'attesa', bonificoArrivato: bonifico && pagamento.stato === 'arrivato',
           ...(bonifico ? { metodo: pagamento.metodo, ...(contabilita ? { mittente: pagamento.mittente } : {}) } : {}) })
       })
       const d = await res.json(); setSavingCredito(false)
       if (d.error) { setErrCredito(d.error); return }
-      setSaldo(Number(d.saldo ?? saldo)); setImpCredito(''); setVoce(VOCE_INIZIALE); setMsgCredito(`✓ Registrato: ${d.descrizione || v.nome}`)
+      setSaldo(Number(d.saldo ?? saldo)); setImpCredito(''); setVoce(VOCE_INIZIALE); setMsgCredito(`✓ Registrato: ${d.descrizione || v.nome}${d.avviso ? ` — ${d.avviso}` : ''}`)
       setPagamento(PAGAMENTO_INIZIALE); setVersionePagatori(v => v + 1)
     } catch { setErrCredito('Errore di rete'); setSavingCredito(false) }
   }
@@ -175,7 +178,8 @@ export default function ModificaMasterPage() {
         <div style={secb}>
           {errCredito && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'8px 12px',fontSize:'12.5px',color:'#dc2626'}}>{errCredito}</div>}
           {msgCredito && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'8px 12px',fontSize:'12.5px',color:'#16a34a'}}>{msgCredito}</div>}
-          <VoceMovimento layout="colonna" stileCampo={inp} valore={voce} onChange={v=>{ if (v.voce !== voce.voce) setErrCredito(''); setVoce(v) }} dopoVoce={
+          <VoceMovimento layout="colonna" stileCampo={inp} valore={voce} onChange={v=>{ if (v.voce !== voce.voce) setErrCredito(''); setVoce(v) }}
+            importo={parseFloat(String(impCredito).replace(',','.'))} bersaglio={`m:${id}`} dopoVoce={
             <div><label style={lbl}>Importo (€)</label>
               <input style={{...inp,maxWidth:'200px'}} inputMode="decimal" value={impCredito} onChange={e=>setImpCredito(e.target.value)} placeholder="es. 200 o -50"/>
               <div style={{fontSize:'11.5px',color:'#6b7280',marginTop:'4px'}}>{suggerimentoSegno(voceManuale(voce.voce))}</div></div>

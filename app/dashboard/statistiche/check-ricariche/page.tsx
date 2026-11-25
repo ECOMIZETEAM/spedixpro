@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
 import SelectCercabile from '@/app/components/SelectCercabile'
-import PagamentoRicarica, { PAGAMENTO_INIZIALE, type ValorePagamento } from '@/app/components/PagamentoRicarica'
+import PagamentoRicarica, { PAGAMENTO_INIZIALE, erroreMetodo, type ValorePagamento } from '@/app/components/PagamentoRicarica'
 
 // CHECK RICARICHE — monitoraggio bonifici delle ricariche manuali (contabilita' + anti-truffa).
 // Ogni ricarica manuale a un cliente/sotto-master compare qui: si segna "bonifico effettuato" e poi
@@ -116,6 +116,8 @@ export default function CheckRicariche() {
     const importo = Number(modulo.importo.replace(',', '.'))
     if (!(importo > 0)) { setErrModulo('Scrivi l\'importo della ricarica'); return }
     if (!modulo.giorno) { setErrModulo('Scegli la data della ricarica'); return }
+    const errMetodo = erroreMetodo(modulo.pagamento)
+    if (errMetodo) { setErrModulo(errMetodo); return }
     const invia = async (conferma: boolean) => {
       const res = await fetch('/api/statistiche/check-ricariche', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
