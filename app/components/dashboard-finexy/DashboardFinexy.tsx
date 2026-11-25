@@ -11,15 +11,16 @@ import { Barra3D, DefsBarre, profondita } from './Barre3D'
 import Conta from './Conta'
 import './dashboard-finexy.css'
 
-// LA DASHBOARD DEL MASTER nella composizione «Finexy» (Lorenzo 24/11/2026: «molto bene»), dentro il portale di oggi:
-// il menu a sinistra non cambia. Il 25/11 Lorenzo: «non interessa che sia 1:1 dello screen, deve essere funzionale...
-// nella vecchia versione ci stavano tanti blocchi, ora non se li ritrovano piu'». Quindi il disegno e' quello del
-// riferimento, ma dentro ci sono TUTTI i riquadri della dashboard di oggi, sistemati per uso:
-//   le spedizioni del mese, in cima a tutto (Lorenzo 25/11: «il totale delle spedizioni fatte questo mese deve stare
-//   sopra a tutto»), col piano e il ritmo
-//   i tuoi conti (tutti) | i quattro numeri di oggi | spedizioni per settimana
+// LA DASHBOARD DEL MASTER nella grafica nuova. Il 25/11 Lorenzo: «non interessa che sia 1:1 dello screen, deve essere
+// funzionale... nella vecchia versione ci stavano tanti blocchi, ora non se li ritrovano piu'»; poi, sulla fascia nera
+// del mese: «mi piace questo... rifacciamo sta dashboard in modo figo come questo». Quindi: TUTTI i riquadri della
+// dashboard di oggi, nella lingua della fascia: lastre scure, numeri grandi e chiari con l'etichetta sopra e la nota
+// sotto, divisori sottili invece delle caselle dentro le caselle, una luce arancio sola per volta.
+//   le spedizioni del mese, in cima a tutto, col piano e il ritmo (fascia)
+//   oggi: create, partite, da chiudere, in giacenza (fascia)
+//   i tuoi conti (tutti) | spedizioni per settimana (larga)
 //   il lavoro in corso (le altre caselle di oggi, ognuna col suo periodo)
-//   corrieri | destinazioni (larga: Italia, Europa, Mondo)
+//   corrieri del mese (tutti, con la quota) | destinazioni (larga: Italia, Europa, Mondo)
 //   la tua rete | gli stati degli ultimi 30 giorni | resi della rete
 //   mese per mese
 //   (gli SMS stanno in piccolo accanto al saluto)
@@ -28,9 +29,7 @@ import './dashboard-finexy.css'
 // Fuori resta solo la tabella «Statistiche spese spedizioni extra», che non ha mai mostrato dati (diceva sempre
 // «Nessun dato disponibile»): rettifiche, resi e giacenze hanno le loro schede nel guadagno.
 // I numeri vengono da /api/dashboard (passati dalla pagina), da /api/dashboard/plancia (oggi sul giorno di Roma,
-// corrieri, settimane) e dalla lista dell'Elenco (le ultime cinque, coi prezzi che l'Elenco mostra).
-// Niente controlli finti: nel riferimento la tabella ha caselle e «···» che qui non farebbero niente, quindi la
-// riga intera apre la spedizione.
+// corrieri, settimane) e da /api/master/credito?dettaglio=1 (i conti).
 
 type Dashboard = DatiDashboard & {
   ruolo?: string
@@ -65,7 +64,6 @@ function scala(max: number) {
 }
 const breve = (v: number) => v >= 1000 ? `${(v / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })}k` : String(v)
 
-const Icona = ({ d }: { d: string }) => <svg viewBox="0 0 24 24" aria-hidden="true"><path d={d} /></svg>
 
 export default function DashboardFinexy({ data }: { data: Dashboard }) {
   const [plancia, setPlancia] = useState<Plancia | null>(null)
@@ -153,44 +151,43 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
         </div>
       </section>
 
+      {/* OGGI: i quattro numeri della giornata, nella stessa fascia del mese (Lorenzo 25/11, sulla fascia del mese: «mi
+          piace questo... rifacciamo sta dashboard in modo figo come questo»).
+          CREATE e PARTITE sono due numeri diversi: create oggi (dal giorno di Roma, col confronto) e partite oggi, cioè
+          create oggi e già uscite dalla lavorazione (spedite, in viaggio, consegnate), il numero che la dashboard di oggi
+          chiamava «Partite oggi» (dashboard_contatori_master). Il 25/11 alle 13 Ecomize LL: 154 create, 14 partite. */}
+      <section className="fx-mese fx-oggi" aria-label="Oggi">
+        <a className="fx-oggi-voce" href="/dashboard/spedizioni">
+          <span>Create oggi</span>
+          <b>{oggi == null ? '…' : <Conta n={oggi} formato={x => intero(Math.round(x))} />}</b>
+          <small title={variazione == null ? undefined : `${giornoSettimana} scorso fino alle ${plancia?.stessoGiornoSettimanaScorsa.finoAlle || 'stessa ora'}: ${intero(prima)} spedizioni`}>
+            {variazione == null ? 'dal mattino, ora di Roma'
+              : <><em className={variazione >= 0 ? 'fx-oggi-su' : 'fx-oggi-giu'}>{variazione >= 0 ? '↑' : '↓'} {Math.abs(variazione)}%</em> su {giornoSettimana} scorso alla stessa ora</>}
+          </small>
+        </a>
+        <a className="fx-oggi-voce" href="/dashboard/spedizioni" title="Create oggi e già uscite dalla lavorazione: spedite, in viaggio, consegnate">
+          <span>Partite oggi</span>
+          <b><Conta n={Number(data.spediteOggi || 0)} formato={x => intero(Math.round(x))} /></b>
+          <small>create oggi e già in viaggio</small>
+        </a>
+        <a className="fx-oggi-voce" href="/dashboard/distinte/crea">
+          <span>Da chiudere</span>
+          <b>{plancia ? <Conta n={plancia.daChiudereOggi} formato={x => intero(Math.round(x))} /> : '…'}</b>
+          <small>create oggi, senza distinta</small>
+        </a>
+        <a className="fx-oggi-voce" href="/dashboard/spedizioni?stato=in_giacenza">
+          <span>In giacenza</span>
+          <b><Conta n={Number(data.inGiacenza || 0)} formato={x => intero(Math.round(x))} /></b>
+          <small>{Number(data.inGiacenza || 0) > 0 ? <em className="fx-oggi-giu">da sbloccare</em> : 'nessuna'}</small>
+        </a>
+      </section>
+
       <div className="fx-griglia">
         {/* I CONTI: tutti, gli stessi della tendina in alto */}
         <ContiFinexy aScalare={aScalare} codDaRimettere={Number(data.codDaRimettere || 0)} />
 
-        {/* I QUATTRO NUMERI DI OGGI */}
-        <section className="fx-scheda" style={{ padding: 0 }}>
-          <div className="fx-numeri">
-            {/* CREATE e PARTITE sono due numeri diversi: create oggi (dal giorno di Roma, col confronto) e partite oggi,
-                cioe' create oggi e gia' uscite dalla lavorazione (spedite, in viaggio, consegnate), il numero che la
-                dashboard di oggi chiamava «Partite oggi» (dashboard_contatori_master). Il 25/11 alle 13 Ecomize LL: 154
-                create, 14 partite; nella prima prova le create stavano sotto il nome «Partite oggi». */}
-            <a className="fx-numero fx-numero--pieno" href="/dashboard/spedizioni">
-              <div className="fx-numero-testa">Create oggi<i><Icona d="M12 5v14M5 12h14" /></i></div>
-              <div className="fx-numero-cifra">{oggi == null ? '…' : <Conta n={oggi} formato={x => intero(Math.round(x))} />}</div>
-              <div className="fx-nota">{variazione == null ? 'dal mattino, ora di Roma'
-                : <><span className="fx-chip fx-chip--vetro">{variazione >= 0 ? '↑' : '↓'} {Math.abs(variazione)}%</span>
-                  <span title={`${giornoSettimana} scorso fino alle ${plancia?.stessoGiornoSettimanaScorsa.finoAlle || 'stessa ora'}: ${intero(prima)} spedizioni`}>su {giornoSettimana} scorso alla stessa ora</span></>}</div>
-            </a>
-            <a className="fx-numero" href="/dashboard/spedizioni" title="Create oggi e già uscite dalla lavorazione: spedite, in viaggio, consegnate">
-              <div className="fx-numero-testa">Partite oggi<i><Icona d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" /></i></div>
-              <div className="fx-numero-cifra"><Conta n={Number(data.spediteOggi || 0)} formato={x => intero(Math.round(x))} /></div>
-              <div className="fx-nota"><span className="fx-chip fx-chip--neutro">oggi</span>già in viaggio</div>
-            </a>
-            <a className="fx-numero" href="/dashboard/distinte/crea">
-              <div className="fx-numero-testa">Da chiudere<i><Icona d="M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2zM9 9h6M9 13h6" /></i></div>
-              <div className="fx-numero-cifra">{plancia ? <Conta n={plancia.daChiudereOggi} formato={x => intero(Math.round(x))} /> : '…'}</div>
-              <div className="fx-nota"><span className="fx-chip fx-chip--neutro">oggi</span>senza distinta</div>
-            </a>
-            <a className="fx-numero" href="/dashboard/spedizioni?stato=in_giacenza">
-              <div className="fx-numero-testa">In giacenza<i><Icona d="M8 5v14M16 5v14" /></i></div>
-              <div className="fx-numero-cifra"><Conta n={Number(data.inGiacenza || 0)} formato={x => intero(Math.round(x))} /></div>
-              <div className="fx-nota">{Number(data.inGiacenza || 0) > 0 ? <span className="fx-chip fx-chip--male">da sbloccare</span> : <span className="fx-chip fx-chip--bene">nessuna</span>}</div>
-            </a>
-          </div>
-        </section>
-
         {/* SPEDIZIONI PER SETTIMANA */}
-        <section className="fx-scheda fx-grafico-scheda">
+        <section className="fx-scheda fx-grafico-scheda fx-largo">
           <h2 style={{ margin: 0, fontSize: 17, fontWeight: 500, letterSpacing: -0.2 }}>Spedizioni per settimana</h2>
           <p className="fx-sotto">Consegnate e non ancora consegnate</p>
           <div className="fx-pannello">
@@ -203,7 +200,7 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
                   <DefsBarre id="fxs" />
                   {[0, 1, 2, 3, 4, 5].map(i => {
                     const v = massimo * (5 - i) / 5, yy = Y0 + i * (Y1 - Y0) / 5
-                    return <g key={i}><text className="fx-asse" x={0} y={yy + 3}>{breve(v)}</text>{i < 5 && <line x1={X0} x2={W} y1={yy} y2={yy} stroke="#E9E9E9" strokeWidth="0.6" />}</g>
+                    return <g key={i}><text className="fx-asse" x={0} y={yy + 3}>{breve(v)}</text>{i < 5 && <line x1={X0} x2={W} y1={yy} y2={yy} stroke="var(--fx-filo)" strokeWidth="0.6" />}</g>
                   })}
                   {sett.map((s, i) => {
                     const x = X0 + i * slot + (slot - larga - profondita(larga)) / 2, yc = y(s.consegnate), ya = y(s.create)
@@ -228,32 +225,24 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
         {/* IL LAVORO IN CORSO: le altre caselle della dashboard di oggi */}
         <LavoroInCorso data={data} />
 
-        <div className="fx-colonna">
-          {/* I CORRIERI DEL MESE */}
-          <section className="fx-scheda" style={{ overflow: 'hidden' }}>
-            <div className="fx-testa">
-              <h2 style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 12 }}>
-                <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7" /><circle cx="7" cy="18" r="1.6" /><circle cx="17" cy="18" r="1.6" /></svg>
-                I tuoi corrieri
-              </h2>
-              {mese.length > 2 && <a className="fx-altri" href="/dashboard/statistiche/corrieri">+ altri {mese.length - 2}</a>}
+        {/* I CORRIERI DEL MESE: la classifica, ognuno con la sua quota del mese (la barra) e quante oggi. Prima erano due
+            carte coi primi due e «+ altri N»: Wave ne ha 7, QUICK 28, e gli altri non si vedevano */}
+        <section className="fx-scheda fx-corrieri">
+          <div className="fx-testa">
+            <h2>I tuoi corrieri a {meseNome}</h2>
+            {mese.length > 7 && <a className="fx-altri" href="/dashboard/statistiche/corrieri">tutti i {intero(mese.length)}</a>}
+          </div>
+          {!plancia ? <div className="fx-vuoto">{erroreP || 'Carico i corrieri…'}</div> : !mese.length ? <div className="fx-vuoto">Nessuna spedizione a {meseNome}</div> : (
+            <div className="fx-corrieri-righe">
+              {mese.slice(0, 7).map((c, i) => (
+                <div key={c.corriere} className="fx-corriere-riga" title={`${c.corriere}: ${intero(c.n)} a ${meseNome}, ${intero(oggiDi(c.corriere))} oggi`}>
+                  <div className="fx-corriere-testa"><b>{c.corriere}<small> · oggi {intero(oggiDi(c.corriere))}</small></b><span>{intero(c.n)}<small> · {quota(c.n)}%</small></span></div>
+                  <div className="fx-corriere-barra"><i style={{ width: `${Math.max(quota(c.n), 1)}%`, animationDelay: `${300 + i * 80}ms` }} /></div>
+                </div>
+              ))}
             </div>
-            {!plancia ? <div className="fx-vuoto">{erroreP || 'Carico i corrieri…'}</div> : !mese.length ? <div className="fx-vuoto">Nessuna spedizione a {meseNome}</div> : (
-              <div className="fx-carte">
-                {mese.slice(0, 2).map((c, i) => (
-                  <div key={c.corriere} className={`fx-carta ${i === 0 ? 'fx-carta--nera' : 'fx-carta--arancio'}`}>
-                    <div className="fx-carta-testa"><b>{quota(c.n)}%</b>{i === 0 ? 'delle spedizioni del mese' : ''}</div>
-                    <div className="fx-carta-nome" title={c.corriere}>{c.corriere}</div>
-                    <div className="fx-carta-cifre">
-                      <div>{meseNome.charAt(0).toUpperCase() + meseNome.slice(1)}<b>{intero(c.n)}</b></div>
-                      <div>Oggi<b>{intero(oggiDi(c.corriere))}</b></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+          )}
+        </section>
 
         {/* DESTINAZIONI, larga: al posto delle ultime spedizioni (Lorenzo 25/11: «non serve a un cazzo», c'e' l'Elenco) */}
         <DestinazioniWidget fx />

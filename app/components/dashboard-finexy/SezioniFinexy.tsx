@@ -23,7 +23,8 @@ export type DatiDashboard = {
 
 const mesePerNome = () => new Intl.DateTimeFormat('it-IT', { month: 'long', timeZone: 'Europe/Rome' }).format(new Date())
 
-// IL LAVORO IN CORSO: i contatori della dashboard di oggi che non stanno nei quattro numeri in alto.
+// IL LAVORO IN CORSO: i contatori della dashboard di oggi che non stanno nella fascia di oggi. Una striscia con i
+// divisori, come la fascia del mese: niente caselle dentro la scheda.
 export function LavoroInCorso({ data }: { data: DatiDashboard }) {
   const mese = mesePerNome()
   const senzaDistinta = Number(data.daMettereInDistinta || 0)
@@ -47,7 +48,7 @@ export function LavoroInCorso({ data }: { data: DatiDashboard }) {
           const dentro = <>
             <div className="fx-cella-nome">{c.nome}</div>
             <div className={`fx-cella-cifra${c.formato(c.n).length > 11 ? ' fx-cella-cifra--lunga' : ''}`}><Conta n={c.n} formato={c.formato} /></div>
-            <div className="fx-cella-quando"><span className="fx-chip fx-chip--neutro">{c.quando}</span></div>
+            <div className="fx-cella-quando">{c.quando}</div>
           </>
           const cls = `fx-cella${c.arancio ? ' fx-cella--arancio' : ''}`
           return c.href
