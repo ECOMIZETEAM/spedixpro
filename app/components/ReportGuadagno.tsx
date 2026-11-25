@@ -12,12 +12,25 @@ function meseCorrente(): { dal: string; al: string } {
   return { dal: str(new Date(oggi.getFullYear(), oggi.getMonth(), 1)), al: str(oggi) }
 }
 
+// I report del guadagno della dashboard: una sola lista per le schede e per le chiamate anticipate dalla pagina, cosi'
+// i due indirizzi non possono divergere (prima stava in app/dashboard/page.tsx).
+export const REPORT_TOTALE = '/api/reports/guadagno-totale'
+export const REPORT_VOCI = [
+  { titolo: 'Rettifiche', endpoint: '/api/reports/guadagno-rettifiche' },
+  { titolo: 'Resi', endpoint: '/api/reports/guadagno-resi' },
+  { titolo: 'Giacenze', endpoint: '/api/reports/guadagno-giacenze' },
+  { titolo: 'Logistica', endpoint: '/api/reports/guadagno-logistica' },
+  { titolo: 'Consumabili', endpoint: '/api/reports/guadagno-consumabili' },
+]
+
 const urlReport = (endpoint: string, dal: string, al: string) => `${endpoint}?dal=${dal}&al=${al}`
 // L'indirizzo della PRIMA richiesta (mese corrente), calcolato come la fa il riquadro: la home la
 // anticipa prima di montarlo, e la risposta si riusa solo se l'indirizzo e' identico.
 export const urlInizialeReport = (endpoint: string) => { const r = meseCorrente(); return urlReport(endpoint, r.dal, r.al) }
 
-export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api/reports/guadagno', icona = '💰' }: { titolo?: string, endpoint?: string, icona?: string }) {
+// Nella Dashboard nuova (app/components/dashboard-finexy) dello staff del master, l'unica che usa queste schede:
+// il disegno delle altre schede. 'nera' e' il Guadagno Totale, la cifra che riassume tutte le altre.
+export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api/reports/guadagno', variante }: { titolo?: string, endpoint?: string, icona?: string, variante?: 'nera' }) {
   const [range, setRange] = useState(meseCorrente)
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -31,40 +44,36 @@ export default function ReportGuadagno({ titolo = 'Spedizioni', endpoint = '/api
       .then(r => r.json()).then(x => { setD(x); setLoading(false) }).catch(() => setLoading(false))
   }, [range.dal, range.al, endpoint])
 
-  const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' } as Intl.NumberFormatOptions)
   const g = Number(d?.guadagno || 0)
-  const colore = g < 0 ? '#dc2626' : '#16a34a'
+  const nera = variante === 'nera'
 
   return (
-    <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '13px 15px' }}>
-      {/* Titolo su una riga a sé (a piena larghezza, MAI troncato) e calendario sotto: con più card
-          affiancate quelle strette accorciavano il titolo alla prima lettera — "Rettifiche" e "Resi"
-          diventavano due "R" indistinguibili. Impilando, il nome si legge sempre. */}
-      <div style={{ marginBottom: '10px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>
-          <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', flexShrink: 0 }}>{icona}</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{titolo}</span>
-        </span>
-        <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
-      </div>
+    <section className={`fx-scheda fx-report${nera ? ' fx-report--nera' : ''}`}>
+      <div className="fx-testa"><h2>{titolo === 'Guadagno Totale' ? 'Guadagno totale' : titolo}</h2></div>
+      <div className="fx-periodo"><DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} /></div>
 
-      <div style={{ fontSize: '24px', fontWeight: 800, color: colore, lineHeight: 1.05 }}>{loading ? '…' : eur(g)}</div>
+      <div className={`fx-report-cifra${!nera && !loading ? (g < 0 ? ' fx-grande--male' : ' fx-grande--bene') : ''}`}>{loading ? '…' : eur(g)}</div>
 
-      <div style={{ display: 'flex', gap: '14px', marginTop: '9px', fontSize: '11px', color: '#8a8a8a', flexWrap: 'wrap' }}>
-        <span>Incassato <b style={{ color: '#1a1a1a' }}>{loading ? '…' : eur(d?.ricavi || 0)}</b></span>
-        <span>Costo <b style={{ color: '#f97316' }}>{loading ? '…' : eur(d?.costi || 0)}</b></span>
+      <div className="fx-report-sotto">
+        <span>Incassato <b>{loading ? '…' : eur(d?.ricavi || 0)}</b></span>
+        <span>Costo <b>{loading ? '…' : eur(d?.costi || 0)}</b></span>
       </div>
 
       {/* Solo nel Guadagno Totale e solo per il titolare: la rotta manda costiGestione soltanto a lui. */}
       {!loading && d?.costiGestione !== undefined && (
-        <div style={{ display: 'flex', gap: '14px', marginTop: '10px', paddingTop: '9px', borderTop: '1px dashed #e8e8e8', fontSize: '11px', color: '#8a8a8a', flexWrap: 'wrap', alignItems: 'baseline' }}>
-          <span>Costi di gestione <b style={{ color: '#dc2626' }}>{eur(d.costiGestione)}</b></span>
-          <span>Utile netto <b style={{ fontSize: '14px', color: Number(d.utileNetto) < 0 ? '#dc2626' : '#16a34a' }}>{eur(d.utileNetto)}</b></span>
-          <a href="/dashboard/costi-gestione" style={{ marginLeft: 'auto', color: '#f97316', fontWeight: 600, textDecoration: 'none' }}>
+        <div className="fx-report-netto">
+          <span>Costi di gestione <b style={{ color: 'var(--fx-male)' }}>{eur(d.costiGestione)}</b></span>
+          <span>Utile netto <b style={{ fontSize: 14, color: Number(d.utileNetto) < 0 ? 'var(--fx-male)' : 'var(--fx-bene)' }}>{eur(d.utileNetto)}</b></span>
+          <a className="fx-link" href="/dashboard/costi-gestione" style={{ marginLeft: 'auto' }}>
             {Number(d.costiGestione) ? 'Costi di gestione →' : 'Aggiungi i costi di gestione →'}
           </a>
         </div>
       )}
-    </div>
+      {nera && (
+        <p className="fx-report-spiega">Spedizioni, rettifiche, rimborsi, resi, giacenze, commissioni, accessori, logistica e canone, senza contare
+          due volte niente e senza i soldi che passano soltanto (ricariche, contrassegni). Accanto e sotto, il dettaglio per voce.</p>
+      )}
+    </section>
   )
 }

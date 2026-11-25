@@ -4,7 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import DateRangePicker from './DateRangePicker'
 import { prendiAnticipata } from '@/lib/richieste-anticipate'
 
-const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' } as Intl.NumberFormatOptions)
 
 // default: mese corrente (dal 1° a oggi)
 function meseCorrente(): { dal: string; al: string } {
@@ -45,74 +45,59 @@ export default function GuadagnoChart() {
   const serie = (d?.serie || []).map((s: any) => ({ ...s, label: fmtGiorno(s.giorno) }))
   const coloreMargine = margine < 0 ? '#dc2626' : '#16a34a'
 
+  // Nella Dashboard nuova (app/components/dashboard-finexy), col disegno delle altre schede: verde quello che entra,
+  // rosso quello che esce, come prima.
   return (
-    <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '12px', padding: '16px 18px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 800, color: '#1a1a1a' }}>
-          <span style={{ width: '26px', height: '26px', borderRadius: '7px', background: '#dcfce7', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>💰</span>
-          Guadagno Spedizioni
-          <span style={{ fontSize: '11px', fontWeight: 500, color: '#8a8a8a' }}>· rettifiche escluse, le trovi nel riquadro Rettifiche</span>
-        </span>
+    <section className="fx-scheda fx-largo">
+      <div className="fx-testa">
+        <div><h2>Guadagno spedizioni</h2><p className="fx-sotto">Rettifiche escluse: le trovi nella loro scheda</p></div>
         <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
       </div>
 
-      {/* KPI in fila: margine grande + fatturato/costi */}
-      <div style={{ display: 'flex', gap: '22px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '12px' }}>
+      <div className="fx-guadagno-numeri">
         <div>
-          <div style={{ fontSize: '11px', color: '#8a8a8a', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Margine</div>
-          <div style={{ fontSize: '30px', fontWeight: 800, color: coloreMargine, lineHeight: 1.05 }}>{loading ? '…' : eur(margine)}</div>
+          <div className="fx-cella-nome">Margine</div>
+          <div className={`fx-report-cifra${loading ? '' : coloreMargine === '#dc2626' ? ' fx-grande--male' : ' fx-grande--bene'}`} style={{ marginTop: 6 }}>{loading ? '…' : eur(margine)}</div>
         </div>
-        <div style={{ display: 'flex', gap: '18px', paddingBottom: '5px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#8a8a8a', fontWeight: 600 }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#16a34a' }} /> Fatturato
-            </div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: '#16a34a' }}>{loading ? '…' : eur(d?.ricavi || 0)}</div>
-          </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: '#8a8a8a', fontWeight: 600 }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#dc2626' }} /> Costi
-            </div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: '#dc2626' }}>{eur(d?.costi || 0)}</div>
-          </div>
-          <div style={{ borderLeft: '1px solid #eee', paddingLeft: '18px' }}>
-            <div style={{ fontSize: '11px', color: '#8a8a8a', fontWeight: 600 }}>Media / spedizione</div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: Number(d?.mediaSped) < 0 ? '#dc2626' : '#16a34a' }}>{loading ? '…' : eur(d?.mediaSped || 0)}</div>
-            <div style={{ fontSize: '10px', color: '#999' }}>{loading ? '' : `${Number(d?.numSpedizioni || 0).toLocaleString()} sped.`}</div>
-          </div>
+        <div><div className="fx-cella-nome"><i className="fx-pallino" style={{ background: 'var(--fx-bene)' }} />Fatturato</div><b>{loading ? '…' : eur(d?.ricavi || 0)}</b></div>
+        <div><div className="fx-cella-nome"><i className="fx-pallino" style={{ background: 'var(--fx-male)' }} />Costi</div><b>{loading ? '…' : eur(d?.costi || 0)}</b></div>
+        <div>
+          <div className="fx-cella-nome">Media per spedizione</div>
+          <b style={{ color: Number(d?.mediaSped) < 0 ? 'var(--fx-male)' : undefined }}>{loading ? '…' : eur(d?.mediaSped || 0)}</b>
+          <small>{loading ? '' : `${Number(d?.numSpedizioni || 0).toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} spedizioni`}</small>
         </div>
       </div>
 
       {Array.isArray(d?.costiProvider) && d.costiProvider.length > 0 && (
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <div className="fx-guadagno-fornitori">
           {d.costiProvider.map((p: any) => (
-            <div key={p.provider} style={{ border: '1px solid #e8e8e8', borderRadius: '8px', padding: '8px 12px', background: '#fafafa', minWidth: '150px' }}>
-              <div style={{ fontSize: '11px', color: '#8a8a8a', fontWeight: 600 }}>Costo {p.provider}</div>
-              <div style={{ fontSize: '17px', fontWeight: 800, color: '#dc2626' }}>{eur(p.costo)}</div>
-              <div style={{ fontSize: '10px', color: '#999' }}>{Number(p.n || 0).toLocaleString()} sped.</div>
+            <div key={p.provider} className="fx-cella">
+              <div className="fx-cella-nome">Costo {p.provider}</div>
+              <div className="fx-cella-cifra" style={{ fontSize: 17, color: 'var(--fx-male)' }}>{eur(p.costo)}</div>
+              <div className="fx-cella-quando" style={{ fontSize: 11, color: 'var(--fx-grigio)' }}>{Number(p.n || 0).toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} spedizioni</div>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{ width: '100%', height: '230px' }}>
+      <div className="fx-pannello" style={{ height: 250 }}>
         {loading ? (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div>
+          <div className="fx-vuoto">Carico il guadagno…</div>
         ) : !serie.length ? (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '13px' }}>Nessun dato nel periodo</div>
+          <div className="fx-vuoto">Nessun dato nel periodo</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={serie} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#8a8a8a' }} tickLine={false} axisLine={{ stroke: '#e8e8e8' }} minTickGap={16} />
-              <YAxis tick={{ fontSize: 11, fill: '#8a8a8a' }} tickLine={false} axisLine={false} width={54} tickFormatter={(v: number) => '€' + v} />
-              <Tooltip formatter={(v: any, name: any) => [eur(Number(v)), name === 'ricavi' ? 'Fatturato' : name === 'costi' ? 'Costi' : 'Margine']} labelStyle={{ color: '#1a1a1a', fontWeight: 700 }} contentStyle={{ borderRadius: '8px', border: '1px solid #e8e8e8', fontSize: '12px' }} />
-              <Line type="monotone" dataKey="ricavi" name="ricavi" stroke="#16a34a" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
-              <Line type="monotone" dataKey="costi" name="costi" stroke="#dc2626" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+            <LineChart data={serie} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+              <CartesianGrid stroke="#E9E9E9" strokeWidth={0.6} vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6E6E73' }} tickLine={false} axisLine={false} minTickGap={16} />
+              <YAxis tick={{ fontSize: 10, fill: '#6E6E73' }} tickLine={false} axisLine={false} width={58} tickFormatter={(v: number) => '€ ' + Number(v).toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)} />
+              <Tooltip formatter={(v: any, name: any) => [eur(Number(v)), name === 'ricavi' ? 'Fatturato' : name === 'costi' ? 'Costi' : 'Margine']} labelStyle={{ color: '#111', fontWeight: 600 }} contentStyle={{ borderRadius: '10px', border: '1px solid #ECECEC', fontSize: '12px', boxShadow: '0 6px 22px rgba(0,0,0,.06)' }} />
+              <Line type="monotone" dataKey="ricavi" name="ricavi" stroke="#2E9B55" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              <Line type="monotone" dataKey="costi" name="costi" stroke="#D9474E" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         )}
       </div>
-    </div>
+    </section>
   )
 }

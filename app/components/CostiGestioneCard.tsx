@@ -12,7 +12,7 @@ function meseCorrente(): { dal: string; al: string } {
   return { dal: str(new Date(oggi.getFullYear(), oggi.getMonth(), 1)), al: str(oggi) }
 }
 
-const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' } as Intl.NumberFormatOptions)
 
 export default function CostiGestioneCard() {
   const [range, setRange] = useState(meseCorrente)
@@ -31,36 +31,31 @@ export default function CostiGestioneCard() {
   if (negato) return null
   const categorie: any[] = d?.perCategoria || []
 
+  // Nella Dashboard nuova (app/components/dashboard-finexy), col disegno delle altre schede del guadagno.
   return (
-    <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '10px', padding: '13px 15px' }}>
-      <div style={{ marginBottom: '10px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 700, color: '#1a1a1a', marginBottom: '8px' }}>
-          <span style={{ width: '22px', height: '22px', borderRadius: '6px', background: '#fee2e2', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', flexShrink: 0 }}>🧮</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Costi di gestione</span>
-        </span>
-        <DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} />
-      </div>
+    <section className="fx-scheda fx-report">
+      <div className="fx-testa"><h2>Costi di gestione</h2></div>
+      <div className="fx-periodo"><DateRangePicker dal={range.dal} al={range.al} onChange={(dal, al) => setRange({ dal, al })} /></div>
 
-      <div style={{ fontSize: '24px', fontWeight: 800, color: '#dc2626', lineHeight: 1.05 }}>{loading ? '…' : eur(d?.totale || 0)}</div>
+      <div className="fx-report-cifra fx-grande--male">{loading ? '…' : eur(d?.totale || 0)}</div>
 
       {!loading && (
         categorie.length ? (
-          <div style={{ marginTop: '9px', maxHeight: '170px', overflowY: 'auto' }}>
+          <div className="fx-righe" style={{ maxHeight: 170, overflowY: 'auto' }}>
             {categorie.map(c => (
-              <div key={c.categoria} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '11.5px', padding: '3px 0', borderBottom: '1px solid #f6f6f6' }}>
-                <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.categoria}</span>
-                <b style={{ color: '#1a1a1a', whiteSpace: 'nowrap' }}>{eur(c.importo)}</b>
+              <div key={c.categoria} className="fx-riga" style={{ padding: '6px 2px' }}>
+                <span>{c.categoria}</span><b>{eur(c.importo)}</b>
               </div>
             ))}
           </div>
         ) : (
-          <div style={{ marginTop: '9px', fontSize: '11px', color: '#8a8a8a' }}>Nessun costo nel periodo.</div>
+          <p className="fx-sotto" style={{ marginTop: 9 }}>Nessun costo nel periodo.</p>
         )
       )}
 
-      <a href="/dashboard/costi-gestione" style={{ display: 'inline-block', marginTop: '9px', fontSize: '11px', color: '#f97316', fontWeight: 600, textDecoration: 'none' }}>
+      <a className="fx-link" href="/dashboard/costi-gestione" style={{ display: 'inline-block', marginTop: 10 }}>
         {categorie.length ? 'Gestisci i costi →' : 'Aggiungi i costi di gestione →'}
       </a>
-    </div>
+    </section>
   )
 }

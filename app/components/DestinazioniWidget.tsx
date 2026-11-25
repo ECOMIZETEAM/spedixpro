@@ -31,7 +31,9 @@ const NUM_ALPHA2: Record<number, string> = Object.entries(PAESE_ISO_NUM).reduce(
 export const URL_DESTINAZIONI = '/api/dashboard/destinazioni'
 export const URL_MAPPA_ITALIA = '/geo/italia-province.json'
 
-export default function DestinazioniWidget() {
+// `fx`: nella Dashboard nuova del master (app/components/dashboard-finexy) cornice, titolo e tasti prendono il disegno
+// delle altre schede; mappa, globo e classifica sono gli stessi. Il cliente e l'agente la vedono com'era.
+export default function DestinazioniWidget({ fx = false }: { fx?: boolean } = {}) {
   const [dati, setDati] = useState<Dati>(null)
   const [italiaTopo, setItaliaTopo] = useState<any>(null)
   const [worldTopo, setWorldTopo] = useState<any>(null)
@@ -95,27 +97,30 @@ export default function DestinazioniWidget() {
   const totale = vista === 'italia' ? (dati?.totale || 0) : (dati?.totalePaesi || 0)
   const conteggioLabel = vista === 'italia' ? `${dati?.nProvince || 0} province` : `${(dati?.paesi || []).length} paesi`
 
-  const card: React.CSSProperties = { background: '#fff', border: '1px solid #eee', borderRadius: 14, padding: 18 }
-  const tab = (attivo: boolean): React.CSSProperties => ({ border: 'none', background: attivo ? '#EA580C' : '#f4f4f4', color: attivo ? '#fff' : '#6b7280', fontSize: 12.5, fontWeight: 700, padding: '5px 12px', borderRadius: 7, cursor: 'pointer' })
+  const card: React.CSSProperties = fx ? {} : { background: '#fff', border: '1px solid #eee', borderRadius: 14, padding: 18 }
+  const tab = (attivo: boolean): React.CSSProperties => fx
+    ? { border: 'none', background: attivo ? '#1C1C1C' : '#F2F2F2', color: attivo ? '#fff' : '#555', fontSize: 12, fontWeight: 500, padding: '6px 13px', borderRadius: 999, cursor: 'pointer' }
+    : { border: 'none', background: attivo ? '#EA580C' : '#f4f4f4', color: attivo ? '#fff' : '#6b7280', fontSize: 12.5, fontWeight: 700, padding: '5px 12px', borderRadius: 7, cursor: 'pointer' }
 
   return (
-    <div style={card}>
+    <div style={card} className={fx ? 'fx-scheda fx-tutta' : undefined}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+        {fx ? <h2 style={{ margin: 0, fontSize: 17, fontWeight: 500, letterSpacing: -0.2 }}>Destinazioni principali</h2> : (
         <div style={{ fontSize: 16, fontWeight: 800, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ color: '#EA580C' }}>📍</span> Destinazioni principali
-        </div>
+        </div>)}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ display: 'inline-flex', gap: 4 }}>
             <button onClick={() => setVista('italia')} style={tab(vista === 'italia')}>Italia</button>
             <button onClick={() => setVista('mondo')} style={tab(vista === 'mondo')}>Mondo</button>
           </span>
-          <span style={{ fontSize: 12, color: '#9a9a9a' }}>Ultimi 30 gg</span>
+          {fx ? <span className="fx-chip fx-chip--neutro">ultimi 30 giorni</span> : <span style={{ fontSize: 12, color: '#9a9a9a' }}>Ultimi 30 gg</span>}
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* MAPPA / GLOBO */}
-        <div ref={boxRef} style={{ position: 'relative', flex: '1 1 300px', minWidth: 260 }} onMouseLeave={() => { setHover(null); onUp() }}>
+        <div ref={boxRef} style={{ position: 'relative', flex: '1 1 300px', minWidth: 260, ...(fx ? { maxWidth: 440 } : {}) }} onMouseLeave={() => { setHover(null); onUp() }}>
           {vista === 'italia' ? (
             !italiaPaths ? <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#bbb', fontSize: 13 }}>{errore ? 'Mappa non disponibile' : 'Carico la mappa…'}</div>
               : <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
@@ -157,11 +162,11 @@ export default function DestinazioniWidget() {
                       <div style={{ width: `${Math.max(3, (p.n / maxClass) * 100)}%`, height: '100%', background: '#EA580C', borderRadius: 5 }} />
                     </div>
                     <div style={{ width: 44, textAlign: 'right', fontSize: 13, fontWeight: 700, color: '#1a1a1a', fontVariantNumeric: 'tabular-nums' }}>{p.n}</div>
-                    <div style={{ width: 44, textAlign: 'right', fontSize: 12, color: '#9a9a9a', fontVariantNumeric: 'tabular-nums' }}>{p.perc.toFixed(1)}%</div>
+                    <div style={{ width: 44, textAlign: 'right', fontSize: 12, color: '#9a9a9a', fontVariantNumeric: 'tabular-nums' }}>{p.perc.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</div>
                   </div>
                 ))}
                 <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 10 }}>
-                  <b style={{ color: '#1a1a1a' }}>{totale.toLocaleString('it-IT')}</b> spedizioni · {conteggioLabel}
+                  <b style={{ color: '#1a1a1a' }}>{totale.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)}</b> spedizioni · {conteggioLabel}
                 </div>
               </>}
         </div>

@@ -129,9 +129,90 @@
 .fx-piccolo { display: block; font-size: 11px; color: var(--fx-grigio); font-weight: 400; margin-top: 2px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .fx-vuoto { padding: 28px; text-align: center; color: var(--fx-grigio); font-size: 12.5px; }
 
+/* LE PARTI SOTTO (Lorenzo 25/11: «ci stavano tanti blocchi, ora non se li ritrovano piu'»): tutti i numeri della
+   dashboard di oggi, nello stesso disegno. */
+.fx-sezione { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.fx-sezione h2 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -0.3px; }
+.fx-sezione p { margin: 0; font-size: 12.5px; color: var(--fx-grigio); }
+.fx-tutta { grid-column: 1 / -1; }
+.fx-fila { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+.fx-link { font-size: 12.5px; font-weight: 500; color: var(--fx-arancio) !important; white-space: nowrap; }
+.fx-link:hover { text-decoration: underline; }
+
+/* Il lavoro in corso: una fila di caselle, ognuna dice di quando parla */
+.fx-striscia { padding: 10px; }
+.fx-striscia-righe { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 10px; }
+.fx-cella { background: var(--fx-riquadro); border-radius: 13px; padding: 13px 14px 12px; display: flex; flex-direction: column; min-width: 0; transition: filter .15s; }
+a.fx-cella:hover { filter: brightness(.985); }
+.fx-cella-nome { font-size: 12.5px; color: var(--fx-grigio); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-cella-cifra { margin-top: 12px; font-size: 22px; font-weight: 500; letter-spacing: -0.3px; line-height: 1.1; white-space: nowrap; }
+.fx-cella-quando { margin-top: 7px; }
+.fx-cella--arancio .fx-cella-cifra { color: #C25427; }
+
+/* Righe di elenco: crediti da recuperare, i primi della rete, gli stati */
+.fx-righe { margin-top: 12px; }
+.fx-riga { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 4px; border-top: 1px solid var(--fx-filo); font-size: 12.5px; }
+.fx-riga:first-child { border-top: 0; }
+.fx-riga > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; }
+.fx-riga b { font-weight: 600; white-space: nowrap; }
+a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
+.fx-riga--male b { color: var(--fx-male); }
+.fx-piu { font-size: 12px; color: var(--fx-grigio); padding: 8px 4px 0; }
+.fx-grande { margin-top: 12px; font-size: 30px; font-weight: 500; letter-spacing: -0.5px; line-height: 1.05; }
+.fx-grande--bene { color: var(--fx-bene); } .fx-grande--male { color: var(--fx-male); }
+.fx-pallino { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; flex-shrink: 0; }
+.fx-coppia { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.fx-coppia > div { background: var(--fx-riquadro); border-radius: 11px; padding: 11px 12px; min-width: 0; }
+.fx-coppia .fx-cella-nome { font-size: 11.5px; }
+.fx-coppia strong { display: block; margin-top: 6px; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-coppia small { display: block; margin-top: 3px; font-size: 11px; color: var(--fx-grigio); }
+
+/* Gli stati degli ultimi 30 giorni */
+.fx-ciambella { display: flex; gap: 18px; align-items: center; margin-top: 14px; }
+.fx-ciambella svg { width: 128px; height: 128px; flex-shrink: 0; }
+.fx-ciambella .fx-righe { flex: 1; min-width: 0; margin-top: 0; }
+.fx-ciambella .fx-riga { padding: 6px 2px; }
+
+/* Mese per mese */
+.fx-mesi { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; margin-top: 14px; align-items: stretch; }
+.fx-mesi .fx-pannello { margin-top: 0; }
+.fx-tabella--piccola td { height: 40px; }
+.fx-tabella--piccola th { padding: 10px 12px; }
+.fx-destra { text-align: right !important; }
+
+/* Il guadagno: le schede con il periodo a scelta */
+.fx-report-cifra { margin-top: 12px; font-size: 26px; font-weight: 500; letter-spacing: -0.4px; line-height: 1.05; }
+.fx-report-sotto { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 9px; font-size: 11.5px; color: var(--fx-grigio); }
+.fx-report-sotto b { color: var(--fx-testo); font-weight: 600; }
+.fx-report-netto { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--fx-filo); font-size: 11.5px; color: var(--fx-grigio); }
+.fx-periodo { margin-top: 10px; }
+
+/* Il guadagno spedizioni: i numeri in fila sopra il grafico */
+.fx-guadagno-numeri { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; margin-top: 14px; }
+.fx-guadagno-numeri b { display: block; margin-top: 6px; font-size: 15px; font-weight: 600; }
+.fx-guadagno-numeri small { display: block; margin-top: 2px; font-size: 11px; color: var(--fx-grigio); }
+.fx-guadagno-numeri .fx-cella-nome { display: flex; align-items: center; }
+.fx-guadagno-fornitori { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+.fx-report--nera { background: linear-gradient(160deg, #2A2A2A, #0E0E0E); color: #fff; }
+.fx-report--nera .fx-testa h2 { color: #fff; }
+.fx-report--nera .fx-report-cifra { font-size: 32px; }
+.fx-report--nera .fx-report-sotto, .fx-report--nera .fx-report-netto { color: rgba(255,255,255,.62); border-top-color: rgba(255,255,255,.16); }
+.fx-report--nera .fx-report-sotto b { color: #fff; }
+.fx-sms { display: flex; flex-direction: column; }
+.fx-sms .fx-tasto { align-self: flex-start; padding: 0 18px; margin-top: auto !important; }
+.fx-sms .fx-sotto { margin-bottom: 16px; }
+.fx-report--nera { display: flex; flex-direction: column; }
+.fx-report-spiega { margin: auto 0 0; padding-top: 18px; font-size: 11.5px; line-height: 1.5; color: rgba(255,255,255,.55); }
+.fx-resi { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 32px; }
+.fx-coppia a { background: var(--fx-riquadro); border-radius: 11px; padding: 11px 12px; min-width: 0; }
+.fx-coppia a:hover { filter: brightness(.985); }
+.fx-sms:hover { filter: none; }
+
 /* Telefono e schermi stretti: una colonna, i quattro numeri restano 2x2, la tabella scorre */
 @media (max-width: 1100px) {
   .fx-griglia { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .fx-mesi { grid-template-columns: minmax(0, 1fr); }
+  .fx-resi { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .fx-grafico-scheda { grid-column: span 2; }
   .fx-largo { grid-column: span 2; }
 }
@@ -141,5 +222,8 @@
   .fx-grafico-scheda, .fx-largo { grid-column: auto; }
   .fx-testa { flex-wrap: wrap; }
   .fx-cerca label { width: 100%; }
+  .fx-ciambella { flex-direction: column; align-items: stretch; }
+  .fx-ciambella svg { align-self: center; }
+  .fx-sezione h2 { font-size: 19px; }
   .fx-cerca { width: 100%; }
 }

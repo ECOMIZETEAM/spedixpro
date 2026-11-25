@@ -2,18 +2,38 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ldvProvvisoria, LDV_IN_ELABORAZIONE, numeroMostrato, nomeClientePulito } from '@/lib/numero-spedizione'
+import BannerSms from '@/app/components/BannerSms'
+import ResiReteWidget from '@/app/components/ResiReteWidget'
+import DestinazioniWidget from '@/app/components/DestinazioniWidget'
+import ReportGuadagno, { REPORT_TOTALE, REPORT_VOCI } from '@/app/components/ReportGuadagno'
+import GuadagnoChart from '@/app/components/GuadagnoChart'
+import CostiGestioneCard from '@/app/components/CostiGestioneCard'
+import { CreditiDaRecuperare, LaTuaRete, LavoroInCorso, MesePerMese, StatiTrentaGiorni, type DatiDashboard } from './SezioniFinexy'
+import { euro, intero, statoDi } from './formati'
 import './dashboard-finexy.css'
 
 // LA DASHBOARD DEL MASTER nella composizione «Finexy» (Lorenzo 24/11/2026: «molto bene»), dentro il portale di oggi:
-// il menu a sinistra non cambia. Stesse caselle del riferimento, nessuna in piu':
+// il menu a sinistra non cambia. Il 25/11 Lorenzo: «non interessa che sia 1:1 dello screen, deve essere funzionale...
+// nella vecchia versione ci stavano tanti blocchi, ora non se li ritrovano piu'». Quindi il disegno e' quello del
+// riferimento, ma dentro ci sono TUTTI i riquadri della dashboard di oggi, sistemati per uso:
 //   credito e conti | i quattro numeri di oggi | spedizioni per settimana
-//   piano + corrieri | ultime spedizioni (largo due colonne)
+//   il lavoro in corso (le altre caselle di oggi, ognuna col suo periodo)
+//   piano + corrieri | ultime spedizioni
+//   la tua rete | gli stati degli ultimi 30 giorni | SMS
+//   resi della rete
+//   mese per mese
+//   crediti da recuperare (a scalare, a fattura)
+//   destinazioni
+//   il guadagno: totale | spedizioni (grafico); le schede per voce; i costi di gestione
+// Fuori resta solo la tabella «Statistiche spese spedizioni extra», che non ha mai mostrato dati (diceva sempre
+// «Nessun dato disponibile»): rettifiche, resi e giacenze hanno le loro schede nel guadagno.
 // I numeri vengono da /api/dashboard (passati dalla pagina), da /api/dashboard/plancia (oggi sul giorno di Roma,
 // corrieri, settimane) e dalla lista dell'Elenco (le ultime cinque, coi prezzi che l'Elenco mostra).
 // Niente controlli finti: nel riferimento la tabella ha caselle e «···» che qui non farebbero niente, quindi la
 // riga intera apre la spedizione.
 
-type Dashboard = {
+type Dashboard = DatiDashboard & {
+  ruolo?: string
   masterNome?: string
   creditoMaster?: { rete?: number; proprio?: number; reteLabel?: string | null }
   codDaRimettere?: number; inTransito?: number; inGiacenza?: number
@@ -37,16 +57,6 @@ type Riga = {
   master_rete?: string | null
 }
 
-const STATI: Record<string, [string, string]> = {
-  in_lavorazione: ['In lavorazione', '#E0A100'], spedita: ['Spedita', '#0284C7'], in_transito: ['In transito', '#2563EB'],
-  in_consegna: ['In consegna', '#EA580C'], consegnata: ['Consegnata', '#2E9B55'], in_giacenza: ['In giacenza', '#D9474E'],
-  reso_mittente: ['Reso al mittente', '#374151'], non_consegnato: ['Non consegnato', '#6B7280'], annullata: ['Annullata', '#9CA3AF'],
-  in_attesa_istruzioni: ['In attesa di istruzioni', '#374151'],
-}
-
-// Intl it-IT non mette il punto sotto 10.000 («4203»): sui numeri si legge male, quindi sempre.
-const intero = (n: number) => Number(n || 0).toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)
-const euro = (n: number) => `€ ${Number(n || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' } as Intl.NumberFormatOptions)}`
 const uno = <T,>(x: T | T[] | null | undefined): T | null => (Array.isArray(x) ? x[0] : x) || null
 
 function saluto() {
@@ -117,7 +127,7 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
   const giornoSettimana = new Intl.DateTimeFormat('it-IT', { weekday: 'long', timeZone: 'Europe/Rome' }).format(new Date())
   const meseNome = new Intl.DateTimeFormat('it-IT', { month: 'long', timeZone: 'Europe/Rome' }).format(new Date())
 
-  // Partite oggi contro lo stesso giorno della settimana scorsa, fino alla stessa ora (api/dashboard/plancia)
+  // Create oggi contro lo stesso giorno della settimana scorsa, fino alla stessa ora (api/dashboard/plancia)
   const oggi = plancia?.oggi.totale ?? null
   const prima = plancia?.stessoGiornoSettimanaScorsa.totale ?? 0
   const variazione = oggi != null && prima > 0 ? Math.round((oggi - prima) / prima * 100) : null
@@ -198,22 +208,26 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
         {/* I QUATTRO NUMERI DI OGGI */}
         <section className="fx-scheda" style={{ padding: 0 }}>
           <div className="fx-numeri">
+            {/* CREATE e PARTITE sono due numeri diversi: create oggi (dal giorno di Roma, col confronto) e partite oggi,
+                cioe' create oggi e gia' uscite dalla lavorazione (spedite, in viaggio, consegnate), il numero che la
+                dashboard di oggi chiamava «Partite oggi» (dashboard_contatori_master). Il 25/11 alle 13 Ecomize LL: 154
+                create, 14 partite; nella prima prova le create stavano sotto il nome «Partite oggi». */}
             <a className="fx-numero fx-numero--pieno" href="/dashboard/spedizioni">
-              <div className="fx-numero-testa">Partite oggi<i><Icona d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" /></i></div>
+              <div className="fx-numero-testa">Create oggi<i><Icona d="M12 5v14M5 12h14" /></i></div>
               <div className="fx-numero-cifra">{oggi == null ? '…' : intero(oggi)}</div>
               <div className="fx-nota">{variazione == null ? 'dal mattino, ora di Roma'
                 : <><span className="fx-chip fx-chip--vetro">{variazione >= 0 ? '↑' : '↓'} {Math.abs(variazione)}%</span>
                   <span title={`${giornoSettimana} scorso fino alle ${plancia?.stessoGiornoSettimanaScorsa.finoAlle || 'stessa ora'}: ${intero(prima)} spedizioni`}>su {giornoSettimana} scorso alla stessa ora</span></>}</div>
             </a>
+            <a className="fx-numero" href="/dashboard/spedizioni" title="Create oggi e già uscite dalla lavorazione: spedite, in viaggio, consegnate">
+              <div className="fx-numero-testa">Partite oggi<i><Icona d="M3 7h11v9H3zM14 10h4l3 3v3h-7M7 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM17 19.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" /></i></div>
+              <div className="fx-numero-cifra">{intero(Number(data.spediteOggi || 0))}</div>
+              <div className="fx-nota"><span className="fx-chip fx-chip--neutro">oggi</span>già in viaggio</div>
+            </a>
             <a className="fx-numero" href="/dashboard/distinte/crea">
               <div className="fx-numero-testa">Da chiudere<i><Icona d="M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2zM9 9h6M9 13h6" /></i></div>
               <div className="fx-numero-cifra">{plancia ? intero(plancia.daChiudereOggi) : '…'}</div>
               <div className="fx-nota"><span className="fx-chip fx-chip--neutro">oggi</span>senza distinta</div>
-            </a>
-            <a className="fx-numero" href="/dashboard/spedizioni?stato=in_transito">
-              <div className="fx-numero-testa">In transito<i><Icona d="M4 12h14M13 7l5 5-5 5" /></i></div>
-              <div className="fx-numero-cifra">{intero(Number(data.inTransito || 0))}</div>
-              <div className="fx-nota"><span className="fx-chip fx-chip--neutro">ora</span>in viaggio</div>
             </a>
             <a className="fx-numero" href="/dashboard/spedizioni?stato=in_giacenza">
               <div className="fx-numero-testa">In giacenza<i><Icona d="M8 5v14M16 5v14" /></i></div>
@@ -260,6 +274,9 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
             </div>
           </div>
         </section>
+
+        {/* IL LAVORO IN CORSO: le altre caselle della dashboard di oggi */}
+        <LavoroInCorso data={data} />
 
         <div className="fx-colonna">
           {/* IL PIANO */}
@@ -321,7 +338,7 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
                   {righe.map(r => {
                     const corr = uno(r.corrieri)?.nome_contratto || ''
                     const [sigla, fondo, scritta] = segnoCorriere(corr)
-                    const [stato, colore] = STATI[r.stato || ''] || [String(r.stato || '').replace(/_/g, ' '), '#9CA3AF']
+                    const [stato, colore] = statoDi(r.stato || '')
                     // Cliente e prezzo come li scrive l'Elenco (app/dashboard/spedizioni): il cliente, e il sotto-master
                     // da cui arriva; il prezzo al cliente, non il costo.
                     const cliente = [nomeClientePulito(uno(r.clienti)?.ragione_sociale || ''), r.master_rete || ''].filter(Boolean).join(' · ')
@@ -344,6 +361,38 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
             )}
           </div>
         </section>
+
+        {/* LA RETE: tasso di consegna e i primi, gli stati degli ultimi 30 giorni, gli SMS; poi i resi (larghi, la
+            lista dei clienti da controllare e' lunga) e il mese per mese */}
+        <LaTuaRete data={data} />
+        <StatiTrentaGiorni stati={data.statiUltimi30 || {}} />
+        <BannerSms />
+        <ResiReteWidget fx />
+        <MesePerMese mesi={data.statsMensili || []} />
+
+        {/* I CREDITI DA RECUPERARE: compaiono solo se ci sono */}
+        {(Number(data.creditiDaRecuperare?.scalare?.clienti || 0) > 0 || Number(data.creditiDaRecuperare?.fattura?.clienti || 0) > 0) && (
+          <div className="fx-tutta fx-fila">
+            <CreditiDaRecuperare crediti={data.creditiDaRecuperare} />
+          </div>
+        )}
+
+        {/* DESTINAZIONI: la mappa e la classifica degli ultimi 30 giorni */}
+        <DestinazioniWidget fx />
+
+        {/* IL GUADAGNO. Il totale e' il calderone del master: spedizioni + rettifiche + rimborsi + resi + giacenze +
+            commissioni + accessori + logistica + canone, una cifra senza doppi conteggi e senza i soldi che passano
+            soltanto (ricariche, cassa dei contrassegni), vedi /api/reports/guadagno-totale. Il grafico e le schede
+            sotto sono il dettaglio per voce, ognuna col suo periodo. */}
+        <div className="fx-sezione fx-tutta">
+          <h2>Il tuo guadagno</h2>
+          <p>Ogni scheda ha il suo periodo: si apre sul mese in corso.</p>
+        </div>
+        <ReportGuadagno titolo="Guadagno Totale" endpoint={REPORT_TOTALE} variante="nera" />
+        <GuadagnoChart />
+        {REPORT_VOCI.map(r => <ReportGuadagno key={r.endpoint} titolo={r.titolo} endpoint={r.endpoint} />)}
+        {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
+        {['master', 'admin'].includes(String(data.ruolo || '').toLowerCase()) && <CostiGestioneCard />}
       </div>
     </div>
   )

@@ -1,9 +1,8 @@
 'use client'
 import { useState, useEffect, useContext } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
-import ReportGuadagno, { urlInizialeReport } from '@/app/components/ReportGuadagno'
-import CostiGestioneCard from '@/app/components/CostiGestioneCard'
-import GuadagnoChart, { urlInizialeGuadagnoChart } from '@/app/components/GuadagnoChart'
+import { REPORT_TOTALE, REPORT_VOCI, urlInizialeReport } from '@/app/components/ReportGuadagno'
+import { urlInizialeGuadagnoChart } from '@/app/components/GuadagnoChart'
 import BannerSms, { URL_STATO_SMS } from '@/app/components/BannerSms'
 import GuadagnoAgente, { urlInizialeGuadagnoAgente } from '@/app/components/GuadagnoAgente'
 import DestinazioniWidget, { URL_DESTINAZIONI, URL_MAPPA_ITALIA } from '@/app/components/DestinazioniWidget'
@@ -13,17 +12,6 @@ import { useProfiloUtente, type ProfiloUtente } from './RuoloUtente'
 import { GraficaNuova } from '@/app/components/grafica/contesto'
 import PlanciaB from '@/app/components/grafica/proposte/b/PlanciaB'
 import DashboardFinexy from '@/app/components/dashboard-finexy/DashboardFinexy'
-
-// I report del guadagno: una sola lista per le card e per le chiamate anticipate, cosi' i due
-// indirizzi non possono divergere.
-const REPORT_TOTALE = '/api/reports/guadagno-totale'
-const REPORT_VOCI = [
-  { titolo: 'Rettifiche', endpoint: '/api/reports/guadagno-rettifiche', icona: '⚖️' },
-  { titolo: 'Resi', endpoint: '/api/reports/guadagno-resi', icona: '↩️' },
-  { titolo: 'Giacenze', endpoint: '/api/reports/guadagno-giacenze', icona: '📦' },
-  { titolo: 'Logistica', endpoint: '/api/reports/guadagno-logistica', icona: '🏬' },
-  { titolo: 'Consumabili', endpoint: '/api/reports/guadagno-consumabili', icona: '🧾' },
-]
 
 // I RIQUADRI PARTONO INSIEME A /api/dashboard, NON DOPO. Si montano solo quando la dashboard ha
 // risposto (prima c'e' "Caricamento..."), quindi le loro chiamate facevano una seconda ondata in
@@ -93,6 +81,12 @@ function DashboardDiOggi() {
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
   if (!data) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>Errore caricamento</div>
 
+  // LA DASHBOARD NUOVA (composizione «Finexy», Lorenzo 24-25/11/2026) per lo staff del master: tutti i riquadri di
+  // questa pagina, con lo stesso disegno e sistemati per uso (app/components/dashboard-finexy). L'agente ha la sua
+  // dashboard confinata ai suoi clienti e i numeri nuovi (/api/dashboard/plancia) sono solo dello staff: per lui resta
+  // quella qui sotto, identica.
+  if (String(data.ruolo || '').toLowerCase() !== 'agente') return <DashboardFinexy data={data} />
+
   const STATI_COLORS: Record<string,string> = {
     'in_lavorazione':'#ca8a04',
     'spedita':'#0284c7',
@@ -136,29 +130,21 @@ function DashboardDiOggi() {
   const kpiLabel = {fontSize:'10px',fontWeight:'700' as const,textTransform:'uppercase' as const,letterSpacing:'0.6px',color:'#999',lineHeight:1.3}
   const kpiValue = {fontSize:'26px',fontWeight:'800' as const,marginTop:'4px',lineHeight:1,color:'#1a1a1a'}
 
-  // LA DASHBOARD NUOVA (composizione «Finexy», Lorenzo 24/11/2026) per lo staff del master: saluto, credito, i numeri di
-  // oggi, le settimane, il piano, i corrieri e le ultime spedizioni stanno tutti in DashboardFinexy, e qui sotto restano
-  // solo i riquadri che li' non ci sono (crediti da recuperare, resi della rete, destinazioni, guadagno). L'agente ha la
-  // sua dashboard confinata ai suoi clienti e i numeri nuovi (/api/dashboard/plancia) sono solo dello staff: per lui
-  // resta quella di oggi, identica.
-  const nuova = String(data.ruolo || '').toLowerCase() !== 'agente'
-
   return (
     <div style={{display:'flex',flexDirection:'column' as const,gap:'16px'}}>
-      {nuova && <DashboardFinexy data={data} />}
 
       {/* Saluto */}
-      {!nuova && <div>
+      <div>
         <h1 style={{fontSize:'18px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Ciao, {data.masterNome}</h1>
         <p style={{color:'#999',fontSize:'12px',margin:'4px 0 0'}}>{new Date().toLocaleDateString('it-IT',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
-      </div>}
+      </div>
 
       {/* Banner SMS: quanti ne restano / invito ad attivare */}
       <BannerSms />
 
       {/* IL TUO CREDITO: conto rete (verso il master sopra) + eventuale conto proprio. Verde se a
           credito, rosso se a debito — chi fattura va sotto zero ed e' normale. */}
-      {!nuova && data.creditoMaster && (() => {
+      {data.creditoMaster && (() => {
         const rete = Number(data.creditoMaster.rete || 0)
         const proprio = Number(data.creditoMaster.proprio || 0)
         const pos = rete >= 0
@@ -190,7 +176,6 @@ function DashboardDiOggi() {
       })()}
 
       {/* KPI */}
-      {!nuova && <>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:'12px'}}>
 
         {/* Spedizioni mese — card scura principale */}
@@ -287,7 +272,6 @@ function DashboardDiOggi() {
           <div style={{...kpiValue,fontSize:'20px',color:Number(data.codDaRimettere)>0?'#ea580c':'#1a1a1a'}}>€ {Number(data.codDaRimettere||0).toLocaleString('it-IT',{minimumFractionDigits:2})}</div>
         </div>
       </div>
-      </>}
 
       {/* CREDITI DA RECUPERARE — le due modalita' NON vanno confuse:
           a scalare = cliente bloccato che deve ricaricare (soldi da farsi ridare);
@@ -334,7 +318,7 @@ function DashboardDiOggi() {
       )}
 
       {/* Tasso consegna + Top corriere + Top cliente */}
-      {!nuova && <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'12px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'12px'}}>
         <div style={kpiCardLight}>
           <div style={{...kpiIconLight,background:'#f0fdf4',border:'1px solid #bbf7d0',color:'#16a34a'}}>📈</div>
           <div style={kpiLabel}>TASSO DI CONSEGNA</div>
@@ -353,13 +337,12 @@ function DashboardDiOggi() {
           <div style={{...kpiValue,fontSize:'17px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{data.topCliente?.nome || '—'}</div>
           <div style={{fontSize:'11px',color:'#999',marginTop:'4px'}}>{data.topCliente?.n ? `${Number(data.topCliente.n).toLocaleString()} spedizioni` : 'nessun dato'}</div>
         </div>
-      </div>}
+      </div>
 
       {/* Resi della rete: i clienti con troppi resi (truffe, clienti in difficolta'), vedi ResiReteWidget */}
       <ResiReteWidget />
 
       {/* Grafici */}
-      {!nuova && <>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(320px,1fr))',gap:'16px'}}>
         <div style={card}>
           <div style={cardH}>Statistiche</div>
@@ -439,30 +422,13 @@ function DashboardDiOggi() {
           </table>
         </div>
       </div>
-      </>}
 
       {/* Destinazioni principali — mappa Italia (master vede la rete, agente i suoi clienti) */}
       <DestinazioniWidget />
 
-      {/* Report Guadagno — l'agente vede il PROPRIO margine (prezzo cliente − suo costo) */}
-      {data?.ruolo === 'agente' ? (
-        <GuadagnoAgente />
-      ) : (
-        <>
-          <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
-          {/* IL CALDERONE: guadagno TOTALE del master = spedizioni + rettifiche + rimborsi + resi +
-              giacenze + commissioni + accessori + logistica + canone abbonamento. UNA cifra, senza doppi
-              conteggi ed esclusi i pass-through (ricarica, cassa COD) — vedi /api/reports/guadagno-totale.
-              Il grafico e le card qui sotto sono il DETTAGLIO per voce. */}
-          <ReportGuadagno titolo="Guadagno Totale" endpoint={REPORT_TOTALE} icona="💰" />
-          <GuadagnoChart />
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
-            {REPORT_VOCI.map(r => <ReportGuadagno key={r.endpoint} titolo={r.titolo} endpoint={r.endpoint} icona={r.icona} />)}
-            {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
-            {['master', 'admin'].includes(String(data?.ruolo || '').toLowerCase()) && <CostiGestioneCard />}
-          </div>
-        </>
-      )}
+      {/* Il guadagno dell'agente: il PROPRIO margine (prezzo cliente − suo costo). Il calderone del master (guadagno
+          totale, grafico e schede per voce) sta nella Dashboard nuova: qui arriva solo l'agente. */}
+      <GuadagnoAgente />
     </div>
   )
 }
