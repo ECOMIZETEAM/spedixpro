@@ -603,7 +603,7 @@ export async function spediamoproCreatePickup(
     shipments: number[]
     courier: string
   }
-): Promise<{ id: number; code: string; status: number; raw: any }> {
+): Promise<{ id: number; code: string | null; status: number; raw: any }> {
   const token = await getSpediamoproToken(authcode)
   const res = await fetch(`${BASE_URL}/pickups`, {
     method: 'POST',
@@ -634,10 +634,16 @@ export async function spediamoproCreatePickup(
   let json: any
   try { json = JSON.parse(text) } catch { json = {} }
   const d = json?.data || {}
-  // Codice pickup robusto: di norma è `code` (CP…), ma prendo anche eventuali alias per non
-  // ripiegare inutilmente sull'id numerico se il campo si chiama diversamente.
-  const code = d.code ?? d.pickupCode ?? d.trackingCode ?? d.tracking ?? d.reference ?? null
-  return { id: d.id, code, status: d.status, raw: json }
+  return { id: d.id, code: codiceRitiroSpediamopro(d), status: d.status, raw: json }
+}
+
+// IL CODICE DEL RITIRO DA DARE A CHI SPEDISCE. Prima il numero di prenotazione del corriere
+// (`courierPickupCode`, dalla versione 2.3.0 di settembre 2026), poi `code`. Su BRT `code` e' il numero
+// interno del fornitore (3404709), che BRT non conosce: il codice vero e' CUR4448310, e arriva solo
+// quando la prenotazione viene passata a BRT (stato 4). Su UPS e Poste `code` e' gia' quello del corriere.
+// Gli alias restano per non ripiegare sull'id numerico se un campo si chiamasse diversamente.
+export function codiceRitiroSpediamopro(d: any): string | null {
+  return d?.courierPickupCode || d?.code || d?.pickupCode || d?.trackingCode || d?.tracking || d?.reference || null
 }
 
 export async function spediamoproGetPickup(authcode: string, pickupId: number): Promise<any> {
@@ -654,7 +660,7 @@ export async function spediamoproGetPickup(authcode: string, pickupId: number): 
 export async function spediamoproWaitPickupCode(authcode: string, pickupId: number, maxAttempts = 4, delayMs = 1500): Promise<string | null> {
   for (let i = 0; i < maxAttempts; i++) {
     const d = await spediamoproGetPickup(authcode, pickupId)
-    const code = d?.code ?? d?.pickupCode ?? d?.trackingCode ?? d?.tracking ?? d?.reference ?? null
+    const code = codiceRitiroSpediamopro(d)
     if (code) return code
     if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, delayMs))
   }

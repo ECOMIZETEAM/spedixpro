@@ -7,6 +7,7 @@ import { useDialog } from '@/app/components/DialogProvider'
 import { inviaReport } from '@/lib/report-client'
 import { giornoRoma, inizioGiornoRomaISO, fineGiornoRomaISO } from '@/lib/date-roma'
 import { vettoreFisico } from '@/lib/vettore'
+import { statoRitiroVisto } from '@/lib/ritiro-vista'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const lbl = {fontSize:'11px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
@@ -115,7 +116,7 @@ export default function ReportRitiriPage() {
               .filter(Boolean).join(', '),
             r.colli ?? '—',
             r.cod_ritiro || '—',
-            r.stato || '—',
+            statoRitiroVisto(r.stato).label,
           ])
       } else {
         const perCliente = new Map<string, number>()

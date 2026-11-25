@@ -8,6 +8,8 @@ import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
 import CodiceRitiroMancante from '@/app/components/CodiceRitiroMancante'
+import { LinkRitiroCorriere, StatoRitiro } from '@/app/components/RitiroCorriere'
+import { STATI_RITIRO } from '@/lib/ritiro-vista'
 import { giornoRoma, giorniFaRoma, inizioGiornoRomaISO, fineGiornoRomaISO } from '@/lib/date-roma'
 
 const sel = {padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',color:'#1a1a1a',background:'#fff',width:'100%',boxSizing:'border-box' as const}
@@ -76,26 +78,21 @@ export default function ElencoRitiriPage() {
 
   const setF = (k: string, v: string) => setFiltri(f => ({ ...f, [k]: v }))
 
-  const filtratiBase = filtri.stato ? ritiri.filter(r => r.stato === filtri.stato) : ritiri
+  // Un filtro ricordato con una parola che la tendina non offre piu' (es. 'Elaborato') filtrava in silenzio
+  // mentre la tendina diceva "Tutti": vale come Tutti.
+  const statoFiltro = STATI_RITIRO[filtri.stato] && filtri.stato !== 'elaborato' && filtri.stato !== 'completato' ? filtri.stato : ''
+  const filtratiBase = statoFiltro ? ritiri.filter(r => r.stato === statoFiltro) : ritiri
   const filtrati = cerca
     ? filtratiBase.filter(r =>
         r.cod_ritiro?.toLowerCase().includes(cerca.toLowerCase()) ||
         r.tracking_ritiro?.toLowerCase().includes(cerca.toLowerCase()) ||
+        String(r.pickup_id || '').includes(cerca.trim()) ||
         r.mitt_nome?.toLowerCase().includes(cerca.toLowerCase()))
     : filtratiBase
 
   const totalePagine = Math.max(1, Math.ceil(filtrati.length / perPage))
   const paginaCorr = Math.min(pagina, totalePagine)
   const ritiriPaginate = filtrati.slice((paginaCorr - 1) * perPage, paginaCorr * perPage)
-
-  const STATO_LABELS: Record<string, { label: string; bg: string; color: string }> = {
-    richiesto: { label: 'Richiesto', bg: '#fff7ed', color: '#f97316' },
-    prenotato: { label: 'Prenotato', bg: '#eff6ff', color: '#2563eb' },
-    elaborato: { label: 'Elaborato', bg: '#f0fdf4', color: '#16a34a' },
-    confermato: { label: 'Confermato', bg: '#fff7ed', color: '#f97316' },
-    completato: { label: 'Completato', bg: '#f0fdf4', color: '#16a34a' },
-    annullato: { label: 'Annullato', bg: '#fef2f2', color: '#dc2626' },
-  }
 
   return (
     <div>
@@ -146,12 +143,12 @@ export default function ElencoRitiriPage() {
           </div>
           <div>
             <div style={{ fontSize: '11px', fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Stato</div>
-            <select value={filtri.stato} onChange={e => setF('stato', e.target.value)} style={stileFiltro(sel, attivo('stato'))}>
+            <select value={statoFiltro} onChange={e => setF('stato', e.target.value)} style={stileFiltro(sel, attivo('stato'))}>
               <option value="">Tutti</option>
-              <option value="richiesto">Richiesto</option>
-              <option value="prenotato">Prenotato</option>
-              <option value="elaborato">Elaborato</option>
-              <option value="annullato">Annullato</option>
+              {/* Le parole vecchie (Elaborato, Completato) non si offrono: restano solo sulle righe gia' scritte. */}
+              {Object.entries(STATI_RITIRO).filter(([k]) => k !== 'elaborato' && k !== 'completato').map(([k, v]) => (
+                <option key={k} value={k}>{v.label}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -201,7 +198,6 @@ export default function ElencoRitiriPage() {
               </thead>
               <tbody>
                 {ritiriPaginate.map(r => {
-                  const st = STATO_LABELS[r.stato] || { label: r.stato, bg: '#f3f4f6', color: '#6b7280' }
                   // Valori della SECONDA riga (colli/peso/quando è stato richiesto), come array così i
                   // divisori verticali saltano i campi assenti senza lasciare linee a vuoto.
                   const secItems: { l: any; v: any }[] = [
@@ -212,7 +208,10 @@ export default function ElencoRitiriPage() {
                   return (
                     <Fragment key={r.id}>
                     <tr style={{ background: '#fff' }}>
-                      <td style={{ padding: '9px 14px', fontWeight: '600', color: '#1a1a1a' }}>{r.cod_ritiro || r.tracking_ritiro || <CodiceRitiroMancante stato={r.codice_stato} />}</td>
+                      <td style={{ padding: '9px 14px', fontWeight: '600', color: '#1a1a1a' }}>
+                        {r.cod_ritiro || r.tracking_ritiro || <CodiceRitiroMancante stato={r.codice_stato} />}
+                        <LinkRitiroCorriere codice={r.cod_ritiro || r.tracking_ritiro} contratto={r.corrieri?.nome_contratto} />
+                      </td>
                       <td style={{ padding: '9px 14px', color: '#1a1a1a' }}>
                         {r.clienti?.ragione_sociale || '-'}
                         {r.master_rete && <div style={{ fontSize: '11px', color: '#4f46e5', fontWeight: 600 }}>▸ {r.master_rete}</div>}
@@ -220,7 +219,7 @@ export default function ElencoRitiriPage() {
                       <td style={{ padding: '9px 14px', color: '#1a1a1a' }}>{r.mitt_nome}</td>
                       <td style={{ padding: '9px 14px', color: '#1a1a1a' }}>{r.data_ritiro ? new Date(r.data_ritiro).toLocaleDateString('it-IT') : '-'}</td>
                       <td style={{ padding: '9px 14px 3px' }}>
-                        <span style={{ background: st.bg, color: st.color, padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '600' }}>{st.label}</span>
+                        <StatoRitiro stato={r.stato} />
                       </td>
                     </tr>
                     <tr style={{ background: '#fff', borderBottom: '2px solid #cbd5e1' }}>

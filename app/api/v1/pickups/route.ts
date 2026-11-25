@@ -193,10 +193,13 @@ export async function POST(req: NextRequest) {
   const pesoTotale = spedizioni.reduce((s: number, x: any) => s + (parseFloat(String(x.peso_reale)) || 1), 0)
   const fascia = fasciaOraria(body.timeFrom, body.timeTo)
 
-  async function salvaRitiro(pickupCode: string, dataRitiro: string = body.date) {
+  // pickupId: il numero del ritiro presso il fornitore, come lo salva il portale. Senza, il giro che rilegge
+  // codice del corriere e stato (lib/ritiro-codice) non trovava i ritiri nati da qui (181 in 30 giorni, 25/11).
+  async function salvaRitiro(pickupCode: string, dataRitiro: string = body.date, pickupId: number | null = null) {
     const r = await admin.from('ritiri').insert({
       master_id: ctx!.masterId, cliente_id: ctx!.clienteId, corriere_id: corriere!.id,
       tracking_ritiro: pickupCode || null, cod_ritiro: pickupCode || null,
+      ...(pickupId ? { pickup_id: pickupId } : {}),
       mitt_nome: from.name, mitt_indirizzo: from.street1, mitt_citta: from.city,
       mitt_provincia: from.state || null, mitt_cap: from.postalCode, mitt_telefono: pulisciTelefono(from.phone) || null,
       colli: colliTotali, peso: pesoTotale, contenuto: body.notes || null,
@@ -235,7 +238,7 @@ export async function POST(req: NextRequest) {
       date: body.date, from: fascia.from, to: fascia.to, shipments: shipmentApiIds, courier: courierCode,
     })
     if (!esito.ok) return NextResponse.json({ error: erroreRitiroPulito(esito.errore) }, { status: 400 })
-    const { data: nuovo, error } = await salvaRitiro(esito.codice, esito.data)
+    const { data: nuovo, error } = await salvaRitiro(esito.codice, esito.data, esito.id)
     if (error) { console.error('[API][PICKUP] salvataggio ritiro fallito:', error.message); return NextResponse.json({ error: `Ritiro creato presso il corriere (${esito.codice}) ma non registrato a sistema: contatta l'assistenza indicando questo codice.` }, { status: 500 }) }
     const avviso = avvisoDataSpostata(String(body.date), esito.data)
     return NextResponse.json({ id: nuovo.id, pickupId: esito.codice, stato: 'richiesto', date: esito.data, ...(avviso ? { avviso } : {}) })

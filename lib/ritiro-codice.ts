@@ -1,4 +1,5 @@
 // IL CODICE DEL RITIRO SUI CONTRATTI DVA: dove si scrive, e chi lo va a prendere quando arriva tardi.
+// (In fondo al file la stessa rincorsa per i ritiri SpediamoPro: codice del corriere e stato.)
 //
 // Su questi contratti il ritiro si prenota insieme all'ordine e il corriere comunica il codice insieme
 // alla lettera di vettura — ma non sempre subito. Dal 25/10/2026 su BRT 2025 V al suo posto c'e'
@@ -164,6 +165,103 @@ export async function rincorriCodiciRitiro(admin: any, opts: { budgetMs?: number
           const k = (r.testo.replace(/\d[\d\-/.:]*/g, '#') || '(vuoto)').slice(0, 40)
           esito.testi[k] = (esito.testi[k] || 0) + 1
         }
+      } catch { esito.errori++ }
+    }))
+  }
+  return esito
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// RITIRI SPEDIAMOPRO: IL CODICE DEL CORRIERE E LO STATO, RILETTI FINCHE' IL RITIRO E' APERTO
+// Su BRT il codice dato alla prenotazione era il numero interno del fornitore (3404709), che in filiale
+// non conosce nessuno: il numero di prenotazione BRT (CUR4448310) arriva solo quando la prenotazione
+// passa a BRT — in giornata per i ritiri di oggi, il giorno dopo per quelli di domani — e dal 21/09/2026
+// non l'avevamo su nessuno (circa 2.400 ritiri a settimana). Lo stato si rileggeva solo aprendo l'elenco,
+// 40 righe alla volta: ritiri gia' fatti restavano "Richiesto". Qui si rileggono entrambi da soli.
+// Cosa cambia su una riga lo decide aggiornamentoRitiroSpediamopro (lib/ritiro-spediamopro).
+// ═══════════════════════════════════════════════════════════════════════════════════════
+export type EsitoRitiriSpediamopro = {
+  candidate: number             // ritiri aperti nella finestra
+  chieste: number               // riletti in questo giro
+  codici: number                // codice del corriere arrivato e scritto
+  stati: Record<string, number> // stati cambiati, per stato nuovo
+  errori: number
+}
+
+// Ogni quanti giri si rilegge un ritiro, secondo il giorno del ritiro. Quelli di oggi cambiano piu' spesso
+// (confermato, ritirato); quelli di domani aspettano solo di passare al corriere; quelli di ieri raramente
+// cambiano ancora (circa un terzo dei BRT in giornata resta "confermato" e senza numero BRT per sempre).
+function periodoGiriRitiro(dataRitiro: string, oggi: string): number {
+  if (dataRitiro === oggi) return 5          // ogni 10 minuti
+  if (dataRitiro > oggi) return 15           // ogni 30 minuti
+  return 30                                  // ieri: ogni ora
+}
+
+export async function rincorriRitiriSpediamopro(
+  admin: any,
+  // `dalGiorno` e `tutti` servono al recupero una tantum: finestra piu' lunga, ogni ritiro a ogni passata.
+  opts: { budgetMs?: number; dalGiorno?: string; tutti?: boolean } = {},
+): Promise<EsitoRitiriSpediamopro> {
+  const esito: EsitoRitiriSpediamopro = { candidate: 0, chieste: 0, codici: 0, stati: {}, errori: 0 }
+  const avvio = Date.now()
+  const { giornoRoma, giorniFaRoma } = await import('@/lib/date-roma')
+  // Stretta: se una pagina non si legge lancia, invece di restituire un elenco vuoto o tagliato e far
+  // sembrare che non ci sia niente da fare.
+  const { fetchAllStretto } = await import('@/lib/fetch-all')
+  const { aggiornamentoRitiroSpediamopro, STATI_RITIRO_FINALI } = await import('@/lib/ritiro-spediamopro')
+  const { spediamoproGetPickup, getSpediamoproToken } = await import('@/lib/spediamopro')
+  const oggi = giornoRoma()
+  const dal = opts.dalGiorno ?? giorniFaRoma(1)
+
+  const { data: corrs, error: errC } = await admin.from('corrieri').select('id,credenziali').eq('tipo', 'spediamopro')
+  if (errC) { console.error('[RITIRO-SP] lettura dei contratti', errC.message); esito.errori++; return esito }
+  const authcode = new Map<string, string>((corrs || []).filter((c: any) => c.credenziali?.authcode).map((c: any) => [c.id, String(c.credenziali.authcode)]))
+  if (!authcode.size) return esito
+
+  // Sempre ordinate anche per id: si legge a pagine da 1.000, e con lo stesso giorno le righe cambierebbero
+  // posto fra una pagina e l'altra (doppie o perse). Dal giorno piu' lontano al piu' vicino all'indietro: se il
+  // tempo finisce, resta indietro ieri, non oggi e domani.
+  let righe: any[] = []
+  try {
+    righe = await fetchAllStretto(() => admin.from('ritiri')
+      .select('id,stato,cod_ritiro,pickup_id,data_ritiro,corriere_id')
+      .in('corriere_id', [...authcode.keys()])
+      .not('pickup_id', 'is', null)
+      .gte('data_ritiro', dal)
+      .not('stato', 'in', `(${STATI_RITIRO_FINALI.join(',')})`)
+      .order('data_ritiro', { ascending: false }).order('id', { ascending: true }))
+  } catch (e: any) { console.error('[RITIRO-SP] lettura dei ritiri', e?.message); esito.errori++; return esito }
+  esito.candidate = righe.length
+
+  const giro = Math.round(avvio / GIRO_MS)
+  const daChiedere = opts.tutti ? righe : righe.filter((r: any) => tocca(String(r.id), periodoGiriRitiro(String(r.data_ritiro), oggi), giro))
+  const budget = opts.budgetMs ?? 40000
+  if (!daChiedere.length) return esito
+  // Il token una volta per contratto prima di partire: con la cache vuota le prime otto letture in parallelo
+  // ne chiederebbero otto.
+  for (const ac of new Set(daChiedere.map((r: any) => authcode.get(r.corriere_id)!))) {
+    try { await getSpediamoproToken(ac) } catch (e: any) { console.error('[RITIRO-SP] token', e?.message); esito.errori++; return esito }
+  }
+  // Il fornitore risponde in ~0,1 secondi a lettura (misurato il 25/11 su 240 ritiri). Una lettura appesa non
+  // deve tenere fermo il giro, che gira insieme a quello DVA dentro lo stesso minuto: dopo 10 secondi si lascia.
+  const ATTESA_MAX_MS = 10000
+  const PARALLELE = 8
+  for (let i = 0; i < daChiedere.length; i += PARALLELE) {
+    if (Date.now() - avvio > budget) break
+    await Promise.all(daChiedere.slice(i, i + PARALLELE).map(async (r: any) => {
+      esito.chieste++
+      try {
+        const pk = await Promise.race([
+          spediamoproGetPickup(authcode.get(r.corriere_id)!, Number(r.pickup_id)),
+          new Promise((_, no) => setTimeout(() => no(new Error('tempo scaduto')), ATTESA_MAX_MS)),
+        ]) as any
+        if (!pk) { esito.errori++; return }
+        const upd = aggiornamentoRitiroSpediamopro(r, pk)
+        if (!Object.keys(upd).length) return
+        const { error } = await admin.from('ritiri').update(upd).eq('id', r.id)
+        if (error) { console.error('[RITIRO-SP] scrittura', r.id, error.message); esito.errori++; return }
+        if (upd.cod_ritiro) esito.codici++
+        if (upd.stato) esito.stati[upd.stato] = (esito.stati[upd.stato] || 0) + 1
       } catch { esito.errori++ }
     }))
   }

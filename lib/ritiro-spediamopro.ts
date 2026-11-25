@@ -1,4 +1,4 @@
-import { spediamoproCreatePickup, spediamoproWaitPickupCode, type SpediamoproPickupContact } from '@/lib/spediamopro'
+import { spediamoproCreatePickup, spediamoproWaitPickupCode, codiceRitiroSpediamopro, type SpediamoproPickupContact } from '@/lib/spediamopro'
 import { dataDaRiprovare } from '@/lib/ritiro-giorno'
 import { siglaProvincia } from '@/lib/province-it'
 
@@ -91,4 +91,57 @@ export async function prenotaRitiroSpediamopro(authcode: string, p: {
   const campi = dettagli(testo).filter(d => String(d?.source || '').includes('.')).map(d => `${d?.source}: ${d?.message}`).join('; ')
   console.error('[RITIRO][SPEDIAMOPRO] ritiro rifiutato -', String(motivo).slice(0, 160), campi ? `(${campi.slice(0, 160)})` : '')
   return { ok: false, errore: ultimo }
+}
+
+// LO STATO DEL RITIRO SECONDO SPEDIAMOPRO (doc API v2, Pickup.status; "non e' un percorso in sequenza").
+// Prima si guardava solo "almeno 4 = elaborato": un ritiro gia' fatto, uno annullato dal corriere e uno
+// appena confermato apparivano tutti "Elaborato". Le parole sono in lib/ritiro-vista.
+//   0 il corriere ha dato errore · 1-3 creato, validato, in lavorazione presso il fornitore · 4 confermato
+//   dal corriere · 5 annullato dal fornitore · 6 annullato dal corriere (rifiutato, nessuno all'indirizzo…)
+//   7 merce ritirata · 8 rimandato (merce non pronta)
+export function statoRitiroSpediamopro(status: unknown): string | null {
+  if (status === null || status === undefined || status === '') return null
+  switch (Number(status)) {
+    case 0: return 'errore'
+    case 1: case 2: case 3: return 'prenotato'
+    case 4: return 'confermato'
+    case 5: return 'annullato'
+    case 6: return 'annullato_corriere'
+    case 7: return 'ritirato'
+    case 8: return 'rimandato'
+    default: return null
+  }
+}
+
+// Lo stato dopo cui non si rilegge piu'. Solo 'ritirato': la doc dice che gli stati non vanno in sequenza, e un
+// "rifiutato" o un "annullato" possono ancora cambiare. Tanto si rilegge solo finche' il ritiro e' recente.
+export const STATI_RITIRO_FINALI = ['ritirato']
+
+// Il codice sulla riga e' ancora il numero interno del fornitore (o manca): si puo' sostituire. Un codice
+// vero del corriere (CP…, quello di UPS, anche se fatto di sole cifre) non si tocca mai.
+function codiceInterno(cod: unknown, pickupId: unknown): boolean {
+  const s = String(cod ?? '').trim()
+  if (!s) return true
+  return /^\d+$/.test(s) && Number(s) === Number(pickupId)
+}
+
+// COSA CAMBIA SU UNA RIGA RITIRI dopo averla riletta presso il fornitore. La usano il giro automatico
+// (lib/ritiro-codice) e il recupero una tantum.
+export function aggiornamentoRitiroSpediamopro(
+  riga: { stato?: string | null; cod_ritiro?: string | null; pickup_id?: number | null; data_ritiro?: string | null },
+  pk: any,
+): Record<string, string> {
+  const upd: Record<string, string> = {}
+  if (!pk) return upd
+  const stato = statoRitiroSpediamopro(pk.status)
+  if (stato && stato !== riga.stato) upd.stato = stato
+  // Il giorno lo decide il corriere: un ritiro rimandato cambia data, e con la data vecchia uscirebbe dal giro
+  // prima che arrivino codice e "ritirato".
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(pk.date || '')) && riga.data_ritiro && pk.date !== riga.data_ritiro) upd.data_ritiro = pk.date
+  const codice = codiceRitiroSpediamopro(pk)
+  if (codice && codiceInterno(riga.cod_ritiro, riga.pickup_id) && !codiceInterno(codice, riga.pickup_id) && codice !== riga.cod_ritiro) {
+    upd.cod_ritiro = codice
+    upd.tracking_ritiro = codice
+  }
+  return upd
 }

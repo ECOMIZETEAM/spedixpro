@@ -5,6 +5,7 @@ import DateRangePicker from '@/app/components/DateRangePicker'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
 import BadgeFiltri from '@/app/components/BadgeFiltri'
 import CodiceRitiroMancante from '@/app/components/CodiceRitiroMancante'
+import { LinkRitiroCorriere, StatoRitiro } from '@/app/components/RitiroCorriere'
 
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%'}
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a'}
@@ -56,6 +57,7 @@ export default function RitiriPage() {
   const filtrati = cerca
     ? ritiri.filter(r =>
         r.cod_ritiro?.toLowerCase().includes(cerca.toLowerCase()) ||
+        String(r.pickup_id || '').includes(cerca.trim()) ||
         r.mitt_nome?.toLowerCase().includes(cerca.toLowerCase()) ||
         r.dest_nome?.toLowerCase().includes(cerca.toLowerCase()) ||
         r.clienti?.ragione_sociale?.toLowerCase().includes(cerca.toLowerCase())
@@ -151,7 +153,7 @@ export default function RitiriPage() {
                 <th style={{padding:'9px 12px',borderBottom:'1px solid #d1d5db',width:'36px'}}>
                   <input type="checkbox" checked={selectedIds.length===paginati.length&&paginati.length>0} onChange={toggleAll}/>
                 </th>
-                {['Cod Ritiro','Pagamento','Cliente','Mittente','Destinatario','Peso','Colli','Data Inserimento','Data Ritiro','Totale'].map(h=>(
+                {['Cod Ritiro','Pagamento','Cliente','Mittente','Destinatario','Peso','Colli','Data Inserimento','Data Ritiro','Stato','Totale'].map(h=>(
                   <th key={h} style={{textAlign:'left' as const,padding:'9px 12px',fontSize:'11px',fontWeight:'700',textTransform:'uppercase' as const,color:'#1a1a1a',borderBottom:'1px solid #d1d5db',whiteSpace:'nowrap' as const}}>{h}</th>
                 ))}
               </tr></thead>
@@ -166,6 +168,7 @@ export default function RitiriPage() {
                         style={{color:'#f97316',fontWeight:'600',fontSize:'12px',textDecoration:'none'}}>
                         {r.cod_ritiro||<CodiceRitiroMancante stato={r.codice_stato}/>}
                       </a>
+                      <LinkRitiroCorriere codice={r.cod_ritiro} contratto={r.corrieri?.nome_contratto}/>
                     </td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px'}}>{r.pagamento||'Porto franco'}</td>
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontWeight:'500',fontSize:'12px'}}>{r.clienti?.ragione_sociale||'—'}</td>
@@ -187,6 +190,7 @@ export default function RitiriPage() {
                     <td style={{padding:'9px 12px',color:'#1a1a1a',fontSize:'12px',whiteSpace:'nowrap' as const}}>
                       {r.data_ritiro ? new Date(r.data_ritiro).toLocaleDateString('it-IT') : '—'}
                     </td>
+                    <td style={{padding:'9px 12px'}}><StatoRitiro stato={r.stato}/></td>
                     <td style={{padding:'9px 12px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(r.totale||0).toFixed(2)}</td>
                   </tr>
                 ))}
