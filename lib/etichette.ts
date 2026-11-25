@@ -243,8 +243,12 @@ async function sorgentiGrezze(
 // solo 'poste' la nuova resa non arrivava a nessuno. L'etichetta e' la stessa 1011 in entrambi i casi.
 // SDA EXPRESS L2 (18/11/2026) e' lo stesso contratto di LOGIXIA con le stesse credenziali, venduto a Wave a
 // un altro prezzo: stessa LDV, stesso A4 di KSync. Fuori da questo elenco usciva l'A4 con tre copie per
-// pagina, e sulla Zebra al 47%. CONSEGNA DIRETTA resta fuori come prima.
-const NOMI_SDA_EXPRESS_L = new Set(['SDA EXPRESS L', 'SDA EXPRESS L2'])
+// pagina, e sulla Zebra al 47%.
+// SDA EXPRESS L CONSEGNA DIRETTA (Lorenzo, 25/11/2026: «deve essere ridisegnata da noi, con lo stesso sistema»):
+// stesso prodotto Poste (Extra Large, APT000901). Oggi le sue LDV arrivano ancora come 1011: la resa la
+// ridisegna come faceva con SDA EXPRESS L prima del 12/11, e alla Zebra resta la 1011 (98%). Provato su
+// 382343J007987 e 382343J007985: i quattro codici si leggono identici all'originale, contrassegno compreso.
+const NOMI_SDA_EXPRESS_L = new Set(['SDA EXPRESS L', 'SDA EXPRESS L2', 'SDA EXPRESS L CONSEGNA DIRETTA'])
 export function contrattoSdaExpressL(corr: { tipo?: string | null; nome_contratto?: string | null } | null | undefined): boolean {
   return (corr?.tipo === 'poste' || corr?.tipo === 'moovexpress')
     && NOMI_SDA_EXPRESS_L.has(String(corr?.nome_contratto || '').trim().toUpperCase())
