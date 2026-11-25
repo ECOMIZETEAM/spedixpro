@@ -1,8 +1,9 @@
 'use client'
 import { useState, useEffect, useContext } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
-import { REPORT_TOTALE, REPORT_VOCI, urlInizialeReport } from '@/app/components/ReportGuadagno'
-import { urlInizialeGuadagnoChart } from '@/app/components/GuadagnoChart'
+import ReportGuadagno, { urlInizialeReport } from '@/app/components/ReportGuadagno'
+import CostiGestioneCard from '@/app/components/CostiGestioneCard'
+import GuadagnoChart, { urlInizialeGuadagnoChart } from '@/app/components/GuadagnoChart'
 import BannerSms, { URL_STATO_SMS } from '@/app/components/BannerSms'
 import GuadagnoAgente, { urlInizialeGuadagnoAgente } from '@/app/components/GuadagnoAgente'
 import DestinazioniWidget, { URL_DESTINAZIONI, URL_MAPPA_ITALIA } from '@/app/components/DestinazioniWidget'
@@ -11,6 +12,17 @@ import { anticipa } from '@/lib/richieste-anticipate'
 import { useProfiloUtente, type ProfiloUtente } from './RuoloUtente'
 import { GraficaNuova } from '@/app/components/grafica/contesto'
 import DashboardFinexy from '@/app/components/dashboard-finexy/DashboardFinexy'
+
+// I report del guadagno: una sola lista per le card e per le chiamate anticipate, cosi' i due
+// indirizzi non possono divergere.
+const REPORT_TOTALE = '/api/reports/guadagno-totale'
+const REPORT_VOCI = [
+  { titolo: 'Rettifiche', endpoint: '/api/reports/guadagno-rettifiche', icona: '⚖️' },
+  { titolo: 'Resi', endpoint: '/api/reports/guadagno-resi', icona: '↩️' },
+  { titolo: 'Giacenze', endpoint: '/api/reports/guadagno-giacenze', icona: '📦' },
+  { titolo: 'Logistica', endpoint: '/api/reports/guadagno-logistica', icona: '🏬' },
+  { titolo: 'Consumabili', endpoint: '/api/reports/guadagno-consumabili', icona: '🧾' },
+]
 
 // I RIQUADRI PARTONO INSIEME A /api/dashboard, NON DOPO. Si montano solo quando la dashboard ha
 // risposto (prima c'e' "Caricamento..."), quindi le loro chiamate facevano una seconda ondata in
@@ -38,8 +50,8 @@ function anticipaRiquadri(profilo: ProfiloUtente | null) {
 
 // Con la grafica nuova (v11, il menu a striscia approvato) la Dashboard è quella nuova, composizione «Finexy» (Lorenzo
 // 25/11: «il menu non vedo quello che avevamo fatto nella nuova versione, che fine ha fatto?»): stessi numeri, stesse
-// rotte. Con la grafica di oggi resta questa, identica. L'agente ha la sua dashboard confinata ai suoi clienti: finché
-// non è disegnata, resta quella di oggi in tutte e due.
+// rotte (app/components/dashboard-finexy). Con la grafica di oggi resta questa, identica. L'agente ha la sua dashboard
+// confinata ai suoi clienti: finché non è disegnata, resta quella di oggi in tutte e due.
 export default function Dashboard() {
   const g = useContext(GraficaNuova)
   if (!g.attiva || g.ruolo === 'agente') return <DashboardDiOggi />
@@ -81,10 +93,8 @@ function DashboardDiOggi({ nuova = false }: { nuova?: boolean }) {
 
   if (loading) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a',fontSize:'14px'}}>Caricamento...</div>
   if (!data) return <div style={{padding:'60px',textAlign:'center',color:'#1a1a1a'}}>Errore caricamento</div>
-
-  // LA DASHBOARD NUOVA (composizione «Finexy», Lorenzo 24-25/11/2026) nella grafica nuova, per lo staff del master:
-  // tutti i riquadri di questa pagina, con lo stesso disegno e sistemati per uso (app/components/dashboard-finexy).
-  // I numeri nuovi (/api/dashboard/plancia) sono solo dello staff: l'agente resta su quella qui sotto, identica.
+  // Nella grafica nuova, per lo staff del master: la Dashboard nuova, coi numeri di questa stessa risposta. I numeri in
+  // piu' (/api/dashboard/plancia) sono solo dello staff: l'agente resta qui sotto.
   if (nuova && String(data.ruolo || '').toLowerCase() !== 'agente') return <DashboardFinexy data={data} />
 
   const STATI_COLORS: Record<string,string> = {
@@ -426,9 +436,25 @@ function DashboardDiOggi({ nuova = false }: { nuova?: boolean }) {
       {/* Destinazioni principali — mappa Italia (master vede la rete, agente i suoi clienti) */}
       <DestinazioniWidget />
 
-      {/* Il guadagno dell'agente: il PROPRIO margine (prezzo cliente − suo costo). Il calderone del master (guadagno
-          totale, grafico e schede per voce) sta nella Dashboard nuova: qui arriva solo l'agente. */}
-      <GuadagnoAgente />
+      {/* Report Guadagno — l'agente vede il PROPRIO margine (prezzo cliente − suo costo) */}
+      {data?.ruolo === 'agente' ? (
+        <GuadagnoAgente />
+      ) : (
+        <>
+          <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginTop:'2px'}}>Report Guadagno</div>
+          {/* IL CALDERONE: guadagno TOTALE del master = spedizioni + rettifiche + rimborsi + resi +
+              giacenze + commissioni + accessori + logistica + canone abbonamento. UNA cifra, senza doppi
+              conteggi ed esclusi i pass-through (ricarica, cassa COD) — vedi /api/reports/guadagno-totale.
+              Il grafico e le card qui sotto sono il DETTAGLIO per voce. */}
+          <ReportGuadagno titolo="Guadagno Totale" endpoint={REPORT_TOTALE} icona="💰" />
+          <GuadagnoChart />
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:'14px'}}>
+            {REPORT_VOCI.map(r => <ReportGuadagno key={r.endpoint} titolo={r.titolo} endpoint={r.endpoint} icona={r.icona} />)}
+            {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
+            {['master', 'admin'].includes(String(data?.ruolo || '').toLowerCase()) && <CostiGestioneCard />}
+          </div>
+        </>
+      )}
     </div>
   )
 }

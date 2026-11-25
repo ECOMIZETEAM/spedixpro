@@ -1,9 +1,10 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import BannerSms from '@/app/components/BannerSms'
+import SmsFinexy from './SmsFinexy'
 import ResiReteWidget from '@/app/components/ResiReteWidget'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
-import { CreditiDaRecuperare, IlTuoGuadagno, LaTuaRete, LavoroInCorso, MesePerMese, StatiTrentaGiorni, type DatiDashboard } from './SezioniFinexy'
+import { CreditiDaRecuperare, LaTuaRete, LavoroInCorso, MesePerMese, StatiTrentaGiorni, type DatiDashboard } from './SezioniFinexy'
+import { IlTuoGuadagno } from './GuadagnoFinexy'
 import { euro, intero } from './formati'
 import { Barra3D, DefsBarre, profondita } from './Barre3D'
 import Conta from './Conta'
@@ -121,7 +122,7 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
           <h1>{saluto()}, {data.masterNome || 'master'}</h1>
           <p>Le spedizioni di oggi, cosa c&apos;è da chiudere e come va la tua rete.</p>
         </div>
-        <BannerSms />
+        <SmsFinexy />
       </div>
 
       <div className="fx-griglia">

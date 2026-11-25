@@ -268,11 +268,11 @@ export default function DestinazioniWidget({ fx = false }: { fx?: boolean } = {}
                       <div style={{ width: `${Math.max(3, (p.n / maxClass) * 100)}%`, height: '100%', background: '#EA580C', borderRadius: 5 }} />
                     </div>
                     <div style={{ width: 44, textAlign: 'right', fontSize: 13, fontWeight: 700, color: '#1a1a1a', fontVariantNumeric: 'tabular-nums' }}>{p.n}</div>
-                    <div style={{ width: 44, textAlign: 'right', fontSize: 12, color: '#9a9a9a', fontVariantNumeric: 'tabular-nums' }}>{p.perc.toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</div>
+                    <div style={{ width: 44, textAlign: 'right', fontSize: 12, color: '#9a9a9a', fontVariantNumeric: 'tabular-nums' }}>{p.perc.toFixed(1)}%</div>
                   </div>
                 ))}
                 <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 10 }}>
-                  <b style={{ color: '#1a1a1a' }}>{totale.toLocaleString('it-IT', { useGrouping: 'always' } as Intl.NumberFormatOptions)}</b> spedizioni · {conteggioLabel}
+                  <b style={{ color: '#1a1a1a' }}>{totale.toLocaleString('it-IT')}</b> spedizioni · {conteggioLabel}
                 </div>
               </>}
         </div>

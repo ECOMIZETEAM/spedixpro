@@ -222,6 +222,21 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
 .fx-report--nera .fx-report-sotto, .fx-report--nera .fx-report-netto { color: rgba(255,255,255,.62); border-top-color: rgba(255,255,255,.16); }
 .fx-report--nera .fx-report-sotto b { color: #fff; }
 .fx-report--nera { display: flex; flex-direction: column; }
+/* la scheda nera tiene il titolo bianco anche contro la regola dei titoli della cornice (:root .fx h2, piu' sotto) */
+:root .fx .fx-report--nera h2 { color: #fff; }
+/* quanto resta di ogni euro incassato: la barra e' l'incassato, il verde (a destra) e' il guadagno */
+.fx-margine { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.16); }
+.fx-margine-testa { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 11.5px; color: rgba(255,255,255,.62); }
+.fx-margine-testa b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fx-margine-barra { display: flex; justify-content: flex-end; height: 12px; margin-top: 10px; border-radius: 999px; overflow: hidden;
+  background: repeating-linear-gradient(135deg, rgba(255,255,255,.14) 0 6px, rgba(255,255,255,.07) 6px 12px); }
+.fx-margine-barra i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #3FBF6E, #7EE2A0);
+  box-shadow: 0 0 12px rgba(126,226,160,.45); animation: fx-allunga .9s cubic-bezier(.2,.8,.2,1) both; }
+.fx-margine-legenda { display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; }
+.fx-margine-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.fx-margine-legenda i { width: 8px; height: 8px; border-radius: 2px; }
+.fx-margine-costo { background: rgba(255,255,255,.3); }
+.fx-margine-tuo { background: #7EE2A0; }
 .fx-report-spiega { margin: auto 0 0; padding-top: 18px; font-size: 11.5px; line-height: 1.5; color: rgba(255,255,255,.55); }
 .fx-coppia a { background: var(--fx-riquadro); border-radius: 11px; padding: 11px 12px; min-width: 0; }
 .fx-coppia a:hover { filter: brightness(.985); }

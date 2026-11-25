@@ -3,10 +3,6 @@ import { useEffect, useRef, useState } from 'react'
 import { euro, intero, meseItaliano, percento, statoDi } from './formati'
 import { Barra3D, DefsBarre, profondita } from './Barre3D'
 import Conta from './Conta'
-import DateRangePicker from '@/app/components/DateRangePicker'
-import ReportGuadagno, { REPORT_TOTALE, REPORT_VOCI, meseCorrente } from '@/app/components/ReportGuadagno'
-import GuadagnoChart from '@/app/components/GuadagnoChart'
-import CostiGestioneCard from '@/app/components/CostiGestioneCard'
 
 // LE PARTI DELLA DASHBOARD NUOVA CHE LA DASHBOARD DI OGGI GIA' AVEVA. Lorenzo, 25/11: «nella vecchia versione nella home
 // ci stavano tanti blocchi, ora non se li ritrovano piu'... applica il design, ma la sistemazione falla in base a tutti
@@ -238,27 +234,5 @@ export function CreditiDaRecuperare({ crediti }: { crediti?: DatiDashboard['cred
         </section>
       )
     })}
-  </>
-}
-
-// IL TUO GUADAGNO: un periodo per tutte le voci (Lorenzo 25/11: «il controllo delle date a blocco singolo va
-// raggruppato»). Il periodo di partenza e' il mese in corso, lo stesso che la pagina chiede in anticipo all'apertura.
-export function IlTuoGuadagno({ ruolo }: { ruolo?: string }) {
-  const [periodo, setPeriodo] = useState(meseCorrente)
-  const titolare = ['master', 'admin'].includes(String(ruolo || '').toLowerCase())
-  return <>
-    <div className="fx-sezione fx-tutta">
-      <div><h2>Il tuo guadagno</h2><p>Un periodo per tutte le voci</p></div>
-      <DateRangePicker dal={periodo.dal} al={periodo.al} onChange={(dal, al) => setPeriodo({ dal, al })} />
-    </div>
-    <ReportGuadagno titolo="Guadagno Totale" endpoint={REPORT_TOTALE} dal={periodo.dal} al={periodo.al} variante="nera" />
-    <GuadagnoChart dal={periodo.dal} al={periodo.al} />
-    <section className="fx-scheda fx-striscia fx-tutta" aria-label="Il guadagno per voce">
-      <div className="fx-striscia-righe fx-voci">
-        {REPORT_VOCI.map(r => <ReportGuadagno key={r.endpoint} titolo={r.titolo} endpoint={r.endpoint} dal={periodo.dal} al={periodo.al} />)}
-        {/* Stipendi, affitto, mezzi...: solo il titolare e i suoi admin (lib/costi-gestione). */}
-        {titolare && <CostiGestioneCard dal={periodo.dal} al={periodo.al} />}
-      </div>
-    </section>
   </>
 }
