@@ -83,7 +83,7 @@ export function Icona({ id, className }: { id: string; className?: string }) {
 // L'icona di ogni voce del menu, per nome (il menu di oggi ha glifi e emoji nel campo icon: quelli restano alla
 // grafica vecchia). Una voce nuova senza icona qui prende il pacco, così non resta mai un buco.
 export const ICONA_VOCE: Record<string, string> = {
-  'Plancia': 'i-plancia', 'Live View': 'i-diretta', 'Spedizioni': 'i-pacco', 'Contrassegni': 'i-euro', 'Ritiri': 'i-camion', 'Distinte': 'i-distinta',
+  'Plancia': 'i-plancia', 'Live View': 'i-diretta', 'Spedizioni': 'i-pacco', 'Contrassegni': 'i-euro', 'Ritiri': 'i-camion', 'Calendario': 'i-calendario', 'Distinte': 'i-distinta',
   'Resi': 'i-resi', 'Dal mio network': 'i-rete', 'Assistenza Clienti': 'i-aiuto', 'Circuito interno': 'i-percorso',
   'Il mio listino': 'i-listino', 'Listini Prezzi': 'i-listino', 'Preventivi': 'i-calc', 'Clienti': 'i-clienti',
   'Logistica': 'i-magazzino', 'Autisti e Consegne': 'i-autista', 'Consumabili': 'i-scatole', 'Fatture': 'i-fattura',

@@ -38,6 +38,9 @@ const NAV: NavItem[] = [
     { label: 'Nuovo Ritiro', href: '/dashboard/ritiri/nuovo', perm: 'admin.pickups.index' },
     { label: 'Elenco Ritiri', href: '/dashboard/ritiri/elenco', perm: 'admin.pickups.index' },
   ]},
+  // Il calendario (25/11): lo vede chiunque entri nel portale, perché le voci tue sono di tutti; ritiri e giacenze
+  // dentro compaiono solo a chi vede le loro pagine (app/dashboard/calendario).
+  { label: 'Calendario', href: '/dashboard/calendario', icon: '▦', always: true },
   { label: 'Distinte', icon: '≡', sub: [
     { label: 'Crea Distinta', href: '/dashboard/distinte/crea', perm: 'admin.shippinglists.create', agenteOk: true },
     { label: 'Elenco Distinte', href: '/dashboard/distinte/elenco', perm: 'admin.shippinglists.index', agenteOk: true },

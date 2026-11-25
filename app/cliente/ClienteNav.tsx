@@ -40,6 +40,7 @@ export const NAV_BASE: NavItem[] = [
       { label: 'Elenco Ritiri', href: '/cliente/ritiri' },
     ],
   },
+  { id: 'calendario', label: 'Calendario', icon: '▦', href: '/cliente/calendario' },
   { id: 'resi', label: 'Resi', icon: '↺', href: '/cliente/resi/distinte' },
   // 'Fatture' nascosta dal menu finché resta uno stub "Sezione in arrivo" (audit #103):
   // era un vicolo cieco per i clienti. Ripristinare la voce quando la sezione esiste davvero.

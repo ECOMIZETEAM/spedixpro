@@ -4,4 +4,6 @@
 export const PAGINE_PROVA = new Set([
   '/dashboard', '/dashboard/spedizioni', '/dashboard/spedizioni/nuova',
   '/cliente/dashboard', '/cliente/spedizioni', '/cliente/spedizioni/nuova',
+  // il calendario (25/11) nasce già nella grafica nuova
+  '/dashboard/calendario', '/cliente/calendario',
 ])
