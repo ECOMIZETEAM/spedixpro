@@ -111,6 +111,14 @@ export function capNotoInArchivio(cap: string): boolean {
   return PER_CAP.has((cap || '').trim())
 }
 
+// I nomi (comuni e frazioni) che l'archivio conosce per un CAP, in ordine alfabetico. Servono a chi
+// legge l'elenco zone: una riga "tutto il CAP 30126" non dice da sola che dentro ci sono il Lido,
+// Alberoni e Pellestrina — ed e' proprio da li' che nascono le domande al master.
+export function nomiArchivioPerCap(cap: string): string[] {
+  const e = PER_CAP.get((cap || '').trim())
+  return e ? Array.from(e.nomi).sort((a, b) => a.localeCompare(b)) : []
+}
+
 // Risultato: ok=true se la città combacia con un nome noto per quel CAP (o se non è validabile:
 // estero, CAP sconosciuto, dati mancanti → NON si blocca). `noti` = nomi ufficiali per quel CAP,
 // per il messaggio d'errore ("selezionane uno").

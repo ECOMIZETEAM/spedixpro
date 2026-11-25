@@ -129,6 +129,8 @@ export async function GET() {
         iva: ivaDelCorriere(iva, cid),
         iva_inclusa: siNoVecchio(ivaDelCorriere(iva, cid)),
         fattore: c.fattore,
+        // Serve alla scheda "Elenco zone" (GET /api/cliente/zone?corriere=…), che rifa' il controllo di perimetro.
+        corriere_id: cid,
         zone: Array.from(c.zoneSet).sort(ordZona as any),
         zoneMittente: Array.from(c.zoneMittenteSet),
         fasce: Array.from(c.fasce.values()).sort((a: any, b: any) => (a.tipo === 'oltre' ? 1 : 0) - (b.tipo === 'oltre' ? 1 : 0) || a.peso_max - b.peso_max),

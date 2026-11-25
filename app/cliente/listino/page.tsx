@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import SupplementiMulticollo from '@/app/components/SupplementiMulticollo'
 import { normalizzaSupplementiMulticollo } from '@/lib/multicollo-zone'
 import { PrezziIva } from '@/app/components/IvaPrezzo'
+import ZoneContratto from './ZoneContratto'
 
 const eur = (x: number) => Number(x) > 0 ? '€ ' + Number(x).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const pct = (x: number) => Number(x) > 0 ? Number(x).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%' : '—'
@@ -30,6 +31,9 @@ function iniziali(nome: string): string {
 
 const TABS: [string, string][] = [
   ['pesi', 'Pesi / Zone'],
+  // Cosa c'e' dentro ogni zona (CAP e localita'), piu' la verifica di un indirizzo col calcolo vero:
+  // senza, il cliente lo chiedeva al master (25/11/2026, elenchi zone a mano per Pedana click).
+  ['zone', 'Elenco zone'],
   ['assicurazione', 'Assicurazione'],
   ['contrassegno', 'Contrassegni'],
   ['accessorio', 'Servizi accessori'],
@@ -104,6 +108,8 @@ export default function ClienteListinoPage() {
                     <div style={{ padding: tab === 'pesi' ? 0 : '14px 16px', overflowX: 'auto' }}>
                       {tab === 'pesi' ? (
                         <GrigliaPesi zone={c.zone || []} fasce={c.fasce || []} zoneMittente={c.zoneMittente || []} />
+                      ) : tab === 'zone' ? (
+                        c.corriere_id ? <ZoneContratto corriereId={c.corriere_id} /> : null
                       ) : (
                         <>
                           {tab === 'minimo_collo' && c.multicollo && <div style={{ margin: '-14px -16px 14px' }}><GrigliaPesi zone={c.multicollo.zone || []} fasce={c.multicollo.fasce || []} zoneMittente={[]} /></div>}
