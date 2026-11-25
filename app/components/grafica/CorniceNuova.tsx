@@ -359,14 +359,16 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
             <kbd>⌘K</kbd>
           </button>
           <span className="gx-spazio" />
-          {credito?.mostra && credito.conti > 1 && <ContiTendina conti={credito.conti} compatto={isMobile} aspetto="nuova" />}
-          {credito?.mostra && !(credito.conti > 1) && (
-            <a className={'gx-tasto gx-vetro gx-pillola gx-credito' + (Number(credito.rete) < 0 ? ' gx-credito--meno' : '')} href={cliente ? '/cliente/movimenti' : '/dashboard/movimenti'} title="Il tuo credito — vai ai movimenti">
-              <Icona id="i-carta" />{!isMobile && <small>{credito.reteLabel || 'Credito'}</small>}
-              <b>€ {Number(credito.rete || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
-            </a>
-          )}
+          {/* i conti nello stesso gruppo di SMS e Supporto (Lorenzo 25/11: «I tuoi conti ha una forma e un colore diverso
+              rispetto a sms e supporto»): stessa pillola, stessa scritta */}
           <div className="gx-gruppo-tasti gx-vetro gx-pillola">
+            {credito?.mostra && credito.conti > 1 && <ContiTendina conti={credito.conti} compatto={isMobile} aspetto="nuova" />}
+            {credito?.mostra && !(credito.conti > 1) && (
+              <a className={'gx-tasto gx-credito' + (Number(credito.rete) < 0 ? ' gx-credito--meno' : '')} href={cliente ? '/cliente/movimenti' : '/dashboard/movimenti'} title="Il tuo credito — vai ai movimenti">
+                <Icona id="i-carta" />{!isMobile && <span>{credito.reteLabel || 'Credito'}</span>}
+                <b>€ {Number(credito.rete || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+              </a>
+            )}
             {mostraSms && <a className="gx-tasto" href="/dashboard/reports/storico-sms" title={app ? 'SMS' : 'SMS — credito e acquisto'}><Icona id="i-messaggio" />{!isMobile && <span className="gx-solo-largo">SMS</span>}</a>}
             <SupportoButton compatto={isMobile} aspetto="nuova" />
           </div>

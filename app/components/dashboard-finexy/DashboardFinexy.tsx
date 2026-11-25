@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import SmsFinexy from './SmsFinexy'
+import ContiFinexy from './ContiFinexy'
 import ResiReteWidget from '@/app/components/ResiReteWidget'
 import DestinazioniWidget from '@/app/components/DestinazioniWidget'
 import { CreditiDaRecuperare, LaTuaRete, LavoroInCorso, MesePerMese, StatiTrentaGiorni, type DatiDashboard } from './SezioniFinexy'
@@ -14,9 +15,11 @@ import './dashboard-finexy.css'
 // il menu a sinistra non cambia. Il 25/11 Lorenzo: «non interessa che sia 1:1 dello screen, deve essere funzionale...
 // nella vecchia versione ci stavano tanti blocchi, ora non se li ritrovano piu'». Quindi il disegno e' quello del
 // riferimento, ma dentro ci sono TUTTI i riquadri della dashboard di oggi, sistemati per uso:
-//   credito e conti | i quattro numeri di oggi | spedizioni per settimana
+//   le spedizioni del mese, in cima a tutto (Lorenzo 25/11: «il totale delle spedizioni fatte questo mese deve stare
+//   sopra a tutto»), col piano e il ritmo
+//   i tuoi conti (tutti) | i quattro numeri di oggi | spedizioni per settimana
 //   il lavoro in corso (le altre caselle di oggi, ognuna col suo periodo)
-//   piano + corrieri | destinazioni (larga: Italia, Europa, Mondo)
+//   corrieri | destinazioni (larga: Italia, Europa, Mondo)
 //   la tua rete | gli stati degli ultimi 30 giorni | resi della rete
 //   mese per mese
 //   (gli SMS stanno in piccolo accanto al saluto)
@@ -32,7 +35,6 @@ import './dashboard-finexy.css'
 type Dashboard = DatiDashboard & {
   ruolo?: string
   masterNome?: string
-  creditoMaster?: { rete?: number; proprio?: number; reteLabel?: string | null }
   codDaRimettere?: number; inTransito?: number; inGiacenza?: number
   spedizioniMese?: number; limiteMese?: number; illimitato?: boolean
   clientiTotali?: number; totClienti?: number; sottomaster?: number
@@ -90,9 +92,6 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
     return () => { vivo = false }
   }, [])
 
-  const rete = Number(data.creditoMaster?.rete || 0)
-  const proprio = Number(data.creditoMaster?.proprio || 0)
-  const nomeRete = (data.creditoMaster?.reteLabel || '').trim()
   const aScalare = plancia?.aScalare ?? true
   const giornoSettimana = new Intl.DateTimeFormat('it-IT', { weekday: 'long', timeZone: 'Europe/Rome' }).format(new Date())
   const meseNome = new Intl.DateTimeFormat('it-IT', { month: 'long', timeZone: 'Europe/Rome' }).format(new Date())
@@ -113,7 +112,18 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
   const W = misura.w, H = misura.h, X0 = 30, Y0 = 14, Y1 = H - 22, slot = (W - X0) / 8, larga = Math.min(slot * 0.5, 28)
   const y = (v: number) => Y1 - v / massimo * (Y1 - Y0)
 
-  const usoPiano = data.illimitato || !data.limiteMese ? 0 : Math.min(100, Number(data.spedizioniMese || 0) / Number(data.limiteMese) * 100)
+  // Le spedizioni del mese: lo stesso numero della casella nera della dashboard di oggi («Create a nov 4.645 / 100.000»),
+  // tutta la rete, col limite del piano. Il ritmo è la media dei giorni passati (oggi compreso) e la stima di fine mese
+  // è quella media per i giorni del mese: Wave il 25/11 era a 83.242 su 100.000, a questo ritmo 99.890.
+  const spedMese = Number(data.spedizioniMese || 0)
+  const limite = Number(data.limiteMese || 0)
+  const conLimite = !data.illimitato && limite > 0
+  const usoPiano = conLimite ? Math.min(100, spedMese / limite * 100) : 0
+  const [annoR, meseR, giornoR] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).split('-').map(Number)
+  const giorniDelMese = new Date(Date.UTC(annoR, meseR, 0)).getUTCDate()
+  const alGiorno = giornoR > 0 ? spedMese / giornoR : 0
+  const stima = Math.round(alGiorno * giorniDelMese)
+  const oltre = conLimite && stima > limite
 
   return (
     <div className="fx">
@@ -125,58 +135,27 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
         <SmsFinexy />
       </div>
 
+      {/* LE SPEDIZIONI DEL MESE, in cima a tutto */}
+      <section className="fx-mese">
+        <div className="fx-mese-totale">
+          <span>Spedizioni di {meseNome}</span>
+          <b><Conta n={spedMese} formato={x => intero(Math.round(x))} /></b>
+          <small>tutta la rete, dal primo del mese</small>
+        </div>
+        <div className="fx-mese-piano">
+          <div className="fx-mese-riga"><span>Il tuo piano</span><b>{conLimite ? `${usoPiano.toLocaleString('it-IT', { maximumFractionDigits: usoPiano < 10 ? 1 : 0 })}% di ${intero(limite)}` : 'illimitato'}</b></div>
+          <div className="fx-mese-barra"><i style={{ width: `${conLimite ? Math.max(usoPiano, 1) : 100}%` }} /></div>
+          <div className="fx-mese-riga"><small>{conLimite ? (spedMese >= limite ? 'limite raggiunto' : `ne restano ${intero(limite - spedMese)}`) : 'nessun limite di spedizioni'}</small></div>
+        </div>
+        <div className="fx-mese-ritmo">
+          <div><span>Al giorno</span><b>{intero(Math.round(alGiorno))}</b><small>media di {giornoR} {giornoR === 1 ? 'giorno' : 'giorni'}</small></div>
+          <div><span>A fine mese</span><b>{intero(stima)}</b>{oltre ? <small className="fx-mese-oltre">oltre il piano di {intero(stima - limite)}</small> : <small>a questo ritmo</small>}</div>
+        </div>
+      </section>
+
       <div className="fx-griglia">
-        {/* CREDITO E CONTI */}
-        <section className="fx-scheda">
-          <div className="fx-testa">
-            <span className="fx-etichetta">Credito</span>
-            {nomeRete && <span className="fx-pillola" title={`Il conto che hai presso ${nomeRete}`}><i>{nomeRete.slice(0, 1).toUpperCase()}</i>{nomeRete}</span>}
-          </div>
-          <div className={`fx-saldo${aScalare && rete < 0 ? ' fx-saldo--meno' : ''}`}><Conta n={rete} formato={euro} /></div>
-          {/* A zero non e' «esaurito»: chi spedisce sui contratti suoi (Wave il 24/11/2026: rete 0, 5.178 spedizioni
-              in giornata) ha il conto di rete fermo a zero e lavora lo stesso. */}
-          <div className="fx-nota">
-            {aScalare
-              ? <><span className={`fx-chip ${rete > 0 ? 'fx-chip--bene' : rete < 0 ? 'fx-chip--male' : 'fx-chip--neutro'}`}>{rete > 0 ? 'a credito' : rete < 0 ? 'sotto zero' : 'a zero'}</span>conto a scalare</>
-              : <><span className="fx-chip fx-chip--neutro">a fattura</span>lo saldi con la fattura</>}
-          </div>
-          <div className="fx-tasti">
-            <a className="fx-tasto fx-tasto--nero" href="/dashboard/movimenti"><Icona d="M4 6h16M4 12h16M4 18h10" />Movimenti</a>
-            <a className="fx-tasto fx-tasto--chiaro" href="/dashboard/fatture"><Icona d="M7 3h10a2 2 0 012 2v16l-3-2-3 2-3-2-3 2V5a2 2 0 012-2zM9 8h6M9 12h6" />Fatture</a>
-          </div>
-          <div className="fx-conti">
-            <div className="fx-conti-testa">I tuoi conti</div>
-            <div className="fx-conti-righe">
-              <div className="fx-conto">
-                <div className="fx-conto-nome" title={nomeRete ? `Il conto presso ${nomeRete}` : undefined}><b style={{ background: 'var(--fx-arancio)' }} />Rete</div>
-                <div className="fx-conto-cifra">{euro(rete)}</div>
-                <div className="fx-conto-sotto">conto di rete</div>
-                <div className={`fx-conto-stato${aScalare && rete > 0 ? ' fx-conto-stato--bene' : aScalare && rete < 0 ? ' fx-conto-stato--male' : ''}`}>{aScalare ? 'a scalare' : 'a fattura'}</div>
-              </div>
-              {proprio !== 0 ? (
-                <div className="fx-conto">
-                  <div className="fx-conto-nome"><b style={{ background: 'var(--fx-nero)' }} />Proprio</div>
-                  <div className="fx-conto-cifra">{euro(proprio)}</div>
-                  <div className="fx-conto-sotto">contratti tuoi</div>
-                  <div className="fx-conto-stato">&nbsp;</div>
-                </div>
-              ) : (
-                <div className="fx-conto">
-                  <div className="fx-conto-nome"><b style={{ background: 'var(--fx-nero)' }} />Rete clienti</div>
-                  <div className="fx-conto-cifra">{intero(Number(data.clientiTotali ?? data.totClienti ?? 0))} clienti</div>
-                  <div className="fx-conto-sotto">{intero(Number(data.sottomaster || 0))} sotto-master</div>
-                  <div className="fx-conto-stato">&nbsp;</div>
-                </div>
-              )}
-              <a className="fx-conto" href="/dashboard/contrassegni">
-                <div className="fx-conto-nome"><b style={{ background: 'var(--fx-bene)' }} />Contrassegni</div>
-                <div className="fx-conto-cifra">{euro(Number(data.codDaRimettere || 0))}</div>
-                <div className="fx-conto-sotto" title="Contrassegni incassati sui pacchi consegnati, da rimettere ai clienti">incassati</div>
-                <div className={`fx-conto-stato${Number(data.codDaRimettere || 0) > 0 ? ' fx-conto-stato--arancio' : ''}`}>{Number(data.codDaRimettere || 0) > 0 ? 'da rimettere' : 'niente da rimettere'}</div>
-              </a>
-            </div>
-          </div>
-        </section>
+        {/* I CONTI: tutti, gli stessi della tendina in alto */}
+        <ContiFinexy aScalare={aScalare} codDaRimettere={Number(data.codDaRimettere || 0)} />
 
         {/* I QUATTRO NUMERI DI OGGI */}
         <section className="fx-scheda" style={{ padding: 0 }}>
@@ -250,16 +229,6 @@ export default function DashboardFinexy({ data }: { data: Dashboard }) {
         <LavoroInCorso data={data} />
 
         <div className="fx-colonna">
-          {/* IL PIANO */}
-          <section className="fx-scheda">
-            <h2 style={{ margin: 0, fontSize: 13.5, fontWeight: 500 }}>Il tuo piano a {meseNome}</h2>
-            <div className="fx-piano-barra"><div style={{ width: `${data.illimitato ? 100 : usoPiano}%`, background: data.illimitato ? 'var(--fx-nero)' : undefined }} /></div>
-            <div className="fx-piano-numeri">
-              <span><b>{intero(Number(data.spedizioniMese || 0))}</b>spedizioni create, su</span>
-              <span>{data.illimitato ? 'illimitate' : intero(Number(data.limiteMese || 0))}</span>
-            </div>
-          </section>
-
           {/* I CORRIERI DEL MESE */}
           <section className="fx-scheda" style={{ overflow: 'hidden' }}>
             <div className="fx-testa">

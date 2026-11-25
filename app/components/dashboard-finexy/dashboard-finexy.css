@@ -39,10 +39,6 @@
 .fx-nota { display: flex; align-items: center; gap: 7px; margin-top: 8px; font-size: 11.5px; color: var(--fx-grigio); }
 
 /* Credito */
-.fx-pillola { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px; border-radius: 999px; box-shadow: 0 0 0 1px var(--fx-filo); font-size: 11.5px; color: var(--fx-grigio); white-space: nowrap; max-width: 60%; overflow: hidden; }
-.fx-pillola i { width: 15px; height: 15px; border-radius: 50%; background: var(--fx-arancio); color: #fff; font-style: normal; font-size: 9px; font-weight: 700; display: grid; place-items: center; flex-shrink: 0; }
-.fx-saldo { margin-top: 10px; font-size: 24px; font-weight: 500; letter-spacing: -0.3px; }
-.fx-saldo--meno { color: var(--fx-male); }
 .fx-tasti { display: grid; grid-template-columns: 1.07fr 1fr; gap: 18px; margin-top: 14px; }
 .fx-tasto { height: 40px; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13.5px; font-weight: 500; border: 0; cursor: pointer; }
 .fx-tasto svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
@@ -51,17 +47,60 @@
 .fx a.fx-tasto--nero, .fx a.fx-tasto--nero:visited { color: #fff; }
 .fx-tasto--chiaro { background: #fff; color: var(--fx-testo); box-shadow: 0 0 0 1px #EFEFEF, 0 2px 8px rgba(0,0,0,.04); }
 .fx-tasto:hover { filter: brightness(1.06); }
-.fx-conti { margin-top: 20px; background: var(--fx-pannello); border-radius: 11px; padding: 10px; }
-.fx-conti-testa { font-size: 12px; font-weight: 500; padding: 0 2px 9px; }
-.fx-conti-testa span { color: var(--fx-grigio); font-weight: 400; }
-.fx-conti-righe { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.fx-conto { background: #fff; border-radius: 9px; padding: 9px; box-shadow: 0 1px 4px rgba(0,0,0,.045); min-width: 0; }
-.fx-conto-nome { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fx-conto-nome b { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.fx-conto-cifra { margin-top: 11px; font-size: 13px; font-weight: 600; white-space: nowrap; }
-.fx-conto-sotto { margin-top: 4px; font-size: 10.5px; color: var(--fx-grigio); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fx-conto-stato { margin-top: 6px; font-size: 10.5px; color: var(--fx-grigio); }
-.fx-conto-stato--arancio { color: #C25427; } .fx-conto-stato--bene { color: var(--fx-bene); } .fx-conto-stato--male { color: var(--fx-male); }
+/* I tuoi conti: uno per riga (ContiFinexy). I conti da cui si spende con la cifra grande; contratti propri e commissioni
+   in piccolo; la lista scorre dentro la scheda se i conti sono tanti (QUICK ne ha 23), la riga non si allunga */
+.fx-conti { display: flex; flex-direction: column; }
+.fx-conti .fx-testa h2 { font-size: 17px; }
+.fx-conti-lista { margin-top: 10px; max-height: 214px; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px; scrollbar-width: thin; }
+.fx-conto { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 10px 12px; border-radius: 11px; background: var(--fx-riquadro); cursor: pointer; transition: background .15s ease; }
+.fx-conto:hover { background: #EFEFEF; }
+.fx-conto:focus-visible { outline: 2px solid var(--fx-arancio); outline-offset: 1px; }
+.fx-conto-nome { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fx-conto-nome b { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-conto-nome small { font-size: 11px; color: var(--fx-grigio); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-conto-cifra { flex-shrink: 0; font-size: 19px; font-weight: 500; letter-spacing: -0.3px; white-space: nowrap; }
+.fx-conto-cifra--male { color: var(--fx-male); }
+.fx-conto-cifra--zero { color: var(--fx-grigio); }
+.fx-conti-altri { display: flex; flex-direction: column; padding: 4px; border-radius: 11px; box-shadow: inset 0 0 0 1px var(--fx-filo); }
+.fx-conto-riga { all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 7px 8px; border-radius: 8px; font-size: 12.5px; color: var(--fx-grigio); cursor: pointer; }
+.fx-conto-riga:hover { background: var(--fx-riquadro); color: var(--fx-testo); }
+.fx-conto-riga:focus-visible { outline: 2px solid var(--fx-arancio); outline-offset: -2px; }
+.fx-conto-riga span { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-conto-riga span i { font-style: normal; display: inline-block; width: 10px; flex-shrink: 0; text-align: center; transition: transform .2s ease; }
+.fx-conto-riga span i.fx-giu { transform: rotate(90deg); }
+.fx-conto-riga b { font-weight: 600; color: var(--fx-testo); white-space: nowrap; }
+.fx-conti-propri { display: flex; flex-direction: column; padding: 0 0 4px 18px; }
+.fx-conti-propri a { display: flex; justify-content: space-between; gap: 12px; padding: 5px 8px; border-radius: 8px; font-size: 12px; color: var(--fx-grigio); }
+.fx-conti-propri a:hover { background: var(--fx-riquadro); color: var(--fx-testo); }
+.fx-conti-propri a span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-conti-propri a b { font-weight: 600; white-space: nowrap; }
+.fx-conti-cod { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding: 12px 2px 0; font-size: 12.5px; color: var(--fx-grigio); }
+.fx-conti-cod span { display: flex; align-items: center; gap: 7px; }
+.fx-conti-cod span b { width: 9px; height: 9px; border-radius: 50%; background: var(--fx-bene); }
+.fx-conti-cod strong { color: var(--fx-testo); font-size: 13.5px; font-weight: 600; }
+.fx-conti-cod:hover strong { text-decoration: underline; }
+.fx-conti .fx-tasti { margin-top: 12px; }
+
+/* LE SPEDIZIONI DEL MESE, in cima a tutto: una fascia nera (come la casella del mese nella dashboard di oggi) col
+   totale, il piano e il ritmo */
+.fx-mese { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.4fr) minmax(0, 1fr); gap: 34px; align-items: center;
+  padding: 20px 26px; border-radius: 15px; color: #fff; background: linear-gradient(160deg, #2A2A2A, #0E0E0E); box-shadow: 0 10px 30px -14px rgba(0,0,0,.45); }
+.fx-mese span { font-size: 13px; color: rgba(255,255,255,.66); }
+.fx-mese small { font-size: 11.5px; color: rgba(255,255,255,.55); }
+.fx-mese-totale { display: flex; flex-direction: column; gap: 4px; }
+.fx-mese-totale b { font-size: 40px; font-weight: 500; letter-spacing: -1px; line-height: 1.05; }
+.fx-mese-piano { display: flex; flex-direction: column; gap: 9px; }
+.fx-mese-riga { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.fx-mese-riga b { font-size: 14px; font-weight: 600; }
+.fx-mese-barra { height: 10px; border-radius: 10px; background: rgba(255,255,255,.12); overflow: hidden; }
+.fx-mese-barra i { display: block; height: 100%; border-radius: 10px; background: linear-gradient(90deg, #F98F64, #EA5326); box-shadow: 0 0 14px rgba(234,83,38,.5);
+  animation: fx-allunga 1.1s cubic-bezier(.2, .8, .2, 1) both .35s; }
+.fx-mese-ritmo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding-left: 26px; border-left: 1px solid rgba(255,255,255,.14); }
+.fx-mese-ritmo div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fx-mese-ritmo b { font-size: 22px; font-weight: 500; letter-spacing: -0.4px; }
+.fx-mese-oltre { color: #FF9C7A !important; font-weight: 600; }
 
 /* Quattro numeri */
 .fx-numeri { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; height: 100%; padding: 10px; }
@@ -95,10 +134,6 @@
 .fx-barra-a { fill: url(#fx-righe); }
 
 /* Piano */
-.fx-piano-barra { margin-top: 30px; height: 9px; border-radius: 9px; background: #F2F2F2; overflow: hidden; }
-.fx-piano-barra div { height: 100%; min-width: 9px; border-radius: 9px; background: #E75132; }
-.fx-piano-numeri { display: flex; justify-content: space-between; margin-top: 10px; font-size: 11.5px; color: var(--fx-grigio); }
-.fx-piano-numeri b { color: var(--fx-testo); font-weight: 600; margin-right: 4px; }
 
 /* Corrieri */
 .fx-carte { position: relative; display: grid; grid-template-columns: 1.46fr 1fr; gap: 11px; margin: 16px -15px 0 0; overflow: hidden; }
@@ -290,7 +325,7 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
 .fx-griglia > :nth-child(n+11) { animation-delay: 540ms; }
 .fx-barra3d { transform-box: fill-box; transform-origin: 50% 100%; animation: fx-cresce .9s cubic-bezier(.2, .8, .2, 1) both; }
 .fx-appare { animation: fx-appare .5s ease both; }
-.fx-barretta i, .fx-piano-barra div { animation: fx-allunga 1.1s cubic-bezier(.2, .8, .2, 1) both .35s; }
+.fx-barretta i { animation: fx-allunga 1.1s cubic-bezier(.2, .8, .2, 1) both .35s; }
 .fx-ciambella-svg { animation: fx-gira 1s cubic-bezier(.2, .8, .2, 1) both .25s; }
 .fx-mappa-plastico { animation: fx-appoggia 1s cubic-bezier(.2, .8, .2, 1) both .2s; }
 .fx-mappa-globo { animation: fx-globo .9s cubic-bezier(.2, .8, .2, 1) both; }
@@ -313,11 +348,13 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
   --fx-filo: #36363A; --fx-nero: #ECECEC; --fx-bene: #4CC37A; --fx-bene-tinta: rgba(76,195,122,.14); --fx-male: #FF6B6B; --fx-male-tinta: rgba(255,107,107,.14);
   --fx-ombra: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.35);
 }
-.gx[data-luce="notte"] .fx-conto, .gx[data-luce="notte"] .fx-tasto--chiaro, .gx[data-luce="notte"] .fx-numero-testa i { background: var(--fx-riquadro); color: var(--fx-testo); }
+.gx[data-luce="notte"] .fx-tasto--chiaro, .gx[data-luce="notte"] .fx-numero-testa i { background: var(--fx-riquadro); color: var(--fx-testo); }
 .gx[data-luce="notte"] .fx-numero--pieno .fx-numero-testa i { background: rgba(255,255,255,.2); }
 .gx[data-luce="notte"] .fx-tasto--chiaro { box-shadow: 0 0 0 1px var(--fx-filo); }
 .gx[data-luce="notte"] .fx-chip--neutro { background: #34343A; color: #C9C9CE; }
-.gx[data-luce="notte"] .fx-piano-barra, .gx[data-luce="notte"] .fx-barretta { background: #34343A; }
+.gx[data-luce="notte"] .fx-conto:hover { background: #333338; }
+.gx[data-luce="notte"] .fx-mese { background: linear-gradient(160deg, #2E2E32, #1A1A1D); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.gx[data-luce="notte"] .fx-barretta { background: #34343A; }
 .gx[data-luce="notte"] .fx-tasto--nero { background: linear-gradient(180deg, #4A4A4F, #222225); }
 .gx[data-luce="notte"] .fx-s-nero-a { stop-color: #F7F5F2; }
 .gx[data-luce="notte"] .fx-s-nero-b { stop-color: #C9C4BE; }
@@ -338,6 +375,8 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
   .fx-dest-corpo { grid-template-columns: minmax(0, 1fr); }
   .fx-grafico-scheda { grid-column: span 2; }
   .fx-largo { grid-column: span 2; }
+  .fx-mese { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+  .fx-mese-ritmo { grid-column: 1 / -1; padding-left: 0; border-left: 0; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.14); }
 }
 @media (max-width: 700px) {
   .fx-titolo h1 { font-size: 26px; }
@@ -349,4 +388,6 @@ a.fx-riga:hover { background: #F7F7F7; border-radius: 8px; }
   .fx-ciambella svg { align-self: center; }
   .fx-sezione h2 { font-size: 19px; }
   .fx-cerca { width: 100%; }
+  .fx-mese { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 18px; }
+  .fx-mese-totale b { font-size: 34px; }
 }

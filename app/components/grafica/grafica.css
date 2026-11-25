@@ -188,7 +188,9 @@
 .gx-aspetto button:focus-visible { outline: 2px solid var(--gx-accento); }
 .gx-credito b { font-weight: 500; color: var(--gx-inchiostro); }
 .gx-credito--meno b { color: var(--gx-problema); }
-.gx-credito small { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--gx-attenuato); }
+/* il numero dei conti accanto a «I tuoi conti», nel gruppo di SMS e Supporto */
+.gx-conti-n { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center; box-sizing: border-box;
+  background: var(--gx-incavo); box-shadow: inset 0 0 0 1px var(--gx-filo); font-size: 12px; font-weight: 600; color: var(--gx-inchiostro); }
 .gx-avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 13px; font-weight: 500; color: #fff; background: linear-gradient(150deg, #5B7CFA, #2B3FA8); }
 .gx-segno { position: relative; }
 .gx-segno__pallino { position: absolute; top: 7px; right: 8px; min-width: 8px; height: 8px; border-radius: 999px; background: var(--gx-pallino); }

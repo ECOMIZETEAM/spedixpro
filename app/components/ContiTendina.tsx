@@ -75,8 +75,9 @@ export default function ContiTendina({ conti, compatto = false, aspetto }: { con
   return (
     <div ref={box} style={{ position: 'relative' }}>
       {aspetto === 'nuova' ? (
-      <button onClick={() => setAperto(a => !a)} aria-haspopup="menu" aria-expanded={aperto} title="I tuoi conti: saldi e movimenti" className="gx-tasto gx-vetro gx-pillola gx-credito">
-        <Icona id="i-carta" />{!compatto && <small>I tuoi conti</small>}<b>{conti}</b>
+      // dentro il gruppo di SMS e Supporto (CorniceNuova): un tasto come i loro, il numero dei conti in un tondino
+      <button onClick={() => setAperto(a => !a)} aria-haspopup="menu" aria-expanded={aperto} title="I tuoi conti: saldi e movimenti" className="gx-tasto">
+        <Icona id="i-carta" />{!compatto && <span>I tuoi conti</span>}<b className="gx-conti-n">{conti}</b>
       </button>
       ) : (
       <button onClick={() => setAperto(a => !a)} aria-haspopup="menu" aria-expanded={aperto}
