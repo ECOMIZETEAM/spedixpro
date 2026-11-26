@@ -113,6 +113,47 @@ export type EsitoRipesatura = {
 
 const arrotonda = (n: number) => Math.round(n * 100) / 100
 
+// ── IL TOTALE DEL FORNITORE, RIDIVISO NEI COLLI, SUI CONTRATTI DA 2 COLLI IN SU ──
+// Il file di SpediamoPro porta UN collo col peso tassato di tutta la spedizione (lib/ripesature, «col solo peso
+// tassato (UPS)»). Su un contratto che si usa solo da 2 colli in su (colli_min: UPS Italia Multicollo, UPS Europa
+// Multicollo) un collo solo non ha prezzo a nessun livello — la tabella multicollo entra solo coi piu' colli — e la
+// rettifica usciva «non calcolabile», da fare a mano.
+// La tabella multicollo guarda solo il peso totale (somma collo per collo, arrotondata al passo del contratto) e il
+// numero dei colli: se il totale del fornitore si ridivide nei colli della spedizione a multipli del passo, la somma
+// torna identica e i colli sono quelli veri. Si tocca solo questo caso: collo unico senza misure (con le misure il
+// volume sarebbe di un collo solo), spedizione con piu' colli, contratto con colli_min da 2 in su. Tutti gli altri
+// contratti (BRT compreso: li' il totale in un collo e' il conto giusto) restano come prima.
+export function ridividiTotaleNeiColli(colli: Ripesatura['colli'], nColli: number, passo = 0.5): Ripesatura['colli'] {
+  const c = colli[0]
+  const s = passo > 0 ? passo : 0.5
+  const unita = Math.ceil((Number(c?.peso) || 0) / s - 1e-9)
+  if (colli.length !== 1 || !(nColli > 1) || !(unita > 0)) return colli
+  const reale = Number(c.pesoReale) || 0
+  return Array.from({ length: nColli }, (_, i) => ({
+    ...c, lunghezza: 0, larghezza: 0, altezza: 0,
+    peso: (Math.floor(unita / nColli) + (i < unita % nColli ? 1 : 0)) * s,
+    ...(reale > 0 ? { pesoReale: reale / nColli } : {}),
+  }))
+}
+
+// Il contratto della spedizione si usa da 2 colli in su? Le regole stanno sul contratto del detentore (come in
+// regoleMulticollo). Lettura fallita: si lascia il collo unico, cioe' la rettifica resta da fare a mano come prima.
+async function colliPerContrattoDaPiuColli(admin: any, s: any, colli: Ripesatura['colli']): Promise<Ripesatura['colli']> {
+  const n = Number(s?.colli) || 1
+  const c = colli[0]
+  if (colli.length !== 1 || n < 2 || (c?.lunghezza > 0 && c?.larghezza > 0 && c?.altezza > 0)) return colli
+  const { data: corr, error: e1 } = await admin.from('corrieri').select('id,contratto_id,settings').eq('id', s.corriere_id).maybeSingle()
+  if (e1) { console.error('[RETTIFICHE] contratto non letto', s.corriere_id, e1.message); return colli }
+  let sett = corr?.settings || {}
+  if (corr?.contratto_id && corr.contratto_id !== corr.id) {
+    const { data: det, error: e2 } = await admin.from('corrieri').select('settings').eq('id', corr.contratto_id).maybeSingle()
+    if (e2) { console.error('[RETTIFICHE] regole del contratto non lette', s.corriere_id, e2.message); return colli }
+    sett = det?.settings || {}
+  }
+  if (!((Number(sett.colli_min) || 0) >= 2)) return colli
+  return ridividiTotaleNeiColli(colli, n, Number(sett.multicollo_arrotondamento_kg) || 0.5)
+}
+
 // ── QUANTO HA PAGATO OGNI LIVELLO PER IL VIAGGIO DI UN PACCO ──
 // Una regola sola, usata dal motore e da chi mostra al master quanto ha incassato e speso su un pacco
 // (Rettifica Costi → «non girate sotto»): se i due contassero in modo diverso, la pagina direbbe un margine
@@ -274,7 +315,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
 
     // Il collo come lo ha misurato il fornitore, nella forma che vuole il motore dei prezzi. Il peso reale del
     // fornitore (solo se ha scritto i pesi senza misure) segue il collo: lo usa la sponda (lib/pricing pesoRealeSponda).
-    const packages = r.colli.map(c => ({
+    const colliR = await colliPerContrattoDaPiuColli(admin, s, r.colli)
+    const packages = colliR.map(c => ({
       weight: c.peso, length: c.lunghezza, width: c.larghezza, height: c.altezza,
       ...(Number(c.pesoReale) > 0 ? { pesoRealeFornitore: Number(c.pesoReale) } : {}),
     }))
