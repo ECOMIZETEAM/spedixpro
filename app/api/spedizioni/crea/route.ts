@@ -1061,6 +1061,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
             mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
             numero: numero, corriere: corriereRecord.nome_contratto, notificaDest,
             spedizioneId: inserted?.id || null,
+            masterId, // marchio del master che vende al cliente; se e' in prova, niente email/SMS reali
           })
         } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
       })
@@ -1402,6 +1403,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
             mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
             numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
             spedizioneId: inserted?.id || null,
+            masterId, // marchio del master che vende al cliente; se e' in prova, niente email/SMS reali
           })
         } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
       })
@@ -1892,6 +1894,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
                   mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
                   numero: w.numero, corriere: corriereRecord.nome_contratto, notificaDest,
                   spedizioneId: spedIdBg,
+                  masterId, // marchio del master che vende al cliente; se e' in prova, niente email/SMS reali
                 })
               } catch (e) { console.error('[CREA][EASYPARCEL] mail destinatario dopo il completamento:', e) }
             }
@@ -1916,6 +1919,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
             mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
             numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
             spedizioneId: inserted?.id || null,
+            masterId, // marchio del master che vende al cliente; se e' in prova, niente email/SMS reali
           })
         } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
       })
@@ -2075,6 +2079,9 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
           mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
           numero: numeroFinale, corriere: corriereRecord.nome_contratto, notificaDest,
           masterId, // se il master è demo, niente email/SMS reali
+          // Senza la spedizione la mail partiva senza il pulsante per seguirla, senza SMS e senza il
+          // controllo sugli ordini del collegamento Amazon (a quei compratori scrive solo Amazon).
+          spedizioneId: inserted?.id || null,
         })
       } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
     })

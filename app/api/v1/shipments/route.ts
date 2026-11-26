@@ -923,6 +923,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         mittNome: body.shipFrom?.name, destNome: body.shipTo?.name, destCitta: body.shipTo?.city,
         numero, corriere: corriere.nome_contratto, notificaDest,
         spedizioneId: inserted?.id || null,
+        masterId, // marchio del master che vende al cliente; se e' in prova, niente email/SMS reali
       })
     } catch { /* best-effort */ }
   })
