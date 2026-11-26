@@ -64,9 +64,11 @@ function wrap(inner: string): string {
 
 // Wrap BRANDIZZATO col logo/colore del MASTER (fallback MoovExpress). Non tocca wrap() (le altre email).
 function wrapBrand(inner: string, b: { logo?: string | null; colore?: string | null; nome?: string | null }): string {
-  const colore = b.colore || '#1a1a1a'
+  // Logo e colore li scrive il master e finiscono dentro un attributo: una virgoletta ne uscirebbe.
+  // Il colore si accetta solo esadecimale (al 26/11/2026 lo sono tutti e 65), il logo si ripulisce.
+  const colore = coloreSicuro(b.colore, '#1a1a1a')
   const header = b.logo
-    ? `<img src="${b.logo}" alt="logo" style="display:block;max-height:44px;max-width:200px;height:auto;border:0" />`
+    ? `<img src="${esc(b.logo)}" alt="logo" style="display:block;max-height:44px;max-width:200px;height:auto;border:0" />`
     : `<div style="color:#fff;font-size:20px;font-weight:800">${esc(b.nome || 'Preventivo')}</div>`
   return `
   <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e8e8e8">
@@ -81,7 +83,7 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
   master: { nome?: string | null; logo_url?: string | null; colore_primario?: string | null; colore_secondario?: string | null }
 }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const colP = master.colore_primario || '#f97316'
+    const colP = coloreSicuro(master.colore_primario, '#f97316')
     await invia({
       from: FROM,
       to,
@@ -337,20 +339,20 @@ export async function inviaCredenzialiCliente({
       to: email,
       subject: `Benvenuto su ${masterNome} — Le tue credenziali di accesso`,
       html: wrap(`
-        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Benvenuto, ${nomeCliente}!</h2>
-        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 20px">${masterNome} ti ha creato un account sulla piattaforma di gestione spedizioni.</p>
+        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Benvenuto, ${esc(nomeCliente)}!</h2>
+        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 20px">${esc(masterNome)} ti ha creato un account sulla piattaforma di gestione spedizioni.</p>
         <div style="background:#f5f5f5;border-radius:8px;padding:20px 24px;margin-bottom:20px">
           <div style="padding:8px 0;border-bottom:1px solid #e8e8e8;font-size:13px;display:flex;justify-content:space-between">
             <span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px">Portale</span>
-            <strong style="color:#1a1a1a;font-family:monospace">${indirizzoPortale}</strong>
+            <strong style="color:#1a1a1a;font-family:monospace">${esc(indirizzoPortale)}</strong>
           </div>
           <div style="padding:8px 0;border-bottom:1px solid #e8e8e8;font-size:13px;display:flex;justify-content:space-between">
             <span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px">Email</span>
-            <strong style="color:#1a1a1a;font-family:monospace">${email}</strong>
+            <strong style="color:#1a1a1a;font-family:monospace">${esc(email)}</strong>
           </div>
           <div style="padding:8px 0;font-size:13px;display:flex;justify-content:space-between">
             <span style="color:#999;text-transform:uppercase;font-size:11px;letter-spacing:0.5px">Password</span>
-            <strong style="color:#f97316;font-family:monospace;font-size:16px">${password}</strong>
+            <strong style="color:#f97316;font-family:monospace;font-size:16px">${esc(password)}</strong>
           </div>
         </div>
         <!-- Ogni destinatario alla SUA porta: i clienti al portale cliente, lo staff (master,
@@ -367,31 +369,6 @@ export async function inviaCredenzialiCliente({
     return { ok: true }
   } catch (err) {
     console.error('Errore invio email credenziali:', err)
-    return { ok: false, error: err }
-  }
-}
-
-// Invito staff (operatore/agente/admin): link per impostare la password ed entrare
-export async function inviaInvitoStaff({
-  email, nome, link, masterNome
-}: {
-  email: string; nome: string; link: string; masterNome: string
-}) {
-  try {
-    await invia({
-      from: FROM,
-      to: email,
-      subject: `${masterNome} — Invito ad accedere a MoovExpress`,
-      html: wrap(`
-        <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 12px">Ciao${nome ? ' ' + nome : ''}!</h2>
-        <p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 20px">${masterNome} ti ha invitato come membro dello staff su MoovExpress. Imposta la tua password per accedere.</p>
-        <a href="${link}" style="display:inline-block;background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:700;font-size:14px">Imposta password e accedi →</a>
-        <p style="color:#999;font-size:12px;margin-top:20px">Se non ti aspettavi questo invito, ignora questa email.</p>
-      `)
-    })
-    return { ok: true }
-  } catch (err) {
-    console.error('Errore invio invito staff:', err)
     return { ok: false, error: err }
   }
 }
@@ -445,8 +422,15 @@ export async function inviaRecuperoPassword({ email, link }: { email: string; li
   }
 }
 
-// Escape minimo per interpolare testo utente nell'HTML delle email
-function esc(v: any): string { return String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
+// Per interpolare nell'HTML delle email un testo che arriva da fuori, anche dentro un attributo.
+// Prima toglieva solo < e >: dalla registrazione pubblica una ragione sociale con un link finiva nella
+// mail delle credenziali, spedita dal nostro dominio all'indirizzo scritto da chi si registrava.
+function esc(v: any): string {
+  return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c])
+}
+function coloreSicuro(c: string | null | undefined, ripiego: string): string {
+  return /^#[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? String(c) : ripiego
+}
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // NOTIFICA "SPEDIZIONE CREATA" — email brand MoovExpress al SOLO DESTINATARIO.
