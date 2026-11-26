@@ -439,10 +439,10 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
         ← <a href="/dashboard/corrieri" style={{color:'#f97316',textDecoration:'none'}}>Corrieri</a> / {corriereEsistente ? 'Modifica' : 'Aggiungi'} {config.titolo}
       </div>
 
-      <h1 style={{fontSize:'20px',fontWeight:'800',color:'#1a1a1a',marginBottom:'20px'}}>🚛 {corriereEsistente ? 'Modifica' : 'Aggiungi'} {config.titolo}</h1>
+      <h1 style={{fontSize:'20px',fontWeight:'800',color:'#1a1a1a',marginBottom:'20px'}}>{corriereEsistente ? 'Modifica' : 'Aggiungi'} {config.titolo}</h1>
 
       <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'12px 16px',marginBottom:'20px',fontSize:'13px',color:'#ea580c',maxWidth:'520px'}}>
-        💡 {config.info}
+        {config.info}
       </div>
 
       <div style={{maxWidth:'520px',background:'#fff',borderRadius:'10px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
@@ -596,7 +596,7 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
           )}
           <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'8px'}}>
             <a href="/dashboard/corrieri" style={{padding:'9px 18px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#666',textDecoration:'none'}}>Annulla</a>
-            <button type="submit" style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>💾 {corriereEsistente ? 'Salva Modifiche' : 'Salva Contratto'}</button>
+            <button type="submit" style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>{corriereEsistente ? 'Salva Modifiche' : 'Salva Contratto'}</button>
           </div>
         </form>
       </div>

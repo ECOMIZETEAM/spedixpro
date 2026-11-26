@@ -55,6 +55,9 @@ const SIMBOLI: Record<string, string> = {
   'i-matita': '<path d="M4 20l1-4.5L15.5 5a2.1 2.1 0 0 1 3 3L8 18.5z"/><path d="M13.5 7l3 3"/>',
   'i-cestino': '<path d="M4.5 6.5h15M9.5 6.5V4.5h5v2"/><path d="M6.5 6.5l1 13.5h9l1-13.5"/><path d="M10 10.5v6M14 10.5v6"/>',
   'i-scarica': '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/>',
+  // le Zone (26/11): importa un file e sposta la zona su un altro corriere (al posto di ⬆ e ↪)
+  'i-carica': '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4.5 19.5h15"/>',
+  'i-sposta': '<path d="M4 12h12.5M12 7.5l4.5 4.5-4.5 4.5"/><path d="M20 5v14"/>',
   'i-filtro': '<path d="M4 6h16M7 12h10M10 18h4"/>',
   'i-attesa': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   // la Live View: un punto che trasmette (18/11)

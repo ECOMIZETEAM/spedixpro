@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { isProviderTecnico } from '@/lib/corriere-logo'
 import WebhookSecretsPanel from '@/app/components/WebhookSecretsPanel'
 import CodiceContratto from '@/app/components/CodiceContratto'
@@ -56,6 +58,8 @@ function iconaCorriere(nome){
 }
 
 export default function CorrieriPage() {
+  // con la grafica nuova icone a linea al posto di 🔒 ⏸ 📦 (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [confermaElimina, setConfermaElimina] = useState<string | null>(null)
@@ -196,8 +200,8 @@ export default function CorrieriPage() {
           ) : !corrieri.length ? (
             <div style={{padding:'30px',textAlign:'center',color:'#1a1a1a',fontSize:'13px'}}>Nessun contratto — aggiungine uno</div>
           ) : [...corrieri].sort((a, b) => (a.staccato_il ? 1 : 0) - (b.staccato_il ? 1 : 0)).map(c => (
-            <div key={c.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 18px',borderBottom:'1px solid #f5f5f5',gap:'10px'}}>
-              <div style={{display:'flex',alignItems:'center',gap:'12px',flex:1,minWidth:0}}>
+            <div key={c.id} className="corr-riga" style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 18px',borderBottom:'1px solid #f5f5f5',gap:'10px'}}>
+              <div className="corr-nome" style={{display:'flex',alignItems:'center',gap:'12px',flex:1,minWidth:0}}>
                 {iconaCorriere(c.nome_contratto) ? (
                   <img src={iconaCorriere(c.nome_contratto)!} alt="" style={{width:'96px',height:'58px',objectFit:'contain',border:'1px solid #eee',borderRadius:'6px',background:'#fff',flexShrink:0}}/>
                 ) : (
@@ -205,11 +209,12 @@ export default function CorrieriPage() {
                 )}
                 <div style={{minWidth:0}}>
                   <div style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</div>
-                  <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'4px'}}>
+                  {/* a capo quando non c'è posto: senza, il codice del contratto finiva sotto il tasto «In pausa» */}
+                  <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'4px',flexWrap:'wrap'}}>
                     {c.staccato_il
                       ? <span title="Staccato: non si vende e non si spedisce più. Resta per i pacchi già partiti, che seguono il fornitore di prima." style={{background:'#f3f4f6',color:'#4b5563',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>Staccato il {new Date(c.staccato_il).toLocaleDateString('it-IT')}</span>
                       : c.sospeso_sopra
-                      ? <span title="Un master superiore lo ha messo in pausa: lo sblocco tocca a lui. Il cliente non lo vede; il tuo listino resta salvato." style={{background:'#fef3c7',color:'#b45309',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>⏸ In pausa (livello superiore)</span>
+                      ? <span title="Un master superiore lo ha messo in pausa: lo sblocco tocca a lui. Il cliente non lo vede; il tuo listino resta salvato." style={{background:'#fef3c7',color:'#b45309',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{nuova ? '' : '⏸ '}In pausa (livello superiore)</span>
                       : <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{c.attivo?'Attivo':'In pausa'}</span>}
                     <span style={{background:'#fff7ed',color:'#f97316',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>L{c.livello}</span>
                     <CodiceContratto codice={c.codice} piccolo />
@@ -219,9 +224,9 @@ export default function CorrieriPage() {
               {c.staccato_il ? (
                 <div style={{fontSize:'11px',color:'#6b7280',maxWidth:'220px',textAlign:'right',flexShrink:0}}>Resta per i pacchi già partiti</div>
               ) : (
-              <div style={{display:'flex',alignItems:'center',gap:'6px',flexShrink:0}}>
+              <div className="corr-tasti" style={{display:'flex',alignItems:'center',gap:'6px',flexShrink:0}}>
                 {c.sospeso_sopra ? (
-                  <span title="Riattivabile solo dal master che lo ha messo in pausa (segue la gerarchia)." style={{padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',background:'#f3f4f6',color:'#9ca3af',cursor:'not-allowed'}}>🔒 In pausa a monte</span>
+                  <span title="Riattivabile solo dal master che lo ha messo in pausa (segue la gerarchia)." style={{padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',background:'#f3f4f6',color:'#9ca3af',cursor:'not-allowed',whiteSpace:'nowrap'}}>{nuova ? <Icona id="i-lucchetto" className="vs-ico-tasto" /> : '🔒'} In pausa a monte</span>
                 ) : (
                   <button onClick={() => toggleAttivo(c.id, c.attivo)}
                     style={{background:c.attivo?'#fef2f2':'#f0fdf4',color:c.attivo?'#dc2626':'#16a34a',padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',border:'none',cursor:'pointer'}}>
@@ -268,7 +273,7 @@ export default function CorrieriPage() {
                 ) : c.tipo === 'dielle' ? (
                   // Dielle non ha un logo da mostrare (è un aggregatore): tile testuale, visibile solo a chi è autorizzato.
                   <div style={{height:'90px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'4px',padding:'8px'}}>
-                    <div style={{fontSize:'22px',lineHeight:1}}>📦</div>
+                    <div style={{fontSize:'22px',lineHeight:1}}>{nuova ? <Icona id="i-pacco" className="vs-ico vs-ico--grande" /> : '📦'}</div>
                     <div style={{fontSize:'12px',fontWeight:700,color:'#1a1a1a',textAlign:'center'}}>Dielle</div>
                     <div style={{fontSize:'10px',color:'#8a8a8a',textAlign:'center'}}>più corrieri</div>
                   </div>

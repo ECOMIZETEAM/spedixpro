@@ -35,6 +35,9 @@ export const PAGINE_PROVA = new Set([
   '/dashboard/logistica/listino', '/dashboard/logistica/posti', '/dashboard/logistica/stock',
   // 26/11 notte, Ritiri e Resi
   '/dashboard/ritiri', '/dashboard/ritiri/nuovo', '/dashboard/resi/analisi', '/dashboard/resi/scansiona',
+  // 26/11 notte, Corrieri e tracking. Aggiungi corriere fotografato solo vuoto, mai su un contratto con le credenziali;
+  // Condivisioni è solo un rimando all'Elenco master
+  '/dashboard/corrieri', '/dashboard/corrieri/aggiungi', '/dashboard/zone', '/dashboard/tracking',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

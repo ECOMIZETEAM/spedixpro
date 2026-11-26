@@ -82,6 +82,9 @@
 /* I TESTI scritti a mano (#1a1a1a, i grigi): i colori della dashboard, così di notte diventano chiari. Solo dove
    l'elemento non ha un fondo suo: un cartellino colorato tiene la sua scritta */
 .gx .gx-vestito :is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"], [style*="color: rgb(51, 51, 51)"], [style*="color:#333"]):not([style*="background"], [style*="position: fixed"] *, [style*="position:fixed"] *) { color: var(--gx-inchiostro) !important; }
+/* le scritte scure su «background: none» (le linguette dei corrieri nelle Zone): la regola qui sopra le salta perché
+   nello stile c'è la parola background, e di notte restavano nere sul fondo scuro */
+.gx .gx-vestito :is([style*="background: none"], [style*="background:none"]):is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(51, 51, 51)"], [style*="color:#333"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) { color: var(--gx-inchiostro) !important; }
 .gx .gx-vestito :is([style*="color: rgb(102, 102, 102)"], [style*="color:#666"], [style*="color: rgb(153, 153, 153)"], [style*="color:#999"], [style*="color: rgb(107, 114, 128)"], [style*="color:#6b7280"],
   [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(85, 85, 85)"], [style*="color:#555"], [style*="color: rgb(136, 136, 136)"], [style*="color:#888"], [style*="color: rgb(156, 163, 175)"], [style*="color:#9ca3af"]):not([style*="background"], [style*="position: fixed"] *, [style*="position:fixed"] *) { color: var(--gx-attenuato) !important; }
 
@@ -92,7 +95,9 @@
   background-color: var(--vs-carta) !important; }
 .gx[data-luce="notte"] .gx-vestito :is([style*="background: rgb(255, 255, 255)"], [style*="background:#fff;"], [style$="background:#fff"], [style*="background: white"], [style*="background:white"]):is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
   color: var(--gx-inchiostro) !important; }
-.gx[data-luce="notte"] .gx-vestito :is(div, button):is([style*="background: rgb(249, 250, 251)"], [style*="background:#f9fafb"], [style*="background: rgb(243, 244, 246)"], [style*="background:#f3f4f6"], [style*="background: rgb(245, 245, 245)"], [style*="background:#f5f5f5"], [style*="background: rgb(250, 250, 250)"], [style*="background:#fafafa"]):is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"], [style*="color: rgb(107, 114, 128)"], [style*="color:#6b7280"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+/* di notte le scritte scure dentro i riquadri grigi (anche #333: «INTERNO» nel riquadro del logo dei Corrieri, 26/11) */
+.gx[data-luce="notte"] .gx-vestito :is(div, button):is([style*="background: rgb(249, 250, 251)"], [style*="background:#f9fafb"], [style*="background: rgb(243, 244, 246)"], [style*="background:#f3f4f6"], [style*="background: rgb(245, 245, 245)"], [style*="background:#f5f5f5"], [style*="background: rgb(250, 250, 250)"], [style*="background:#fafafa"]):is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"], [style*="color: rgb(107, 114, 128)"], [style*="color:#6b7280"],
+  [style*="color: rgb(51, 51, 51)"], [style*="color:#333"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
   color: var(--gx-inchiostro) !important; }
 /* i numeri delle spedizioni scritti come testo arancio in grassetto (Lista contrassegni): in nero come nell'Elenco */
 .gx .gx-vestito span:is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"]):is([style*="font-weight: 700"], [style*="font-weight:700"]):not([style*="background"]) { color: var(--gx-inchiostro) !important; }
@@ -204,7 +209,9 @@
   background: var(--gx-incavo) !important; border-color: transparent !important; color: var(--gx-inchiostro) !important; }
 
 /* l'icona a linea dentro un tasto (il cestino dello Staff) prende il colore della scritta del tasto */
-.gx .gx-vestito .vs-ico-tasto { width: 15px; height: 15px; vertical-align: -2px; }
+/* in linea col testo del tasto («🔒 In pausa a monte» dei Corrieri): lo stile di base mette le svg a blocco e l'icona
+   finiva sopra la scritta */
+.gx .gx-vestito .vs-ico-tasto { display: inline-block; width: 15px; height: 15px; vertical-align: -2px; }
 /* i tasti rossi pieni piccoli (il cestino nelle righe dello Staff): bianchi col filo e l'icona rossa, come un'azione
    secondaria che cancella; quelli grandi delle finestre di conferma restano rossi (sono fisse, fuori da qui) */
 .gx .gx-vestito button:is([style*="background: rgb(220, 38, 38)"], [style*="background:#dc2626"], [style*="background: rgb(239, 68, 68)"], [style*="background:#ef4444"]):is([style*="border-radius: 4px"], [style*="border-radius:4px"], [style*="border-radius: 5px"], [style*="border-radius:5px"], [style*="border-radius: 6px"], [style*="border-radius:6px"]):not(:disabled):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
@@ -227,3 +234,19 @@
 /* i tasti neri pieni scritti a mano (#1a1a1a / #111, «Fotocamera» in Scansiona resi): pillole nere come gli altri */
 .gx .gx-vestito :is(button, a):is([style*="background: rgb(26, 26, 26)"], [style*="background:#1a1a1a"], [style*="background: rgb(17, 17, 17)"], [style*="background:#111"]):not(:disabled):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
   background: var(--vs-nero) !important; color: #fff !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 3px 9px rgba(0,0,0,.18); }
+
+/* i Corrieri sul telefono: il nome del contratto prende tutta la riga e i tasti vanno sotto, a capo se serve (senza,
+   i tasti coprivano il nome, lo stato e il codice) */
+@media (max-width: 640px) {
+  .gx .gx-vestito .corr-riga { flex-wrap: wrap !important; }
+  .gx .gx-vestito .corr-riga > .corr-nome { flex: 1 1 100% !important; }
+  .gx .gx-vestito .corr-riga > .corr-tasti { flex-wrap: wrap !important; flex-shrink: 1 !important; margin-left: auto; }
+}
+
+/* LE FINESTRE A COMPARSA DI NOTTE (26/11): il vestito non entra nelle finestre (position: fixed), ma la regola delle schede
+   qui in cima prendeva lo stesso il riquadro bianco della finestra e di notte lo faceva scuro, lasciando scure le
+   etichette: «Modifica zona» nelle Zone era illeggibile, e così le finestre delle altre pagine. Di notte restano bianche,
+   col testo scuro, come di giorno */
+.gx[data-luce="notte"] .gx-vestito [style*="position: fixed"] :is(div, button):is([style*="background: rgb(255, 255, 255)"], [style*="background:#fff;"], [style$="background:#fff"], [style*="background: white"], [style*="background:white"]),
+.gx[data-luce="notte"] .gx-vestito [style*="position:fixed"] :is(div, button):is([style*="background: rgb(255, 255, 255)"], [style*="background:#fff;"], [style$="background:#fff"], [style*="background: white"], [style*="background:white"]) {
+  background: #fff !important; color: #1a1a1a; color-scheme: light; }

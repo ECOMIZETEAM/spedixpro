@@ -1,10 +1,14 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import * as XLSX from 'xlsx'
 import { logoCorriere } from '@/lib/corriere-logo'
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function ZonePage() {
+  // con la grafica nuova icone a linea al posto di ✏️ ⬇ ⬆ ↪ 🗑️ (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [zone, setZone] = useState<any[]>([])
@@ -247,19 +251,19 @@ export default function ZonePage() {
                         <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}} title={riepilogoRegioni(z)}>{riepilogoRegioni(z)}</td>
                         <td style={{padding:'10px 12px'}}>
                           <div style={{display:'flex',gap:'4px'}}>
-                            <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false,multicollo:!!z.multicollo});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>✏️</button>
-                            <button onClick={()=>esporta(z)} title="Esporta zona (XLSX)" style={ibtn('#fff','#1a1a1a','#d1d5db')}>⬇</button>
+                            <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false,multicollo:!!z.multicollo});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>{nuova ? <Icona id="i-matita" className="vs-ico-tasto" /> : '✏️'}</button>
+                            <button onClick={()=>esporta(z)} title="Esporta zona (XLSX)" style={ibtn('#fff','#1a1a1a','#d1d5db')}>{nuova ? <Icona id="i-scarica" className="vs-ico-tasto" /> : '⬇'}</button>
                             <label title="Importa regioni (XLSX spedisci.online)" style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:importing===z.id?'wait':'pointer',opacity:importing===z.id?0.5:1}}>
-                              {importing===z.id?'…':'⬆'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!!importing} style={{display:'none'}} onChange={async e=>{
+                              {importing===z.id?'…':nuova ? <Icona id="i-carica" className="vs-ico-tasto" /> : '⬆'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!!importing} style={{display:'none'}} onChange={async e=>{
                                 const f=e.target.files?.[0]; e.target.value=''; if(!f)return
                                 await importaXlsx(z.id, f)
                               }}/>
                             </label>
-                            <button onClick={()=>setModalSposta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>↪</button>
+                            <button onClick={()=>setModalSposta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>{nuova ? <Icona id="i-sposta" className="vs-ico-tasto" /> : '↪'}</button>
                           </div>
                         </td>
                         <td style={{padding:'10px 8px'}}>
-                          <button onClick={()=>elimina(z.id,z.nome)} style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>🗑️</button>
+                          <button onClick={()=>elimina(z.id,z.nome)} style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑️'}</button>
                         </td>
                       </tr>
                     ))}
@@ -340,8 +344,8 @@ export default function ZonePage() {
                               <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.cap}</td>
                               <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.citta}</td>
                               <td style={{padding:'6px 8px',textAlign:'right' as const,whiteSpace:'nowrap' as const}}>
-                                <button onClick={()=>setEditReg({capId:r.id,paese:r.paese,provincia:r.provincia,cap:r.cap,citta:r.citta})} title="Modifica" style={{background:'none',border:'none',cursor:'pointer',color:'#16a34a',fontSize:'13px'}}>✏️</button>
-                                <button onClick={()=>eliminaRegione(r.id)} title="Elimina" style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px'}}>🗑</button>
+                                <button onClick={()=>setEditReg({capId:r.id,paese:r.paese,provincia:r.provincia,cap:r.cap,citta:r.citta})} title="Modifica" style={{background:'none',border:'none',cursor:'pointer',color:'#16a34a',fontSize:'13px'}}>{nuova ? <Icona id="i-matita" className="vs-ico-tasto" /> : '✏️'}</button>
+                                <button onClick={()=>eliminaRegione(r.id)} title="Elimina" style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px'}}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑'}</button>
                               </td>
                             </tr>
                           )
