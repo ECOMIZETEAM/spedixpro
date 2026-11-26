@@ -15,6 +15,11 @@ export const PAGINE_PROVA = new Set([
   '/dashboard/reports/agenti', '/dashboard/reports/consumabili', '/dashboard/reports/contrassegni', '/dashboard/reports/distinte',
   '/dashboard/reports/fatture', '/dashboard/reports/giacenze', '/dashboard/reports/resi', '/dashboard/reports/rettifiche',
   '/dashboard/reports/ricariche', '/dashboard/reports/ritiri', '/dashboard/reports/sms-clienti', '/dashboard/reports/storico-sms',
+  // 26/11 sera, le Statistiche: grafici e numeri grandi nei colori della dashboard. L'estratto conto no: visto solo vuoto
+  // (leggerlo scrive, riprova gli abbinamenti dei bonifici)
+  '/dashboard/statistiche/check-ricariche', '/dashboard/statistiche/clienti', '/dashboard/statistiche/contrassegni',
+  '/dashboard/statistiche/corrieri', '/dashboard/statistiche/fatturazione', '/dashboard/statistiche/rettifiche-auto',
+  '/dashboard/statistiche/salute-conto',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

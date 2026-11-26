@@ -150,3 +150,26 @@
 .gx[data-luce="notte"] .gx-vestito :is([style*="background:#eff6ff"], [style*="background: rgb(239, 246, 255)"], [style*="background:#e0f2fe"], [style*="background: rgb(224, 242, 254)"], [style*="background:#f0f9ff"], [style*="background: rgb(240, 249, 255)"], [style*="background:#eef2ff"], [style*="background: rgb(238, 242, 255)"], [style*="background:#dbeafe"], [style*="background: rgb(219, 234, 254)"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) { background: color-mix(in srgb, #3B82F6 15%, var(--vs-carta)) !important; }
 .gx[data-luce="notte"] .gx-vestito :is([style*="color:#1e40af"], [style*="color: rgb(30, 64, 175)"], [style*="color:#1d4ed8"], [style*="color: rgb(29, 78, 216)"], [style*="color:#2563eb"], [style*="color: rgb(37, 99, 235)"], [style*="color:#0369a1"], [style*="color: rgb(3, 105, 161)"], [style*="color:#075985"], [style*="color: rgb(7, 89, 133)"], [style*="color:#3730a3"], [style*="color: rgb(55, 48, 163)"], [style*="color:#4338ca"], [style*="color: rgb(67, 56, 202)"], [style*="color:#1e3a8a"], [style*="color: rgb(30, 58, 138)"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) { color: #9CC3FF !important; }
 .gx[data-luce="notte"] .gx-vestito :is([style*="solid #fecaca"], [style*="solid rgb(254, 202, 202)"], [style*="solid #fed7aa"], [style*="solid rgb(254, 215, 170)"], [style*="solid #bbf7d0"], [style*="solid rgb(187, 247, 208)"], [style*="solid #bfdbfe"], [style*="solid rgb(191, 219, 254)"], [style*="solid #fde68a"], [style*="solid rgb(253, 230, 138)"], [style*="solid #fdba74"], [style*="solid rgb(253, 186, 116)"], [style*="solid #86efac"], [style*="solid rgb(134, 239, 172)"], [style*="solid #fca5a5"], [style*="solid rgb(252, 165, 165)"], [style*="solid #93c5fd"], [style*="solid rgb(147, 197, 253)"], [style*="solid #bae6fd"], [style*="solid rgb(186, 230, 253)"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) { border-color: rgba(255, 255, 255, .10) !important; }
+
+/* I NUMERI GRANDI dei riquadri (le Statistiche, Kpi da 19-24 px) scritti in arancio o in blu: in nero come nella
+   dashboard. Il rosso e il verde restano: lì il colore dice qualcosa (a rischio, guadagno) */
+.gx .gx-vestito :is(div, span, b, strong, p):is([style*="font-size:18"], [style*="font-size: 18"], [style*="font-size:19"], [style*="font-size: 19"], [style*="font-size:2"], [style*="font-size: 2"], [style*="font-size:3"], [style*="font-size: 3"]):is([style*="color:#f97316"], [style*="color: rgb(249, 115, 22)"], [style*="color:#ea580c"], [style*="color: rgb(234, 88, 12)"], [style*="color:#c2410c"], [style*="color: rgb(194, 65, 12)"], [style*="color:#2563eb"], [style*="color: rgb(37, 99, 235)"], [style*="color:#1d4ed8"], [style*="color: rgb(29, 78, 216)"], [style*="color:#3b82f6"], [style*="color: rgb(59, 130, 246)"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) { color: var(--gx-inchiostro) !important; }
+
+/* i tasti arancio fatti con un'etichetta (il caricamento di un file, «Carica estratto conto»): neri come gli altri */
+.gx .gx-vestito label:is([style*="background: rgb(249, 115, 22)"], [style*="background:#f97316"], [style*="background: rgb(234, 88, 12)"], [style*="background:#ea580c"]) {
+  background: var(--vs-nero) !important; color: #fff !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 3px 9px rgba(0,0,0,.18); }
+
+/* I GRAFICI (recharts: Statistiche clienti, corrieri, contrassegni, profitto) nei colori della dashboard: la serie
+   arancio diventa nera (di notte chiara), quella blu l'arancio dell'accento; il verde e il rosso restano. Le scritte
+   degli assi grigie, i fili tenui, il riquadro del passaggio del mouse col fondo della scheda: di notte era bianco con
+   la scritta chiara. Il CSS vince sugli attributi fill/stroke dell'SVG */
+.gx .gx-vestito { --vs-grafico: #1C1C1C; }
+.gx[data-luce="notte"] .gx-vestito { --vs-grafico: #E6E6E8; }
+.gx .gx-vestito .recharts-wrapper :is([fill="#f97316"], [fill="#ea580c"]) { fill: var(--vs-grafico); }
+.gx .gx-vestito .recharts-wrapper :is([stroke="#f97316"], [stroke="#ea580c"]) { stroke: var(--vs-grafico); }
+.gx .gx-vestito .recharts-wrapper :is([fill="#2563eb"], [fill="#3b82f6"]) { fill: var(--gx-accento); }
+.gx .gx-vestito .recharts-wrapper :is([stroke="#2563eb"], [stroke="#3b82f6"]) { stroke: var(--gx-accento); }
+.gx .gx-vestito .recharts-cartesian-axis-tick text { fill: var(--gx-attenuato); }
+.gx .gx-vestito :is(.recharts-cartesian-axis-line, .recharts-cartesian-axis-tick-line, .recharts-cartesian-grid line) { stroke: var(--gx-filo); }
+.gx .gx-vestito .recharts-tooltip-cursor { fill: color-mix(in srgb, var(--gx-attenuato) 12%, transparent); }
+.gx .gx-vestito .recharts-default-tooltip { background: var(--vs-carta) !important; border: 0 !important; border-radius: 10px; box-shadow: 0 0 0 1px var(--gx-filo), 0 8px 24px rgba(0,0,0,.12); color: var(--gx-inchiostro); }
