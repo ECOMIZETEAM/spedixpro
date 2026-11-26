@@ -93,7 +93,12 @@ export async function GET(req: NextRequest) {
     for (const sp of (sped || [])) {
       if ((sp as any).stato === 'annullata') continue
       const ric = pagato.has((sp as any).id) ? pagato.get((sp as any).id)! : Number((sp as any).costo_totale || 0)
-      const cos = calcAg ? (calcAg(sp)?.totale ?? 0) : 0
+      // Spedizione su un contratto che il listino dell'agente NON copre: margine 0 (costo = quanto ha pagato il
+      // cliente), come nel Report Agenti (lib/guadagno-agente) e nella sua dashboard (api/agente/guadagno). Con costo 0
+      // qui il margine era il prezzo intero: novembre 2026, 1.535 spedizioni e 13.072 € di margine in piu' di quello
+      // su cui il master lo paga (Andrea Mollica 7.367 € con un listino che non copre nessuno dei suoi contratti).
+      const cAg = calcAg(sp)?.totale
+      const cos = cAg != null ? cAg : ric
       ricaviA += ric; costiA += cos
       const d = new Date((sp as any).created_at)
       const k = perMese ? `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}` : d.toISOString().slice(0, 10)
