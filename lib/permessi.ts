@@ -74,6 +74,12 @@ export const getPermessiUtente = cache(async (): Promise<PermessiUtente | null> 
   const { supabase, user, utente: u } = await profiloDellaRichiesta()
   if (!user) return null
   if (!u) return null
+  return permessiDiUtente(supabase, u)
+})
+
+// La stessa regola per un utente dato, senza sessione: la usano i giri automatici (il riepilogo del mattino del
+// calendario), che devono mostrare a ciascuno solo ciò che vede nel portale. `db` legge masters e master_permessi.
+export async function permessiDiUtente(supabase: any, u: { ruolo?: string | null; master_id?: string | null; nome?: string | null; cognome?: string | null }): Promise<PermessiUtente> {
   const ruolo = (u.ruolo || '').toLowerCase()
   const nome = ((u.nome || '') + ' ' + (u.cognome || '')).trim()
   const isFull = ruolo === 'admin' || ruolo === 'master'
@@ -97,7 +103,7 @@ export const getPermessiUtente = cache(async (): Promise<PermessiUtente | null> 
     }
   }
   return { ruolo, masterId: u.master_id || null, nome, isFull: false, gestioneRete, permessi }
-})
+}
 
 // Helper server-side per proteggere pagine/API della gestione rete.
 //

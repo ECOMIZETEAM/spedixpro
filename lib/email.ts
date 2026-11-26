@@ -739,3 +739,51 @@ export async function inviaEmailInvito(p: {
     return { ok: false, error: e?.message || 'invio non riuscito' }
   }
 }
+
+// IL RIEPILOGO DEL MATTINO DEL CALENDARIO (fase 3, 26/11/2026): alle 7:30, solo a chi l'ha acceso, solo se c'è qualcosa.
+// Col marchio del master. Lo manda il giro /api/cron/calendario-riepilogo.
+export async function inviaEmailRiepilogo(p: {
+  to: string
+  giorno: string                                   // «mercoledì 26 novembre»
+  voci: { ora: string; titolo: string; sotto?: string | null }[]
+  ritiri: number | null                            // null = non vede i ritiri
+  giacenze: number | null
+  inviti: number
+  arretrati: number                                // promemoria rimasti indietro
+  link: string
+  brand?: { logo?: string | null; nome?: string | null }
+}): Promise<{ ok: boolean; error?: string }> {
+  const dest = String(p.to || '').trim().toLowerCase()
+  if (!EMAIL_RE.test(dest)) return { ok: false, error: 'email non valida' }
+  const numero = (n: number, una: string, tante: string) => `<div style="flex:1;min-width:110px;background:#f7f7f7;border-radius:10px;padding:12px 14px"><div style="font-size:22px;font-weight:600;color:#1a1a1a">${n}</div><div style="font-size:12px;color:#888;margin-top:2px">${n === 1 ? una : tante}</div></div>`
+  const numeri = [
+    p.ritiri != null ? numero(p.ritiri, 'ritiro oggi', 'ritiri oggi') : '',
+    p.giacenze != null ? numero(p.giacenze, 'giacenza da gestire', 'giacenze da gestire') : '',
+    p.inviti ? numero(p.inviti, 'invito da rispondere', 'inviti da rispondere') : '',
+    p.arretrati ? numero(p.arretrati, 'promemoria indietro', 'promemoria indietro') : '',
+  ].filter(Boolean).join('')
+  const elenco = p.voci.length
+    ? p.voci.map((v) => `<div style="display:flex;gap:14px;padding:9px 0;border-bottom:1px solid #efefef;font-size:14px"><span style="color:#888;min-width:52px">${esc(v.ora)}</span><span style="color:#1a1a1a">${esc(v.titolo)}${v.sotto ? `<span style="display:block;color:#999;font-size:12px;margin-top:2px">${esc(v.sotto)}</span>` : ''}</span></div>`).join('')
+    : '<p style="color:#888;font-size:14px;margin:0">Nessuna voce in calendario oggi.</p>'
+  const corpo = `
+    <p style="color:#999;font-size:12px;text-transform:uppercase;letter-spacing:0.6px;margin:0 0 6px">Il tuo giorno</p>
+    <h2 style="font-size:20px;color:#1a1a1a;margin:0 0 18px;line-height:1.3">${esc(p.giorno.charAt(0).toUpperCase() + p.giorno.slice(1))}</h2>
+    ${numeri ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">${numeri}</div>` : ''}
+    <p style="color:#1a1a1a;font-size:14px;font-weight:600;margin:0 0 6px">In calendario</p>
+    <div style="margin-bottom:22px">${elenco}</div>
+    <a href="${p.link}" style="display:inline-block;background:#1a1a1a;color:#fff;padding:12px 26px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px">Apri il calendario →</a>
+    <p style="color:#999;font-size:12px;line-height:1.6;margin:22px 0 0">Ricevi questa email perché hai acceso il riepilogo del mattino. Lo spegni dal calendario, alla voce «Notifiche».</p>
+  `
+  const nomeBrand = (p.brand?.nome || '').replace(/["<>]/g, '').slice(0, 60)
+  const fromAddr = FROM.match(/<([^>]+)>/)?.[1] || FROM
+  const from = nomeBrand ? `${nomeBrand} <${fromAddr}>` : FROM
+  try {
+    await invia({
+      from, to: dest, subject: `Il tuo giorno: ${p.giorno}`.slice(0, 180),
+      html: (p.brand?.logo || p.brand?.nome) ? wrapBrand(corpo, { logo: p.brand?.logo, nome: p.brand?.nome }) : wrap(corpo),
+    })
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'invio non riuscito' }
+  }
+}

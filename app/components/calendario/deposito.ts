@@ -84,3 +84,6 @@ export type StatoFeed = { attivo: boolean; creato_il: string | null; ultimo_uso:
 export const leggiFeed = (): Promise<StatoFeed> => chiedi('/api/calendario/feed')
 export const creaFeed = (): Promise<{ url: string; webcal: string }> => chiedi('/api/calendario/feed', { method: 'POST' })
 export const spegniFeed = (): Promise<{ ok: boolean }> => chiedi('/api/calendario/feed', { method: 'DELETE' })
+
+export const leggiPreferenze = (): Promise<{ riepilogo_mattino: boolean }> => chiedi('/api/calendario/preferenze')
+export const salvaPreferenze = (p: { riepilogo_mattino: boolean }): Promise<{ ok: boolean }> => chiedi('/api/calendario/preferenze', json('POST', p))

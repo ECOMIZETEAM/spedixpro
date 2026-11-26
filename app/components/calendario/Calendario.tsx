@@ -12,7 +12,8 @@ import {
   ora, oraBreve, dataLunga, quandoRelativo, titoloPeriodo, MESI, MESI_BREVI, GIORNI, giornoSettimana,
 } from './date'
 import { costruisciGiorni, disponi, voceDaMio } from './voci'
-import { leggiMiei, leggiDaFare, eliminaMio, segnaFatto, azioneOccorrenza, rispondiInvito, leggiFeed, creaFeed, spegniFeed, CAMBIATO, type StatoFeed } from './deposito'
+import { leggiMiei, leggiDaFare, eliminaMio, segnaFatto, azioneOccorrenza, rispondiInvito, leggiFeed, creaFeed, spegniFeed, leggiPreferenze, salvaPreferenze, CAMBIATO, type StatoFeed } from './deposito'
+import { statoQui, attivaQui, disattivaQui, notificaDiProva, type StatoQui } from './dispositivo'
 import { momentoAvviso } from '@/lib/calendario-avviso'
 import FinestraEvento, { type Bozza } from './FinestraEvento'
 import SchedaVoce from './SchedaVoce'
@@ -454,6 +455,7 @@ export default function Calendario({ portale, vedeRitiri, vedeGiacenze, puoInvit
         </div>
       </div>
 
+      <SchedaNotifiche />
       <SchedaFeed />
       {auto.troncati && (
         <div className="cal-nota"><Ic n="info" /><div>In questo periodo ci sono più di 5.000 ritiri: ne mostro i primi. L’elenco completo è in Elenco Ritiri.</div></div>
@@ -567,6 +569,57 @@ function SchedaFeed() {
           <button className="cal-tasto cal-tasto--chiaro" disabled={occupato} onClick={crea} style={{ width: '100%' }}>{occupato ? 'Creo…' : 'Crea il link'}</button>
         </>
       )}
+      {errore && <div className="cal-msg" role="alert" style={{ marginTop: 8 }}>{errore}</div>}
+    </div>
+  )
+}
+
+// LE NOTIFICHE (fase 3): su questo dispositivo (browser, iPhone o Android) e il riepilogo del mattino alle 7:30, spento
+// finché non lo accende chi guarda (Lorenzo 26/11: «chi lo attiva»).
+function SchedaNotifiche() {
+  const [qui, setQui] = useState<StatoQui | null>(null)
+  const [riepilogo, setRiepilogo] = useState<boolean | null>(null)
+  const [occupato, setOccupato] = useState(false)
+  const [errore, setErrore] = useState('')
+  const [nota, setNota] = useState('')
+  useEffect(() => {
+    statoQui().then(setQui).catch(() => setQui({ supporto: 'nessuno', permesso: 'da-chiedere', attivo: false }))
+    leggiPreferenze().then((p) => setRiepilogo(p.riepilogo_mattino)).catch(() => setRiepilogo(false))
+  }, [])
+  const fai = async (f: () => Promise<void>) => { setOccupato(true); setErrore(''); setNota(''); try { await f() } catch (e: any) { setErrore(e?.message || 'Non riuscito') } finally { setOccupato(false) } }
+  const attiva = () => fai(async () => {
+    await attivaQui()
+    setQui(await statoQui())
+    const r = await notificaDiProva()
+    setNota(r.inviate ? 'Ti ho mandato una notifica di prova.' : 'Attivate. Se la prova non arriva, controlla le impostazioni delle notifiche.')
+  })
+  const spegni = () => fai(async () => { await disattivaQui(); setQui(await statoQui()) })
+  const cambiaRiepilogo = () => fai(async () => { const v = !riepilogo; await salvaPreferenze({ riepilogo_mattino: v }); setRiepilogo(v) })
+  const descrizione = !qui ? 'Un attimo…'
+    : qui.supporto === 'iphone-browser' ? 'Sull’iPhone le notifiche arrivano con l’app MoovExpress.'
+      : qui.supporto === 'app-vecchia' ? 'Aggiorna l’app MoovExpress dallo store per ricevere le notifiche.'
+        : qui.supporto === 'nessuno' ? 'Questo browser non riceve notifiche.'
+          : qui.attivo ? 'Attive su questo dispositivo: promemoria, inviti e riepilogo arrivano qui.'
+            : qui.permesso === 'negato' ? (qui.supporto === 'app' ? 'Bloccate: riattivale nelle impostazioni del telefono, alla voce MoovExpress.' : 'Bloccate dal browser: riattivale dal lucchetto accanto all’indirizzo.')
+              : 'Ricevi qui promemoria e inviti, anche col portale chiuso.'
+  const puo = qui && (qui.supporto === 'app' || qui.supporto === 'web') && qui.permesso !== 'negato'
+  return (
+    <div className="cal-scheda cal-feed">
+      <h3><span className="cal-feed-titolo"><Ic n="campanella" />Notifiche</span>{qui?.attivo && <span className="cal-chip cal-chip--bene">attive</span>}</h3>
+      <p className="cal-feed-testo">{descrizione}</p>
+      {puo && (
+        <div className="cal-feed-tasti" style={{ marginTop: 0, marginBottom: 12 }}>
+          {qui!.attivo
+            ? <><button className="cal-tasto cal-tasto--chiaro" disabled={occupato} onClick={() => fai(async () => { const r = await notificaDiProva(); setNota(r.inviate ? 'Prova mandata.' : 'Nessun dispositivo l’ha ricevuta.') })}>Manda una prova</button>
+                <button className="cal-tasto cal-tasto--rosso" disabled={occupato} onClick={spegni}>Disattiva</button></>
+            : <button className="cal-tasto cal-tasto--nero" disabled={occupato} onClick={attiva} style={{ width: '100%' }}>{occupato ? 'Un attimo…' : 'Attiva su questo dispositivo'}</button>}
+        </div>
+      )}
+      <button type="button" className="cal-interruttore" role="switch" aria-checked={!!riepilogo} disabled={riepilogo === null || occupato} onClick={cambiaRiepilogo}>
+        <i />Riepilogo del mattino
+      </button>
+      <p className="cal-feed-nota">Alle 7:30, per email e come notifica: ritiri e giacenze del giorno, le tue voci, gli inviti da rispondere. Solo nei giorni in cui c’è qualcosa.</p>
+      {nota && <p className="cal-feed-nota" style={{ color: 'var(--t-evento)' }}>{nota}</p>}
       {errore && <div className="cal-msg" role="alert" style={{ marginTop: 8 }}>{errore}</div>}
     </div>
   )

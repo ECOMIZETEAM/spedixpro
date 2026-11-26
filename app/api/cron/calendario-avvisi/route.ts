@@ -5,6 +5,7 @@ import { momentoAvviso, RITARDO_MASSIMO_MIN, ORA_TUTTO_IL_GIORNO } from '@/lib/c
 import { occorrenze, descriviRicorrenza } from '@/lib/calendario-ricorrenza'
 import { inviaEmailPromemoria, inviaEmailInvito } from '@/lib/email'
 import { masterEDemo } from '@/lib/demo'
+import { mandaPush } from '@/lib/notifiche-push'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -15,7 +16,9 @@ export const maxDuration = 120
 //     ripetono (avvisato_occorrenza = l'inizio dell'ultima occorrenza avvisata);
 //  2. lo stesso avviso a chi è invitato e non ha detto di no (le stesse due colonne, sulla riga dell'invito);
 //  3. l'email «ti hanno invitato», una volta per invito (invito_mandato_il).
-// La campanella mostra gli avvisi da sé (/api/notifiche/mie): qui solo le email.
+// La campanella mostra gli avvisi da sé (/api/notifiche/mie). Qui le email e (fase 3, 26/11) le notifiche sul telefono
+// e sul computer (lib/notifiche-push): se la notifica arriva e solo l'email fallisce, l'avviso non si riprova (si
+// manderebbe di nuovo la notifica); si riprova solo quando non è arrivato niente.
 //
 // UN AVVISO SOLO. Ogni riga si segna PRIMA di spedire, con una scrittura che riesce solo se nessun altro giro l'ha già
 // presa: due giri sovrapposti non mandano due email. Se l'invio fallisce il segno torna com'era e ci riprova il giro
@@ -28,7 +31,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminSupabase()
   const ora = Date.now()
   const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
-  const conti = { guardate: 0, inviate: 0, inviti: 0, inRitardo: 0, saltate: 0, errori: 0 }
+  const conti = { guardate: 0, inviate: 0, inviti: 0, notifiche: 0, inRitardo: 0, saltate: 0, errori: 0 }
 
   // ── chi riceve: email dell'account (gli utenti non l'hanno in tabella), solo se attivo; marchio del master; demo no ──
   const persone = new Map<string, { email: string | null; attivo: boolean; cliente: boolean; nome: string }>()
@@ -73,9 +76,16 @@ export async function GET(req: NextRequest) {
     prendi: () => Promise<boolean>, rilascia: () => Promise<void>) => {
     if (!(await prendi())) return
     const p = await persona(destinatario)
-    if (!p.email || !p.attivo) { conti.saltate++; return }
+    if (!p.attivo) { conti.saltate++; return }
     const m = await marchio(e.master_id)
     if (m?.demo) { conti.saltate++; return }
+    const href = p.cliente ? '/cliente/calendario' : '/dashboard/calendario'
+    const push = await mandaPush(admin, destinatario, {
+      titolo: e.titolo, testo: [scriviQuando(quando, !!e.tutto_il_giorno), e.luogo, invitato ? `invito di ${invitato.organizzatore}` : null].filter(Boolean).join(' · '),
+      link: href, chiave: `cal-${e.id}-${quando.toISOString().slice(0, 10)}`,
+    }).catch(() => ({ inviate: 0 }))
+    if (push.inviate) conti.notifiche++
+    if (!p.email) { if (!push.inviate) conti.saltate++; return }
     const r = await inviaEmailPromemoria({
       to: p.email, tipo: e.tipo, titolo: e.titolo, quando: scriviQuando(quando, !!e.tutto_il_giorno),
       ripetizione: e.ricorrenza ? descriviRicorrenza(e.ricorrenza, e.inizio) : null,
@@ -83,10 +93,11 @@ export async function GET(req: NextRequest) {
       // la spedizione collegata è solo di chi ha scritto la voce
       spedizione: invitato ? null : (e.collegamento?.etichetta || null),
       organizzatore: invitato?.organizzatore || null,
-      link: `${base}${p.cliente ? '/cliente/calendario' : '/dashboard/calendario'}`,
+      link: `${base}${href}`,
       brand: m ? { logo: m.logo, nome: m.nome } : undefined,
     })
-    if ((await esitoInvio(r, rilascia)) === 'ok') conti.inviate++
+    // la notifica è arrivata: anche se l'email fallisce non si riprova (si manderebbe di nuovo la notifica)
+    if ((await esitoInvio(r, push.inviate ? async () => {} : rilascia)) === 'ok') conti.inviate++
   }
 
   // l'occorrenza da avvisare ADESSO, se c'è: la più recente col momento dell'avviso passato da meno di un'ora
@@ -191,10 +202,16 @@ export async function GET(req: NextRequest) {
       if (!presa) continue
       if (!e || !prossima) { conti.saltate++; continue }
       const p = await persona(i.utente_id)
-      if (!p.email || !p.attivo) { conti.saltate++; continue }
+      if (!p.attivo) { conti.saltate++; continue }
       const m = await marchio(e.master_id)
       if (m?.demo) { conti.saltate++; continue }
       const org = await persona(i.invitato_da)
+      const pushInv = await mandaPush(admin, i.utente_id, {
+        titolo: `Invito: ${e.titolo}`, testo: `${org.nome || 'Lo staff'} ti ha invitato · ${scriviQuando(prossima.inizio, !!e.tutto_il_giorno)}`,
+        link: p.cliente ? '/cliente/calendario' : '/dashboard/calendario', chiave: `inv-${i.id}`,
+      }).catch(() => ({ inviate: 0 }))
+      if (pushInv.inviate) conti.notifiche++
+      if (!p.email) { if (!pushInv.inviate) conti.saltate++; continue }
       const r = await inviaEmailInvito({
         to: p.email, tipo: e.tipo === 'riunione' ? 'riunione' : 'evento', titolo: e.titolo,
         quando: scriviQuando(prossima.inizio, !!e.tutto_il_giorno),
@@ -203,7 +220,7 @@ export async function GET(req: NextRequest) {
         link: `${base}${p.cliente ? '/cliente/calendario' : '/dashboard/calendario'}`,
         brand: m ? { logo: m.logo, nome: m.nome } : undefined,
       })
-      if ((await esitoInvio(r, async () => { await admin.from('calendario_inviti').update({ invito_mandato_il: null }).eq('id', i.id) })) === 'ok') conti.inviti++
+      if ((await esitoInvio(r, pushInv.inviate ? async () => {} : async () => { await admin.from('calendario_inviti').update({ invito_mandato_il: null }).eq('id', i.id) })) === 'ok') conti.inviti++
     }
   }
 

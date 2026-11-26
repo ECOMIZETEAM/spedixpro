@@ -4,6 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 import { pollaSeVisibile } from '@/lib/polling-visibile'
+import { agganciaDispositivo } from './calendario/dispositivo'
 
 // La campanella legge /api/notifiche/mie e le divide in TAB per categoria, così i "Spedizione
 // consegnata" (ad alto volume) non affogano gli AVVISI importanti del master. Il pallino conta solo
@@ -40,7 +41,9 @@ export default function CampanellaNotifiche({ aspetto }: { aspetto?: 'nuova' } =
   const pannello = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const [montato, setMontato] = useState(false)
-  useEffect(() => { setMontato(true) }, [])
+  // le notifiche su questo dispositivo (calendario, fase 3): rinnova il telefono o il browser già attivato, apre la pagina
+  // giusta al tocco di una notifica nell'app, e lo stacca all'«Esci». La campanella c'è in ogni pagina dei due portali.
+  useEffect(() => { setMontato(true); agganciaDispositivo() }, [])
 
   useEffect(() => { try { setVistoAl(localStorage.getItem(VISTE_KEY) || '') } catch {} }, [])
 

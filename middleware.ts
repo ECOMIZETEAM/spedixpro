@@ -23,6 +23,8 @@ const SCRITTURE_AGENTE = [
   // scrivono solo righe con utente_id = chi chiama; gli inviti li manda solo lo staff (controllato nella rotta). Senza,
   // l'agente vedeva il calendario ma ogni «Salva» tornava «gli agenti hanno accesso in sola lettura».
   '/api/calendario/',
+  // i SUOI dispositivi per le notifiche (fase 3, 26/11): registrare il telefono o il browser, staccarlo, la prova
+  '/api/notifiche/dispositivi',
 ]
 
 // SCRITTURE CONSENTITE ALL'AUTISTA: la sua schermata e la sessione, e basta.
