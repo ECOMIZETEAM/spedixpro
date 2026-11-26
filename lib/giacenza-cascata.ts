@@ -461,8 +461,9 @@ const OP_LABEL: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_
 // tolto o listino cambiato. Senza pacco (il ledger di un salto a collegamento): il suo listino di oggi.
 async function prezzoGiacenzaClienteListino(admin: any, clienteId: string, corriereId: string, operazione: string, spedizioneId?: string): Promise<{ apertura: number; servizio: number }> {
   if (spedizioneId && corriereId) {
-    const { data: sped, error } = await admin.from('spedizioni').select('*').eq('id', spedizioneId).maybeSingle()
-    if (error) throw new Error('prezzo giacenza: spedizione non leggibile (' + error.message + ')')
+    // Lettura fallita: si resta al listino di oggi qui sotto, come prima. Mai un errore: l'apertura del
+    // cliente si calcola dopo aver gia' scritto altre voci, e la coda la rifarebbe da capo.
+    const { data: sped } = await admin.from('spedizioni').select('*').eq('id', spedizioneId).maybeSingle()
     if (sped) {
       const pr = await leggiPrezzi(admin, { ...sped, cliente_id: clienteId, corriere_id: corriereId })
       return { apertura: Number(pr.apertura) || 0, servizio: Number(pr.servizi?.[operazione]?.valore) || 0 }

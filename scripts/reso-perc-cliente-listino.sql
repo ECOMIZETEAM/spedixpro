@@ -13,9 +13,10 @@
 -- Se quel listino non ha piu' nessuna fascia del contratto, la riga del reso si cerca anche fra le righe
 -- archiviate. Se nemmeno li' c'e', vale il predefinito di sempre.
 --
--- fn_addebita_resi cambia in UNA riga (passa `listino_id`). Lo script si ferma se la funzione nel
--- database non e' piu' quella letta il 25/11 (impronta md5): qualcuno l'ha cambiata nel frattempo, e
--- sovrascriverla cancellerebbe il suo lavoro.
+-- fn_addebita_resi cambia in DUE righe: passa `listino_id` alla percentuale del cliente e la spedizione a
+-- quella del master. Lo script si ferma se una delle tre funzioni nel database non e' piu' quella letta il
+-- 25-26/11 (impronta md5): qualcuno l'ha cambiata nel frattempo, e sovrascriverla cancellerebbe il suo lavoro.
+-- E si annulla tutto se la copia di fn_addebita_resi differisce da quella di prima oltre le due righe.
 
 begin;
 
@@ -33,7 +34,7 @@ begin
     raise exception 'fn_reso_perc_cliente e'' cambiata dal 26/11: non la sovrascrivo. Rileggerla e rifare lo script.';
   end if;
 end $$;
--- Il testo di prima, per controllare in fondo che sia cambiata SOLO la riga della percentuale.
+-- Il testo di prima, per controllare in fondo che siano cambiate SOLO le due righe delle percentuali.
 create temp table _addebita_resi_prima on commit drop as
   select pg_get_functiondef('public.fn_addebita_resi(jsonb,uuid)'::regprocedure) d;
 
@@ -75,8 +76,8 @@ $$;
 revoke all on function public.fn_reso_perc_cliente(uuid, uuid, uuid) from public, anon, authenticated;
 grant execute on function public.fn_reso_perc_cliente(uuid, uuid, uuid) to service_role;
 
--- fn_addebita_resi: identica a quella in produzione il 25/11/2026 (md5 edba32c0…), tranne la chiamata
--- a fn_reso_perc_cliente, che ora passa il listino del nolo.
+-- fn_addebita_resi: identica a quella in produzione il 25/11/2026 (md5 edba32c0…), tranne le chiamate
+-- a fn_reso_perc_cliente, che ora passa il listino del nolo, e a fn_reso_perc_master, che passa la spedizione.
 CREATE OR REPLACE FUNCTION public.fn_addebita_resi(p_righe jsonb, p_created_by uuid DEFAULT NULL::uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -157,7 +158,8 @@ begin
       if not found then v_valore := 0; v_perc := 100; end if;   -- il cliente ha sempre un predefinito
       v_trovata := true;
     elsif v_corriere is not null then
-      select f.valore, f.perc into v_valore, v_perc from public.fn_reso_perc_master(v_corriere) f;
+      -- 26/11/2026: la spedizione, per usare i prezzi di costo archiviati solo se tolti dopo la partenza.
+      select f.valore, f.perc into v_valore, v_perc from public.fn_reso_perc_master(v_corriere, v_sped.id) f;
       v_trovata := found;
     end if;
 
@@ -216,6 +218,10 @@ begin
     E'      -- 25/11/2026: la percentuale dallo stesso listino da cui il codice ha preso il nolo (listino_id).\n'
     || E'      select f.valore, f.perc into v_valore, v_perc\n'
     || E'        from public.fn_reso_perc_cliente(v_cliente, v_corriere, nullif(r ->> ''listino_id'', '''')::uuid) f;\n');
+  v_attesa := replace(v_attesa,
+    E'      select f.valore, f.perc into v_valore, v_perc from public.fn_reso_perc_master(v_corriere) f;\n',
+    E'      -- 26/11/2026: la spedizione, per usare i prezzi di costo archiviati solo se tolti dopo la partenza.\n'
+    || E'      select f.valore, f.perc into v_valore, v_perc from public.fn_reso_perc_master(v_corriere, v_sped.id) f;\n');
   v_ora := pg_get_functiondef('public.fn_addebita_resi(jsonb,uuid)'::regprocedure);
   if v_attesa = v_prima then
     raise exception 'la riga da cambiare non c''e'' nella funzione di prima: annullo';
@@ -232,6 +238,10 @@ end $$;
 -- all'andata, contrassegno compreso. Il nolo su cui si applica lo calcola il codice, anche lui
 -- dall'archivio (noloMaster). Se il contratto ha ancora le sue fasce, non cambia niente: stesse righe,
 -- stesso ordine (per id) di prima.
+-- Le righe archiviate valgono alle stesse condizioni del codice (lib/prezzi-archivio.ts, archivioCostoPerPacco):
+-- prezzi tolti DOPO la partenza del pacco, e listino di quelle fasce ancora esistente. Per saperlo serve la
+-- spedizione, che fn_addebita_resi ora passa. Senza spedizione (fn_reso_prezzo, che nessun codice chiama)
+-- l'archivio non si usa: come prima.
 do $$
 begin
   if md5(pg_get_functiondef('public.fn_reso_perc_master(uuid)'::regprocedure)) <> '90ef7dabe752bb8dc4d776c3a9bdfc5d' then
@@ -239,7 +249,9 @@ begin
   end if;
 end $$;
 
-create or replace function public.fn_reso_perc_master(p_corriere_id uuid)
+drop function public.fn_reso_perc_master(uuid);
+
+create function public.fn_reso_perc_master(p_corriere_id uuid, p_spedizione_id uuid default null)
 returns table(valore numeric, perc numeric)
 language sql stable security definer set search_path = public as $$
   select x.valore, x.perc from (
@@ -267,13 +279,24 @@ language sql stable security definer set search_path = public as $$
        and lower(a.riga ->> 'nome') not like '%nuovo%'
        and not exists (select 1 from public.listini_corrieri_fasce f where f.corriere_id = p_corriere_id)
        and not exists (select 1 from public.listini_corrieri_supplementi v where v.corriere_id = p_corriere_id)
+       and p_spedizione_id is not null
+       -- solo prezzi tolti DOPO la partenza: prima, il pacco e' stato prezzato da un'altra parte
+       and (select min(z.archiviato_at) from public.listini_corrieri_archivio z
+             where z.corriere_id = p_corriere_id and z.tabella = 'listini_corrieri_fasce')
+           >= (select sp.created_at from public.spedizioni sp where sp.id = p_spedizione_id)
+       -- e solo se il listino di quelle fasce esiste ancora
+       and not exists (select 1 from public.listini_corrieri_archivio z
+                        where z.corriere_id = p_corriere_id and z.tabella = 'listini_corrieri_fasce'
+                          and not exists (select 1 from public.listini_corrieri l2
+                                            join public.corrieri c2 on c2.master_id = l2.master_id
+                                           where c2.id = p_corriere_id and l2.id = (z.riga ->> 'listino_id')::uuid))
        -- descrizione non JSON: la riga archiviata si salta invece di far fallire tutto l'addebito dei resi
        and (btrim(coalesce(a.riga ->> 'descrizione', '')) = '' or pg_input_is_valid(btrim(a.riga ->> 'descrizione'), 'jsonb'))
   ) x
   order by x.fonte, x.ordine
   limit 1;
 $$;
-revoke all on function public.fn_reso_perc_master(uuid) from public, anon, authenticated;
-grant execute on function public.fn_reso_perc_master(uuid) to service_role;
+revoke all on function public.fn_reso_perc_master(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.fn_reso_perc_master(uuid, uuid) to service_role;
 
 commit;

@@ -26,9 +26,11 @@
 //     non c'entrano;
 //  4. tabella per tabella vince il vivo: se il listino ha ancora supplementi (o l'aggancio) di quel
 //     contratto, valgono quelli, come fa il database (fn_reso_perc_cliente, fn_reso_perc_master);
-//  5. una lettura FALLITA non e' "niente in archivio" ne' "niente di vivo": si lancia l'errore e l'evento
-//     si ritenta. Uno zero scritto per una lettura andata storta non si ritenta piu' (l'indice unico dei
-//     resi lo vieta per sempre).
+//  5. una lettura FALLITA non diventa mai un prezzo: per il cliente vale "nessuna fonte" (la riga di reso
+//     non si scrive e il pacco resta nella sentinella dei resi, invece di chiudersi a 0 per sempre), per il
+//     master "niente archivio" (il calcolo di prima). E NON si lancia: chi chiama spesso ha gia' scritto
+//     qualcosa (il cliente addebitato, l'istruzione al corriere, la distinta chiusa) e un errore a meta'
+//     faceva ripartire tutto da capo, con doppi addebiti e doppie istruzioni (revisione del 26/11).
 
 export type ArchivioCoppia = {
   fasce: any[]
@@ -54,22 +56,22 @@ async function esiste(q: any, cosa: string): Promise<boolean> {
 }
 
 // Il listino ha ancora fasce di quel contratto? Se si', il prezzo si legge da li', come sempre.
-export async function haFasceVive(db: any, listinoId: string, corriereId: string): Promise<boolean> {
+async function haFasceVive(db: any, listinoId: string, corriereId: string): Promise<boolean> {
   return esiste(db.from('listini_clienti_fasce').select('id').eq('listino_id', listinoId).eq('corriere_id', corriereId), 'fasce del listino')
 }
 
-// Quando e' partito il pacco. null = non si sa, e allora l'archivio non si usa (regola 3).
+// Quando e' partito il pacco. null = non si sa (o non si e' letto), e allora l'archivio non si usa (regola 3).
 export async function partenzaDi(db: any, sped: any): Promise<string | null> {
   if (sped?.created_at) return sped.created_at
   if (!sped?.id) return null
   const { data, error } = await db.from('spedizioni').select('created_at').eq('id', sped.id).maybeSingle()
-  if (error) throw errore('data della spedizione', error)
+  if (error) { console.error('[PREZZI DOPO PARTENZA]', errore('data della spedizione', error).message); return null }
   return (data as any)?.created_at || null
 }
 
 // Il listino con cui il pacco e' partito. Lo segna il database alla nascita (dal 25/11/2026): i pacchi
 // piu' vecchi non ce l'hanno (null).
-export async function listinoDiPartenza(db: any, sped: any): Promise<string | null> {
+async function listinoDiPartenza(db: any, sped: any): Promise<string | null> {
   if (sped?.listino_cliente_id !== undefined) return sped.listino_cliente_id || null
   if (!sped?.id) return null
   const { data, error } = await db.from('spedizioni').select('listino_cliente_id').eq('id', sped.id).maybeSingle()
@@ -104,6 +106,17 @@ async function archivioCoppiaPerPacco(db: any, listinoId: string, corriereId: st
 // prova una alla volta e si ferma alla prima che prezza il pacco. Vuota = nessun listino lo prezza piu'.
 // `sped` deve avere corriere_id; id (o created_at e listino_cliente_id) per la partenza.
 export async function fontiCliente(db: any, sped: any, listinoOggi: string | null | undefined): Promise<FonteCliente[]> {
+  try {
+    return await fontiClienteLette(db, sped, listinoOggi)
+  } catch (e: any) {
+    // Regola 5: nessuna fonte. Il reso del cliente non si scrive e resta in vista; la rettifica esce "non
+    // calcolabile" per quella riga e le altre vanno avanti, come quando prima il listino non si leggeva.
+    console.error('[PREZZI DOPO PARTENZA] fonti del cliente non lette, pacco', sped?.id, e?.message)
+    return []
+  }
+}
+
+async function fontiClienteLette(db: any, sped: any, listinoOggi: string | null | undefined): Promise<FonteCliente[]> {
   const corriereId = sped?.corriere_id
   const out: FonteCliente[] = []
   if (!corriereId) return listinoOggi ? [{ listinoId: listinoOggi, archivio: null }] : out
@@ -134,7 +147,7 @@ export type ArchivioCosto = {
 }
 
 // Il contratto ha ancora fasce di costo? Se si', il costo si legge da li', come sempre.
-export async function haFasceCostoVive(db: any, corriereId: string): Promise<boolean> {
+async function haFasceCostoVive(db: any, corriereId: string): Promise<boolean> {
   return esiste(db.from('listini_corrieri_fasce').select('id').eq('corriere_id', corriereId), 'fasce di costo')
 }
 
@@ -144,6 +157,16 @@ export async function haFasceCostoVive(db: any, corriereId: string): Promise<boo
 // non va prezzato coi prezzi di prima), o se il listino di quelle fasce non c'e' piu': senza la sua riga
 // non si sa piu' se valeva "solo peso reale", e un costo sul volume sbagliato e' peggio di nessun costo.
 export async function archivioCostoPerPacco(db: any, masterId: string, corriereId: string, partenza: string | null): Promise<ArchivioCosto | null> {
+  try {
+    return await archivioCostoLetto(db, masterId, corriereId, partenza)
+  } catch (e: any) {
+    // Regola 5: niente archivio, il costo del master come lo si calcolava prima.
+    console.error('[PREZZI DOPO PARTENZA] archivio di costo non letto, contratto', corriereId, e?.message)
+    return null
+  }
+}
+
+async function archivioCostoLetto(db: any, masterId: string, corriereId: string, partenza: string | null): Promise<ArchivioCosto | null> {
   if (!corriereId || !masterId || !partenza) return null
   if (await haFasceCostoVive(db, corriereId)) return null
   const { data, error } = await db.from('listini_corrieri_archivio').select('tabella,riga,archiviato_at').eq('corriere_id', corriereId)

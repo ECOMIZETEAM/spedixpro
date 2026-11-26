@@ -55,8 +55,8 @@ function prezziDaRighe(suppl: any[]) {
 // un altro numero (revisione 26/11). Le fonti e il loro ordine li decide lib/prezzi-archivio.ts.
 async function fonteGiacenza(admin: any, sped: any): Promise<{ nolo: number | null; fonte: FonteCliente | null; oggi: string | null }> {
   if (!sped?.cliente_id) return { nolo: null, fonte: null, oggi: null }
-  const { data: cliente, error } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  if (error) throw new Error('prezzi giacenza: cliente non leggibile (' + error.message + ')')
+  // Lettura fallita: nessun listino di oggi, come prima (mai un errore a meta' di uno svincolo).
+  const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
   const oggi = cliente?.listino_cliente_id || null
   const n = await noloClienteDopoPartenzaCon(admin, sped, oggi)
   return { nolo: n.nolo, fonte: n.fonte, oggi }
