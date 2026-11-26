@@ -14,7 +14,7 @@
 //
 // Il rimborso passa SEMPRE da rimborsaAnnulloSpedizione (idempotente per-movimento), il punto unico.
 import { easyparcelStorno } from '@/lib/easyparcel'
-import { rimborsaAnnulloSpedizione } from '@/lib/annullaSpedizione'
+import { rimborsaAnnulloSpedizione, masterDetentore } from '@/lib/annullaSpedizione'
 
 export type SpedStorno = { id: string; numero: string; dest_nome?: string | null; stato?: string | null; corriere_id: string; raw_response: any; annullamento_da?: string | null }
 
@@ -40,6 +40,21 @@ async function annullaERimborsa(admin: any, sped: SpedStorno, createdBy: string 
   catch (e) { console.error('[STORNO-DVA] shopify fulfillment:', (e as any)?.message) }
 }
 
+// In coda manuale si va SEMPRE con il detentore (annullamento_owner_id): la coda degli annulli filtra per owner e
+// la conferma lo esige, quindi una riga senza owner non la vede e non la chiude nessuno, e il cliente resta
+// addebitato. Al 26/11/2026 tre spedizioni DVA erano ferme cosi' dal 15/10 (55,36 € ai clienti).
+async function inCodaManuale(admin: any, sped: { id: string; corriere_id: string; numero?: string }, errore: string) {
+  let owner: string | null = null
+  const { data: corr, error: errCorr } = await admin.from('corrieri').select('id,master_id,nome_contratto,contratto_id').eq('id', sped.corriere_id).maybeSingle()
+  if (errCorr || !corr) console.error('[STORNO-DVA] contratto non leggibile, coda senza detentore:', sped.numero || sped.id, errCorr?.message)
+  else {
+    try { owner = await masterDetentore(admin, corr) }
+    catch (e: any) { console.error('[STORNO-DVA] detentore non trovato, coda senza detentore:', sped.numero || sped.id, e?.message) }
+  }
+  const { error } = await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_owner_id: owner, annullamento_errore: errore.slice(0, 200) }).eq('id', sped.id)
+  if (error) throw new Error('coda manuale non scritta: ' + error.message)
+}
+
 export type EsitoRichiesta = { azione: 'richiesto' | 'gia_cancellato' | 'manuale' | 'riprovare' | 'saltata'; codice: string; messaggio: string }
 
 // RICHIEDE lo storno a DVA (solo_verifica=false) e aggiorna lo stato. Non rimborsa, TRANNE quando DVA
@@ -61,7 +76,7 @@ export async function richiediStornoDva(admin: any, sped: SpedStorno, createdBy:
     return { azione: 'richiesto', codice: e.codice, messaggio: e.messaggio }
   }
   if (TRANSITORIO.has(e.codice)) return { azione: 'riprovare', codice: e.codice, messaggio: e.messaggio }
-  await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno DVA non possibile: ${e.messaggio}`.slice(0, 200) }).eq('id', sped.id)
+  await inCodaManuale(admin, sped, `Storno DVA non possibile: ${e.messaggio}`)
   return { azione: 'manuale', codice: e.codice, messaggio: e.messaggio }
 }
 
@@ -71,13 +86,13 @@ export type EsitoRiconcilia = { azione: 'completato' | 'in_attesa' | 'manuale' |
 export async function riconciliaStornoDva(admin: any, sped: SpedStorno): Promise<EsitoRiconcilia> {
   const apikey = await apikeyCorriere(admin, sped.corriere_id)
   const idOrdine = idOrdineEasyparcel(sped.raw_response)
-  if (!apikey || !idOrdine) { await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: 'storno: apikey/id_ordine mancante' }).eq('id', sped.id); return { azione: 'manuale', codice: 'dati_mancanti', messaggio: '' } }
+  if (!apikey || !idOrdine) { await inCodaManuale(admin, sped, 'storno: apikey/id_ordine mancante'); return { azione: 'manuale', codice: 'dati_mancanti', messaggio: '' } }
   const r = await easyparcelStorno(apikey, [idOrdine], true)
   const e = r.esiti[0]
   if (!e) return { azione: 'riprovare', codice: 'nessun_esito', messaggio: '' }
   if (e.codice === 'cancellato') { await annullaERimborsa(admin, sped, sped.annullamento_da || null); return { azione: 'completato', codice: e.codice, messaggio: e.messaggio } }
   if (e.codice === 'gia_richiesto' || e.codice === 'ammesso') return { azione: 'in_attesa', codice: e.codice, messaggio: e.messaggio }
-  await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno non completato: ${e.messaggio}`.slice(0, 200) }).eq('id', sped.id)
+  await inCodaManuale(admin, sped, `Storno non completato: ${e.messaggio}`)
   return { azione: 'manuale', codice: e.codice, messaggio: e.messaggio }
 }
 
@@ -113,11 +128,11 @@ export async function riconciliaStorniDvaCron(admin: any): Promise<{ completate:
           if (e.codice === 'cancellato') { await annullaERimborsa(admin, s, s.annullamento_da || null); completate++ }
           else if (e.codice === 'gia_richiesto' || e.codice === 'ammesso') {
             const giorni = s.annullamento_richiesto_at ? (Date.now() - new Date(s.annullamento_richiesto_at).getTime()) / 864e5 : 0
-            if (giorni > GIORNI_TIMEOUT) { await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno DVA non confermato dopo ${GIORNI_TIMEOUT} giorni: da verificare.` }).eq('id', s.id); manuali++ }
+            if (giorni > GIORNI_TIMEOUT) { await inCodaManuale(admin, s, `Storno DVA non confermato dopo ${GIORNI_TIMEOUT} giorni: da verificare.`); manuali++ }
             else if (e.codice === 'ammesso') daRimandare.push({ sped: s, id: e.id_ordine })
             else inCorso++
           } else {
-            await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno non completato: ${e.messaggio}`.slice(0, 200) }).eq('id', s.id); manuali++
+            await inCodaManuale(admin, s, `Storno non completato: ${e.messaggio}`); manuali++
           }
         }
       } catch (e: any) { errori += chunk.length; console.error('[STORNO-DVA][CRON] batch:', e?.message); continue }
@@ -132,7 +147,7 @@ export async function riconciliaStorniDvaCron(admin: any): Promise<{ completate:
           if (e.codice === 'cancellato') { await annullaERimborsa(admin, s, s.annullamento_da || null); completate++ }
           else if (e.codice === 'ammesso' || e.codice === 'gia_richiesto') { rimandate++; console.log('[STORNO-DVA][CRON] richiesta rimandata:', s.numero, e.id_ordine, 'registrata:', e.richiesto, 'stato DVA', e.stato) }
           else if (TRANSITORIO.has(e.codice)) inCorso++
-          else { await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_errore: `Storno non completato: ${e.messaggio}`.slice(0, 200) }).eq('id', s.id); manuali++ }
+          else { await inCodaManuale(admin, s, `Storno non completato: ${e.messaggio}`); manuali++ }
         }
       } catch (e: any) { errori += daRimandare.length; console.error('[STORNO-DVA][CRON] rinvio:', e?.message) }
     }

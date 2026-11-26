@@ -73,6 +73,15 @@ export async function GET(req: NextRequest) {
     console.error('[SENTINELLA] controllo annulli SDA EXPRESS L non eseguito:', e?.message)
     righe.push({ area: 'sentinella', controllo: `controllo annulli SDA EXPRESS L NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
   }
+  // Gli annulli dei pacchi venduti fra reti (26/11/2026): righe rimaste addebitate sotto un detentore annullato,
+  // code manuali senza detentore, ripristini rifiutati. Sta in lib/annullo-pacco, vicino alla regola che controlla.
+  try {
+    const { controlloAnnulliPacco } = await import('@/lib/annullo-pacco')
+    righe.push(...await controlloAnnulliPacco(admin))
+  } catch (e: any) {
+    console.error('[SENTINELLA] controllo annulli dei pacchi fra reti non eseguito:', e?.message)
+    righe.push({ area: 'sentinella', controllo: `controllo annulli dei pacchi fra reti NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
+  }
   // La sesta e' il margine di MULTIEXPRESS pacco per pacco del giorno prima (26/11/2026): le guardie fermano le
   // destinazioni speciali, ma un rincaro del corriere sulle zone normali (BRT Express isole, 19/11) lo si vedeva
   // solo misurando a mano. Sta nel codice perche' il motivo lo deve dire la stessa catena che fa gli addebiti.

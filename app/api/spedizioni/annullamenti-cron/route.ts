@@ -11,6 +11,27 @@ export const maxDuration = 300
 // l'annullo al corriere. Se il corriere accetta (o la considera già inesistente) → 'annullata'
 // + storno credito. Se rifiuta (già spedita/chiusa) → torna allo stato precedente con la nota
 // d'errore, così resta tracciabile e non sparisce.
+// Annullo rifiutato: la spedizione torna com'era, con la nota. Se intanto il cliente ha rifatto la spedizione per
+// lo stesso ordine, il vincolo uniq_sped_ordine_attivo_v2 rifiuta il ripristino. Prima l'errore non si leggeva: la
+// riga restava in attesa con la richiesta aperta e il giro la riprendeva ogni ora per sempre (su SpediamoPro con
+// un annullo al corriere a ogni giro). Ora la richiesta si chiude col motivo scritto e la riga resta addebitata
+// com'era: due spedizioni per lo stesso ordine le guarda una persona (la sentinella le conta).
+async function rimettiComEra(admin: any, s: any, nota: string): Promise<void> {
+  const { error } = await admin.from('spedizioni').update({
+    stato: s.stato_precedente || 'in_lavorazione',
+    annullamento_richiesto_at: null,
+    annullamento_errore: nota,
+  }).eq('id', s.id)
+  if (!error) return
+  console.error('[ANNULLI][CRON] ripristino rifiutato:', s.numero, error.message)
+  const doppio = /duplicate|unique|uniq_sped_ordine/i.test(error.message)
+  const { error: e2 } = await admin.from('spedizioni').update({
+    annullamento_richiesto_at: null,
+    annullamento_errore: `${nota} ${doppio ? 'Non si può rimettere attiva: per lo stesso ordine esiste già un\'altra spedizione.' : 'Ripristino non riuscito: ' + error.message}`.slice(0, 500),
+  }).eq('id', s.id)
+  if (e2) throw new Error('ripristino e nota non scritti: ' + e2.message)
+}
+
 // Una richiesta in attesa su un pacco Poste diretto: annullata subito, oppure rimessa com'era se il pacco
 // e' gia' nelle mani del corriere (resta addebitata). null = non e' un pacco Poste.
 async function chiudiRichiestaPoste(admin: any, s: any): Promise<'annullata' | 'rifiutata' | null> {
@@ -18,11 +39,7 @@ async function chiudiRichiestaPoste(admin: any, s: any): Promise<'annullata' | '
   const r = await annullaSubitoPoste(admin, s.tracking_number, { da: s.annullamento_da || null, richiestoAt: s.annullamento_richiesto_at })
   if (r.esito === 'annullata') return 'annullata'
   if (r.esito === 'partito') {
-    await admin.from('spedizioni').update({
-      stato: s.stato_precedente || 'in_lavorazione',
-      annullamento_richiesto_at: null,
-      annullamento_errore: r.messaggio,
-    }).eq('id', s.id)
+    await rimettiComEra(admin, s, r.messaggio)
     return 'rifiutata'
   }
   return null
@@ -111,11 +128,7 @@ export async function GET(req: NextRequest) {
         if (gambe) {
           const r = await annullaPaccoGls(admin, gambe, { da: (s as any).annullamento_da || null })
           if (r.ok) { annullate++; continue }
-          await admin.from('spedizioni').update({
-            stato: (s as any).stato_precedente || 'in_lavorazione',
-            annullamento_richiesto_at: null,
-            annullamento_errore: `Annullo rifiutato dal corriere: ${r.motivo}`,
-          }).eq('id', s.id)
+          await rimettiComEra(admin, s, `Annullo rifiutato dal corriere: ${r.motivo}`)
           rifiutate++
           continue
         }
@@ -131,11 +144,7 @@ export async function GET(req: NextRequest) {
           if (r.esito === 'annullata') { annullate++; continue }
           if (r.esito === 'coda') { manuali++; continue }
           const motivo = r.esito === 'rifiutata' ? r.motivo : 'il corriere non ha risposto'
-          await admin.from('spedizioni').update({
-            stato: (s as any).stato_precedente || 'in_lavorazione',
-            annullamento_richiesto_at: null,
-            annullamento_errore: /^Non annullabile/.test(motivo) ? motivo : `Annullo rifiutato dal corriere: ${motivo}`,
-          }).eq('id', s.id)
+          await rimettiComEra(admin, s, /^Non annullabile/.test(motivo) ? motivo : `Annullo rifiutato dal corriere: ${motivo}`)
           rifiutate++
           continue
         }
@@ -186,11 +195,7 @@ export async function GET(req: NextRequest) {
         const nota = /15\s*(days|giorni)/i.test(reason)
           ? 'Non annullabile: sono passati più di 15 giorni dalla creazione — il corriere non consente più l\'annullo.'
           : `Annullo rifiutato dal corriere: ${reason}`
-        await admin.from('spedizioni').update({
-          stato: (s as any).stato_precedente || 'in_lavorazione',
-          annullamento_richiesto_at: null,
-          annullamento_errore: nota,
-        }).eq('id', s.id)
+        await rimettiComEra(admin, s, nota)
         rifiutate++
       }
     } catch (e) {

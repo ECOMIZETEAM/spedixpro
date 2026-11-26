@@ -36,13 +36,17 @@ export async function trovaOwnerContratto(admin: any, corriereMasterId: string, 
 export async function masterDetentore(
   admin: any, corr: { id?: string | null; master_id: string; nome_contratto: string | null; contratto_id?: string | null },
 ): Promise<string> {
+  // Una lettura fallita NON e' "contratto senza puntatore": ripiegare sul nome rifarebbe proprio l'errore che
+  // questa funzione corregge (coda a chi non puo' annullare). Si ferma, e chi chiama riprova.
   let contrattoId = corr.contratto_id ?? null
   if (contrattoId === null && corr.id) {
-    const { data } = await admin.from('corrieri').select('contratto_id').eq('id', corr.id).maybeSingle()
+    const { data, error } = await admin.from('corrieri').select('contratto_id').eq('id', corr.id).maybeSingle()
+    if (error) throw new Error('contratto non leggibile: ' + error.message)
     contrattoId = (data as any)?.contratto_id || null
   }
   if (contrattoId) {
-    const { data: det } = await admin.from('corrieri').select('master_id').eq('id', contrattoId).maybeSingle()
+    const { data: det, error } = await admin.from('corrieri').select('master_id').eq('id', contrattoId).maybeSingle()
+    if (error) throw new Error('riga del detentore non leggibile: ' + error.message)
     if ((det as any)?.master_id) return (det as any).master_id
     console.warn('[ANNULLO] riga del detentore non trovata, detentore per nome:', corr.id, contrattoId)
   }
@@ -255,13 +259,17 @@ export async function rimborsaAnnulloSpedizione(
     // addebiti identici ripetuti. (L'over-refund da riscrittura in-place dell'importo e' un caso a parte,
     // chiuso alla radice dal trigger append-only su movimenti.importo: qui non lo si puo' sanare creando
     // altri rimborsi.)
-    const { data: addebiti } = await admin.from('movimenti')
+    // Letture fallite = non si sa cosa e' gia' stato rimborsato: meglio nessun rimborso (lo riprende la coda
+    // annulli_da_rimborsare, che rilegge) che rimborsare tutto una seconda volta.
+    const { data: addebiti, error: errAdd } = await admin.from('movimenti')
       .select('cliente_id,master_id,master_target_id,importo')
       .eq('spedizione_id', sped.id).in('tipo', ['spedizione', 'rettifica'])
+    if (errAdd) throw new Error('addebiti non leggibili: ' + errAdd.message)
     if (!addebiti?.length) return
-    const { data: rimbEsistenti } = await admin.from('movimenti')
+    const { data: rimbEsistenti, error: errRimb } = await admin.from('movimenti')
       .select('cliente_id,master_id,master_target_id,importo')
       .eq('spedizione_id', sped.id).eq('tipo', 'rimborso')
+    if (errRimb) throw new Error('rimborsi gia\' fatti non leggibili: ' + errRimb.message)
     const chiaveRimb = (cli: any, mo: any, tg: any, imp: number) =>
       `${cli || ''}|${mo || ''}|${tg || ''}|${imp.toFixed(2)}`
     const giaFatti = new Map<string, number>()
@@ -309,11 +317,16 @@ export async function annullaGambePacco(
   admin: any, gambe: GambaSpedizione[], rich: { richiestoAt?: string | null; da?: string | null },
 ): Promise<{ gambe: number }> {
   const ids = gambe.map(g => g.spedizioneId)
-  const { data: righe } = await admin.from('spedizioni').select('id,numero,dest_nome,stato,stato_precedente').in('id', ids)
+  // Lettura fallita: niente e' stato toccato, si dice che non e' andata (chi chiama risponde errore e si riprova).
+  // Prima tornava "annullata" senza aver scritto ne' rimborsato niente.
+  const { data: righe, error: errRighe } = await admin.from('spedizioni').select('id,numero,dest_nome,stato,stato_precedente').in('id', ids)
+  if (errRighe) throw new Error('righe del pacco non leggibili: ' + errRighe.message)
   const quando = rich.richiestoAt || new Date().toISOString()
+  const annullate: any[] = []
+  const nonScritte: string[] = []
   for (const r of (righe || [])) {
-    if (r.stato === 'annullata') continue
-    await admin.from('spedizioni').update({
+    if (r.stato === 'annullata') { annullate.push(r); continue }
+    const { error } = await admin.from('spedizioni').update({
       stato: 'annullata',
       // Della gamba in attesa conta lo stato di prima della richiesta; le altre non erano in attesa.
       stato_precedente: r.stato === 'annullamento_pending' ? (r.stato_precedente || 'in_lavorazione') : r.stato,
@@ -321,9 +334,13 @@ export async function annullaGambePacco(
       annullamento_da: rich.da || null,
       annullamento_errore: null,
     }).eq('id', r.id)
+    if (error) { nonScritte.push(`${r.numero}: ${error.message}`); continue }
+    annullate.push(r)
   }
-  for (const r of (righe || [])) await rimborsaAnnulloSpedizione(admin, r, rich.da || null)
+  // Si rimborsa solo cio' che risulta annullato: una riga rimasta attiva non si rimborsa.
+  for (const r of annullate) await rimborsaAnnulloSpedizione(admin, r, rich.da || null)
   // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
-  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, ids) } catch {}
-  return { gambe: (righe || []).length }
+  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, annullate.map(r => r.id)) } catch {}
+  if (nonScritte.length) throw new Error('righe del pacco non annullate: ' + nonScritte.join('; '))
+  return { gambe: annullate.length }
 }

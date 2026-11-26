@@ -25,11 +25,30 @@
 -- dice "annullata" e un livello sotto risulta in viaggio, c'è qualcosa da guardare a mano, non da decidere.
 --
 -- Non rimborsa niente da sé: cambia solo lo stato. I soldi restano a rimborsaAnnulloSpedizione.
--- Un errore qui NON deve bloccare la scrittura del detentore (tracking, conferma, storno): si registra un
--- avviso nei log di Postgres e la riga del detentore passa lo stesso. Le righe rimaste indietro le mostra la
--- query di controllo in fondo a questo file.
+-- Un errore qui NON deve bloccare la scrittura del detentore (tracking, conferma, storno): ogni riga si scrive
+-- nel suo blocco, e quella che non si scrive finisce in gambe_pacco_anomalie (la conta la sentinella), mentre
+-- la riga del detentore e le altre passano lo stesso.
 --
 -- Da lanciare nel SQL Editor PRIMA di rilasciare il codice dell'annullo per pacco.
+
+-- Le righe che non si riescono a far seguire finiscono qui: nei log di Postgres non le leggerebbe nessuno.
+-- Le conta la sentinella (app/api/controllo/sentinella). Solo il server ci scrive e legge.
+create table if not exists public.gambe_pacco_anomalie (
+  id            bigserial primary key,
+  at            timestamptz not null default now(),
+  detentore_id  uuid not null,
+  spedizione_id uuid,
+  numero        text,
+  evento        text not null,
+  errore        text not null
+);
+alter table public.gambe_pacco_anomalie enable row level security;
+revoke all on table public.gambe_pacco_anomalie from public;
+revoke all on table public.gambe_pacco_anomalie from anon;
+revoke all on table public.gambe_pacco_anomalie from authenticated;
+revoke all on sequence public.gambe_pacco_anomalie_id_seq from public;
+revoke all on sequence public.gambe_pacco_anomalie_id_seq from anon;
+revoke all on sequence public.gambe_pacco_anomalie_id_seq from authenticated;
 
 create or replace function public.fn_gambe_seguono_detentore()
 returns trigger
@@ -38,9 +57,10 @@ security definer
 set search_path = public
 as $$
 declare
-  v_tipo  text;
-  v_altre uuid[];
-  r       record;
+  v_tipo   text;
+  v_altre  uuid[];
+  v_evento text;
+  r        record;
 begin
   -- Solo la riga del detentore: nessun venditore sopra, contratto vero (non un ponte).
   if new.tracking_number is null or (new.raw_response->>'venditore_spedizione_id') is not null then
@@ -48,6 +68,18 @@ begin
   end if;
   select c.tipo into v_tipo from corrieri c where c.id = new.corriere_id;
   if v_tipo is null or v_tipo = 'moovexpress' then
+    return new;
+  end if;
+
+  if new.stato = 'annullata' then
+    v_evento := 'annullata';
+  elsif new.stato in ('annullamento_manuale', 'storno_richiesto')
+        and coalesce(old.stato, '') not in ('annullamento_manuale', 'storno_richiesto', 'annullata') then
+    v_evento := 'in_coda';
+  elsif old.stato in ('annullamento_manuale', 'storno_richiesto')
+        and new.stato not in ('annullata', 'annullamento_manuale', 'storno_richiesto', 'annullamento_pending') then
+    v_evento := 'uscita_dalla_coda';
+  else
     return new;
   end if;
 
@@ -63,66 +95,81 @@ begin
       where g.tracking_number = new.tracking_number
     )
     select array_agg(id) into v_altre from fila where id <> new.id;
-
-    if v_altre is null then
-      return new;   -- pacco di una riga sola: niente da seguire
-    end if;
-
-    -- 1. LDV annullata: si annullano le righe ancora ferme.
-    if new.stato = 'annullata' then
-      update spedizioni g set
-        stato = 'annullata',
-        stato_precedente = case when g.stato in ('annullamento_pending', 'annullamento_manuale', 'storno_richiesto')
-                                then coalesce(g.stato_precedente, 'in_lavorazione') else g.stato end,
-        annullamento_richiesto_at = coalesce(new.annullamento_richiesto_at, g.annullamento_richiesto_at, now()),
-        annullamento_da = coalesce(g.annullamento_da, new.annullamento_da),
-        annullamento_owner_id = null,
-        annullamento_errore = null
-      where g.id = any(v_altre)
-        and g.stato in ('in_lavorazione', 'spedita', 'annullamento_pending', 'annullamento_manuale', 'storno_richiesto');
-
-    -- 2. Il detentore entra in coda: le altre righe ferme mostrano l'annullo in corso.
-    elsif new.stato in ('annullamento_manuale', 'storno_richiesto')
-          and coalesce(old.stato, '') not in ('annullamento_manuale', 'storno_richiesto', 'annullata') then
-      update spedizioni g set
-        stato = 'annullamento_manuale',
-        stato_precedente = case when g.stato = 'annullamento_pending'
-                                then coalesce(g.stato_precedente, 'in_lavorazione') else g.stato end,
-        annullamento_richiesto_at = coalesce(new.annullamento_richiesto_at, now()),
-        annullamento_da = coalesce(g.annullamento_da, new.annullamento_da),
-        annullamento_owner_id = null,
-        annullamento_errore = null
-      where g.id = any(v_altre)
-        and g.stato in ('in_lavorazione', 'spedita', 'annullamento_pending');
-
-    -- 3. Il detentore esce dalla coda senza annullarsi: tornano com'erano le righe messe in coda al punto 2
-    --    (owner nullo = in coda per il detentore, non per conto proprio). Una alla volta: se il cliente ha
-    --    già rifatto la spedizione per lo stesso ordine, il vincolo uniq_sped_ordine_attivo_v2 rifiuta il
-    --    ripristino di quella riga, e quella sola resta in coda col motivo.
-    elsif old.stato in ('annullamento_manuale', 'storno_richiesto')
-          and new.stato not in ('annullata', 'annullamento_manuale', 'storno_richiesto', 'annullamento_pending') then
-      for r in
-        select g.id from spedizioni g
-        where g.id = any(v_altre) and g.stato = 'annullamento_manuale' and g.annullamento_owner_id is null
-      loop
-        begin
-          update spedizioni g set
-            stato = coalesce(g.stato_precedente, 'in_lavorazione'),
-            annullamento_richiesto_at = null,
-            annullamento_owner_id = null,
-            annullamento_errore = new.annullamento_errore
-          where g.id = r.id;
-        exception when unique_violation then
-          update spedizioni g set
-            annullamento_errore = 'Il detentore non ha annullato la spedizione, ma non si può rimettere attiva: per lo stesso ordine ne esiste già un''altra.'
-          where g.id = r.id;
-        end;
-      end loop;
-    end if;
-
   exception when others then
-    raise warning '[gambe-seguono-detentore] % (%): %', new.numero, new.id, sqlerrm;
+    begin
+      insert into gambe_pacco_anomalie (detentore_id, numero, evento, errore) values (new.id, new.numero, v_evento, 'righe del pacco non lette: ' || sqlerrm);
+    exception when others then raise warning '[gambe-seguono-detentore] % : %', new.numero, sqlerrm;
+    end;
+    return new;
   end;
+
+  if v_altre is null then
+    return new;   -- pacco di una riga sola: niente da seguire
+  end if;
+
+  -- Una riga alla volta, ognuna nel suo blocco: se una non si scrive (un altro trigger, un vincolo), le altre
+  -- seguono lo stesso e quella finisce in gambe_pacco_anomalie. La riga del detentore passa comunque.
+  for r in select g.id, g.numero, g.stato, g.stato_precedente, g.annullamento_owner_id from spedizioni g where g.id = any(v_altre)
+  loop
+    begin
+      -- 1. LDV annullata: si annullano le righe ancora ferme (il rimborso lo fa la coda annulli_da_rimborsare).
+      if v_evento = 'annullata' then
+        if r.stato in ('in_lavorazione', 'spedita', 'annullamento_pending', 'annullamento_manuale', 'storno_richiesto') then
+          update spedizioni g set
+            stato = 'annullata',
+            stato_precedente = case when r.stato in ('annullamento_pending', 'annullamento_manuale', 'storno_richiesto')
+                                    then coalesce(r.stato_precedente, 'in_lavorazione') else r.stato end,
+            annullamento_richiesto_at = coalesce(new.annullamento_richiesto_at, g.annullamento_richiesto_at, now()),
+            annullamento_da = coalesce(g.annullamento_da, new.annullamento_da),
+            annullamento_owner_id = null,
+            annullamento_errore = null
+          where g.id = r.id;
+        end if;
+
+      -- 2. Il detentore entra in coda: le altre righe ferme mostrano l'annullo in corso, senza owner.
+      elsif v_evento = 'in_coda' then
+        if r.stato in ('in_lavorazione', 'spedita', 'annullamento_pending') then
+          update spedizioni g set
+            stato = 'annullamento_manuale',
+            stato_precedente = case when r.stato = 'annullamento_pending'
+                                    then coalesce(r.stato_precedente, 'in_lavorazione') else r.stato end,
+            annullamento_richiesto_at = coalesce(new.annullamento_richiesto_at, now()),
+            annullamento_da = coalesce(g.annullamento_da, new.annullamento_da),
+            annullamento_owner_id = null,
+            annullamento_errore = null
+          where g.id = r.id;
+        end if;
+
+      -- 3. Il detentore esce dalla coda senza annullarsi: tornano com'erano le righe messe in coda al punto 2
+      --    (owner nullo = in coda per il detentore, non per conto proprio). Se il cliente ha già rifatto la
+      --    spedizione per lo stesso ordine, il vincolo uniq_sped_ordine_attivo_v2 rifiuta il ripristino di
+      --    quella riga, che resta in coda col motivo.
+      else
+        if r.stato = 'annullamento_manuale' and r.annullamento_owner_id is null then
+          begin
+            update spedizioni g set
+              stato = coalesce(r.stato_precedente, 'in_lavorazione'),
+              annullamento_richiesto_at = null,
+              annullamento_owner_id = null,
+              annullamento_errore = new.annullamento_errore
+            where g.id = r.id;
+          exception when unique_violation then
+            update spedizioni g set
+              annullamento_errore = 'Il detentore non ha annullato la spedizione, ma non si può rimettere attiva: per lo stesso ordine ne esiste già un''altra.'
+            where g.id = r.id;
+            insert into gambe_pacco_anomalie (detentore_id, spedizione_id, numero, evento, errore)
+              values (new.id, r.id, r.numero, v_evento, 'ripristino rifiutato: stesso ordine già rispedito');
+          end;
+        end if;
+      end if;
+    exception when others then
+      begin
+        insert into gambe_pacco_anomalie (detentore_id, spedizione_id, numero, evento, errore)
+          values (new.id, r.id, r.numero, v_evento, sqlerrm);
+      exception when others then raise warning '[gambe-seguono-detentore] % / % : %', new.numero, r.numero, sqlerrm;
+      end;
+    end;
+  end loop;
 
   return new;
 end;
