@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useDialog } from '@/app/components/DialogProvider'
 
 const ACCENT = '#f97316'
@@ -20,6 +22,8 @@ const td: React.CSSProperties = { fontSize: '13px', color: '#333', padding: '11p
 const MARKETPLACE = ['amazon', 'shopify', 'temu']
 
 export default function ReportMarketplacePage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [gruppi, setGruppi] = useState<Gruppo[]>([])
   const [totali, setTotali] = useState<Record<string, number>>({})
@@ -90,7 +94,7 @@ export default function ReportMarketplacePage() {
             <div key={piatt} style={card}>
               <div style={{ padding: '14px 16px', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '20px' }}>{meta.emoji}</span>
+                  <span style={{ fontSize: '20px' }}>{nuova ? <Icona id="i-scarica" className="vs-ico" /> : meta.emoji}</span>
                   <div>
                     <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>Report {meta.label}</div>
                     <div style={{ fontSize: '12px', color: '#888' }}>{tot} ordini spediti</div>

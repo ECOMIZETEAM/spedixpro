@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
 import { inviaReport } from '@/lib/report-client'
@@ -23,6 +24,8 @@ const NOTA_ANNULLATE = 'Le spedizioni annullate e rimborsate sono elencate con i
 const eur = (n: number) => '€ ' + (Math.round(n * 100) / 100).toFixed(2)
 
 export default function ReportSpedizioniPage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [reports, setReports] = useState<any[]>([])
   const [erroreLista, setErroreLista] = useState('')
@@ -231,7 +234,7 @@ export default function ReportSpedizioniPage() {
       </div>
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'16px',marginBottom:'16px'}}>
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px',display:'flex',alignItems:'center',gap:'6px'}}>🔍 Nuovo report</div>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'14px',display:'flex',alignItems:'center',gap:'6px'}}>{nuova ? '' : '🔍 '}Nuovo report</div>
 
         {/* Riga 1 */}
         <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr',gap:'12px',marginBottom:'12px'}}>

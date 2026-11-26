@@ -51,6 +51,10 @@ export const PAGINE_PROVA = new Set([
   // 26/11 notte, il portale cliente, primo gruppo (spedizioni e soldi), fotografato come utente di NS CONSULTING
   '/cliente/spedizioni/cancellate', '/cliente/spedizioni/giacenze', '/cliente/contrassegni', '/cliente/distinte',
   '/cliente/distinte/nuova', '/cliente/movimenti', '/cliente/ricarica', '/cliente/fatture', '/cliente/listino',
+  // 26/11 notte, portale cliente, secondo gruppo (ritiri, resi, report, SMS)
+  '/cliente/ritiri', '/cliente/ritiri/nuovo', '/cliente/resi/distinte', '/cliente/reports/consumabili',
+  '/cliente/reports/contrassegni', '/cliente/reports/distinte', '/cliente/reports/marketplace', '/cliente/reports/rettifiche',
+  '/cliente/reports/spedizioni', '/cliente/sms',
 ])
 
 // LE SCHEDE DELLA PROVA, con l'id nell'indirizzo (26/11): [id] vale per qualunque id, ma solo nella forma di un uuid, così

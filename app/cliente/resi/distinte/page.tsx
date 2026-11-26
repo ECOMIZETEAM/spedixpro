@@ -1,9 +1,13 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import ResiClienteBlocco from '@/app/components/ResiClienteBlocco'
 export default function ResiDistinteCliente() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -161,7 +165,7 @@ export default function ResiDistinteCliente() {
                     </td>
                     <td style={td} onClick={e=>e.stopPropagation()}>
                       <button onClick={apri} title="Dettaglio" style={{padding:'6px 10px',border:'1px solid #fdba74',borderRadius:'6px',background:'#fff7ed',color:'#c2410c',cursor:'pointer',marginRight:'6px',fontSize:'12px',fontWeight:700}}>{aperta===d.id?'Chiudi':'Dettaglio'}</button>
-                      <button onClick={()=>stampa(d)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{padding:'6px 10px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',cursor:'pointer',marginRight:'6px',fontSize:'12px'}}>{busy===d.id+'-pdf'?'...':'🖨'}</button>
+                      <button onClick={()=>stampa(d)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{padding:'6px 10px',border:'none',borderRadius:'6px',background:'#f97316',color:'#fff',cursor:'pointer',marginRight:'6px',fontSize:'12px'}}>{busy===d.id+'-pdf'?'...':(nuova ? <Icona id="i-stampa" className="vs-ico-tasto" /> : '🖨')}</button>
                       <button onClick={()=>esporta(d)} disabled={busy===d.id+'-xlsx'} title="Esporta Excel" style={{padding:'6px 10px',border:'1px solid #d1d5db',borderRadius:'6px',background:'#fff',color:'#1a1a1a',cursor:'pointer',fontSize:'12px'}}>{busy===d.id+'-xlsx'?'...':'⬇'}</button>
                     </td>
                   </tr>,
