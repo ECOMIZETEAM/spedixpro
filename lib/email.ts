@@ -216,8 +216,24 @@ export async function inviaAllertaOneTracking(to: string, arretrato?: number): P
 // LA SENTINELLA, una volta al giorno. Si manda ANCHE quando e' tutto verde, di proposito: una
 // sentinella silenziosa non si distingue da una morta, e il guasto che ha fatto nascere tutto questo
 // (il recupero ripesature fermo dal 31/08/2026 al 11/09) non produceva errori — produceva silenzio.
-export async function inviaControlloGiornaliero(to: string, righe: { area: string; controllo: string; valore: number; atteso: string; allarme: boolean }[]): Promise<{ ok: boolean }> {
+type RigaControllo = { area: string; controllo: string; valore: number; atteso: string; allarme: boolean }
+
+export async function inviaControlloGiornaliero(to: string, righe: RigaControllo[]): Promise<{ ok: boolean }> {
   if (!to || !righe.length) return { ok: false }
+  try {
+    // Resend non lancia quando rifiuta la mail: risponde con `error`. Prima la rotta diceva "mail inviata" lo stesso.
+    const r: any = await invia({ from: FROM, to, ...componiControlloGiornaliero(righe) })
+    if (r?.error) throw new Error(r.error.message || String(r.error))
+    return { ok: true }
+  } catch (err: any) {
+    console.error('[SENTINELLA] email non inviata:', err?.message || err)
+    return { ok: false }
+  }
+}
+
+// Oggetto e corpo della mail della Sentinella, separati dall'invio: cosi' un'anteprima mostra la mail esatta che
+// arriva, senza mandarla.
+export function componiControlloGiornaliero(righe: RigaControllo[]): { subject: string; html: string } {
   const allarmi = righe.filter(r => r.allarme)
   const num = (v: number) => Number(v).toLocaleString('it-IT')
   const riga = (r: typeof righe[number]) => `
@@ -226,9 +242,7 @@ export async function inviaControlloGiornaliero(to: string, righe: { area: strin
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:13px;text-align:right;font-weight:700;color:${r.allarme ? '#b91c1c' : '#1a1a1a'}">${num(r.valore)}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;color:#9ca3af">${r.atteso}</td>
     </tr>`
-  try {
-    await invia({
-      from: FROM, to,
+  return {
       subject: allarmi.length
         ? `⚠️ MoovExpress — ${allarmi.length} ${allarmi.length === 1 ? 'cosa da guardare' : 'cose da guardare'}`
         : '✅ MoovExpress — tutto a posto',
@@ -247,11 +261,6 @@ export async function inviaControlloGiornaliero(to: string, righe: { area: strin
           che smette di partire non lascia errori, lascia silenzio.
         </p>
       `),
-    })
-    return { ok: true }
-  } catch (err: any) {
-    console.error('[SENTINELLA] email non inviata:', err?.message || err)
-    return { ok: false }
   }
 }
 

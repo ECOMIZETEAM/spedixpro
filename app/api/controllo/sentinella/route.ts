@@ -33,6 +33,7 @@ async function autorizzato(req: NextRequest): Promise<boolean> {
 }
 
 export async function GET(req: NextRequest) {
+  const inizio = Date.now()
   if (!(await autorizzato(req))) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
   const admin = createAdminSupabase()
 
@@ -69,6 +70,23 @@ export async function GET(req: NextRequest) {
   } catch (e: any) {
     console.error('[SENTINELLA] controllo annulli SDA EXPRESS L non eseguito:', e?.message)
     righe.push({ area: 'sentinella', controllo: `controllo annulli SDA EXPRESS L NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
+  }
+  // La sesta e' il margine di MULTIEXPRESS pacco per pacco del giorno prima (26/11/2026): le guardie fermano le
+  // destinazioni speciali, ma un rincaro del corriere sulle zone normali (BRT Express isole, 19/11) lo si vedeva
+  // solo misurando a mano. Sta nel codice perche' il motivo lo deve dire la stessa catena che fa gli addebiti.
+  // Ha una scadenza sua, calcolata su tutta la rotta (maxDuration 120 s, ~15 s per comporre e mandare la mail): se
+  // Vercel chiudesse la funzione per tempo non partirebbe nessuna mail, nemmeno con le altre parti.
+  try {
+    const { controlloPerditeMulti } = await import('@/lib/controllo-perdite-multi')
+    const restano = 105_000 - (Date.now() - inizio)
+    const misura = controlloPerditeMulti(admin, { tempoMaxMs: Math.max(5_000, restano - 25_000) })
+    misura.catch(() => {})   // se scade prima, un errore arrivato dopo non deve restare senza gestore
+    const esito = await Promise.race([misura, new Promise<null>(r => setTimeout(() => r(null), Math.max(1_000, restano)))])
+    if (esito) righe.push(...esito)
+    else righe.push({ area: 'sentinella', controllo: 'controllo margine MULTIEXPRESS NON completato in tempo (la Sentinella ha due minuti)', valore: 0, atteso: 'eseguito', allarme: true })
+  } catch (e: any) {
+    console.error('[SENTINELLA] controllo margine MULTIEXPRESS non eseguito:', e?.message)
+    righe.push({ area: 'sentinella', controllo: `controllo margine MULTIEXPRESS NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
   }
   if (righe.every(r => r.area === 'sentinella')) {
     // Se non riesco nemmeno a fare le domande, quello E' l'allarme: si dice, non si tace.

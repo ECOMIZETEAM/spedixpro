@@ -174,7 +174,7 @@ function soloIlSalto<T extends { pagato: number; dovuto: number | null; differen
 // volume invece dei 71,22 fatturati: un dichiarato gonfiato farebbe pagare meno chili di quelli veri.
 // Lo stesso istante della Conferma (app/api/rettifiche/route.ts): da li' il prezzo si fa collo per collo.
 const PREZZO_COLLO_PER_COLLO_DAL = Date.parse('2026-09-28T13:51:34Z')
-function colliDichiarati(s: any, rawResponse: any): { weight: number; length: number; width: number; height: number }[] {
+export function colliDichiarati(s: any, rawResponse: any): { weight: number; length: number; width: number; height: number }[] {
   const n = Math.max(1, Number(s.colli) || 1)
   if (n === 1) {
     const peso = Number(s.peso_reale) || 0
