@@ -10,7 +10,12 @@ import { chiavePubblicaWeb } from '@/lib/notifiche-push'
 // portale (esplicito falso) rinnova SOLO un dispositivo che è già di chi ha la sessione — anche col token cambiato dal
 // telefono (precedente) — e non lo passa mai a un altro: chi non le ha chieste non le riceve. All'uscita («Esci») il
 // portale lo stacca prima di chiudere la sessione (app/components/calendario/dispositivo.ts).
+// USCIRE NON È SPEGNERE: chi esce e rientra sullo stesso dispositivo le ritrova (l'aggancio automatico riprende una riga
+// staccata all'uscita); chi le ha SPENTE («Disattiva») o un dispositivo che il servizio dà per morto no. Senza questa
+// distinzione, sull'iPhone «Disattiva» durava fino alla riapertura dell'app: il telefono ridà spesso lo stesso token e
+// l'aggancio le riaccendeva da solo.
 const TIPI = new Set(['web', 'ios', 'android'])
+const USCITO = 'uscito dal portale'
 
 async function chi() {
   const supabase = await createServerSupabase()
@@ -54,7 +59,7 @@ export async function POST(req: NextRequest) {
     // aggancio automatico: si rinnova solo una riga già mia (con l'indirizzo di oggi o con quello di prima)
     const precedente = b?.precedente ? String(b.precedente).slice(0, 1000) : null
     const { data: mia } = await admin.from('notifiche_dispositivi').select('id,utente_id').in('indirizzo', [indirizzo, precedente].filter(Boolean) as string[])
-      .eq('utente_id', user.id).order('creato_il', { ascending: false }).limit(1).maybeSingle()
+      .eq('utente_id', user.id).or(`disattivato_il.is.null,motivo_spento.eq."${USCITO}"`).order('creato_il', { ascending: false }).limit(1).maybeSingle()
     if (!mia) return NextResponse.json({ ok: false, motivo: 'non attivato da te su questo dispositivo' })
     const { error } = await admin.from('notifiche_dispositivi').update(riga).eq('id', mia.id)
     if (error) return NextResponse.json({ error: 'Dispositivo non salvato: ' + error.message }, { status: 500 })
@@ -65,14 +70,15 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, id: data.id })
 }
 
-// stacca un dispositivo: per id (dall'elenco) o per indirizzo (questo browser, all'uscita). Solo i propri.
+// stacca un dispositivo: per id (dall'elenco) o per indirizzo (questo dispositivo: «Disattiva», o all'uscita con
+// uscita: true). Solo i propri.
 export async function DELETE(req: NextRequest) {
   const user = await chi()
   if (!user) return NextResponse.json({ error: 'Non autenticato' }, { status: 401 })
   const b = await req.json().catch(() => null)
   const id = String(b?.id || ''), indirizzo = String(b?.indirizzo || '')
   if (!id && !indirizzo) return NextResponse.json({ error: 'Quale dispositivo?' }, { status: 400 })
-  let q = createAdminSupabase().from('notifiche_dispositivi').update({ disattivato_il: new Date().toISOString(), motivo_spento: 'staccato da chi lo usava' })
+  let q = createAdminSupabase().from('notifiche_dispositivi').update({ disattivato_il: new Date().toISOString(), motivo_spento: b?.uscita === true ? USCITO : 'spento da chi lo usava' })
     .eq('utente_id', user.id).is('disattivato_il', null)
   q = id ? q.eq('id', id) : q.eq('indirizzo', indirizzo)
   const { error } = await q

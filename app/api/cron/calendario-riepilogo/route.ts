@@ -39,16 +39,17 @@ export async function GET(req: NextRequest) {
   if (error) { console.error('[CALENDARIO-RIEPILOGO] iscritti non letti:', error.message); return NextResponse.json({ error: error.message }, { status: 500 }) }
   conti.iscritti = (chi || []).length
 
-  for (const c of chi || []) {
-    if (c.riepilogo_inviato_il === oggi) continue
+  // cinque persone per volta: una costa circa un secondo di letture, e il giro ha cinque minuti
+  const persone = (chi || []).filter((c) => c.riepilogo_inviato_il !== oggi)
+  for (let i = 0; i < persone.length; i += 5) await Promise.all(persone.slice(i, i + 5).map(async (c) => {
     try {
       // lo prendo io: un riepilogo al giorno anche con due giri sovrapposti
       const { data: presa } = await admin.from('calendario_preferenze').update({ riepilogo_inviato_il: oggi }).eq('utente_id', c.utente_id)
         .or(`riepilogo_inviato_il.is.null,riepilogo_inviato_il.neq.${oggi}`).select('utente_id').maybeSingle()
-      if (!presa) continue
+      if (!presa) return
       const { data: u } = await admin.from('utenti').select('id,ruolo,master_id,cliente_id,nome,cognome,attivo').eq('id', c.utente_id).maybeSingle()
-      if (!u || u.attivo === false || !u.master_id || String(u.ruolo || '').toLowerCase() === 'autista') { conti.saltati++; continue }
-      if (await masterEDemo(u.master_id, admin).catch(() => false)) { conti.saltati++; continue }
+      if (!u || u.attivo === false || !u.master_id || String(u.ruolo || '').toLowerCase() === 'autista') { conti.saltati++; return }
+      if (await masterEDemo(u.master_id, admin).catch(() => false)) { conti.saltati++; return }
 
       // le voci di oggi (le sue e gli inviti non rifiutati), gli inviti da rispondere, i promemoria rimasti indietro
       const voci = (await vociNelPeriodo(admin, u.id, dal, al)).filter((v) => v.invito?.stato !== 'rifiutato')
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
       }
 
       // niente da dire: niente email né notifica
-      if (!voci.length && !ritiri && !giacenze && !inviti && !arretrati) { conti.vuoti++; continue }
+      if (!voci.length && !ritiri && !giacenze && !inviti && !arretrati) { conti.vuoti++; return }
 
       const href = cliente ? '/cliente/calendario' : '/dashboard/calendario'
       const righe = voci.slice(0, 12).map((v) => ({
@@ -106,6 +107,6 @@ export async function GET(req: NextRequest) {
       conti.errori++
       console.error('[CALENDARIO-RIEPILOGO] persona saltata:', c.utente_id, e?.message || e)
     }
-  }
+  }))
   return NextResponse.json({ ok: true, giorno: oggi, ...conti })
 }

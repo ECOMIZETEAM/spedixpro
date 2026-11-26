@@ -180,6 +180,6 @@ export function agganciaDispositivo() {
 // all'uscita: il dispositivo si stacca dalla persona, ma il permesso del browser/telefono resta (chi rientra lo riprende)
 async function disattivaSoloServer() {
   const indirizzo = piattaformaApp() ? tokenSalvato() : (await iscrizioneWeb().catch(() => null))?.endpoint
-  if (indirizzo) await fetch('/api/notifiche/dispositivi', json('DELETE', { indirizzo })).catch(() => {})
+  if (indirizzo) await fetch('/api/notifiche/dispositivi', json('DELETE', { indirizzo, uscita: true })).catch(() => {})
   try { sessionStorage.removeItem('mx_push_sync') } catch { }
 }
