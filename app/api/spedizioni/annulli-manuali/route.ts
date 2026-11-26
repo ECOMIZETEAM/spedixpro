@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { fetchAll } from '@/lib/fetch-all'
 import { gestisceLaRete } from '@/lib/ruoli'
+import { NOTA_ORDINE_GIA_RISPEDITO } from '@/lib/annulli-ripristino'
 
 // Coda annulli MANUALI (Spedisci): le vede SOLO il detentore del contratto
 // (annullamento_owner_id = suo master). Le richiede via assistenza WhatsApp e poi conferma.
@@ -18,7 +19,7 @@ export async function GET() {
 
   const admin = createAdminSupabase()
   const data = await fetchAll(() => admin.from('spedizioni')
-    .select('id,numero,tracking_number,dest_nome,dest_citta,dest_provincia,created_at,annullamento_richiesto_at,corrieri(nome_contratto)')
+    .select('id,numero,tracking_number,dest_nome,dest_citta,dest_provincia,created_at,annullamento_richiesto_at,annullamento_errore,corrieri(nome_contratto)')
     .eq('stato', 'annullamento_manuale')
     .eq('annullamento_owner_id', utente.master_id)
     .order('annullamento_richiesto_at', { ascending: true }))
@@ -65,8 +66,13 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json((data || []).map((s: any) => ({
+  // ORDINE GIA' RISPEDITO: il giro dei ripristini l'ha trovata partita, ma il cliente ha rifatto lo stesso
+  // ordine con un'altra spedizione attiva e il database non ne tiene due (lib/annulli-ripristino). Nessun
+  // giro la decide: tocca al detentore, che qui deve vederlo. Esce solo il SI'/NO, mai il testo della nota:
+  // in quel campo altre strade scrivono frasi col nome del fornitore tecnico, che un master non deve leggere.
+  return NextResponse.json((data || []).map(({ annullamento_errore, ...s }: any) => ({
     ...s,
+    ordine_gia_rispedito: annullamento_errore === NOTA_ORDINE_GIA_RISPEDITO,
     ripesata: ripesate.has(s.id),
     costo_pagato: Math.abs(Math.round((costoPerSped.get(s.id) || 0) * 100) / 100) || 0,
     stato_tracking: ultimoStato.get(s.id)?.stato || null,

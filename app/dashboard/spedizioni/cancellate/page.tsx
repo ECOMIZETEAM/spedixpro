@@ -123,7 +123,7 @@ export default function SpedizioniCancellatePage() {
       String(Number(s.costo_pagato || 0).toFixed(2)).replace('.', ','),
       s.dest_nome || '', s.dest_citta || '', s.dest_provincia || '',
       s.annullamento_richiesto_at ? new Date(s.annullamento_richiesto_at).toLocaleString('it-IT') : '',
-      s.ripesata ? 'RIPESATA - PARTITA: verificare' : '',
+      [s.ripesata ? 'RIPESATA - PARTITA: verificare' : '', s.ordine_gia_rispedito ? 'ORDINE GIA\' RISPEDITO: decidere se annullare o tenere' : ''].filter(Boolean).join(' · '),
     ].map(csvCampo).join(';'))
     const csv = '\uFEFF' + [intest.join(';'), ...corpo].join('\r\n')   // BOM: Excel IT apre gli accenti giusti
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -328,6 +328,15 @@ export default function SpedizioniCancellatePage() {
                       {s.ripesata && (
                         <div style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#166534',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'4px',padding:'2px 6px',display:'inline-block'}}>
                           ✓ Ripesata dal corriere: è partita
+                        </div>
+                      )}
+                      {/* ORDINE GIA' RISPEDITO: risulta partita, ma il cliente ha rifatto lo stesso ordine con
+                          un'altra spedizione ancora attiva. Nessun giro automatico la decide: tocca a chi gestisce
+                          la coda scegliere se annullarla o tenerla (lib/annulli-ripristino). */}
+                      {s.ordine_gia_rispedito && (
+                        <div title="Risulta partita, ma lo stesso ordine ha già un'altra spedizione attiva: decidi tu se annullarla o tenerla."
+                          style={{marginTop:'3px',fontSize:'10.5px',fontWeight:600,color:'#92400e',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'4px',padding:'2px 6px',display:'inline-block',cursor:'help'}}>
+                          ⚠ Ordine già rispedito: decidi tu
                         </div>
                       )}
                     </td>
