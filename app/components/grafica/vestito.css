@@ -70,8 +70,8 @@
 .gx .gx-vestito :is(button, a):is([style*="background: rgb(249, 115, 22)"], [style*="background:#f97316"]):disabled { background: var(--gx-incavo) !important; color: var(--gx-attenuato) !important; border: 0 !important; border-radius: 999px !important; opacity: 1 !important; }
 /* i numeri delle spedizioni e gli altri collegamenti scritti in arancio: in nero come nell'Elenco (l'arancio al
    passaggio); il resto del testo arancio un tono più scuro, leggibile sul bianco */
-.gx .gx-vestito :is(button, a):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"]):not([style*="background"]) { color: var(--gx-inchiostro) !important; text-decoration: none !important; font-weight: 600; }
-.gx .gx-vestito :is(button, a):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"]):not([style*="background"]):hover { color: var(--gx-accento-testo) !important; text-decoration: underline !important; }
+.gx .gx-vestito :is(button, a):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"], [style*="color: rgb(234, 88, 12)"], [style*="color:#ea580c"]):not([style*="background"]) { color: var(--gx-inchiostro) !important; text-decoration: none !important; font-weight: 600; }
+.gx .gx-vestito :is(button, a):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"], [style*="color: rgb(234, 88, 12)"], [style*="color:#ea580c"]):not([style*="background"]):hover { color: var(--gx-accento-testo) !important; text-decoration: underline !important; }
 .gx .gx-vestito :is(span, div, p, td, b, strong):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"], [style*="color: rgb(234, 88, 12)"], [style*="color:#ea580c"]):not([style*="background"]) { color: var(--gx-accento-testo) !important; }
 
 /* I FILI dei bordi scritti a mano, del colore dei fili della dashboard */
@@ -94,3 +94,5 @@
   color: var(--gx-inchiostro) !important; }
 .gx[data-luce="notte"] .gx-vestito :is(div, button):is([style*="background: rgb(249, 250, 251)"], [style*="background:#f9fafb"], [style*="background: rgb(243, 244, 246)"], [style*="background:#f3f4f6"], [style*="background: rgb(245, 245, 245)"], [style*="background:#f5f5f5"], [style*="background: rgb(250, 250, 250)"], [style*="background:#fafafa"]):is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"], [style*="color: rgb(107, 114, 128)"], [style*="color:#6b7280"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
   color: var(--gx-inchiostro) !important; }
+/* i numeri delle spedizioni scritti come testo arancio in grassetto (Lista contrassegni): in nero come nell'Elenco */
+.gx .gx-vestito span:is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"]):is([style*="font-weight: 700"], [style*="font-weight:700"]):not([style*="background"]) { color: var(--gx-inchiostro) !important; }
