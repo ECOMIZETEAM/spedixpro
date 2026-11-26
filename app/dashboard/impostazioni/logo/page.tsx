@@ -1,9 +1,13 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 const lbl = {fontSize:'12px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
 export default function LogoPage() {
+  // con la grafica nuova icone a linea al posto delle emoji (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const [logo, setLogo] = useState<string|null>(null)       // anteprima (dataURL locale o URL salvato)
   const [logoFile, setLogoFile] = useState<File|null>(null) // file scelto da caricare
   const [nome, setNome] = useState('')
@@ -96,7 +100,7 @@ export default function LogoPage() {
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
-        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>🖼️ Logo e Nome Azienda</h1>
+        <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Logo e Nome Azienda</h1>
         <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>Il logo e il nome che vedrai tu e i tuoi clienti in alto a sinistra. Se non carichi un logo, viene mostrato il nome.</p>
       </div>
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'24px'}}>
@@ -116,7 +120,7 @@ export default function LogoPage() {
                 <img src={logo} alt="Logo" style={{maxHeight:'120px',maxWidth:'100%',objectFit:'contain'}}/>
               ) : (
                 <div>
-                  <div style={{fontSize:'40px',marginBottom:'10px'}}>🖼️</div>
+                  <div style={{fontSize:'40px',marginBottom:'10px'}}>{nuova ? <Icona id="i-pannello" className="vs-ico vs-ico--grande" /> : '🖼️'}</div>
                   <div style={{fontSize:'13px',color:'#1a1a1a',marginBottom:'4px',fontWeight:'500'}}>Clicca per caricare il logo</div>
                   <div style={{fontSize:'11px',color:'#1a1a1a'}}>PNG 300x90px consigliato</div>
                 </div>
@@ -126,12 +130,12 @@ export default function LogoPage() {
             <div style={{display:'flex',gap:'8px',marginTop:'10px'}}>
               <button onClick={()=>document.getElementById('logoInput')?.click()}
                 style={{padding:'6px 14px',background:'#f9fafb',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer',color:'#1a1a1a'}}>
-                📁 Scegli file
+                Scegli file
               </button>
               {logo && (
                 <button onClick={rimuovi} disabled={saving}
                   style={{padding:'6px 14px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'6px',fontSize:'12px',fontWeight:'600',cursor:'pointer'}}>
-                  🗑️ Rimuovi
+                  Rimuovi
                 </button>
               )}
             </div>
@@ -194,7 +198,7 @@ export default function LogoPage() {
         <div style={{marginTop:'20px'}}>
           <button onClick={salva} disabled={saving}
             style={{padding:'9px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:saving?'not-allowed':'pointer',opacity:saving?0.7:1}}>
-            {saving ? 'Salvataggio...' : '💾 Salva'}
+            {saving ? 'Salvataggio...' : 'Salva'}
           </button>
         </div>
       </div>

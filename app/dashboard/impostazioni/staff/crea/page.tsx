@@ -1,8 +1,12 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useRouter } from 'next/navigation'
 
 export default function CreaAccount() {
+  // con la grafica nuova icone a linea al posto delle emoji (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const router = useRouter()
   const [nome, setNome] = useState('')
   const [ruolo, setRuolo] = useState('admin')
@@ -67,7 +71,7 @@ export default function CreaAccount() {
     <div style={{ maxWidth:'620px', margin:'0 auto' }}>
       <div style={{ borderTop:'3px solid #f97316', background:'#fff', borderRadius:'8px', boxShadow:'0 1px 4px rgba(0,0,0,0.08)', padding:'28px' }}>
         <div style={{ display:'flex', justifyContent:'center', marginBottom:'20px' }}>
-          <div style={{ width:'90px', height:'90px', borderRadius:'50%', background:'#e0f2fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'44px' }}>👤</div>
+          <div style={{ width:'90px', height:'90px', borderRadius:'50%', background:'#e0f2fe', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'44px' }}>{nuova ? <Icona id="i-clienti" className="vs-ico vs-ico--grande" /> : '👤'}</div>
         </div>
         <div style={{ borderTop:'1px solid #eee', paddingTop:'22px' }}>
           {msg && <div style={{ marginBottom:'16px', padding:'10px 14px', borderRadius:'6px', fontSize:'13px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca' }}>{msg}</div>}

@@ -1,8 +1,12 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function StaffPage() {
+  // con la grafica nuova icone a linea al posto delle emoji (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [utenti, setUtenti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -100,7 +104,7 @@ export default function StaffPage() {
                         <a href={`/api/agenti/${u.id}/impersona`} target="_blank" rel="noopener noreferrer" style={{ padding:'6px 12px', background:'#eef2ff', color:'#4338ca', border:'1px solid #c7d2fe', borderRadius:'5px', fontSize:'12px', fontWeight:'600', cursor:'pointer', textDecoration:'none' }} title="Entra nel portale dell'agente (sola lettura, come lo vede lui)">&#8618; Entra</a>
                       )}
                       <a href={`/dashboard/impostazioni/staff/${u.id}`} style={{ padding:'6px 12px', background:'#fff7ed', color:'#ea580c', border:'1px solid #fed7aa', borderRadius:'5px', fontSize:'12px', fontWeight:'600', cursor:'pointer', textDecoration:'none' }} title="Modifica dati e reset password">Modifica</a>
-                      <button onClick={()=>elimina(u.id)} style={{ padding:'6px 10px', background:'#dc2626', color:'#fff', border:'none', borderRadius:'5px', fontSize:'13px', cursor:'pointer' }} title="Elimina">&#128465;</button>
+                      <button onClick={()=>elimina(u.id)} style={{ padding:'6px 10px', background:'#dc2626', color:'#fff', border:'none', borderRadius:'5px', fontSize:'13px', cursor:'pointer' }} title="Elimina">{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : <>&#128465;</>}</button>
                     </div>
                   </td>
                 </tr>
