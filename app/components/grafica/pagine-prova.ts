@@ -38,6 +38,10 @@ export const PAGINE_PROVA = new Set([
   // 26/11 notte, Corrieri e tracking. Aggiungi corriere fotografato solo vuoto, mai su un contratto con le credenziali;
   // Condivisioni è solo un rimando all'Elenco master
   '/dashboard/corrieri', '/dashboard/corrieri/aggiungi', '/dashboard/zone', '/dashboard/tracking',
+  // 26/11 notte, Controlli e soldi. Le foto senza scrivere: Preventivi e Verifica giacenze scrivono quando leggono, e
+  // l'attrezzo delle foto blocca ogni scrittura; della Centrale di controllo fotografate solo le «Rettifiche da girare»
+  '/dashboard/margini', '/dashboard/preventivi', '/dashboard/spedizioni/controllo-fattura', '/dashboard/controllo',
+  '/dashboard/controllo-giacenze', '/dashboard/contrassegni/distinte', '/dashboard/contrassegni/check', '/dashboard/fatture/proforma',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

@@ -1,9 +1,13 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
 
 // CONTROLLO AGENTE GIACENZE — pagina del super master. Mostra l'esito del giro automatico che
 // verifica, corriere per corriere, se le giacenze che risultano svincolate sono davvero uscite.
 export default function ControlloGiacenzePage() {
+  // con la grafica nuova niente emoji davanti alle scritte (il foglio delle icone a linea lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
+  const e = (s: string) => nuova ? s.replace(/^\S+\s/, '') : s
   const [d, setD] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [controllando, setControllando] = useState(false)
@@ -65,10 +69,10 @@ export default function ControlloGiacenzePage() {
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1a1a1a', margin: 0 }}>🛰️ Controllo Giacenze</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1a1a1a', margin: 0 }}>{e('🛰️ Controllo Giacenze')}</h1>
         <button onClick={controllaOra} disabled={controllando}
           style={{ background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: controllando ? .6 : 1 }}>
-          {controllando ? 'Controllo in corso…' : '🔄 Controlla ora'}
+          {controllando ? 'Controllo in corso…' : e('🔄 Controlla ora')}
         </button>
       </div>
       <p style={{ fontSize: 13, color: '#8a8a8a', marginTop: 0 }}>
@@ -83,8 +87,8 @@ export default function ControlloGiacenzePage() {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', margin: '14px 0' }}>
             {card('Controllate oggi', d.controllateOggi)}
             {card('Svincolate totali', d.totaliSvincolate)}
-            {card('✅ Uscite', d.ok, '#16a34a', '#f0fdf4')}
-            {card('⚠️ Ancora ferme', d.ferma, d.ferma > 0 ? '#dc2626' : '#16a34a', d.ferma > 0 ? '#fef2f2' : '#f0fdf4')}
+            {card(e('✅ Uscite'), d.ok, '#16a34a', '#f0fdf4')}
+            {card(e('⚠️ Ancora ferme'), d.ferma, d.ferma > 0 ? '#dc2626' : '#16a34a', d.ferma > 0 ? '#fef2f2' : '#f0fdf4')}
             {d.errore > 0 && card('Verifica fallita', d.errore, '#b45309', '#fffbeb')}
             {d.nonVerificate > 0 && card('Da controllare', d.nonVerificate, '#6b7280')}
           </div>
@@ -93,7 +97,7 @@ export default function ControlloGiacenzePage() {
           <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 10, overflow: 'hidden', marginBottom: 18 }}>
             <div style={{ padding: '12px 16px', fontWeight: 700, fontSize: 14, borderBottom: '1px solid #eee' }}>Per corriere</div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={th}>Corriere</th><th style={th}>✅ Uscite</th><th style={th}>⚠️ Ferme</th><th style={th}>Verifica fallita</th><th style={th}>Da controllare</th></tr></thead>
+              <thead><tr><th style={th}>Corriere</th><th style={th}>{e('✅ Uscite')}</th><th style={th}>{e('⚠️ Ferme')}</th><th style={th}>Verifica fallita</th><th style={th}>Da controllare</th></tr></thead>
               <tbody>
                 {Object.entries<any>(d.perCorriere || {}).map(([nome, v]) => (
                   <tr key={nome}>
@@ -111,7 +115,7 @@ export default function ControlloGiacenzePage() {
           {/* Problemi */}
           <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 10, overflow: 'hidden' }}>
             <div style={{ padding: '12px 16px', fontWeight: 700, fontSize: 14, borderBottom: '1px solid #eee', color: d.problemi?.length ? '#dc2626' : '#16a34a' }}>
-              {d.problemi?.length ? `⚠️ ${d.problemi.length} ancora ferme dal corriere (svincolate da noi ma non uscite)` : '✅ Nessun problema: tutte le svincolate sono uscite dal corriere'}
+              {e(d.problemi?.length ? `⚠️ ${d.problemi.length} ancora ferme dal corriere (svincolate da noi ma non uscite)` : '✅ Nessun problema: tutte le svincolate sono uscite dal corriere')}
             </div>
             {d.problemi?.length > 0 && (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>

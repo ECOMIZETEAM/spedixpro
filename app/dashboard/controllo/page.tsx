@@ -1,5 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 // CENTRALE DI CONTROLLO (super master). Registro di "controlli": ogni problematica ricorrente diventa
 // un controllo che scansiona i dati veri e dice QUALE e PERCHE'. La pagina e' GENERICA: ogni endpoint
@@ -25,7 +27,13 @@ function chip(active: boolean): React.CSSProperties {
   return { background: active ? '#1a1a1a' : '#fff', color: active ? '#fff' : '#555', border: '1px solid ' + (active ? '#1a1a1a' : '#ddd'), borderRadius: 20, padding: '6px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }
 }
 
+// le icone a linea delle schede, con la grafica nuova (al posto di 📉 🔁 🗺️ 🚨)
+const ICONA_NUOVA: Record<string, string> = { 'spedizioni-in-perdita': 'i-euro', 'rettifiche-da-girare': 'i-movimenti', 'zone-listini': 'i-segnaposto', 'log-errori': 'i-scudo' }
+
 export default function CentraleControlloPage() {
+  // con la grafica nuova niente emoji davanti alle scritte (il foglio delle icone a linea lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
+  const e = (s: string) => nuova ? s.replace(/^\S+\s/, '') : s
   const [sel, setSel] = useState<string | null>(null)
   const [giorni, setGiorni] = useState(14)
   const [loading, setLoading] = useState(false)
@@ -69,14 +77,14 @@ export default function CentraleControlloPage() {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-      <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1a1a1a', margin: '0 0 4px' }}>🎛️ Centrale di Controllo</h1>
+      <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1a1a1a', margin: '0 0 4px' }}>{e('🎛️ Centrale di Controllo')}</h1>
       <p style={{ color: '#777', fontSize: 13, margin: '0 0 18px' }}>Un controllo per ogni problematica: scansiona i dati veri della rete e dice <b>quale</b> e <b>perché</b>.</p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(285px, 1fr))', gap: 12, marginBottom: 22 }}>
         {CONTROLLI.map(c => (
           <div key={c.id} style={{ background: sel === c.id ? '#fff7ed' : '#fff', border: '1px solid ' + (sel === c.id ? '#fdba74' : '#eee'), borderRadius: 12, padding: 16, opacity: c.pronto ? 1 : .55, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <span style={{ fontSize: 20 }}>{c.icona}</span>
+              <span style={{ fontSize: 20 }}>{nuova ? <Icona id={ICONA_NUOVA[c.id] || 'i-altro'} className="vs-ico" /> : c.icona}</span>
               <span style={{ fontWeight: 800, fontSize: 15, color: '#1a1a1a' }}>{c.nome}</span>
             </div>
             <div style={{ fontSize: 12.5, color: '#666', lineHeight: 1.5, flex: 1 }}>{c.descrizione}</div>

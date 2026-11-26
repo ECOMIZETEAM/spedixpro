@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import BarraAvanzamento from '@/app/components/BarraAvanzamento'
@@ -28,6 +29,9 @@ function filtriDefault() {
 }
 
 export default function DistinteContrassegniPage() {
+  // con la grafica nuova niente emoji davanti alle scritte (il foglio delle icone a linea lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
+  const e = (s: string) => nuova ? s.replace(/^\S+\s/, '') : s
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
@@ -473,7 +477,7 @@ export default function DistinteContrassegniPage() {
         <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #86efac',overflow:'hidden',marginBottom:'16px'}}>
           <div style={{padding:'12px 16px',borderBottom:'1px solid #bbf7d0',background:'#f0fdf4',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'10px',flexWrap:'wrap' as const}}>
             <div>
-              <div style={{fontSize:'13px',fontWeight:800,color:'#15803d'}}>💰 Contrassegni da caricare — {daCaricare.spedizioni} spedizioni · € {daCaricare.totale.toFixed(2)}</div>
+              <div style={{fontSize:'13px',fontWeight:800,color:'#15803d'}}>{nuova ? '' : '💰 '}Contrassegni da caricare — {daCaricare.spedizioni} spedizioni · € {daCaricare.totale.toFixed(2)}</div>
               <div style={{fontSize:'11.5px',color:'#166534',marginTop:'2px'}}>Apri un cliente per scegliere le singole spedizioni (anche su più pagine), oppure spunta il cliente intero. Le non selezionate restano in attesa.</div>
               {/* Totale per contratto: ogni cifra si confronta col file del corriere da cui viene (vedi la rotta). */}
               {daCaricare.perContratto.length > 0 && (
@@ -556,7 +560,7 @@ export default function DistinteContrassegniPage() {
                                   {iso!==isoPrec && (
                                     <label style={{display:'flex',alignItems:'center',gap:'8px',padding:'7px 8px 5px',fontSize:'11px',fontWeight:700,color:'#166534',textTransform:'uppercase' as const,letterSpacing:'.02em',background:'#f6faf8',borderBottom:'1px solid #eef2f0',cursor:'pointer'}}>
                                       <input type="checkbox" checked={giornoSel} onChange={()=>toggleGiorno(g.chiave, giornoIds)} style={{width:'14px',height:'14px',cursor:'pointer'}}/>
-                                      📅 {giornoLabel} <span style={{color:'#9ca3af',fontWeight:400}}>({giornoIds.length})</span>
+                                      {nuova ? '' : '📅 '}{giornoLabel} <span style={{color:'#9ca3af',fontWeight:400}}>({giornoIds.length})</span>
                                     </label>
                                   )}
                                   <label style={{display:'flex',alignItems:'center',gap:'10px',padding:'6px 8px 6px 26px',borderBottom:'1px solid #eef2f0',cursor:'pointer',fontSize:'12px'}}>
@@ -728,8 +732,8 @@ export default function DistinteContrassegniPage() {
                           ✓ Pagata
                         </button>
                       )}
-                      <button onClick={()=>stampaPDF(d)} style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>🖨️ Stampa</button>
-                      <button onClick={()=>esportaExcel(d)} style={{padding:'4px 10px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>📊 Excel</button>
+                      <button onClick={()=>stampaPDF(d)} style={{padding:'4px 10px',background:'#fff7ed',color:'#ea580c',border:'1px solid #fed7aa',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>{e('🖨️ Stampa')}</button>
+                      <button onClick={()=>esportaExcel(d)} style={{padding:'4px 10px',background:'#f0fdf4',color:'#15803d',border:'1px solid #86efac',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>{e('📊 Excel')}</button>
                       {d.stato==='in_lavorazione' && !Number(d.totale_pagato||0) && (
                         <button onClick={async()=>{
                           const ok = await dialog.confirm({ title: 'Elimina distinta', message: `Eliminare la distinta N.${d.numero}? Le spedizioni tornano disponibili per una nuova distinta.`, danger: true })
@@ -738,7 +742,7 @@ export default function DistinteContrassegniPage() {
                           const j = await r.json().catch(()=>({}))
                           if (j.success) carica()
                           else await dialog.alert({ title: 'Non eliminabile', message: j.error || 'Errore durante l\'eliminazione.' })
-                        }} style={{padding:'4px 10px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>🗑 Elimina</button>
+                        }} style={{padding:'4px 10px',background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',borderRadius:'4px',fontSize:'11px',fontWeight:'600',cursor:'pointer'}}>{e('🗑 Elimina')}</button>
                       )}
                     </div>
                   </td>

@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useDialog } from '@/app/components/DialogProvider'
 
 // PREVENTIVI (Fase 1): lista (clienti e sotto-master separati) + crea bozza + elimina.
@@ -21,6 +23,9 @@ const STATO_STILE: Record<string, { bg: string; col: string; label: string }> = 
 }
 
 export default function Preventivi() {
+  // con la grafica nuova niente emoji davanti alle scritte (il foglio delle icone a linea lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
+  const e = (s: string) => nuova ? s.replace(/^\S+\s/, '') : s
   const dialog = useDialog()
   const [clienti, setClienti] = useState<any[]>([])
   const [master, setMaster] = useState<any[]>([])
@@ -88,7 +93,7 @@ export default function Preventivi() {
   }
 
   const dataBreve = (s: any) => { try { return new Date(s).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' }) } catch { return '' } }
-  const badge = (st: string) => { const s = STATO_STILE[st] || STATO_STILE.bozza; return <span style={{ background: s.bg, color: s.col, fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap' }}>{s.label}</span> }
+  const badge = (st: string) => { const s = STATO_STILE[st] || STATO_STILE.bozza; return <span style={{ background: s.bg, color: s.col, fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap' }}>{e(s.label)}</span> }
 
   const Tabella = ({ righe, vuoto }: { righe: any[]; vuoto: string }) => (
     righe.length === 0 ? <div style={{ padding: '30px', textAlign: 'center', color: '#9aa', fontSize: '13px' }}>{vuoto}</div> : (
@@ -119,7 +124,7 @@ export default function Preventivi() {
                     )}
                     <a href={`/dashboard/preventivi/${r.id}`} style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 700, textDecoration: 'none' }}>{(r.stato === 'accettato' || r.stato === 'accettato_da_confermare') ? 'Apri' : 'Modifica'}</a>
                     {!['accettato', 'accettato_da_confermare'].includes(r.stato) && (
-                      <button onClick={() => elimina(r.id, r.dest_nome || '')} title="Elimina" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer' }}>🗑</button>
+                      <button onClick={() => elimina(r.id, r.dest_nome || '')} title="Elimina" style={{ background: 'transparent', border: 'none', color: '#b91c1c', fontSize: '15px', cursor: 'pointer' }}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑'}</button>
                     )}
                   </span>
                 </td>

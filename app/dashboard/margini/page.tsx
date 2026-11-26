@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
 import { useDialog } from '@/app/components/DialogProvider'
 
 type Apply = { corriere_id: string; zona_id: string; peso_max: number; prezzo: number }
@@ -12,6 +13,8 @@ type Cli = { listino_id: string; clienti: string[]; spedizioni_90gg: number; sti
 const TOP = 6
 
 export default function OttimizzaMargini() {
+  // con la grafica nuova il riquadro del guadagno è nero come quelli della dashboard (era l'unico a gradiente verde), senza 📦
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [attivo, setAttivo] = useState(true)
   const [totale, setTotale] = useState(0)
@@ -70,7 +73,7 @@ export default function OttimizzaMargini() {
       </p>
 
       {!loading && (
-        <div style={{ background: 'linear-gradient(135deg,#065f46,#10b981)', borderRadius: 16, padding: '22px 26px', marginBottom: 18, color: '#fff', boxShadow: '0 10px 30px -12px rgba(16,185,129,0.5)' }}>
+        <div style={{ background: nuova ? 'var(--vs-nero)' : 'linear-gradient(135deg,#065f46,#10b981)', borderRadius: 16, padding: '22px 26px', marginBottom: 18, color: '#fff', boxShadow: nuova ? 'var(--vs-ombra)' : '0 10px 30px -12px rgba(16,185,129,0.5)' }}>
           <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>Guadagno potenziale — ultimi 90 giorni</div>
           <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.1, marginTop: 4, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{eur(totale)}</div>
           <div style={{ fontSize: 13, opacity: 0.92, marginTop: 4 }}>Stima sul tuo volume reale (ultimi 90 giorni). {data.length} clienti con opportunità.</div>
@@ -99,7 +102,7 @@ export default function OttimizzaMargini() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, flexWrap: 'wrap', padding: '14px 18px', cursor: 'pointer' }} onClick={() => setAperto(isOpen ? null : c.listino_id)}>
               <span style={{ fontWeight: 800, fontSize: 15.5, color: '#0f172a' }}>{nomeCli(c)}</span>
               <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={pill('#f1f5f9', '#475569')}>📦 {c.spedizioni_90gg} sped./90gg</span>
+                <span style={pill('#f1f5f9', '#475569')}>{nuova ? '' : '📦 '}{c.spedizioni_90gg} sped./90gg</span>
                 {c.stima_guadagno_90gg > 0 && <span style={pill('#dcfce7', '#15803d')}>▲ +{eur(c.stima_guadagno_90gg)} potenziali</span>}
                 <span style={pill('#f1f5f9', '#475569')}>{c.raccomandazioni.length} consigli</span>
                 <span style={{ color: '#94a3b8', fontSize: 13, width: 16, textAlign: 'center' }}>{isOpen ? '▲' : '▼'}</span>
