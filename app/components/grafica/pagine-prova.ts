@@ -48,6 +48,9 @@ export const PAGINE_PROVA = new Set([
   '/dashboard/assistenza/prezzi-pod', '/dashboard/audit', '/dashboard/sicurezza', '/dashboard/impostazioni/password',
   '/dashboard/notifiche/invia', '/dashboard/catalogo', '/dashboard/consumabili/aggiungi', '/dashboard/consumabili/storia',
   '/dashboard/demo', '/dashboard/grafica-voti',
+  // 26/11 notte, il portale cliente, primo gruppo (spedizioni e soldi), fotografato come utente di NS CONSULTING
+  '/cliente/spedizioni/cancellate', '/cliente/spedizioni/giacenze', '/cliente/contrassegni', '/cliente/distinte',
+  '/cliente/distinte/nuova', '/cliente/movimenti', '/cliente/ricarica', '/cliente/fatture', '/cliente/listino',
 ])
 
 // LE SCHEDE DELLA PROVA, con l'id nell'indirizzo (26/11): [id] vale per qualunque id, ma solo nella forma di un uuid, così
@@ -57,6 +60,7 @@ export const SCHEDE_PROVA = [
   '/dashboard/clienti/[id]', '/dashboard/clienti/[id]/impostazioni', '/dashboard/clienti/[id]/modifica',
   '/dashboard/clienti/master/[id]', '/dashboard/distinte/[id]', '/dashboard/impostazioni/staff/[id]',
   '/dashboard/preventivi/[id]', '/dashboard/resi/distinte/[id]', '/dashboard/spedizioni/giacenze/[id]',
+  '/cliente/spedizioni/giacenze/[id]',
 ]
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
   const scad = new Date(richiestoAt).getTime() + 48 * 60 * 60 * 1000
@@ -12,6 +14,8 @@ function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function SpedizioniCancellateClientePage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [spedizioni, setSpedizioni] = useState<any[]>([])
   const [pending, setPending] = useState<any[]>([])
@@ -157,7 +161,7 @@ export default function SpedizioniCancellateClientePage() {
           <div style={{padding:'60px',textAlign:'center',color:'#bbb'}}>Caricamento...</div>
         ) : !visibili.length ? (
           <div style={{padding:'60px',textAlign:'center',color:'#bbb'}}>
-            <div style={{fontSize:'36px',marginBottom:'12px'}}>🗑️</div>
+            <div style={{fontSize:'36px',marginBottom:'12px'}}>{nuova ? <Icona id="i-cestino" className="vs-ico vs-ico--grande" /> : '🗑️'}</div>
             <div style={{fontSize:'14px',fontWeight:'500',color:'#999'}}>Nessuna spedizione cancellata</div>
           </div>
         ) : (

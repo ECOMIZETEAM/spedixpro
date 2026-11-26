@@ -1,6 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 const ACCENT = '#f97316'
 
@@ -44,6 +46,8 @@ function fmtData(iso: string) {
 }
 
 export default function MovimentiClientePage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const [movimenti, setMovimenti] = useState<Movimento[]>([])
   const [saldo, setSaldo] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -133,7 +137,7 @@ export default function MovimentiClientePage() {
           <div style={{ padding: '40px', textAlign: 'center', color: '#999', fontSize: '13px' }}>Caricamento…</div>
         ) : !visibili.length ? (
           <div style={{ padding: '50px', textAlign: 'center' }}>
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>📄</div>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>{nuova ? <Icona id="i-movimenti" className="vs-ico vs-ico--grande" /> : '📄'}</div>
             <div style={{ fontSize: '14px', fontWeight: 500, color: '#999' }}>Nessun movimento</div>
           </div>
         ) : (

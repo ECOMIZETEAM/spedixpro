@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useDialog } from '@/app/components/DialogProvider'
 import DateRangePicker from '@/app/components/DateRangePicker'
 
@@ -12,6 +14,8 @@ const giornoDi = (v: any) => {
 }
 
 export default function ListaDistinteCliente() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -184,9 +188,9 @@ export default function ListaDistinteCliente() {
                     <td style={td}>{Number(d.peso||0)} kg</td>
                     <td style={td}>{Number(d.costo||0).toFixed(2)} €</td>
                     <td style={td}>
-                      <button onClick={()=>stampa(d.id,d.numero)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{...btn,background:'#6b7280',color:'#fff'}}>{busy===d.id+'-pdf'?'...':'🖨'}</button>
+                      <button onClick={()=>stampa(d.id,d.numero)} disabled={busy===d.id+'-pdf'} title="Stampa PDF" style={{...btn,background:'#6b7280',color:'#fff'}}>{busy===d.id+'-pdf'?'...':(nuova ? <Icona id="i-stampa" className="vs-ico-tasto" /> : '🖨')}</button>
                       <button onClick={()=>esporta(d.id,d.numero)} disabled={busy===d.id+'-xlsx'} title="Esporta Excel" style={{...btn,background:'#e5e7eb',color:'#1a1a1a'}}>{busy===d.id+'-xlsx'?'...':'⬇'}</button>
-                      <button onClick={()=>conferma(d.id)} disabled={busy===d.id+'-conf'} title="Conferma al vettore" style={{...btn,background:'#06b6d4',color:'#fff'}}>{busy===d.id+'-conf'?'...':'✈'}</button>
+                      <button onClick={()=>conferma(d.id)} disabled={busy===d.id+'-conf'} title="Conferma al vettore" style={{...btn,background:'#06b6d4',color:'#fff'}}>{busy===d.id+'-conf'?'...':(nuova ? <Icona id="i-invia" className="vs-ico-tasto" /> : '✈')}</button>
                     </td>
                   </tr>
                 ))}

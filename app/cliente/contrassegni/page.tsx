@@ -1,8 +1,12 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { useDialog } from '@/app/components/DialogProvider'
 export default function ContrassegniCliente() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [distinte, setDistinte] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -130,7 +134,7 @@ export default function ContrassegniCliente() {
                     <td style={td}><span style={{background:st.bg,color:st.c,padding:'3px 10px',borderRadius:'4px',fontSize:'11px',fontWeight:'700'}}>{st.t}</span></td>
                     <td style={td}>{d.dataPagamento?new Date(d.dataPagamento).toLocaleDateString('it-IT'):''}</td>
                     <td style={td}>
-                      <button style={linkBtn} onClick={()=>stampa(d.id,d.numero)} disabled={busy===d.id+'-pdf'}>🖨 Stampa</button>
+                      <button style={linkBtn} onClick={()=>stampa(d.id,d.numero)} disabled={busy===d.id+'-pdf'}>{nuova ? <Icona id="i-stampa" className="vs-ico-tasto" /> : '🖨'} Stampa</button>
                       <button style={linkBtn} onClick={()=>esporta(d.id,d.numero,'csv')} disabled={busy===d.id+'-csv'}>CSV</button>
                       <button style={linkBtn} onClick={()=>esporta(d.id,d.numero,'xlsx')} disabled={busy===d.id+'-xlsx'}>Excel</button>
                     </td>

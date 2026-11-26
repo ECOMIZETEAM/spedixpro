@@ -1,4 +1,11 @@
+'use client'
+import { useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
+
+// pagina client solo per sapere se la cornice è quella nuova: lì l'icona a linea al posto di 🧾
 export default function FatturePage() {
+  const nuova = useContext(GraficaNuova).attiva
   return (
     <div>
       <div style={{marginBottom:'20px'}}>
@@ -6,7 +13,7 @@ export default function FatturePage() {
         <p style={{color:'#999',fontSize:'13px',marginTop:'4px'}}>Sezione in arrivo</p>
       </div>
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',padding:'60px',textAlign:'center'}}>
-        <div style={{fontSize:'40px',marginBottom:'12px'}}>🧾</div>
+        <div style={{fontSize:'40px',marginBottom:'12px'}}>{nuova ? <Icona id="i-fattura" className="vs-ico vs-ico--grande" /> : '🧾'}</div>
         <div style={{fontSize:'14px',fontWeight:'500',color:'#999'}}>Nessuna fattura disponibile</div>
       </div>
     </div>

@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, Fragment, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import AzzeraFiltri from '@/app/components/AzzeraFiltri'
 import { useFiltriPersistenti } from '@/lib/use-filtri-persistenti'
@@ -26,6 +28,8 @@ function filtriDefault() {
 }
 
 export default function GiacenzePage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const [giacenze, setGiacenze] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -159,7 +163,7 @@ export default function GiacenzePage() {
       {/* Tabella */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Giacenze <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({giacenzeFiltrate.length} risultati)</span></span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{nuova ? '' : '📋 '}Giacenze <span style={{color:'#1a1a1a',fontWeight:'400',fontSize:'12px'}}>({giacenzeFiltrate.length} risultati)</span></span>
           <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
             <span style={{fontSize:'12px',color:'#1a1a1a',fontWeight:'600'}}>Cerca:</span>
             <input value={cerca} onChange={e=>setCerca(e.target.value)}
@@ -172,7 +176,7 @@ export default function GiacenzePage() {
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : !giacenzeFiltrate.length ? (
           <div style={{padding:'60px',textAlign:'center' as const,color:'#1a1a1a'}}>
-            <div style={{fontSize:'36px',marginBottom:'12px'}}>📦</div>
+            <div style={{fontSize:'36px',marginBottom:'12px'}}>{nuova ? <Icona id="i-pacco" className="vs-ico vs-ico--grande" /> : '📦'}</div>
             <div style={{fontWeight:'500'}}>Nessuna giacenza trovata</div>
           </div>
         ) : (
@@ -227,7 +231,7 @@ export default function GiacenzePage() {
                           return (
                             <a href={`/cliente/spedizioni/giacenze/${g.id}`}
                               style={{display:'inline-block',padding:'4px 10px',background:daGestire?'#fff7ed':'#f1f5f9',color:daGestire?'#ea580c':'#475569',border:`1px solid ${daGestire?'#fed7aa':'#cbd5e1'}`,borderRadius:'4px',fontSize:'12px',fontWeight:'600',cursor:'pointer',textDecoration:'none'}}>
-                              {daGestire ? '✏️ Gestisci' : '👁 Dettagli'}
+                              {daGestire ? (nuova ? 'Gestisci' : '✏️ Gestisci') : (nuova ? 'Dettagli' : '👁 Dettagli')}
                             </a>
                           )
                         })()}
@@ -271,7 +275,7 @@ export default function GiacenzePage() {
               {esito ? (
                 <div>
                   <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'8px',padding:'16px',marginBottom:'16px',fontSize:'13px',color:'#16a34a',textAlign:'center' as const}}>
-                    <div style={{fontSize:'28px',marginBottom:'8px'}}>✅</div>
+                    <div style={{fontSize:'28px',marginBottom:'8px'}}>{nuova ? <Icona id="i-spunta" className="vs-ico vs-ico--grande" /> : '✅'}</div>
                     <div style={{fontWeight:'700',marginBottom:'4px'}}>Svincolo effettuato!</div>
                     {esito.costoAddebitato > 0 && (
                       <div style={{color:'#1a1a1a',marginTop:'8px'}}>
@@ -286,7 +290,7 @@ export default function GiacenzePage() {
               ) : (
                 <div>
                   <div style={{background:'#f9fafb',borderRadius:'8px',padding:'14px',marginBottom:'16px',border:'1px solid #d1d5db',fontSize:'13px'}}>
-                    <div style={{fontWeight:'700',marginBottom:'8px',color:'#1a1a1a'}}>📦 Dettagli Giacenza</div>
+                    <div style={{fontWeight:'700',marginBottom:'8px',color:'#1a1a1a'}}>{nuova ? '' : '📦 '}Dettagli Giacenza</div>
                     <div style={{color:'#1a1a1a',lineHeight:1.8}}>
                       <div><strong>Destinatario:</strong> {modal.dest_nome}</div>
                       <div><strong>Indirizzo:</strong> {modal.dest_indirizzo}, {modal.dest_citta} ({modal.dest_provincia})</div>
@@ -307,7 +311,7 @@ export default function GiacenzePage() {
                   <div style={{display:'flex',gap:'10px'}}>
                     <button onClick={svincola} disabled={elaborando}
                       style={{flex:1,padding:'10px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:elaborando?0.7:1}}>
-                      {elaborando?'Svincolo in corso...':'✅ Svincola'}
+                      {elaborando?'Svincolo in corso...':(nuova ? 'Svincola' : '✅ Svincola')}
                     </button>
                     <button onClick={async()=>{
                       await fetch('/api/cliente/giacenze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spedizioneId:modal.id,azione:'chiudi'})})
