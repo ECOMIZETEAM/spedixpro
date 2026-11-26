@@ -526,7 +526,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           // pagato = quanto risulta scalato al ledger alla creazione. (L'addebito vero in conferma scala
           // il ledger — vedi rettifiche/route.ts; qui si calcola solo la differenza.)
           const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
-          const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto, { corrierePacco: s.corriere_id })
+          const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto, { corrierePacco: s.corriere_id, partenza: s.created_at || null })
           pag = arrotonda(pagatoPerCliente.get(liv.ledgerClienteId) || 0)
           if ((lc as any)?.listino_cliente_id && corrVend) {
             // Il ledger e' un cliente del venditore: a contratto tolto dal suo listino, prezzi archiviati.

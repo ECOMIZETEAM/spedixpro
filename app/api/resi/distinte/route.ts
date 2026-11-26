@@ -75,7 +75,7 @@ async function righeCatenaPropria(adminDb: any, mioMasterId: string, voci: any[]
   const cache = new Map<string, { masterId: string; corriereId: string }[]>()
   for (const v of (voci || [])) {
     const { data: sp } = await adminDb.from('spedizioni')
-      .select('id,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto,master_id,tipo)')
+      .select('id,created_at,corriere_id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto,master_id,tipo)')
       .eq('id', v.id).maybeSingle()
     const nome = (sp as any)?.corrieri?.nome_contratto || null
     const owner = (sp as any)?.corrieri?.master_id || null
@@ -87,7 +87,7 @@ async function righeCatenaPropria(adminDb: any, mioMasterId: string, voci: any[]
     if ((sp as any)?.corrieri?.tipo === 'moovexpress') continue
     // Per riga del contratto del pacco, non solo per nome: con due righe omonime (una staccata) la catena cambia.
     const kc = nome + '|' + (sp as any).corriere_id
-    if (!cache.has(kc)) cache.set(kc, await catenaContratto(adminDb, mioMasterId, owner, nome, { corrierePacco: (sp as any).corriere_id }))
+    if (!cache.has(kc)) cache.set(kc, await catenaContratto(adminDb, mioMasterId, owner, nome, { corrierePacco: (sp as any).corriere_id, partenza: (sp as any).created_at }))
     for (const liv of cache.get(kc)!) {
       righe.push({
         spedizione_id: sp.id, master_target_id: liv.masterId, master_owner_id: liv.masterId,
@@ -248,10 +248,10 @@ export async function POST(req: NextRequest) {
     for (const v of (voci || [])) {
       await adminDb.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
       const { data: spD } = await adminDb.from('spedizioni')
-        .select('colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,corrieri(nome_contratto)')
+        .select('created_at,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,corrieri(nome_contratto)')
         .eq('id', v.id).maybeSingle()
       const nomeContratto = (spD as any)?.corrieri?.nome_contratto || null
-      const suoCorriere = await corriereDiMasterPerNome(adminDb, targetMasterId, nomeContratto, { corrierePacco: (spD as any)?.corriere_id })
+      const suoCorriere = await corriereDiMasterPerNome(adminDb, targetMasterId, nomeContratto, { corrierePacco: (spD as any)?.corriere_id, partenza: (spD as any)?.created_at })
       righe.push({
         spedizione_id: v.id,
         master_target_id: targetMasterId,

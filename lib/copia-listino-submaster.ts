@@ -100,7 +100,10 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   //    Le IMPOSTAZIONI DI CONTRATTO (agevolazione peso, misure/volume massimo, scaglioni,
   //    peso reale soglia) si PROPAGANO dal padre; il MITTENTE resta del sotto-master.
   const { data: corrSrc } = corriereIds.length ? await admin.from('corrieri').select('*').in('id', corriereIds) : { data: [] }
-  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings,proprio,tipo,staccato_il,fornitore_corriere_id').eq('master_id', subMasterId)
+  const { data: corrMiei, error: eMiei } = await admin.from('corrieri').select('id,nome_contratto,settings,proprio,tipo,staccato_il,fornitore_corriere_id').eq('master_id', subMasterId)
+  // Senza i suoi contratti non si sa quali nomi compra via codice né da quali si è staccato: si creerebbe una copia
+  // accanto al ponte. Fin qui si è solo letto: meglio un giro saltato.
+  if (eMiei) { console.error('[copia-listino]', subMasterId, eMiei.message); return { ok: false, reason: 'contratti del sotto-master non leggibili: sotto-master non toccato' } }
   // Le righe STACCATE del sotto-master (26/11/2026) non si agganciano: restano per i suoi pacchi già partiti, coi
   // prezzi e le zone di allora. E un contratto del padre da cui il sotto-master si è staccato non gli si ricrea.
   const mappaCorrMio = new Map((corrMiei || []).filter((c: any) => !c.staccato_il).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c]))

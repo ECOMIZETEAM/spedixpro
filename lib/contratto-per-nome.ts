@@ -27,8 +27,11 @@ export function nomeContrattoNormalizzato(v: string | null | undefined): string 
 //     sempre la stessa (prima la query non aveva ordine: vinceva quella che il database restituiva per prima);
 //   - un evento su un pacco GIA' PARTITO (reso, giacenza, rettifica) usa la riga della SUA catena, letta dai
 //     puntatori a partire dalla riga della spedizione (`corrierePacco`): la catena di allora, mai il fornitore
-//     di oggi. Per nome si ripiega solo se quel master non sta sulla catena del pacco.
-export type OpzioniRiga = { corrierePacco?: string | null }
+//     di oggi. Per nome si ripiega solo se quel master non sta sulla catena del pacco, o se la catena non si legge:
+//     allora, fra due omonime, vale quella che era in vita il giorno della partenza (`partenza`): nata prima e non
+//     ancora staccata. Una riga staccata non riceve spedizioni dal momento dello stacco, e una sola alla volta è viva
+//     (scripts/stacca-contratto-vincolo.sql): la data dice da sola su quale il pacco è partito.
+export type OpzioniRiga = { corrierePacco?: string | null; partenza?: string | null }
 
 type RigaOmonima = { id: string; staccato_il?: string | null; created_at?: string | null }
 export function ordinaOmonime<T extends RigaOmonima>(righe: T[]): T[] {
@@ -40,27 +43,51 @@ export function ordinaOmonime<T extends RigaOmonima>(righe: T[]): T[] {
 
 // La catena dei fornitori di un pacco, dalla riga della spedizione in su (RPC catena_contratto): master → la sua
 // riga. Tenuta mezzo minuto: la catena di un pacco gia' partito non cambia, e un evento la chiede una volta per
-// livello. Lettura fallita = nessuna catena (si ripiega sul nome, e lo si scrive nel log).
-const cacheFile = new Map<string, { at: number; righe: Promise<Map<string, { id: string; nome: string }>> }>()
-async function righeDellaFila(adminDb: any, corriereId: string): Promise<Map<string, { id: string; nome: string }>> {
-  const c = cacheFile.get(corriereId)
-  if (c && Date.now() - c.at < 30_000) return c.righe
-  const righe = (async () => {
-    const out = new Map<string, { id: string; nome: string }>()
+// livello. Una lettura fallita si riprova una volta e NON si tiene in memoria (la chiamata dopo ritenta); se fallisce
+// ancora, `letta: false` e chi chiama sceglie per data di partenza (vedi sopra), scrivendolo nel log.
+type Fila = { letta: boolean; righe: Map<string, { id: string; nome: string }> }
+const cacheFile = new Map<string, { at: number; fila: Promise<Fila> }>()
+async function leggiFila(adminDb: any, corriereId: string): Promise<Fila> {
+  for (let tentativo = 1; tentativo <= 2; tentativo++) {
     const { data, error } = await adminDb.rpc('catena_contratto', { p_corriere_id: corriereId })
-    if (error || !data?.length) {
-      if (error) console.error('[contratto-per-nome] catena del pacco non leggibile, ripiego sul nome:', corriereId, error.message)
-      return out
+    if (!error && !data?.length) return { letta: true, righe: new Map() }
+    if (!error) {
+      const ids = (data as any[]).map(r => r.corriere_id)
+      const { data: nomi, error: eN } = await adminDb.from('corrieri').select('id,nome_contratto').in('id', ids)
+      if (!eN) {
+        const nomeDi = new Map((nomi || []).map((r: any) => [r.id, r.nome_contratto]))
+        const righe = new Map<string, { id: string; nome: string }>()
+        for (const r of data as any[]) if (!righe.has(r.master_id)) righe.set(r.master_id, { id: r.corriere_id, nome: String(nomeDi.get(r.corriere_id) || '') })
+        return { letta: true, righe }
+      }
+      console.error('[contratto-per-nome] nomi della catena del pacco non leggibili:', corriereId, eN.message, 'tentativo', tentativo)
+    } else {
+      console.error('[contratto-per-nome] catena del pacco non leggibile:', corriereId, error.message, 'tentativo', tentativo)
     }
-    const ids = (data as any[]).map(r => r.corriere_id)
-    const { data: nomi } = await adminDb.from('corrieri').select('id,nome_contratto').in('id', ids)
-    const nomeDi = new Map((nomi || []).map((r: any) => [r.id, r.nome_contratto]))
-    for (const r of data as any[]) if (!out.has(r.master_id)) out.set(r.master_id, { id: r.corriere_id, nome: String(nomeDi.get(r.corriere_id) || '') })
-    return out
-  })()
-  cacheFile.set(corriereId, { at: Date.now(), righe })
+  }
+  return { letta: false, righe: new Map() }
+}
+async function righeDellaFila(adminDb: any, corriereId: string): Promise<Fila> {
+  const c = cacheFile.get(corriereId)
+  if (c && Date.now() - c.at < 30_000) return c.fila
+  const fila = leggiFila(adminDb, corriereId)
+  cacheFile.set(corriereId, { at: Date.now(), fila })
+  fila.then(f => { if (!f.letta) cacheFile.delete(corriereId) }, () => cacheFile.delete(corriereId))
   if (cacheFile.size > 500) for (const k of Array.from(cacheFile.keys()).slice(0, 250)) cacheFile.delete(k)
-  return righe
+  return fila
+}
+
+// Fra righe omonime dello stesso master, quella in vita al momento della partenza: nata prima, non ancora staccata.
+// Null se nessuna (o piu' d'una) torna: allora decide l'ordine di sempre.
+function vivaAllaPartenza<T extends RigaOmonima>(righe: T[], partenza: string | null | undefined): T | null {
+  const t = partenza ? new Date(partenza).getTime() : NaN
+  if (!Number.isFinite(t)) return null
+  const vive = righe.filter(r => {
+    const nata = r.created_at ? new Date(r.created_at).getTime() : -Infinity
+    const staccata = r.staccato_il ? new Date(r.staccato_il).getTime() : Infinity
+    return nata <= t && t < staccata
+  })
+  return vive.length === 1 ? vive[0] : null
 }
 
 // Id della riga `corrieri` di quel master per quel nome contratto, oppure null.
@@ -71,13 +98,24 @@ export async function corriereDiMasterPerNome(
 ): Promise<string | null> {
   const cercato = nomeContrattoNormalizzato(nomeContratto)
   if (!masterId || !cercato) return null
+  let filaLetta = true
   if (opz?.corrierePacco) {
     // Sulla catena del pacco, e con lo stesso nome: se il nome non torna (una rinomina a meta') non si rischia.
-    const diFila = (await righeDellaFila(adminDb, opz.corrierePacco)).get(masterId)
+    const fila = await righeDellaFila(adminDb, opz.corrierePacco)
+    filaLetta = fila.letta
+    const diFila = fila.righe.get(masterId)
     if (diFila && nomeContrattoNormalizzato(diFila.nome) === cercato) return diFila.id
   }
   const { data } = await adminDb.from('corrieri').select('id,nome_contratto,staccato_il,created_at').eq('master_id', masterId)
   const omonime = ordinaOmonime(((data || []) as any[]).filter(c => nomeContrattoNormalizzato(c.nome_contratto) === cercato))
+  // Due omonime (una staccata) e un pacco gia' partito: per nome vincerebbe la viva, cioe' il fornitore di OGGI.
+  // Vale invece quella in vita alla partenza. Se nemmeno la data decide, lo si scrive: e' un addebito da guardare.
+  if (omonime.length > 1 && opz?.corrierePacco) {
+    const allora = vivaAllaPartenza(omonime, opz.partenza)
+    if (allora) return allora.id
+    console.error('[STACCA] riga del pacco non determinabile, uso la viva:', masterId, cercato, 'pacco su', opz.corrierePacco,
+      filaLetta ? '(master fuori dalla fila)' : '(fila non leggibile)', 'partenza', opz.partenza ?? 'ignota')
+  }
   return omonime[0]?.id ?? null
 }
 
@@ -98,6 +136,9 @@ export async function corriereDiMasterPerNome(
 export type SorgenteCatena = {
   padreDi: (masterId: string) => Promise<string | null> | string | null
   copiaDi: (masterId: string, nomeContratto: string) => Promise<{ proprio: boolean } | null> | { proprio: boolean } | null
+  // Solo la sorgente in memoria: se qualche master ha una riga STACCATA con questo nome. Allora, per un pacco, la
+  // copia "per nome" puo' non essere quella con cui e' partito, e va chiesta al database con la riga del pacco.
+  haStaccate?: (nomeContratto: string) => boolean
 }
 
 export async function detentoreContrattoCon(
@@ -167,7 +208,9 @@ async function costruisciSorgenteCatena(adminDb: any): Promise<SorgenteCatena> {
   const padri = new Map<string, string | null>()
   for (const m of (mRes.data || [])) padri.set(m.id, m.parent_master_id || null)
   const copie = new Map<string, { proprio: boolean; staccata?: boolean }>()
+  const nomiStaccati = new Set<string>()
   for (const c of (cRes.data || [])) {
+    if (c.staccato_il) nomiStaccati.add(nomeContrattoNormalizzato(c.nome_contratto))
     const k = c.master_id + '|' + nomeContrattoNormalizzato(c.nome_contratto)
     // Fra due copie collo stesso nome vince quella dichiarata propria: è la dichiarazione che conta. Poi quella
     // non staccata (26/11/2026): una riga staccata resta solo per i pacchi gia' partiti.
@@ -177,5 +220,6 @@ async function costruisciSorgenteCatena(adminDb: any): Promise<SorgenteCatena> {
   return {
     padreDi: (id) => padri.get(id) ?? null,
     copiaDi: (id, nome) => copie.get(id + '|' + nomeContrattoNormalizzato(nome)) || null,
+    haStaccate: (nome) => nomiStaccati.has(nomeContrattoNormalizzato(nome)),
   }
 }

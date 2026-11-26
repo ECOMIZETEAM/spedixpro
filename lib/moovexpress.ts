@@ -355,9 +355,10 @@ export async function trackingMoovexpressLocale(
   if (!tracking) return { stato: null, consegnata: false, eventi: [] }
   if (!memo.accessi.has(cred.api_key)) {
     const { autenticaApiKey } = await import('@/lib/api-auth')
+    // Solo lettura, come la rotta /api/v1/tracking: i pacchi già partiti su un contratto poi staccato si seguono.
     memo.accessi.set(cred.api_key, autenticaApiKey(new Request('https://interno/api/v1/tracking', {
       headers: { authorization: `Bearer ${cred.api_key}` },
-    })))
+    }), { soloLettura: true }))
   }
   const ctx = await memo.accessi.get(cred.api_key)
   if (!ctx) throw new Error('API key non valida o mancante')

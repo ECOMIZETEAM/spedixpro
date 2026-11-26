@@ -34,18 +34,21 @@ async function registraRifiuto(admin: any, motivo: string, chiaveId: string | nu
 
 // Autentica una richiesta API pubblica tramite header Authorization: Bearer <api_key>.
 // La chiave è PER CONTRATTO -> risolve cliente + master + corriere (contratto).
-export async function autenticaApiKey(req: Request): Promise<ApiContext | null> {
+// `opz.soloLettura`: la rotta legge soltanto un pacco già nato (tracking, dettaglio, etichetta). Vedi sotto, "contratto
+// STACCATO".
+export type OpzioniChiave = { soloLettura?: boolean }
+export async function autenticaApiKey(req: Request, opz?: OpzioniChiave): Promise<ApiContext | null> {
   const auth = req.headers.get('authorization') || req.headers.get('Authorization') || ''
   const token = auth.replace(/^Bearer\s+/i, '').trim()
   if (!token) return null
-  return autenticaChiave(token)
+  return autenticaChiave(token, opz)
 }
 
 // La stessa autenticazione a partire dalla chiave, con gli stessi controlli e le stesse scritture (ultimo uso,
 // pacchetto, freno di frequenza). La usa anche il ponte unico dei condivisi (fase 3 di PONTE-UNICO.md), che a
 // ogni salto della fila presenta la chiave del ponte come faceva la staffetta via HTTP: chi vende vede la sua
 // chiave usata, il pacchetto e il freno contano e fermano come prima.
-export async function autenticaChiave(token: string): Promise<ApiContext | null> {
+export async function autenticaChiave(token: string, opz?: OpzioniChiave): Promise<ApiContext | null> {
   const admin = createAdminSupabase()
   // Si cerca per HASH, non per valore. .eq('chiave', token) metteva la chiave nell'URL, e PostgREST/
   // Supabase lo scrivono nei log edge: la chiave dei conti all'ingrosso finiva in chiaro, a ogni
@@ -71,11 +74,15 @@ export async function autenticaChiave(token: string): Promise<ApiContext | null>
   // CLIENTE. Stessa cosa per il contratto: se il master lo spegne, non deve restare spendibile.
   const [{ data: cli }, { data: cor }] = await Promise.all([
     admin.from('clienti').select('attivo').eq('id', data.cliente_id).maybeSingle(),
-    admin.from('corrieri').select('attivo').eq('id', data.corriere_id).maybeSingle(),
+    admin.from('corrieri').select('attivo,staccato_il').eq('id', data.corriere_id).maybeSingle(),
   ])
   if (cli?.attivo === false) await registraRifiuto(admin, 'cliente_disattivato', data.id)
   if (!cli || cli.attivo === false) return null
-  if (cor && cor.attivo === false) return null
+  // Contratto STACCATO (26/11/2026, scripts/stacca-contratto.sql): il venditore si è staccato dal suo fornitore, e
+  // la sua riga resta spenta per sempre. Chi comprava da lui con questa chiave si è staccato prima (il database lo
+  // impone), ma i suoi pacchi già partiti vanno ancora seguiti: tracking, dettaglio ed etichetta passano. Tutto il
+  // resto (creare, prezzare, ritiri) resta fermo come per un contratto spento, PRIMA di chiamare il corriere.
+  if (cor && cor.attivo === false && !(opz?.soloLettura && (cor as any).staccato_il)) return null
 
   // ULTIMO USO, AL MASSIMO UNA VOLTA AL MINUTO, senza bloccare la risposta.
   // Si scriveva a OGNI chiamata: 231.122 scritture in un giorno (19-20/10/2026) su 132 chiavi, perche'

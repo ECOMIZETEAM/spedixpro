@@ -13,7 +13,8 @@ const CAMPI = 'id,numero,stato,etichetta_url,etichetta_path,colli_dettaglio,raw_
 
 // Scarica l'etichetta (LDV) PDF della spedizione creata via API
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await autenticaApiKey(req)
+  // Solo lettura: passa anche sul contratto staccato di un venditore, per i pacchi già partiti (lib/api-auth.ts).
+  const ctx = await autenticaApiKey(req, { soloLettura: true })
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
   const _b = rispostaBlocco(ctx); if (_b) return _b
   const { id } = await params

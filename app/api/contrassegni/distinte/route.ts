@@ -5,7 +5,7 @@ import { isAgente, clientiAgente, idClientiPerFiltro, bloccaAgente } from '@/lib
 import { gestisceLaRete, vedeLaRete } from '@/lib/ruoli'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { risaliCatena, destinatarioCod } from '@/lib/contrassegni-catena'
-import { detentoreContratto, nomeContrattoNormalizzato } from '@/lib/contratto-per-nome'
+import { detentoreContratto } from '@/lib/contratto-per-nome'
 import { gambePerTracking, catenaDaCorriere, destinatarioCodCondivisione, type LivelloCondivisione } from '@/lib/condivisione-catena'
 
 // Una selezione grande di contrassegni condivisi legge la fila di ogni contratto: non deve scadere a metà.
@@ -235,9 +235,11 @@ export async function POST(req: NextRequest) {
       for (const c of (data || [])) corr.set((c as any).id, c)
     }
     const detentori = new Map<string, string>()
+    // Per RIGA del contratto del pacco, non per nome (26/11/2026): con una riga staccata e una nuova omonima, un
+    // pacco vecchio ha il detentore della catena di allora. Senza righe staccate le due strade danno lo stesso.
     const detentoreDi = async (c: any) => {
-      const k = c.master_id + '|' + nomeContrattoNormalizzato(c.nome_contratto)
-      if (!detentori.has(k)) detentori.set(k, (await detentoreContratto(admin, c.master_id, c.nome_contratto)).detentore)
+      const k = c.id as string
+      if (!detentori.has(k)) detentori.set(k, (await detentoreContratto(admin, c.master_id, c.nome_contratto, { corrierePacco: c.id })).detentore)
       return detentori.get(k)!
     }
     const nomiMaster = new Map<string, string>()

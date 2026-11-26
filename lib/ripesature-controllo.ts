@@ -55,7 +55,7 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
   for (let i = 0; i < ids.length; i += 200) {
     const fetta = ids.slice(i, i + 200)
     const [s, m] = await Promise.all([
-      admin.from('spedizioni').select('id,colli,corrieri(nome_contratto)').in('id', fetta),
+      admin.from('spedizioni').select('id,colli,corriere_id,created_at,corrieri(nome_contratto)').in('id', fetta),
       admin.from('ripesature_misure').select('spedizione_id,esito,peso,lunghezza,larghezza,altezza,misurata_il,filiale,righe').in('spedizione_id', fetta),
     ])
     if (s.error || m.error) throw new Error('controllo OneTracking: ' + (s.error?.message || m.error?.message))
@@ -65,9 +65,12 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
 
   // Il contratto di CHI CARICA: e' il suo accordo col fornitore a dire scatola, tetto, divisore e fasce.
   const contratti = new Map<string, { settings: any; divisore: number; soglie: number[] } | null>()
-  const contrattoDi = async (nome: string) => {
-    if (contratti.has(nome)) return contratti.get(nome)!
-    const corrId = await corriereDiMasterPerNome(admin, masterId, nome)
+  // Con la riga del pacco (26/11/2026): se chi carica si è staccato dal fornitore e ha ricomprato il contratto
+  // altrove, un pacco vecchio si controlla col contratto di allora, non con quello nuovo omonimo.
+  const contrattoDi = async (nome: string, corrierePacco?: string | null, partenza?: string | null) => {
+    const kc = nome + '|' + (corrierePacco || '')
+    if (contratti.has(kc)) return contratti.get(kc)!
+    const corrId = await corriereDiMasterPerNome(admin, masterId, nome, { corrierePacco, partenza })
     let c: { settings: any; divisore: number; soglie: number[] } | null = null
     if (corrId) {
       const [{ data: co }, { data: ll }] = await Promise.all([
@@ -81,7 +84,7 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
       const soglie = Array.from(new Set(((ff || []) as any[]).map(f => Number(f.peso_max)).filter(n => n > 0))).sort((a, b) => a - b)
       c = { settings: (co as any)?.settings || {}, divisore: Number(listini[0]?.fattore_volume) || 5000, soglie }
     }
-    contratti.set(nome, c)
+    contratti.set(kc, c)
     return c
   }
 
@@ -91,7 +94,7 @@ export async function controllaConOneTracking(admin: any, masterId: string, esit
     const corr: any = Array.isArray(s?.corrieri) ? s.corrieri[0] : s?.corrieri
     const nome = String(corr?.nome_contratto || '')
     if (!DI_POSTE.test(nome)) continue
-    const c = await contrattoDi(nome)
+    const c = await contrattoDi(nome, s?.corriere_id, s?.created_at)
     if (!c) continue
     const colliFile = (e.colli_ripesati || []) as any[]
     const reale = colliFile.reduce((a, p) => a + (Number(p.weight) || 0), 0)

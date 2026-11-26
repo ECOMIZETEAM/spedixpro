@@ -88,9 +88,10 @@ export async function addebitaGiacenzaCatena(
   // La riga del contratto di ogni livello si legge dalla catena del PACCO (26/11/2026): un master staccato da un
   // fornitore puo' avere due righe con lo stesso nome, e la giacenza di un pacco vecchio va prezzata su quella
   // con cui e' partito (lib/contratto-per-nome.ts, corriereDiMasterPerNome).
-  const pacco: OpzioniRiga = { corrierePacco: params.spedizioneId
-    ? ((await admin.from('spedizioni').select('corriere_id').eq('id', params.spedizioneId).maybeSingle()).data as any)?.corriere_id ?? null
-    : null }
+  const sPacco: any = params.spedizioneId
+    ? (await admin.from('spedizioni').select('corriere_id,created_at').eq('id', params.spedizioneId).maybeSingle()).data
+    : null
+  const pacco: OpzioniRiga = { corrierePacco: sPacco?.corriere_id ?? null, partenza: sPacco?.created_at ?? null }
   let ownerReale = params.corriereOwnerId
   {
     let cur: string | null = params.corriereOwnerId
@@ -193,7 +194,7 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
   const gambe = tracking ? await risolviGambeSpedizione(admin, tracking) : []
   const originanteId = gambe.length ? gambe[0].spedizioneId : spedizioneId
   const { data: full } = await admin.from('spedizioni')
-    .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+    .select('id,created_at,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
     .eq('id', originanteId).maybeSingle()
   if (!full) return { addebitato: false, importoCliente: 0 }
   // La fila del contratto dai puntatori, dalla riga della gamba originante: lineare fino al detentore vero.
@@ -216,7 +217,7 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
       // Livello-CODICE: prezzato come in creazione — listino del cliente-ledger, corriere del VENDITORE.
       // L'addebito scala il LEDGER (clienti.credito del "(ingrosso)"), non masters.credito.
       const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
-      const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto, { corrierePacco: full.corriere_id })
+      const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto, { corrierePacco: full.corriere_id, partenza: full.created_at })
       // Dopo la partenza si paga sempre anche sul ledger: il suo listino di oggi, vivo o archiviato (il ledger
       // non ha un "listino di partenza" sul pacco: listino_cliente_id della gamba e' del cliente finale).
       const n = ((lc as any)?.listino_cliente_id && corrVend)
@@ -264,7 +265,7 @@ export async function addebitaResoDaTracking(admin: any, spedizioneId: string): 
  */
 async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: string | null, corriereOwnerId: string | null, daGiacenza = true): Promise<EsitoAddebito> {
   const { data: full } = await admin.from('spedizioni')
-    .select('id,numero,tracking_number,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+    .select('id,created_at,numero,tracking_number,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
     .eq('id', sped.id).maybeSingle()
   if (!full) return { addebitato: false, importoCliente: 0 }
   // UN RESO È UN EVENTO DEL PACCO, NON DELLA RIGA. Un pacco condiviso ha più gambe con lo stesso tracking:
@@ -309,7 +310,7 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
   // La catena: dal master della spedizione fino a chi possiede davvero il contratto. Ogni livello
   // paga il SUO nolo, letto dalla SUA copia del contratto.
   if (corriereNome && corriereOwnerId) {
-    for (const liv of await catenaContratto(admin, full.master_id, corriereOwnerId, corriereNome, { corrierePacco: full.corriere_id })) {
+    for (const liv of await catenaContratto(admin, full.master_id, corriereOwnerId, corriereNome, { corrierePacco: full.corriere_id, partenza: full.created_at })) {
       righe.push({
         spedizione_id: full.id, master_target_id: liv.masterId, master_owner_id: liv.masterId,
         corriere_id: liv.corriereId,

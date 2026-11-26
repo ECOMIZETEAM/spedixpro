@@ -53,7 +53,7 @@ async function anteprima(admin: any, corr: any) {
   }
   const giorni = (n: number) => new Date(Date.now() - n * 864e5).toISOString()
   const testa = { count: 'exact' as const, head: true }
-  const [spedizioni30, pacchiAperti, aValle, fasce, altri] = await Promise.all([
+  const [spedizioni30, pacchiAperti, aValle, fasce, altri, chiaviApi] = await Promise.all([
     conta(admin.from('spedizioni').select('id', testa).eq('corriere_id', id).gte('created_at', giorni(30))),
     // Pacchi degli ultimi quattro mesi non ancora chiusi: sono quelli su cui arriveranno ancora eventi.
     conta(admin.from('spedizioni').select('id', testa).eq('corriere_id', id).gte('created_at', giorni(120))
@@ -63,6 +63,9 @@ async function anteprima(admin: any, corr: any) {
     corr.collegamento_id
       ? admin.from('corrieri').select('nome_contratto').eq('collegamento_id', corr.collegamento_id).neq('id', id).is('staccato_il', null)
       : Promise.resolve({ data: [] }),
+    // Le chiavi API legate a questo contratto: da subito non creano più spedizioni (tracking ed etichette dei pacchi
+    // già fatti continuano, lib/api-auth.ts). Il master deve sapere che qualche integrazione si fermerà.
+    conta(admin.from('api_keys').select('id', testa).eq('corriere_id', id).eq('attivo', true)),
   ])
   if ((aValle as any).error) throw new Error((aValle as any).error.message)
   const listini = Array.from(new Set((fasce as any[]).map(f => f.listino_id).filter(Boolean)))
@@ -77,7 +80,7 @@ async function anteprima(admin: any, corr: any) {
 
   return {
     nome: corr.nome_contratto, fornitore, viaCodice: !!corr.collegamento_id, staccatoIl: corr.staccato_il,
-    spedizioni30, pacchiAperti, listiniClienti: listini.length, clientiSuQueiListini: clienti,
+    spedizioni30, pacchiAperti, listiniClienti: listini.length, clientiSuQueiListini: clienti, chiaviApi,
     restanoDalloStessoFornitore: ((altri as any).data || []).map((r: any) => r.nome_contratto),
     puoStaccare: !motivo, motivo,
   }

@@ -174,7 +174,7 @@ async function costruisciCatenaGrezza(
   // IL DETENTORE SI DICHIARA (copia marcata `proprio`), altrimenti è il più in alto che ha lo stesso
   // contratto. La regola sta in lib/contratto-per-nome.ts: la usa anche l'anticipo dei contrassegni.
   const { detentore: ownerReale, dichiaratoProprio: contrattoDichiaratoProprio } =
-    await detentoreContratto(adminDb, params.corriereOwnerId, params.corriereNome, { corrierePacco: params.corrierePacco })
+    await detentoreContratto(adminDb, params.corriereOwnerId, params.corriereNome, { corrierePacco: params.corrierePacco, partenza: params.partenza })
 
   // SALIRE PRIMA, PREZZARE INSIEME (20/11/2026). La creazione costruisce la catena due volte (controllo del
   // credito prima del corriere, addebiti dopo) e ogni livello costa circa 0,3 s di letture: con tre livelli,
@@ -211,7 +211,7 @@ async function costruisciCatenaGrezza(
     let assOltreMax: boolean | undefined
     let accNonPrezzati: string[] | undefined
     if (params.corriereNome) {
-      const mCorrId = await corriereDiMasterPerNome(adminDb, m.id, params.corriereNome, { corrierePacco: params.corrierePacco })
+      const mCorrId = await corriereDiMasterPerNome(adminDb, m.id, params.corriereNome, { corrierePacco: params.corrierePacco, partenza: params.partenza })
       if (mCorrId) {
         const mCorr = { id: mCorrId }
         const pesoReale = (params.packages || []).reduce((s: number, p: any) => s + (parseFloat(p?.weight) || 0), 0) || 1
@@ -223,7 +223,7 @@ async function costruisciCatenaGrezza(
         // sul comportamento normale (nessun override → il livello usa il proprio flag come prima).
         let pesoSuRealeCost: boolean | undefined = undefined
         if (!isProprietario && m.parent_master_id) {
-          const supCorrId = await corriereDiMasterPerNome(adminDb, m.parent_master_id, params.corriereNome, { corrierePacco: params.corrierePacco })
+          const supCorrId = await corriereDiMasterPerNome(adminDb, m.parent_master_id, params.corriereNome, { corrierePacco: params.corrierePacco, partenza: params.partenza })
           if (supCorrId) {
             const [supCorrRes, supListRes]: any = await Promise.all([
               adminDb.from('corrieri').select('settings').eq('id', supCorrId).maybeSingle(),
@@ -282,7 +282,7 @@ async function costruisciCatenaGrezza(
         // (le fasce di parent_listino usano il corriere del padre). Se quel contratto non prezza la
         // destinazione → niente tariffa → la catena si ferma qui: un sotto-master non rivende cio' che non ha.
         const corrPadre = params.corriereNome
-          ? await corriereDiMasterPerNome(adminDb, m.parent_master_id, params.corriereNome, { corrierePacco: params.corrierePacco })
+          ? await corriereDiMasterPerNome(adminDb, m.parent_master_id, params.corriereNome, { corrierePacco: params.corrierePacco, partenza: params.partenza })
           : null
         const ris = await calcolaPrezzoListino(adminDb, {
           listinoId: m.parent_listino_id, provincia: params.provincia,

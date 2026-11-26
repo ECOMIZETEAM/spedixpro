@@ -229,10 +229,10 @@ function impronta(linkId: string, listinoId: string, piano: { corr: any; esito: 
  *    "in attesa di costo" (nato, o riacceso, mentre la propagazione falliva).
  *  - soloCosto: mai creare, mai riaccendere; se il ponte non c'è più (il compratore l'ha tolto) non si
  *    ricrea.
- *  - sostituisci: le copie morte da togliere, col registro di chi l'ha deciso. Si tolgono DOPO aver creato
- *    il ponte (spento): con il ponte già lì, una cascata dei listini che passasse in quell'istante salta il
- *    nome e non ricrea la copia. Il registro si scrive PRIMA della cancellazione: se non si scrive, non si
- *    cancella; se la cancellazione non riesce, chiave, abilitazione e ponte tornano come erano e il
+ *  - sostituisci: le copie morte da togliere, col registro di chi l'ha deciso. Senza ponte si tolgono PRIMA di
+ *    crearlo (26/11/2026: una sola riga non staccata per nome e master, scripts/stacca-contratto-vincolo.sql); con
+ *    il ponte già lì (sostituzione interrotta) dopo. Il registro si scrive PRIMA della cancellazione: se non si
+ *    scrive, non si cancella; se la cancellazione non riesce, chiave, abilitazione e ponte tornano come erano e il
  *    registro lo dice. */
 async function materializzaContratto(
   admin: any,
@@ -294,16 +294,29 @@ async function materializzaContratto(
   // Ponte nuovo, o ponte da riaccendere: in tutti e due i casi resta segnato "in attesa di costo" finché
   // la propagazione non riesce, così un giro successivo lo accende da solo.
   let creato = false
+  // Torna com'era quello che si è acceso qui sopra: chiave e abilitazione allo stato letto prima, e il registro lo dice.
+  const ripristinaChiave = async (motivo: string) => {
+    if (!keyEsist || keyEsist.attivo === false) await admin.from('api_keys').update({ attivo: false }).eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
+    if (!ab) await admin.from('clienti_corrieri_abilitati').delete().eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
+    else if (ab.abilitato === false) await admin.from('clienti_corrieri_abilitati').update({ abilitato: false }).eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
+    if (opt.sostituisci) await admin.from('audit_log').insert({ ...opt.sostituisci.registro, azione: 'condivisione_sostituzione_annullata', record_id: buyerCorrId ?? null,
+      modifiche: { ...(opt.sostituisci.registro.modifiche || {}), motivo } })
+  }
+  // SOSTITUZIONE SENZA PONTE: le copie morte si tolgono PRIMA di creare il ponte (26/11/2026). Il database ammette
+  // una sola riga non staccata per nome e master (scripts/stacca-contratto-vincolo.sql): con le copie ancora lì il
+  // ponte non nascerebbe. Sono senza storico e senza niente appeso (valutaContrattoPerCompratore), e morte perché
+  // il loro master le ha tolte: toglierle prima non ferma nessun pacco. Il registro si scrive prima della
+  // cancellazione; se la cancellazione non riesce non si è cambiato niente. Se poi il ponte non nasce, le copie
+  // sono già tolte e lo si dice: al giro dopo il ponte nasce senza sostituzione.
+  let copieGiaTolte = false
+  if (!buyerCorrId && opt.sostituisci?.copie.length) {
+    const { error: eReg } = await admin.from('audit_log').insert({ ...opt.sostituisci.registro, record_id: null })
+    if (eReg) { await ripristinaChiave('registro non scritto'); return { ok: false, reason: 'registro della sostituzione non scritto: non è stato cambiato niente' } }
+    const el = await eliminaContrattiSenzaStorico(admin, opt.sostituisci.copie.map(c => c.id))
+    if (!el.ok) { await ripristinaChiave(el.reason || 'copie non tolte'); return { ok: false, reason: 'le copie da sostituire non si possono più togliere: non è stato cambiato niente' } }
+    copieGiaTolte = true
+  }
   if (!buyerCorrId) {
-    // SOSTITUZIONE: le copie morte del compratore con lo stesso nome si tolgono DOPO la nascita del ponte (sotto), ma
-    // il database ammette una sola riga attiva per nome e master (scripts/stacca-contratto-vincolo.sql). Prima si
-    // segnano staccate: non hanno storico né niente appeso (valutaContrattoPerCompratore), e se la sostituzione si
-    // annulla restano lì staccate, cioè come erano già di fatto (morte).
-    const sueCopie = (opt.sostituisci?.copie || []).filter(c => c.master_id === buyer).map(c => c.id)
-    if (sueCopie.length) {
-      const { error: eSt } = await admin.from('corrieri').update({ staccato_il: new Date().toISOString(), attivo: false }).in('id', sueCopie)
-      if (eSt) return { ok: false, reason: 'le copie da sostituire non si possono mettere da parte: non è stato cambiato niente' }
-    }
     const { data: nc, error: eC } = await admin.from('corrieri').insert({
       master_id: buyer, tipo: 'moovexpress', nome_contratto: corr.nome_contratto,
       credenziali: { api_key: chiave, fornitore_master_id: seller, corriere_origine_id: corriereId },
@@ -313,7 +326,13 @@ async function materializzaContratto(
       // verso il padre-albero: lo decide la catena-fornitore (lib/condivisione-catena.ts), non il flag.
       settings: { in_attesa_costo: true }, multicollo: true, inserimento_ritiri: true, attivo: false, livello: 1, proprio: false,
     }).select('id').single()
-    if (eC || !nc) return { ok: false, reason: 'Creazione corriere sul compratore non riuscita.' }
+    if (eC || !nc) {
+      if (copieGiaTolte) {
+        await ripristinaChiave('ponte non creato dopo aver tolto le copie: ' + (eC?.message || 'nessuna riga'))
+        return { ok: false, reason: 'Le copie vecchie sono state tolte, ma il contratto nuovo non è nato: riprova, ora si crea senza sostituzione.' }
+      }
+      return { ok: false, reason: 'Creazione corriere sul compratore non riuscita.' }
+    }
     // Da quando il salvataggio del listino crea i ponti (lib/listino-modificato), due salvataggi a pochi
     // secondi l'uno dall'altro girano in parallelo e possono trovare tutti e due il ponte mancante. Due
     // ponti con lo stesso nome sul collegato rompono la regola "una riga per nome": la catena ne sceglie
@@ -344,16 +363,13 @@ async function materializzaContratto(
     }).eq('id', buyerCorrId)
   }
 
-  if (opt.sostituisci?.copie.length) {
-    // Torna tutto com'era: niente ponte nuovo, chiave e abilitazione allo stato letto prima.
+  if (opt.sostituisci?.copie.length && !copieGiaTolte) {
+    // Ponte già presente (sostituzione interrotta a metà): le copie si tolgono dopo. Torna tutto com'era: ponte com'era,
+    // chiave e abilitazione allo stato letto prima.
     const annulla = async (motivo: string) => {
       if (creato) await admin.from('corrieri').delete().eq('id', buyerCorrId)
       else await admin.from('corrieri').update({ settings: esistente?.settings || {} }).eq('id', buyerCorrId)
-      if (!keyEsist || keyEsist.attivo === false) await admin.from('api_keys').update({ attivo: false }).eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
-      if (!ab) await admin.from('clienti_corrieri_abilitati').delete().eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
-      else if (ab.abilitato === false) await admin.from('clienti_corrieri_abilitati').update({ abilitato: false }).eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
-      await admin.from('audit_log').insert({ ...opt.sostituisci!.registro, azione: 'condivisione_sostituzione_annullata', record_id: buyerCorrId,
-        modifiche: { ...(opt.sostituisci!.registro.modifiche || {}), motivo } })
+      await ripristinaChiave(motivo)
     }
     const { error: eReg } = await admin.from('audit_log').insert({ ...opt.sostituisci.registro, record_id: buyerCorrId })
     if (eReg) { await annulla('registro non scritto'); return { ok: false, reason: 'registro della sostituzione non scritto: non è stato cambiato niente' } }

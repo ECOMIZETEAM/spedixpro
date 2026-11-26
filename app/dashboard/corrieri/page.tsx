@@ -375,7 +375,8 @@ export default function CorrieriPage() {
                     {d.listiniClienti > 0 && <li style={{marginBottom:'6px'}}>È in <b>{d.listiniClienti}</b> tuoi listini clienti ({d.clientiSuQueiListini} clienti): da subito non lo vedono più. Quando compri il contratto nuovo, mettilo nei loro listini.</li>}
                     {d.restanoDalloStessoFornitore?.length > 0 && <li style={{marginBottom:'6px'}}>Gli altri contratti che compri da {d.fornitore || 'questo fornitore'} restano come sono ({d.restanoDalloStessoFornitore.join(', ')}).</li>}
                     <li style={{marginBottom:'6px'}}>Dopo puoi comprare lo stesso contratto da un altro fornitore.</li>
-                    <li><b>Non si annulla</b>: per riaverlo da questo fornitore dovrai ricomprarlo.</li>
+                    {d.chiaviApi > 0 && <li style={{marginBottom:'6px'}}><b>{d.chiaviApi}</b> chiavi API sono legate a questo contratto: da subito con queste chiavi non si creano più spedizioni (tracking ed etichette dei pacchi già fatti continuano). Chi le usa dovrà passare al contratto nuovo.</li>}
+                    <li><b>Non si annulla</b>: questo contratto da {d.fornitore || 'questo fornitore'} non tornerà più.</li>
                   </ul>
                 )}
               </div>

@@ -10,7 +10,8 @@ import { risolviChiaveDispatch } from '@/lib/condivisione-catena'
 // Auth: Authorization: Bearer <api_key>
 // GET /api/v1/tracking/{tracking_number}
 export async function GET(req: NextRequest, { params }: { params: Promise<{ tracking: string }> }) {
-  const ctx = await autenticaApiKey(req)
+  // Solo lettura: passa anche sul contratto staccato di un venditore, per i pacchi già partiti (lib/api-auth.ts).
+  const ctx = await autenticaApiKey(req, { soloLettura: true })
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
   const _b = rispostaBlocco(ctx); if (_b) return _b
   const { tracking } = await params

@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ error: 'Nessuna LDV nel reso' }, { status: 400 })
 
   const { data: speds } = await admin.from('spedizioni')
-    .select('id,numero,tracking_number,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale,giacenza_reso_addebitato,corrieri(nome_contratto,tipo)')
+    .select('id,created_at,numero,tracking_number,master_id,cliente_id,dest_provincia,dest_cap,dest_paese,dest_citta,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,corriere_id,costo_totale,giacenza_reso_addebitato,corrieri(nome_contratto,tipo)')
     .in('id', ids)
 
   // prima linea per ogni discendente
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
       // Il prezzo lo decide il SUO listino corrieri, quindi serve la SUA copia del contratto.
-      const suoCorriere = await corriereDiMasterPerNome(admin, flId, (s as any).corrieri?.nome_contratto || null, { corrierePacco: s.corriere_id })
+      const suoCorriere = await corriereDiMasterPerNome(admin, flId, (s as any).corrieri?.nome_contratto || null, { corrierePacco: s.corriere_id, partenza: (s as any).created_at })
       righe.push({
         spedizione_id: s.id, master_target_id: flId, master_owner_id: mio, corriere_id: suoCorriere,
         nolo: (suoCorriere ? await noloMaster(admin, flId, suoCorriere, s) : null) || 0,

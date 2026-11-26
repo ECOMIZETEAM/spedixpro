@@ -218,6 +218,9 @@ export async function POST(req: NextRequest) {
         packages: [{ weight: peso, length: 0, width: 0, height: 0 }], cap: s.dest_cap || '', citta: s.dest_citta || '', paese: s.dest_paese || 'IT',
         corriereNome: corr.nome_contratto, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
         mittCap: s.mitt_cap || '', mittProvincia: s.mitt_provincia || '', mittPaese: 'IT',
+        // La catena del PACCO, come il ricalcolo vero della rettifica (lib/ripesature-calcolo.ts): con un contratto
+        // staccato e ricomprato altrove, la spiegazione deve parlare del fornitore di allora.
+        corrierePacco: s.corriere_id,
       })
       // Quale listino correggere: quello che il padre ha assegnato al master dove la catena si ferma (lib/cascata,
       // parent_listino_id). Si cerca risalendo dal master della spedizione, per nome come lo dice l'errore.

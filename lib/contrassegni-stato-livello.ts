@@ -1,5 +1,5 @@
 import { fetchAll } from '@/lib/fetch-all'
-import { caricaSorgenteCatena, detentoreContrattoCon, nomeContrattoNormalizzato } from '@/lib/contratto-per-nome'
+import { caricaSorgenteCatena, detentoreContrattoCon, nomeContrattoNormalizzato, sorgenteDaDatabase } from '@/lib/contratto-per-nome'
 import { risolviCatenaCondivisione, catenaDaCorriere } from '@/lib/condivisione-catena'
 
 // IL COLORE DEL CONTRASSEGNO, LIVELLO PER LIVELLO: dice se i soldi sono arrivati A ME.
@@ -98,7 +98,12 @@ export async function statiCodPerLivello(
     const kk = partenza + '|' + (nome || '') + '|' + (corriereId || '')
     const hit = comboCache.get(kk); if (hit) return hit
     const res = (async (): Promise<Combo> => {
-      const [sorgente, moovSet] = await Promise.all([sorgentePronta, moovSetPronto])
+      const [inMemoria, moovSet] = await Promise.all([sorgentePronta, moovSetPronto])
+      // Un contratto con righe STACCATE (26/11/2026): il detentore di un pacco vecchio si cerca lungo la catena del
+      // pacco (database, riga per riga), non fra le copie per nome, dove vincerebbe la riga di oggi.
+      const sorgente = corriereId && nome && inMemoria.haStaccate?.(nome)
+        ? sorgenteDaDatabase(adminDb, { corrierePacco: corriereId })
+        : inMemoria
       if (nome && moovSet.has(partenza + '|' + nomeContrattoNormalizzato(nome))) {
         // Con la riga della gamba, la fila dei puntatori: un ponte comprato da una copia d'albero arriva fino
         // al detentore vero (MULTI per il GLS che GTS rivende a spedizioni 2000), non si ferma al venditore.
@@ -107,9 +112,9 @@ export async function statiCodPerLivello(
           : await risolviCatenaCondivisione(adminDb, partenza, nome)
         if (chain.length && chain.some(l => l.ruolo === 'codice'))
           return { detentore: chain[chain.length - 1].master, masters: chain.map(l => l.master), codice: true }
-        return { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(sorgente, partenza), codice: false }
+        return { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(inMemoria, partenza), codice: false }
       }
-      return { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(sorgente, partenza), codice: false }
+      return { detentore: (await detentoreContrattoCon(sorgente, partenza, nome)).detentore, masters: catenaDi(inMemoria, partenza), codice: false }
     })()
     comboCache.set(kk, res); return res
   }
