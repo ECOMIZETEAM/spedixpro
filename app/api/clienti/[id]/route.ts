@@ -276,6 +276,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   if (condizionata && !cliente) return NextResponse.json({ error: NEGOZIO_AGGIORNATO }, { status: 409 })
   let emailInviata = false
+  // La password nuova torna al master SOLO se l'email non e' partita. Prima la rotta rispondeva
+  // emailInviata=true senza guardare l'esito: la password era gia' cambiata, il master leggeva «inviata
+  // via email» e il cliente, che fino a un attimo prima entrava, restava fuori senza che nessuno lo sapesse.
+  let passwordDaComunicare: string | null = null
   if (resetPassword) {
     try {
       const { createAdminSupabase } = await import('@/lib/supabase-admin')
@@ -309,18 +313,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           }
         }
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        await inviaCredenzialiCliente({ email: emailFinale, nomeCliente: cliente?.ragione_sociale || '', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
-        emailInviata = true
+        const esito = await inviaCredenzialiCliente({ email: emailFinale, nomeCliente: cliente?.ragione_sociale || '', masterNome: 'MoovExpress', dominio: 'moovexpress.com', password: newPassword })
+        emailInviata = esito.ok
+        if (!esito.ok) {
+          passwordDaComunicare = newPassword
+          console.error('[CLIENTE][RESET] password cambiata ma email non partita: la vede il master', { cliente: id })
+        }
       }
     } catch(e) { console.error('Reset password error:', e) }
   }
   // Al conto nato da Shopify torna l'impronta della riga appena scritta: il salvataggio stesso puo'
   // cambiarla (l'email di accesso, un paese vuoto che diventa 'Italia'), e un secondo salvataggio dallo
   // stesso modulo non deve vedersi rifiutare per colpa del primo.
+  const daComunicare = passwordDaComunicare ? { passwordNuova: passwordDaComunicare } : {}
   if (cliente && contoNatoDaShopify(cliente)) {
-    return NextResponse.json({ success: true, emailInviata, versione_dati_negozio: versioneDatiNegozio(cliente) })
+    return NextResponse.json({ success: true, emailInviata, ...daComunicare, versione_dati_negozio: versioneDatiNegozio(cliente) })
   }
-  return NextResponse.json({ success: true, emailInviata })
+  return NextResponse.json({ success: true, emailInviata, ...daComunicare })
 }
 
 // Elimina un cliente DIRETTO del master. Bloccato se ha spedizioni (storico/fatturazione).

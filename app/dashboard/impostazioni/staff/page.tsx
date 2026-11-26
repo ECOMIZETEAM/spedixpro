@@ -35,7 +35,7 @@ export default function StaffPage() {
   const paginati = filtrati.slice(inizio, inizio + perPagina)
   const numPagine = Math.max(1, Math.ceil(totale / perPagina))
 
-  const [resetCred, setResetCred] = useState<{nome:string,email:string,password:string}|null>(null)
+  const [resetCred, setResetCred] = useState<{nome:string,email:string,password:string,emailInviata:boolean}|null>(null)
   const [resetting, setResetting] = useState('')
 
   async function elimina(id: string) {
@@ -56,7 +56,7 @@ export default function StaffPage() {
     const j = await r.json()
     setResetting('')
     if (j.error) { await dialog.alert({ title: 'Errore', message: j.error }); return }
-    setResetCred({ nome: [u.nome,u.cognome].filter(Boolean).join(' ')||u.email, email: j.email || u.email, password: j.password })
+    setResetCred({ nome: [u.nome,u.cognome].filter(Boolean).join(' ')||u.email, email: j.email || u.email, password: j.password, emailInviata: j.emailInviata === true })
   }
 
   const th = { padding:'12px 14px', textAlign:'left' as const, fontSize:'13px', fontWeight:'700', color:'#374151', borderBottom:'2px solid #eee', whiteSpace:'nowrap' as const }
@@ -128,7 +128,9 @@ export default function StaffPage() {
         <div onClick={()=>setResetCred(null)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
           <div onClick={e=>e.stopPropagation()} style={{ background:'#fff', borderRadius:'10px', padding:'24px', width:'420px', maxWidth:'90vw', boxShadow:'0 10px 40px rgba(0,0,0,0.2)' }}>
             <div style={{ fontSize:'16px', fontWeight:'700', color:'#1a1a1a', marginBottom:'6px' }}>Nuova password generata</div>
-            <p style={{ fontSize:'13px', color:'#666', marginBottom:'16px', lineHeight:1.5 }}>Le credenziali di <b>{resetCred.nome}</b> sono state aggiornate e inviate via email. Condividile anche manualmente se necessario.</p>
+            {resetCred.emailInviata
+              ? <p style={{ fontSize:'13px', color:'#666', marginBottom:'16px', lineHeight:1.5 }}>Le credenziali di <b>{resetCred.nome}</b> sono state aggiornate e inviate via email. Condividile anche manualmente se necessario.</p>
+              : <p style={{ fontSize:'13px', color:'#b91c1c', marginBottom:'16px', lineHeight:1.5 }}>Le credenziali di <b>{resetCred.nome}</b> sono state aggiornate, ma <b>l&apos;email non è partita</b>: la vecchia password non vale più, comunicagli tu questa.</p>}
             <div style={{ background:'#f9fafb', border:'1px solid #eee', borderRadius:'8px', padding:'14px', marginBottom:'16px' }}>
               <div style={{ fontSize:'12px', color:'#999', marginBottom:'4px' }}>Email</div>
               <div style={{ fontSize:'14px', color:'#1a1a1a', fontFamily:'monospace', marginBottom:'12px' }}>{resetCred.email}</div>

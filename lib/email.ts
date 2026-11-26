@@ -21,13 +21,34 @@ const FROM = FROM_RAW.includes('<') ? FROM_RAW : `MoovExpress <${FROM_RAW}>`
 // di rispondere: ogni funzione qui sotto lo intercetta gia' col suo try/catch e risponde ok:false.
 // Il reply-to invece NON si tocca: dove debbano arrivare le risposte dei compratori di un negozio
 // creato da Shopify non e' ancora deciso, e non lo decide un filtro.
+//
+// UN RIFIUTO DI RESEND E' UN ERRORE, NON UN SUCCESSO. La libreria resend non lancia quando l'invio
+// viene rifiutato (troppe richieste al secondo, quota finita, mittente o indirizzo respinti, Resend
+// giu'): restituisce { error }. Quasi tutte le funzioni qui sotto facevano `await invia(...)` e poi
+// `return { ok: true }`, quindi un rifiuto risultava "inviato": il reset dalla scheda cliente diceva
+// «nuova password inviata via email» senza mostrarla, e il cliente restava fuori senza che nessuno
+// lo sapesse; le giacenze venivano segnate come avvisate e non si riprovavano piu' (26/11/2026).
+// Si lancia qui, come per gli indirizzi interni, e ogni try/catch risponde ok:false da solo.
+// Quando e' la mail in se' a essere sbagliata (indirizzo, mittente, allegato) riprovarla uguale non
+// serve: l'errore dice «non valida», la parola con cui giacenze e calendario smettono di riprovare.
+const RIFIUTI_DEFINITIVI = new Set(['validation_error', 'missing_required_field', 'invalid_parameter', 'invalid_from_address', 'invalid_attachment'])
 async function invia(msg: Parameters<typeof resend.emails.send>[0]) {
   const destinatari = ([] as string[]).concat(msg.to).filter((e) => !eIndirizzoInterno(e))
   if (!destinatari.length) {
     console.warn('[EMAIL] destinatario inventato da noi: email non spedita —', msg.subject)
     throw new Error('destinatario interno: email non spedita')
   }
-  return resend.emails.send({ ...msg, to: destinatari })
+  const r = await resend.emails.send({ ...msg, to: destinatari })
+  if (r.error) {
+    const nome = String((r.error as any).name || 'errore')
+    // L'oggetto aiuta a capire QUALE mail e' saltata, ma quello del codice di accesso contiene il codice.
+    const oggetto = /codice di accesso/i.test(String(msg.subject)) ? 'Codice di accesso (nascosto)' : msg.subject
+    console.error('[EMAIL] Resend ha rifiutato:', nome, '—', r.error.message, '—', oggetto)
+    throw new Error(RIFIUTI_DEFINITIVI.has(nome)
+      ? `email non valida per Resend (${nome}): ${r.error.message}`
+      : `Resend ha rifiutato l'invio (${nome}): ${r.error.message}`)
+  }
+  return r
 }
 
 // Intestazione/footer comuni MoovExpress
@@ -61,7 +82,7 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const colP = master.colore_primario || '#f97316'
-    const r: any = await invia({
+    await invia({
       from: FROM,
       to,
       subject: oggetto || `Preventivo${master.nome ? ' da ' + master.nome : ''}`,
@@ -72,7 +93,6 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
         <p style="color:#999;font-size:12px;margin-top:16px;word-break:break-all">Oppure copia questo link: ${link}</p>
       `, { logo: master.logo_url, colore: master.colore_secondario, nome: master.nome }),
     })
-    if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
     return { ok: true }
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
 }
@@ -81,7 +101,7 @@ export async function inviaEmailPreventivo({ to, oggetto, destNome, link, master
 // nell'oggetto: lo si legge gia' dalla notifica del telefono, senza aprire la mail.
 export async function inviaCodiceAccesso({ to, codice, minuti }: { to: string; codice: string; minuti: number }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const r: any = await invia({
+    await invia({
       from: FROM,
       to,
       subject: `Codice di accesso MoovExpress: ${codice}`,
@@ -93,7 +113,6 @@ export async function inviaCodiceAccesso({ to, codice, minuti }: { to: string; c
         <p style="color:#999;font-size:12px;line-height:1.5;margin:0">Se non stai provando ad accedere tu, qualcuno conosce la tua password: cambiala subito con «Password dimenticata» nella pagina di accesso.</p>
       `),
     })
-    if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
     return { ok: true }
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
 }
@@ -111,7 +130,6 @@ export async function inviaEmailTest(to: string): Promise<{ ok: boolean; from: s
         <p style="color:#999;font-size:12px;margin-top:16px">Mittente: ${FROM}</p>
       `),
     })
-    if (r?.error) return { ok: false, from: FROM, error: r.error?.message || JSON.stringify(r.error) }
     return { ok: true, from: FROM, id: r?.data?.id || null }
   } catch (err: any) {
     return { ok: false, from: FROM, error: String(err?.message || err) }
@@ -149,8 +167,7 @@ export async function inviaEmailDoganaFerma({ to, destNome, numero, paese, maste
       ${link ? `<p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#f97316;color:#fff;text-decoration:none;border-radius:8px;padding:12px 26px;font-size:14px;font-weight:700;display:inline-block">Apri il ticket e invia i documenti</a></p>` : ''}
     `
     const html = brand ? wrapBrand(inner, { logo: brand.logo, nome: brand.nome }) : wrap(inner)
-    const r: any = await invia({ from, to, subject: `Spedizione ${numero}: servono documenti doganali`, html })
-    if (r?.error) return { ok: false, error: r.error?.message || JSON.stringify(r.error) }
+    await invia({ from, to, subject: `Spedizione ${numero}: servono documenti doganali`, html })
     return { ok: true }
   } catch (err: any) { return { ok: false, error: String(err?.message || err) } }
 }
@@ -278,7 +295,7 @@ export async function inviaAllarmiSicurezza(to: string, allarmi: { tipo: string;
       <div style="font-size:13px;color:#374151;line-height:1.5">${esc(COSA_FARE_ALLARME[a.tipo] || 'Va guardato.')}</div>
     </div>`
   try {
-    const r: any = await invia({
+    await invia({
       from: FROM, to,
       subject: `🚨 MoovExpress — ${allarmi.length === 1 ? 'allarme di sicurezza' : `${allarmi.length} allarmi di sicurezza`}`,
       html: wrap(`
@@ -293,7 +310,6 @@ export async function inviaAllarmiSicurezza(to: string, allarmi: { tipo: string;
         </p>
       `),
     })
-    if (r?.error) { console.error('[ALLARMI] email non inviata:', r.error?.message || r.error); return { ok: false } }
     return { ok: true }
   } catch (err: any) {
     console.error('[ALLARMI] email non inviata:', err?.message || err)
@@ -603,15 +619,11 @@ export async function inviaEmailGiacenza(p: {
   const replyTo = EMAIL_RE.test(String(p.mittEmail || '').trim().toLowerCase())
     ? String(p.mittEmail).trim().toLowerCase() : undefined
   try {
-    // Resend non lancia quando rifiuta (troppe richieste al secondo, quota, dominio): restituisce
-    // { error }. Rispondere ok senza guardarlo faceva segnare la giacenza come avvisata, e il giro
-    // non riprovava piu': un avviso perso senza traccia.
-    const r: any = await invia({
+    await invia({
       from: fromBrand, to: dest, replyTo,
       subject: `Il tuo pacco \u00e8 in attesa \u2014 spedizione ${p.numero}`,
       html: (brandLogo || brandNome) ? wrapBrand(corpo, { logo: brandLogo, nome: brandNome }) : wrap(corpo),
     })
-    if (r?.error) return { ok: false, error: r.error?.message || 'invio non riuscito' }
     return { ok: true }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'invio non riuscito' }
@@ -643,13 +655,12 @@ export async function inviaEmailProforma(p: {
   const fromBrand = nome ? `${nome} <${fromAddr}>` : FROM
   const replyTo = EMAIL_RE.test(String(p.replyTo || '').trim().toLowerCase()) ? String(p.replyTo).trim().toLowerCase() : undefined
   try {
-    const r: any = await invia({
+    await invia({
       from: fromBrand, to: dest, replyTo,
       subject: `Fattura proforma ${p.numero} - ${nome || 'MoovExpress'}`,
       html: wrapBrand(corpo, { logo: p.master.logo || null, nome: nome || null }),
       attachments: [{ filename: p.nomeFile, content: p.pdf }],
     })
-    if (r?.error) return { ok: false, error: r.error?.message || 'invio non riuscito' }
     return { ok: true }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'invio non riuscito' }

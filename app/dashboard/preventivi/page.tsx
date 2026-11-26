@@ -78,7 +78,9 @@ export default function Preventivi() {
     if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Attivazione non riuscita' }); return }
     if (d?.credenzialiInviate === false) {
       // Posizione aperta ma l'email delle credenziali NON è partita: avvisa chiaro così il master la rimanda a mano.
-      await dialog.alert({ title: 'Attivato — ma email credenziali NON partita', message: `${nomeDest} è ora attivo e il listino è agganciato, ma l'email con le credenziali d'accesso non è stata inviata. Invia tu le credenziali (o riprova più tardi), altrimenti non potrà entrare.` })
+      // La password la genera il server e non la conosce nessuno: il modo per dargliela e' il «Reset password»
+      // della sua scheda, che crea anche l'accesso se manca e, se l'email non parte di nuovo, la mostra a te.
+      await dialog.alert({ title: 'Attivato — ma email credenziali NON partita', message: `${nomeDest} è ora attivo e il listino è agganciato, ma le credenziali d'accesso non gli sono arrivate. Apri la sua scheda e usa «Reset password»: se l'email non parte nemmeno allora, la nuova password compare a te da comunicargli. Finché non lo fai, non potrà entrare.` })
     } else {
       await dialog.alert({ title: 'Posizione attivata', message: `${nomeDest} è ora attivo: credenziali inviate e listino agganciato.` })
     }

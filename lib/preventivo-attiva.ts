@@ -93,9 +93,12 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
         masterId = creato.id
         const password = generaPassword()
         const { data: au, error: aErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true })
+        // Senza accesso le credenziali non partono: il master deve saperlo, non leggere «credenziali inviate».
+        if (aErr || !au?.user) { credenzialiInviate = false; console.error('[preventivo/attiva] accesso del sotto-master non creato', aErr?.message) }
         if (!aErr && au?.user) {
           const { error: uErr } = await admin.from('utenti').insert({ id: au.user.id, ruolo: 'master', master_id: creato.id, cliente_id: null, nome, attivo: true })
           if (uErr) {
+            credenzialiInviate = false
             // deleteUser restituisce l'errore, non lo lancia: un .catch() qui non prendeva niente.
             const { error: dErr } = await admin.auth.admin.deleteUser(au.user.id)
             console.error('[preventivo/attiva] riga utenti non creata', uErr.message, dErr ? `— utente di login RIMASTO: ${dErr.message}` : '— utente di login tolto')
@@ -171,9 +174,11 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
         clienteId = nuovo.id; clienteCreatoId = nuovo.id
         const password = generaPassword()
         const { data: au, error: aErr } = await admin.auth.admin.createUser({ email, password, email_confirm: true })
+        if (aErr || !au?.user) { credenzialiInviate = false; console.error('[preventivo/attiva] accesso del cliente non creato', aErr?.message) }
         if (!aErr && au?.user) {
           const { error: uErr } = await admin.from('utenti').insert({ id: au.user.id, ruolo: 'cliente', master_id: p.master_id, cliente_id: nuovo.id, nome: p.dest_nome || email, attivo: true })
           if (uErr) {
+            credenzialiInviate = false
             // deleteUser restituisce l'errore, non lo lancia: un .catch() qui non prendeva niente.
             const { error: dErr } = await admin.auth.admin.deleteUser(au.user.id)
             console.error('[preventivo/attiva] riga utenti non creata', uErr.message, dErr ? `— utente di login RIMASTO: ${dErr.message}` : '— utente di login tolto')
@@ -196,5 +201,6 @@ export async function attivaPreventivo(admin: any, p: any): Promise<Esito> {
   // Aggancia il listino reale + (se il preventivo è di un agente) il tag agente anche su cliente esistente.
   await admin.from('clienti').update({ listino_cliente_id: draftId, ...(p.agente ? { agente: p.agente } : {}) }).eq('id', clienteId).eq('master_id', p.master_id)
   await finalizza(admin, p, draftId, clienteCreatoId)
-  return { ok: true }
+  // Il segno torna anche dal ramo del cliente: prima si perdeva qui e il master leggeva sempre «credenziali inviate».
+  return { ok: true, credenzialiInviate }
 }

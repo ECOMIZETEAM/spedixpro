@@ -146,7 +146,9 @@ function NuoviMaster() {
     setAzione('')
     if (!res.ok || d?.error) { await dialog.alert({ title: 'Errore', message: d?.error || 'Operazione non riuscita' }); return }
     if (tipo === 'approva') {
-      await dialog.alert({ title: 'Master attivato', message: d.credenzialiInviate === false ? `${nome} è attivo, ma l'email con le credenziali non è partita: mandagliela a mano.` : `${nome} è attivo e ha ricevuto le credenziali. Ora assegnagli i contratti/listino.` })
+      await dialog.alert({ title: 'Master attivato', message: d.credenzialiInviate === false
+        ? `${nome} è attivo, ma l'email con le credenziali non è partita: mandagliele tu.${d.password ? ` Accesso su moovexpress.com — email: ${d.email} — password: ${d.password}` : ''}`
+        : `${nome} è attivo e ha ricevuto le credenziali. Ora assegnagli i contratti/listino.` })
     }
     carica()
   }

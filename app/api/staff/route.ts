@@ -177,6 +177,8 @@ export async function PUT(req: NextRequest) {
 
   // Reset password + invio credenziali
   let passwordImpostata: string | undefined
+  // «Inviate via email» solo se Resend l'ha presa: prima bastava avere un indirizzo per dirlo.
+  let credenzialiInviate = false
   if (resetPassword) {
     const password = generaPassword()
     const { error: ePw } = await admin.auth.admin.updateUserById(id, { password })
@@ -186,7 +188,8 @@ export async function PUT(req: NextRequest) {
       try {
         const { data: masterRec } = await admin.from('masters').select('nome').eq('id', me.master_id).single()
         const { inviaCredenzialiCliente } = await import('@/lib/email')
-        await inviaCredenzialiCliente({ email: emailAttuale, nomeCliente: (st as any).nome || 'Collaboratore', masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
+        const esito = await inviaCredenzialiCliente({ email: emailAttuale, nomeCliente: (st as any).nome || 'Collaboratore', masterNome: masterRec?.nome || 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
+        credenzialiInviate = esito.ok
       } catch (e) { console.error('Errore invio credenziali staff (reset):', e) }
     }
   }
@@ -218,7 +221,7 @@ export async function PUT(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   }
 
-  return NextResponse.json({ success: true, email: emailAttuale, emailInviata: !!passwordImpostata && !!emailAttuale, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
+  return NextResponse.json({ success: true, email: emailAttuale, emailInviata: credenzialiInviate, ...(passwordImpostata ? { password: passwordImpostata } : {}) })
 }
 
 export async function DELETE(req: NextRequest) {

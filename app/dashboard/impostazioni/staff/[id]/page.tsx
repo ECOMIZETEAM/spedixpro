@@ -54,7 +54,8 @@ export default function ModificaStaffPage() {
     const res = await fetch('/api/staff', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const d = await res.json(); setSaving(false)
     if (d.error) { setErrore(d.error); return }
-    setMsg(d.emailInviata ? 'Modifiche salvate — credenziali inviate via email' : 'Modifiche salvate')
+    setMsg(d.emailInviata ? 'Modifiche salvate — credenziali inviate via email'
+      : d.password ? 'Modifiche salvate — l\'email NON è partita: comunica tu la nuova password qui sotto' : 'Modifiche salvate')
     if (d.password) setPasswordMostrata(d.password)
     if (body.nuova_email) setEmailOrig(email.trim())
     setResetPassword(false)

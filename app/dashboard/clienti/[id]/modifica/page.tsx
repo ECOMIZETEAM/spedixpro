@@ -62,6 +62,12 @@ export default function ModificaClientePage() {
     // Il salvataggio puo' aver cambiato l'impronta (per esempio l'email di accesso): un secondo clic
     // prima di tornare alla scheda deve partire da quella nuova.
     setVersioneDati(typeof data.versione_dati_negozio === 'string' ? data.versione_dati_negozio : null)
+    // Password cambiata ma email non partita: la vecchia non vale piu', quindi questa il master la deve
+    // leggere e passare al cliente. Niente ritorno automatico alla scheda, che la farebbe sparire.
+    if (resetPassword && data.passwordNuova) {
+      setMsg(`Salvato, ma l'email con la nuova password NON è partita. La vecchia non vale più: comunica tu al cliente la nuova password: ${data.passwordNuova}`)
+      return
+    }
     setMsg(resetPassword && data.emailInviata ? '✓ Salvato — nuova password inviata via email' : '✓ Anagrafica aggiornata!')
     setTimeout(() => router.push(`/dashboard/clienti/${id}`), 1200)
   }

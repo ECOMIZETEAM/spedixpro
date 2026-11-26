@@ -88,5 +88,7 @@ export async function POST(req: NextRequest) {
     const es: any = await inviaCredenzialiCliente({ email, nomeCliente: m.nome, masterNome: 'MoovExpress', dominio: 'moovexpress.com', password, areaStaff: true })
     if (es && es.ok === false) credenzialiInviate = false
   } catch { credenzialiInviate = false }
-  return NextResponse.json({ ok: true, approvata: true, credenzialiInviate })
+  // Email non partita: la password torna a chi approva, altrimenti «mandagliela a mano» non si puo'
+  // fare (e' generata qui e non la conosce nessuno).
+  return NextResponse.json({ ok: true, approvata: true, credenzialiInviate, ...(credenzialiInviate ? {} : { email, password }) })
 }
