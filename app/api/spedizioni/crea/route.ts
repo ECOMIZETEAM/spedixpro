@@ -375,6 +375,14 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
   if (packages.length > 1 && (corriereRecord as any)?.multicollo === false) {
     return NextResponse.json({ error: 'Il contratto non prevede la funzione multicollo' }, { status: 400 })
   }
+  // SPRING CHE NON PUO' FARE QUESTA SPEDIZIONE: fuori dall'ambito del contratto (Italia/Europa/
+  // Internazionale), piu' di un collo, assicurazione, contrassegno fuori da HU/RO/BG. Stessa regola del
+  // preventivo (lib/spring.ts): qui la si ripete perche' da questa porta passano anche import e negozi.
+  {
+    const { motivoSpringNonServe } = await import('@/lib/spring')
+    const motivoSpring = motivoSpringNonServe(corriereRecord, { paese: body.shipTo?.country, contrassegno: body.codValue, assicurazione: body.insuranceValue, colli: packages.length })
+    if (motivoSpring) return NextResponse.json({ error: motivoSpring }, { status: 400 })
+  }
   // STESSO METRO DEL PREVENTIVO. Qui i lati si confrontavano ASSE PER ASSE (lunghezza con
   // lunghezza, larghezza con larghezza), mentre il preventivo confronta i lati ORDINATI dal piu'
   // lungo al piu' corto — che e' il criterio giusto, perche' un collo si puo' girare. Risultato:
@@ -3370,6 +3378,195 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       console.error('[CREA][ECOSMOS]', err?.message)
       await stornaPrenotazione()
       return NextResponse.json({ error: err?.ecosmos ? err.message : erroreCorrierePulito(err?.message) }, { status: 400 })
+    }
+  }
+
+  if (corriereRecord.tipo === 'spring') {
+    // SPRING GDS (XBS): diretto, contratto del master con la sua chiave (lib/spring.ts). Un collo per
+    // spedizione (le regole sopra lo hanno gia' fermato), etichetta data dalla creazione e intoccabile.
+    // Nessun ritiro da prenotare: i pacchi arrivano a Spring fuori dall'API. Si annulla via API finche' Spring
+    // non li accetta in hub, quindi una spedizione creata da loro e non registrata da noi si annulla subito.
+    const settSp: any = (corriereRecord as any)?.settings || {}
+    const credSp = { api_key: String(cred.api_key || ''), ambiente: String(cred.ambiente || '') }
+    if (!credSp.api_key) {
+      await stornaPrenotazione()
+      return NextResponse.json({ error: 'Contratto Spring senza chiave API: va inserita dal master nel contratto.' }, { status: 400 })
+    }
+    try {
+      const { creaSpedizioneSpring, annullaSpring, nuovoRiferimentoSpring } = await import('@/lib/spring')
+      const { isExtraUe } = await import('@/lib/paesi-ue')
+      const { normalizzaPaese } = await import('@/lib/paesi')
+      const paeseSp = normalizzaPaese(body.shipTo?.country)
+
+      let costoCorrente = costoMaster
+      if (!isProprio) {
+        costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          corriereId: corriereRecord.id, masterId,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: paeseSp, citta: body.shipTo.city,
+          pesoReale, packages,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+        })) ?? 0
+      }
+      const costoCliente = isProprio ? costoMaster : Math.max(prezzoServerCliente, parseFloat(body.totalPrice) || 0)
+
+      // DOGANA fuori UE: una voce per articolo, coi dati doganali letti dal catalogo LATO SERVER (come
+      // EasyParcel). Senza articoli dal catalogo, una voce sola con quello che chi spedisce ha scritto nel
+      // modulo (contenuto, valore, codice HS). Se manca qualcosa la ferma lib/spring.ts, prima di chiamare.
+      let articoliSp: any[] | undefined
+      if (isExtraUe(paeseSp)) {
+        const ids = Array.isArray(body.articoli) ? [...new Set(body.articoli.map((a: any) => a?.articolo_id).filter(Boolean))] : []
+        if (ids.length) {
+          const { data: cat } = await adminCrea.from('articoli_cliente')
+            .select('id,codice_hs,descrizione_doganale,nome,paese_origine,peso,valore_dichiarato,sku').in('id', ids)
+          const perId = new Map((cat || []).map((c: any) => [c.id, c]))
+          articoliSp = body.articoli.map((a: any) => {
+            const c: any = perId.get(a?.articolo_id); if (!c) return null
+            const q = Math.max(1, Math.round(Number(a?.quantita) || 1))
+            return {
+              descrizione: c.descrizione_doganale || c.nome, hsCode: c.codice_hs, origine: c.paese_origine || 'IT', sku: c.sku || null,
+              quantita: q, valoreTotale: (Number(c.valore_dichiarato) || 0) * q, pesoTotaleKg: (Number(c.peso) || 0) * q,
+            }
+          }).filter(Boolean)
+        }
+        if (!articoliSp?.length && (body.contenuto || body.hscode)) {
+          articoliSp = [{
+            descrizione: String(body.contenuto || ''), hsCode: String(body.hscode || '').replace(/\D/g, ''),
+            origine: String(body.origineMerce || 'IT'), quantita: 1,
+            valoreTotale: Number(body.valoreMerce || 0), pesoTotaleKg: pesoReale,
+          }]
+        }
+      }
+
+      let ris: Awaited<ReturnType<typeof creaSpedizioneSpring>>
+      try {
+        ris = await creaSpedizioneSpring(credSp, {
+          servizio: String(settSp.spring_servizio || ''), ambito: String(settSp.spring_ambito || ''),
+          riferimento: nuovoRiferimentoSpring(),
+          rifOrdine: body.rifOrdine ? String(body.rifOrdine) : null,
+          pesoKg: pesoReale,
+          lunghezzaCm: Number(pkg?.length) || null, larghezzaCm: Number(pkg?.width) || null, altezzaCm: Number(pkg?.height) || null,
+          valore: Number(body.valoreMerce || 0) || null,
+          contenuto: body.contenuto ? String(body.contenuto) : null,
+          articoli: articoliSp,
+          mittente: {
+            nome: body.shipFrom.name, indirizzo: body.shipFrom.street1, citta: body.shipFrom.city,
+            cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: normalizzaPaese(body.shipFrom?.country),
+            telefono: body.shipFrom.phone || null, email: body.shipFrom.email || null,
+          },
+          destinatario: {
+            nome: body.shipTo.name, indirizzo: body.shipTo.street1, citta: body.shipTo.city,
+            cap: body.shipTo.postalCode, provincia: body.shipTo.state, paese: paeseSp,
+            telefono: body.shipTo.phone || null, email: body.shipTo.email || null,
+          },
+          contrassegno: Number(body.codValue || 0) || null,
+          assicurazione: Number(body.insuranceValue || 0) || null,
+        })
+      } catch (e: any) {
+        // Spring non ha risposto, o ha risposto senza numero o senza etichetta: forse la spedizione c'e'. Non si
+        // storna alla cieca (il giro delle prenotazioni scadute la libera se davvero non c'e'): si dice di
+        // controllare, col dettaglio nei log per ritrovarla.
+        if (e?.forseCreata) {
+          console.error('[CREA][SPRING] esito incerto', e?.message, JSON.stringify(e.raw || {}).slice(0, 800))
+          return NextResponse.json({ error: e.message }, { status: 502 })
+        }
+        throw e
+      }
+      const numeroFinale = ris.numero
+      // Etichetta di Spring cosi' com'e': il loro manuale vieta qualunque modifica (cap. 1.5).
+      const etichettaUrl = `data:application/pdf;base64,${ris.etichettaBase64}`
+      const colliDettaglio = [{
+        numero: 1,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        peso: pkg?.weight || pesoReale || null,
+        etichetta_url: etichettaUrl,
+      }]
+
+      const { data: inserted, error: insertError } = await supabase.from('spedizioni').insert({
+        master_id: masterId, cliente_id: clienteId, corriere_id: corriereRecord.id,
+        numero: numeroFinale,
+        mitt_nome: body.shipFrom.name, mitt_indirizzo: body.shipFrom.street1, mitt_citta: body.shipFrom.city,
+        mitt_provincia: body.shipFrom.state, mitt_cap: body.shipFrom.postalCode, mitt_paese: normalizzaPaese(body.shipFrom?.country),
+        mitt_email: body.shipFrom.email || null, mitt_telefono: body.shipFrom.phone || null,
+        dest_nome: body.shipTo.name, dest_indirizzo: body.shipTo.street1, dest_citta: body.shipTo.city,
+        dest_provincia: body.shipTo.state, dest_cap: body.shipTo.postalCode, dest_paese: paeseSp,
+        dest_email: body.shipTo.email || null, dest_telefono: body.shipTo.phone || null,
+        colli: packages.length, peso_reale: pesoReale,
+        peso_volume: pesoVolCalc || null, peso_fatturato: pesoFattCalc || null,
+        lunghezza: pkg?.length || null, larghezza: pkg?.width || null, altezza: pkg?.height || null,
+        contrassegno: body.codValue || 0, assicurazione: body.insuranceValue || 0,
+        tracking_number: numeroFinale,
+        etichetta_url: etichettaUrl,
+        colli_dettaglio: colliDettaglio,
+        // Il riferimento Spring serve a ritrovare la spedizione sul loro portale; il vettore finale (PostNL,
+        // Royal Mail, Poste…) e il suo numero sono quelli che il destinatario vede sull'etichetta.
+        raw_response: {
+          _spring: true, numero: numeroFinale, riferimento: ris.raw?.ShipperReference || null,
+          servizio: String(settSp.spring_servizio || ''), servizio_finale: ris.servizioFinale, vettore: ris.vettore,
+          numero_vettore: ris.numeroVettore, tracking_url: ris.trackingUrl, tracking_url_vettore: ris.trackingUrlVettore,
+        },
+        stato: 'in_lavorazione',
+        costo_spedizione: costoCorrente, costo_totale: costoCliente,
+        servizi_accessori: serviziAccessori,
+        richiedi_ritiro: false, data_ritiro: null, intervallo_ritiro: null,
+        note: body.notes || null, contenuto: body.contenuto || null,
+        rif_ordine: body.rifOrdine || null, rif_destinatario: body.rifDestinatario || null,
+      }).select('id').single()
+
+      if (insertError) {
+        console.error('[CREA][SPRING][INSERT]', numeroFinale, insertError.message)
+        after(async () => {
+          try {
+            const a = await annullaSpring(credSp, numeroFinale)
+            if (a.annullata) console.log('[CREA][SPRING] pacco fantasma annullato', numeroFinale)
+            else console.error('[CREA][SPRING] pacco fantasma NON annullato, annullare dal portale Spring', numeroFinale, a.messaggio)
+          } catch (e) { console.error('[CREA][SPRING] annullo fantasma:', e) }
+        })
+        return NextResponse.json({
+          error: `Spedizione non registrata a sistema (rif. ${numeroFinale}): riprova. Se ricompare, contatta l'assistenza.`,
+          numero: numeroFinale,
+        }, { status: 500 })
+      }
+
+      await addebitaCredito(inserted?.id || null, numeroFinale, costoCliente)
+      try {
+        await addebitaCatena(adminCrea, {
+          masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id,
+          // Diretto: nessuna quotazione esterna, il listino È il costo → costoSpedizione:0 (come FedEx/GLS).
+          costoSpedizione: 0, provincia: body.shipTo.state, packages,
+          cap: body.shipTo.postalCode, paese: paeseSp, citta: body.shipTo.city,
+          corriereNome: corriereRecord.nome_contratto,
+          contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
+          serviziAccessori,
+          // MITTENTE: supplemento origine anche qui (vedi nota ramo EASYPARCEL).
+          mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state, mittPaese: 'IT',
+          numero: numeroFinale, destNome: body.shipTo?.name || '', spedizioneId: inserted?.id || null, createdBy: user!.id,
+        })
+      } catch (e) { console.error('[CREA][SPRING] cascata catena:', e) }
+
+      after(async () => {
+        try {
+          const { inviaEmailSpedizioneCreata } = await import('@/lib/email')
+          let notificaDest = true
+          if (clienteId) {
+            const { data: cli } = await adminCrea.from('clienti').select('impostazioni').eq('id', clienteId).maybeSingle()
+            notificaDest = (cli?.impostazioni as any)?.notifica_email_dest !== false
+          }
+          await inviaEmailSpedizioneCreata({
+            mittEmail: body.shipFrom?.email, destEmail: body.shipTo?.email,
+            mittNome: body.shipFrom?.name, destNome: body.shipTo?.name,
+            numero: numeroFinale, corriere: corriereRecord.nome_contratto, destCitta: body.shipTo?.city,
+            notificaDest, spedizioneId: inserted?.id || null, masterId,
+          })
+        } catch { /* la spedizione e' gia' creata: l'email non blocca nulla */ }
+      })
+
+      return NextResponse.json({
+        numero: numeroFinale, tracking: numeroFinale, costo: costoCorrente.toFixed(2), spedizioneId: inserted?.id || null,
+      })
+    } catch (err: any) {
+      console.error('[CREA][SPRING]', err?.message)
+      await stornaPrenotazione()
+      return NextResponse.json({ error: err?.spring ? err.message : erroreCorrierePulito(err?.message) }, { status: 400 })
     }
   }
 

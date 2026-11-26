@@ -155,6 +155,14 @@ export async function valutaLivelloV1(
     if (no) return NextResponse.json({ error: no }, { status: 400 })
   }
 
+  // SPRING: ambito del contratto, un collo per spedizione, niente assicurazione, contrassegno solo HU/RO/BG.
+  // Le stesse regole del preventivo e del portale (lib/spring.ts), prima del credito.
+  if (corriere.tipo === 'spring') {
+    const { motivoSpringNonServe } = await import('@/lib/spring')
+    const no = motivoSpringNonServe(corriere, { paese: body.shipTo?.country, contrassegno: body.codValue, assicurazione: body.insuranceValue, colli: packages.length })
+    if (no) return NextResponse.json({ error: no }, { status: 400 })
+  }
+
   // IL RITIRO CHIESTO DA CHI INTEGRA.
   // Si accettano due forme perche' l'API pubblica parla inglese ma i client italiani mandano gia'
   // i nomi del portale: meglio leggere tutte e due che rispondere 200 OK ignorando la richiesta.

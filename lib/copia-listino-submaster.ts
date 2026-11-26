@@ -16,7 +16,10 @@ import { pontiCodiceDi } from '@/lib/ponti-codice'
 // riuscivano a spedire FedEx. tipo_ritiro/test_mode idem. (GLS/BRT tollerano l'assenza col default,
 // per questo non bloccavano.)
 const CONTRACT_SETTINGS_KEYS = ['agevolazione_peso_reale', 'misure_max', 'misure_scaglioni', 'peso_reale_soglia', 'limite_combinato', 'somma_lati_max', 'peso_max_collo', 'colli_max', 'colli_min',
-  'tipo_servizio', 'tipo_ritiro', 'test_mode']
+  'tipo_servizio', 'tipo_ritiro', 'test_mode',
+  // Spring: ambito e servizio sono del detentore e viaggiano con la chiave (come tipo_servizio di FedEx). Senza,
+  // la copia del sotto-master nasce «senza ambito» e Spring sparisce dai preventivi dei suoi clienti.
+  'spring_ambito', 'spring_servizio']
 function settingsContratto(src: any): any {
   const out: any = {}
   if (src && typeof src === 'object') {

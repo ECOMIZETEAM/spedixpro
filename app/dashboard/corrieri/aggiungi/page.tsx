@@ -2,6 +2,7 @@ import { createServerSupabase } from '@/lib/supabase'
 import { redirect } from 'next/navigation'
 import TestGls from './TestGls'
 import TestEcosmos from './TestEcosmos'
+import TestSpring from './TestSpring'
 
 async function salvaCorriere(formData: FormData) {
   'use server'
@@ -117,6 +118,36 @@ async function salvaCorriere(formData: FormData) {
     }
     const srvEc = formData.get('servizio_ecosmos') as string
     settings.servizio = ['same_day', 'express_24h', 'standard_72h'].includes(srvEc) ? srvEc : 'express_24h'
+  } else if (tipo === 'spring') {
+    // Spring GDS (XBS): una chiave API per account (lib/spring.ts). Un contratto per AMBITO (Italia, Europa,
+    // Internazionale), ognuno col suo servizio Spring e il suo listino. L'ambiente si sceglie apposta: la
+    // stessa chiave crea spedizioni di prova o vere a seconda di dove si chiama, e una spedizione di prova
+    // pagata dal cliente non partirebbe mai.
+    credenziali.api_key = ((formData.get('api_key') as string) || '').trim()
+    const amb = String(formData.get('ambiente_spring') || '')
+    credenziali.ambiente = amb === 'produzione' ? 'produzione' : 'prova'
+    const ambito = String(formData.get('spring_ambito') || '')
+    settings.spring_ambito = ['italia', 'europa', 'internazionale'].includes(ambito) ? ambito : ''
+    settings.spring_servizio = String(formData.get('spring_servizio') || '').trim().toUpperCase()
+    // Si controlla con Spring PRIMA di salvare: una chiave sbagliata o un servizio non attivo sull'account
+    // fermerebbero ogni spedizione del contratto, e lo si scoprirebbe solo con un cliente davanti.
+    // (redirect fuori dal try: Next lo realizza lanciando un errore, che il catch inghiottirebbe.)
+    let erroreSpring = ''
+    if (!['prova', 'produzione'].includes(amb)) erroreSpring = 'Spring: scegli l\'ambiente (Prova o Produzione).'
+    else if (!settings.spring_ambito) erroreSpring = 'Spring: scegli l\'ambito del contratto (Italia, Europa o Internazionale).'
+    else if (!settings.spring_servizio) erroreSpring = 'Spring: scegli il servizio del contratto.'
+    else {
+      try {
+        const { serviziSpring } = await import('@/lib/spring')
+        const srv = await serviziSpring({ api_key: credenziali.api_key, ambiente: credenziali.ambiente })
+        if (!srv.consentiti.includes(String(settings.spring_servizio))) {
+          erroreSpring = `Spring: il servizio ${settings.spring_servizio} non è attivo sul tuo account. Servizi attivi: ${srv.consentiti.join(', ') || 'nessuno'}.`
+        }
+      } catch (e: any) {
+        erroreSpring = e?.message || 'Spring: verifica della chiave non riuscita, riprova.'
+      }
+    }
+    if (erroreSpring) redirect('/dashboard/corrieri?error=' + encodeURIComponent(erroreSpring))
   } else if (tipo === 'inpost') {
     // InPost diretto — Global API OAuth2 (merchant.inpost-group.com). Un account = clientId/secretId/
     // organizationId + ambiente (stage per collaudo, prod per il live). Le spedizioni verso locker usano
@@ -181,7 +212,9 @@ async function salvaCorriere(formData: FormData) {
     const { error } = await supabase.from('corrieri').insert({
       master_id: utente.master_id,
       tipo, nome_contratto: formData.get('nome_contratto') as string,
-      credenziali, settings, multicollo: true, inserimento_ritiri: true, attivo: true, livello: 1,
+      // Spring: un collo per spedizione, la loro API non conosce il multicollo (lib/spring.ts). Niente ritiro
+      // da prenotare: i pacchi arrivano a Spring fuori dall'API.
+      credenziali, settings, multicollo: tipo !== 'spring', inserimento_ritiri: tipo !== 'spring', attivo: true, livello: 1,
     })
 
     // Un solo contratto attivo per nome e master (scripts/stacca-contratto-vincolo.sql): due righe omonime facevano
@@ -193,6 +226,36 @@ async function salvaCorriere(formData: FormData) {
     redirect('/dashboard/corrieri?success=corriere_aggiunto')
   }
 }
+
+// Servizi Spring che creano un'etichetta di consegna (elenco del loro comando GetServices, manuale 2026-09-02).
+// Fuori elenco apposta: i resi (BACK, BACKT), quelli senza etichetta (IMPRT, NOLABEL), il ritiro a un punto
+// (CLLCT, PPLCS, HEDCS: vogliono il codice del punto, che oggi non passiamo) e le merci pericolose (UDGS,
+// UPDG, UPDGS, UPPDG: vogliono i dati ADR per articolo). Quali sono attivi lo dice Spring, conto per conto.
+const SERVIZI_SPRING: [string, string][] = [
+  ['TRCK', 'Spring Tracked (sceglie Spring il vettore migliore, tracciato)'],
+  ['SIGN', 'Spring Signature (sceglie Spring il vettore, con firma)'],
+  ['UNTR', 'Spring Untracked (sceglie Spring il vettore, non tracciato)'],
+  ['ITCR', 'Poste Italiane Crono'], ['ITCRX', 'Poste Italiane Crono Express'],
+  ['PPLEU', 'PostNL Parcel EU'], ['PPTT', 'PostNL Packet Tracked'], ['PPTR', 'PostNL Packet Registered'],
+  ['PPNT', 'PostNL Packet Non Tracked'], ['PPBTT', 'PostNL Packet Boxable Tracked'], ['PPBNT', 'PostNL Packet Boxable Non Tracked'],
+  ['PPBT', 'PostNL Packet Bag & Trace'], ['PPBBT', 'PostNL Packet Boxable Bag & Trace'],
+  ['PPND', 'PostNL Parcel Benelux, senza firma'], ['PPNDS', 'PostNL Parcel Benelux, con firma'],
+  ['PPHD', 'PostNL Parcel Benelux, senza firma, no vicino'], ['PPHDS', 'PostNL Parcel Benelux, con firma, no vicino'],
+  ['PPLUP', 'PostNL Parcel Benelux UPU'], ['PPLEP', 'PostNL Parcel EPG'], ['PPNEU', 'PostNL Parcel EPG extra-UE'],
+  ['PPLGE', 'PostNL Parcel GlobalPack EMS'], ['PPLGU', 'PostNL Parcel GlobalPack UPU'], ['PPLLW', 'PostNL Lightweight China'],
+  ['RM24', 'Royal Mail Tracked 24, senza firma'], ['RM24S', 'Royal Mail Tracked 24, con firma'],
+  ['RM48', 'Royal Mail Tracked 48, senza firma'], ['RM482', 'Royal Mail Tracked 48, senza firma (2)'], ['RM48S', 'Royal Mail Tracked 48, con firma'],
+  ['SEND', 'Sending (Spagna e Portogallo continentali)'], ['SEND2', 'Sending (isole)'],
+  ['DPDDE', 'DPD Germania'], ['HEHDS', 'Hermes Germania, con firma'],
+  ['CPHD', 'Colis Privé Francia, senza firma'], ['CPHDS', 'Colis Privé Francia, con firma'],
+  ['PACHD', 'Packeta'], ['ATEHD', 'Austrian Post Eurodis'], ['MABNT', 'MailAlliance Boxable Non Tracked'],
+  ['SCST', 'Spring Com Standard, senza firma'], ['SCSTS', 'Spring Com Standard, con firma'],
+  ['SCEX', 'Spring Com Express, senza firma'], ['SCEXS', 'Spring Com Express, con firma'],
+  ['UPGR', 'USA Parcel Ground, senza firma'], ['UPGRS', 'USA Parcel Ground, con firma'],
+  ['UPEX', 'USA Parcel Express, senza firma'], ['UPEXS', 'USA Parcel Express, con firma'],
+  ['UPMA', 'USA Parcel Max, senza firma'], ['UPMAS', 'USA Parcel Max, con firma'],
+  ['EXPR', 'Spring Express'],
+]
 
 const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,string,string,boolean?][],extra?:string}> = {
   interno: {
@@ -299,6 +362,14 @@ const CONFIGS: Record<string,{titolo:string,info:string,campi:[string,string,str
     campi: [
       ['nome_contratto','Nome del contratto','es. Ecosmos 24 ore','text'],
       ['api_key','Chiave API','eco_live_…','password'],
+    ],
+  },
+  spring: {
+    titolo: 'Spring',
+    info: 'Spring GDS (gruppo PostNL): spedizioni in Italia, in Europa e nel resto del mondo. La chiave API la trovi nel portale Spring (mailingtechnology.com) in Profilo → API-key. Crea un contratto per ogni ambito che vuoi vendere (Italia, Europa, Internazionale): ognuno ha il suo servizio e il suo listino. Spring accetta un collo per spedizione, il contrassegno solo verso Ungheria, Romania e Bulgaria e non prevede l\'assicurazione. Fuori dall\'UE servono i dati doganali degli articoli (descrizione, codice HS, valore, peso, origine) dal catalogo. Il ritiro non si prenota da qui: vale l\'accordo che hai con Spring.',
+    campi: [
+      ['nome_contratto','Nome del contratto','es. Spring Europa','text'],
+      ['api_key','Chiave API','dal portale Spring, Profilo → API-key','password'],
     ],
   },
   poste: {
@@ -429,6 +500,35 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
               </select>
             </div>
           )}
+          {tipo === 'spring' && (
+            <>
+              <div>
+                <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Ambito</label>
+                <select name="spring_ambito" required defaultValue={['italia','europa','internazionale'].includes(settingsEsistenti.spring_ambito) ? settingsEsistenti.spring_ambito : ''} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                  <option value="" disabled>Scegli…</option>
+                  <option value="italia">Italia</option>
+                  <option value="europa">Europa (paesi UE, Italia esclusa)</option>
+                  <option value="internazionale">Internazionale (fuori UE: Regno Unito, Svizzera, Stati Uniti…)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Servizio Spring</label>
+                <select name="spring_servizio" required defaultValue={SERVIZI_SPRING.some(([c]) => c === settingsEsistenti.spring_servizio) ? settingsEsistenti.spring_servizio : ''} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                  <option value="" disabled>Scegli…</option>
+                  {SERVIZI_SPRING.map(([c, d]) => <option key={c} value={c}>{c} — {d}</option>)}
+                </select>
+                <div style={{fontSize:'11px',color:'#9ca3af',marginTop:'4px'}}>Al salvataggio controlliamo con Spring che il servizio sia attivo sul tuo account.</div>
+              </div>
+              <div>
+                <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Ambiente</label>
+                <select name="ambiente_spring" required defaultValue={['prova','produzione'].includes(credenzialiEsistenti.ambiente) ? credenzialiEsistenti.ambiente : ''} style={{width:'100%',padding:'9px 12px',border:'1px solid #e8e8e8',borderRadius:'7px',fontSize:'13px',background:'#fff'}}>
+                  <option value="" disabled>Scegli…</option>
+                  <option value="prova">Prova (le spedizioni non partono)</option>
+                  <option value="produzione">Produzione (spedizioni vere)</option>
+                </select>
+              </div>
+            </>
+          )}
           {tipo === 'sda' && (
             <div>
               <label style={{fontSize:'11.5px',fontWeight:'600',color:'#666',display:'block',marginBottom:'4px'}}>Tipo Contratto</label>
@@ -504,6 +604,7 @@ export default async function AggiungiCorrierePage({ searchParams }: { searchPar
       {/* Test connessione: solo per un contratto GLS diretto già salvato (proprietario). */}
       {tipo === 'gls' && corriereEsistente && <TestGls corriereId={corriereEsistente.id} />}
       {tipo === 'ecosmos' && corriereEsistente && <TestEcosmos corriereId={corriereEsistente.id} />}
+      {tipo === 'spring' && corriereEsistente && <TestSpring corriereId={corriereEsistente.id} />}
     </div>
   )
 }

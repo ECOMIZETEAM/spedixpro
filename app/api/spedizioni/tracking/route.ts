@@ -277,6 +277,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
     }
 
+    // SPRING: come Ecosmos, dal vivo; l'avanzamento trovato qui si salva subito.
+    if (corriere.tipo === 'spring') {
+      let eventiSp: { data: string; descrizione: string; luogo: string }[] = []
+      if (spedizione.tracking_number && cred?.api_key) {
+        const { trackingSpring, mapStatoSpring } = await import('@/lib/spring')
+        const r = await trackingSpring({ api_key: String(cred.api_key), ambiente: String(cred.ambiente || '') }, String(spedizione.tracking_number)); eventiSp = r.eventi
+        let av: string | null = null
+        for (const st of r.stati) { const m = mapStatoSpring(st); if (m && prioritaStato(m) > prioritaStato(av)) av = m }
+        if (r.consegnata && prioritaStato('consegnata') > prioritaStato(av)) av = 'consegnata'
+        if (r.stati.some((st) => mapStatoSpring(st) === 'reso_mittente')) av = 'reso_mittente'
+        await persistiStato(av)
+      }
+      // Dal piu' recente, come gli altri corrieri del popup: si ordina per data (ISO), non ci si fida dell'ordine
+      // in cui Spring li elenca.
+      const eventi = eventiSp.slice().sort((a, b) => String(b.data).localeCompare(String(a.data))).map(e => ({ date: e.data || '', description: e.descrizione, location: e.luogo || '' }))
+      return NextResponse.json({ ...base, eventi, stato: statoEffettivo, status_code: 200 })
+    }
+
     // Spedisci.online ha CHIUSO il polling del tracking (403 "For tracking please use the Webhooks
     // events"): gli eventi arrivano in tempo reale dal WEBHOOK e vengono salvati in tracking_events.
     // Il popup mostra quelli (lo stato è già allineato dal webhook stesso, solo-in-avanti).

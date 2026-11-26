@@ -21,6 +21,7 @@ import { EMAIL_PER_CORRIERE,
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
 import { normalizzaPaese } from '@/lib/paesi'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
+import { motivoSpringNonServe } from '@/lib/spring'
 import { calcolaPrezzoCorriereDettaglio, calcolaPesoFatturato, importoSponda, parseScaglioniSupp, scaglioniPerPeso, supplementoMittente, origineCopertaCap, soloCapCoperti, TIPO_MINIMO_COLLO, minimoACollo, noloMulticollo, regoleMulticollo, noloMulticolloZone, zonaDestContrattoMulticollo, type RegolaMulticollo } from '@/lib/pricing'
 import { TIPO_MULTICOLLO_SUPPLEMENTI } from '@/lib/multicollo-zone'
 // La sigla neutra al posto del tipo del contratto: il nome del sistema tecnico a valle non deve
@@ -432,6 +433,9 @@ export async function calcolaTariffeCliente(
     // GLS diretto: il nazionale solo in Italia, il Parcel solo all'estero UE e senza contrassegno,
     // qualunque zona abbia il listino (lib/gls.ts).
     if (motivoGlsNonServe(fasceC[0]?.corrieri as any, { paese: paeseDest, cap: capDest, contrassegno: body.codValue })) continue
+    // Spring: ambito del contratto (Italia/Europa/Internazionale), un collo, niente assicurazione, contrassegno
+    // solo HU/RO/BG, qualunque zona abbia il listino (lib/spring.ts).
+    if (motivoSpringNonServe(fasceC[0]?.corrieri as any, { paese: paeseDest, contrassegno: body.codValue, assicurazione: body.insuranceValue, colli: tuttiColli.length })) continue
     let sel = fasceC.filter(f => zoneMatchIds.includes((f.zone as any)?.id))   // 1) zone_cap del corriere
     // 2) fallback per nome SOLO Italia — MA NON se la dest è esclusiva PER QUESTO corriere (isole/
     //    disagiate/sardegna…): lì il corriere senza la zona speciale non deve agganciare via "Italia".
@@ -457,6 +461,7 @@ export async function calcolaTariffeCliente(
       const fasceC = (fasceMCtutte as any[]).filter((f: any) => f.corriere_id === cid)
       if (!fasceC[0]?.corrieri || soloCapCoperti(fasceC[0]?.corrieri as any)) continue
       if (motivoGlsNonServe(fasceC[0]?.corrieri as any, { paese: paeseDest, cap: capDest, contrassegno: body.codValue })) continue
+      if (motivoSpringNonServe(fasceC[0]?.corrieri as any, { paese: paeseDest, contrassegno: body.codValue, assicurazione: body.insuranceValue, colli: tuttiColli.length })) continue
       const z = await zonaDestContrattoMulticollo(supabase, cid, { paese: paeseDest, provincia, cap: capDest, citta: (body.shipTo?.city || '') })
       if (!z.ok) continue
       soloMC.set(cid, { nomi: z.nomi, esclusive: z.esclusive })

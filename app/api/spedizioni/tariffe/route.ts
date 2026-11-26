@@ -11,6 +11,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 // due porte, una regola sola.
 import { annotaPuntoPoste, eTariffaAUnPunto, soloCorrieriInCatena } from '@/lib/tariffe-offerte'
 import { motivoGlsNonServe } from '@/lib/gls'
+import { motivoSpringNonServe } from '@/lib/spring'
 import { erroreIndirizzoItaliano } from '@/lib/citta-spedizione'
 import { completaProvinciaDaCap } from '@/lib/provincia-da-cap'
 
@@ -98,6 +99,7 @@ export async function POST(req: NextRequest) {
       if (!corr || corr.attivo === false) return false
       if (sospesoDallaCatena(corr.nome_contratto, sospesiSopra)) return false   // in pausa da un livello superiore
       if (motivoGlsNonServe(corr, { paese: body.shipTo?.country, cap: capP, contrassegno: body.codValue })) return false   // GLS: nazionale solo Italia, Parcel solo UE senza contrassegno (lib/gls.ts)
+      if (motivoSpringNonServe(corr, { paese: body.shipTo?.country, contrassegno: body.codValue, assicurazione: body.insuranceValue, colli: colliP.length })) return false   // Spring: ambito del contratto, un collo, niente assicurazione (lib/spring.ts)
       if (superaMisureMax(corr.settings, pesoRealeP, colliP)) return false   // fuori misura per il suo scaglione
       return true
     })

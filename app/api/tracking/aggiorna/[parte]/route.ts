@@ -449,6 +449,36 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
           }
         } catch (e: any) { console.error('[TRACKING][ECOSMOS][EVENTI]', s.numero, e?.message) }
 
+      } else if (tipo === 'spring') {
+        // SPRING (XBS): eventi da TrackShipment col numero Spring, chiave e ambiente dalla join. Si legge il
+        // CODICE dell'evento (lib/spring.ts li mappa uno per uno), mai la descrizione. Nessuna giacenza: il
+        // pacco «in attesa di ritiro» all'ufficio postale non e' una giacenza fatturata da Spring.
+        if (!s.tracking_number || !cred?.api_key) return
+        const { trackingSpring, mapStatoSpring } = await import('@/lib/spring')
+        const sp = await trackingSpring({ api_key: String(cred.api_key), ambiente: String(cred.ambiente || '') }, String(s.tracking_number))
+        for (const str of sp.stati) {
+          const m = mapStatoSpring(str)
+          if (m && prioritaStato(m) > prioritaStato(nuovo)) nuovo = m
+        }
+        if (sp.consegnata && prioritaStato('consegnata') > prioritaStato(nuovo)) nuovo = 'consegnata'
+        // Il pacco tornato al mittente: vince il reso, anche su una consegna (che e' quella del ritorno).
+        if (sp.stati.some((str) => mapStatoSpring(str) === 'reso_mittente')) nuovo = 'reso_mittente'
+        try {
+          const cambiatoSp = nuovo !== s.stato
+          {
+            const { normalizzaEventi, scriviCronologia, mancanoEventi } = await import('@/lib/tracking-eventi')
+            const { eventi, chiaviIgnote } = normalizzaEventi(sp.eventi, {
+              data: ['data'],
+              descrizione: ['descrizione'],
+              luogo: ['luogo'],
+            })
+            if (chiaviIgnote.length && !chiaviEventoIgnote.length) chiaviEventoIgnote = chiaviIgnote
+            if (eventi.length && (cambiatoSp || await mancanoEventi(admin, s.id, eventi))) {
+              await scriviCronologia(admin, s.id, eventi)
+            }
+          }
+        } catch (e: any) { console.error('[TRACKING][SPRING][EVENTI]', s.numero, e?.message) }
+
       } else if (tipo === 'poste') {
         // POSTE Delivery Business diretto via KSync/ParcelPilot: lo stato si legge da /tracking (formato
         // Poste PDB) con la LDV. Credenziali (clientId/secretId/costCenterCode/ambiente) dalla join. Sul

@@ -26,7 +26,7 @@ const DISPONIBILI = [
   {tipo:'generico',nome:'Palletways',icona:'palletways'},
   {tipo:'generico',nome:'Correos Express',icona:'correos_express'},
   {tipo:'inpost',nome:'InPost',icona:'inpost'},
-  {tipo:'generico',nome:'Spring',icona:'spring'},
+  {tipo:'spring',nome:'Spring',icona:'spring'},
   {tipo:'generico',nome:'Paack',icona:'paack'},
   {tipo:'generico',nome:'Speedy',icona:'speedy'},
   {tipo:'generico',nome:'Amazon Shipping',icona:'amazon_shipping'},

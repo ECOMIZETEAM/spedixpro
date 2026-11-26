@@ -588,6 +588,67 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
       if (e?.forseCreata) return NextResponse.json({ error: e.message }, { status: 502 })
       return errore(e?.ecosmos ? e.message : erroreCorrierePulito(e?.message))
     }
+  } else if (corriere.tipo === 'spring') {
+    // SPRING (XBS): diretto, contratto del master (lib/spring.ts). Un collo per spedizione (fermato prima, in
+    // lib/v1-livello), etichetta dalla creazione e intoccabile, nessun ritiro da prenotare. Fuori UE la dogana
+    // arriva da `customsItems` (una voce per articolo) o, senza, da contenuto/valore/codice HS.
+    const credSp = { api_key: String(cred.api_key || ''), ambiente: String(cred.ambiente || '') }
+    const settSp: any = (corriere as any)?.settings || {}
+    if (!credSp.api_key) return errore('Contratto non configurato correttamente')
+    try {
+      const { creaSpedizioneSpring, nuovoRiferimentoSpring } = await import('@/lib/spring')
+      const { isExtraUe } = await import('@/lib/paesi-ue')
+      const { normalizzaPaese } = await import('@/lib/paesi')
+      const paeseSp = normalizzaPaese(body.shipTo?.country)
+      let articoliSp: any[] | undefined
+      if (isExtraUe(paeseSp)) {
+        articoliSp = Array.isArray(body.customsItems) ? body.customsItems.map((it: any) => {
+          const q = Math.max(1, Math.round(Number(it?.quantity ?? it?.quantita) || 1))
+          return {
+            descrizione: String(it?.description ?? it?.descrizione ?? ''), hsCode: String(it?.hscode ?? it?.hsCode ?? '').replace(/\D/g, ''),
+            origine: String(it?.origin ?? it?.origine ?? 'IT'), sku: it?.sku ? String(it.sku) : null, quantita: q,
+            // Come per gli altri corrieri di questa porta: valore e peso arrivano per pezzo.
+            valoreTotale: (Number(it?.unitValue ?? it?.value ?? it?.valore) || 0) * q, pesoTotaleKg: (Number(it?.weight ?? it?.peso) || 0) * q,
+          }
+        }) : undefined
+        if (!articoliSp?.length && (body.contenuto || body.hscode)) {
+          articoliSp = [{
+            descrizione: String(body.contenuto || ''), hsCode: String(body.hscode || '').replace(/\D/g, ''),
+            origine: String(body.origineMerce || 'IT'), quantita: 1,
+            valoreTotale: Number(body.valoreMerce ?? body.declaredValue ?? 0), pesoTotaleKg: pesoReale,
+          }]
+        }
+      }
+      const risSp = await creaSpedizioneSpring(credSp, {
+        servizio: String(settSp.spring_servizio || ''), ambito: String(settSp.spring_ambito || ''),
+        riferimento: nuovoRiferimentoSpring(),
+        rifOrdine: (body.rifOrdine ? String(body.rifOrdine) : '').trim() || null,
+        pesoKg: pesoReale,
+        lunghezzaCm: Number(pkg?.length) || null, larghezzaCm: Number(pkg?.width) || null, altezzaCm: Number(pkg?.height) || null,
+        valore: Number(body.valoreMerce ?? body.declaredValue ?? 0) || null,
+        contenuto: body.contenuto ? String(body.contenuto) : null,
+        articoli: articoliSp,
+        mittente: { nome: body.shipFrom.name, indirizzo: body.shipFrom.street1 || '', citta: body.shipFrom.city, cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: normalizzaPaese(body.shipFrom?.country), telefono: body.shipFrom.phone || null, email: body.shipFrom.email || null },
+        destinatario: { nome: body.shipTo.name, indirizzo: body.shipTo.street1 || '', citta: body.shipTo.city, cap: body.shipTo.postalCode, provincia: body.shipTo.state, paese: paeseSp, telefono: body.shipTo.phone || null, email: body.shipTo.email || null, presso: pressoTo || null },
+        contrassegno: Number(body.codValue || 0) || null,
+        assicurazione: Number(body.insuranceValue || 0) || null,
+      })
+      numero = risSp.numero
+      costoCorrente = 0
+      // Etichetta di Spring cosi' com'e': il loro manuale vieta qualunque modifica (cap. 1.5).
+      etichettaUrl = `data:application/pdf;base64,${risSp.etichettaBase64}`
+      raw = {
+        _spring: true, numero, riferimento: risSp.raw?.ShipperReference || null,
+        servizio: String(settSp.spring_servizio || ''), servizio_finale: risSp.servizioFinale, vettore: risSp.vettore,
+        numero_vettore: risSp.numeroVettore, tracking_url: risSp.trackingUrl, tracking_url_vettore: risSp.trackingUrlVettore,
+      }
+    } catch (e: any) {
+      console.error('[V1][SPRING]', e?.message)
+      // Esito incerto (nessuna risposta, o risposta senza numero o etichetta): il credito non si restituisce alla
+      // cieca, lo libera il giro delle prenotazioni scadute se davvero non c'e'.
+      if (e?.forseCreata) return NextResponse.json({ error: e.message }, { status: 502 })
+      return errore(e?.spring ? e.message : erroreCorrierePulito(e?.message))
+    }
   } else if (corriere.tipo === 'poste') {
     // Il ramo Poste sta in lib/v1-poste (lo usa anche il ponte unico): stesso codice, stesse risposte.
     const po = await ldvPosteV1({ corriere, cred, body, packages, conPresso, pressoFrom, pressoTo })
@@ -800,6 +861,14 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     const annullata = await annullaSpedizioneGls(cred as any, String(raw.numero)).catch(() => false)
     console.error('[V1][GLS][INSERT]', numero, insErr.message, annullata ? 'annullata su GLS' : 'NON annullata su GLS')
     if (annullata) return errore('Spedizione non registrata e annullata sul corriere: riprova.', 500)
+  }
+  // SPRING: come GLS, la spedizione si toglie da Spring finche' non l'hanno accettata in hub, e il credito torna.
+  // Solo se Spring conferma l'annullo.
+  if (insErr && corriere.tipo === 'spring' && numero) {
+    const { annullaSpring } = await import('@/lib/spring')
+    const a = await annullaSpring({ api_key: String(cred.api_key || ''), ambiente: String(cred.ambiente || '') }, numero).catch(() => null)
+    console.error('[V1][SPRING][INSERT]', numero, insErr.message, a?.annullata ? 'annullata su Spring' : 'NON annullata su Spring')
+    if (a?.annullata) return errore('Spedizione non registrata e annullata sul corriere: riprova.', 500)
   }
   // DVA: l'ordine e' pagato ma la riga non c'e'. Si chiede subito lo storno, come nel portale
   // (lib/storno-dva → stornaOrdineOrfanoDva). Doppio invio scartato dall'indice: risposta della guardia.

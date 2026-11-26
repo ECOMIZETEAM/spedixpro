@@ -166,6 +166,18 @@ export async function annullaSpedizioneSulCorriere(
     return { ok: false, reason: a.messaggio.slice(0, 160) }
   }
 
+  // SPRING: annullabile via API (VoidShipment) finche' Spring non ha accettato il pacco in hub. Il rimborso parte
+  // SOLO su un annullo confermato da loro (ErrorLevel 0): senza questo ramo si cadeva nell'`ok: true` qui
+  // sotto e si rimborsava un pacco che Spring avrebbe accettato e fatturato lo stesso.
+  if (corr.tipo === 'spring') {
+    const numero = raw.numero || sped.tracking_number
+    if (!numero) return { ok: false, reason: 'numero Spring mancante per l\'annullo' }
+    const { annullaSpring } = await import('@/lib/spring')
+    const a = await annullaSpring({ api_key: String(cred.api_key || ''), ambiente: String(cred.ambiente || '') }, String(numero))
+    if (a.annullata) return { ok: true }
+    return { ok: false, reason: a.messaggio.slice(0, 160) }
+  }
+
   // CIRCUITO INTERNO: non c'e' nessuno a cui mandare l'annullo, il corriere siamo noi. Basta non
   // farlo partire — ma se e' gia' stato consegnato non c'e' piu' niente da fermare, e dire ok
   // qui vorrebbe dire rimborsare cliente e catena per un pacco che il destinatario ha in casa.

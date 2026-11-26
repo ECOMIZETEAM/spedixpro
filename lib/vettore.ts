@@ -12,6 +12,9 @@ export function vettoreFisico(c: { tipo?: string | null; nome_contratto?: string
   if (t === 'gls') return 'GLS'
   if (t === 'brt') return 'BRT'
   if (t === 'fedex') return 'FEDEX'
+  // Spring: i pacchi vanno a Spring, qualunque vettore finale (Poste Crono, PostNL…) stampi l'etichetta. Dal
+  // nome si leggerebbe «POSTE» per un «Spring Italia Crono» e lo si unirebbe alle distinte di Poste.
+  if (t === 'spring') return 'SPRING'
   const n = (c?.nome_contratto || '').toUpperCase()
   const regole: [RegExp, string][] = [
     [/GLS/, 'GLS'],

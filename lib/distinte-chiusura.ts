@@ -50,7 +50,9 @@ export async function chiudiDistintaMoovexpress(supabase: any, distintaId: strin
 // contrario del bug, e più pericoloso). Un tipo nuovo resta fuori e lo si gestisce apposta.
 // ecosmos: la spedizione e' registrata da loro alla create e il ritiro e' automatico (lib/ecosmos.ts),
 // la loro API non ha una chiusura di giornata.
-export const TIPI_SENZA_MANIFEST = ['easyparcel', 'interno', 'inpost', 'poste', 'dielle', 'ecosmos']
+// spring: la spedizione e' registrata da Spring alla create (OrderShipment); i pacchi si consegnano a Spring
+// fisicamente e la loro API non ha una chiusura di giornata (i «gruppi» di sacchi e bancali sono facoltativi).
+export const TIPI_SENZA_MANIFEST = ['easyparcel', 'interno', 'inpost', 'poste', 'dielle', 'ecosmos', 'spring']
 
 // Stati in cui una spedizione NON va affidata al corriere: annullata, o in coda di annullo (per Dielle
 // l'annullo lo fa a mano il detentore: confermarla nel frattempo la farebbe partire).

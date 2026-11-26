@@ -150,6 +150,27 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
   }
 
+  // SPRING: stesso ramo di spedizioni/elimina, SUBITO. Spring annulla solo finche' non ha accettato il pacco in
+  // hub: fra 48 ore sarebbe quasi sempre gia' accettato, e l'annullo fallirebbe. Si rimborsa solo se Spring
+  // conferma; altrimenti la spedizione resta valida e si dice perche'.
+  if (corr?.tipo === 'spring') {
+    const { data: sr } = await admin.from('spedizioni').select('raw_response,tracking_number').eq('id', id).maybeSingle()
+    const { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione } = await import('@/lib/annullaSpedizione')
+    const esito = await annullaSpedizioneSulCorriere(admin, { corriere_id: sped.corriere_id, raw_response: sr?.raw_response, tracking_number: sr?.tracking_number || null })
+    if (!esito.ok) {
+      await admin.from('spedizioni').update({ annullamento_errore: `Annullo non riuscito: ${esito.reason || 'Spring non lo consente'}` }).eq('id', id)
+      return NextResponse.json({ error: `Annullo non riuscito: ${esito.reason || 'Spring non lo consente'}` }, { status: 409 })
+    }
+    const { error: annErr } = await admin.from('spedizioni').update({
+      stato: 'annullata', stato_precedente: sped.stato,
+      annullamento_richiesto_at: new Date().toISOString(), annullamento_da: null, annullamento_errore: null,
+    }).eq('id', id)
+    if (annErr) return NextResponse.json({ error: annErr.message }, { status: 400 })
+    await rimborsaAnnulloSpedizione(admin, sped as any, null)
+    after(async () => { try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, [id]) } catch (e: any) { console.error('[SHOPIFY][ANNULLO da api v1]', id, e?.message) } })
+    return NextResponse.json({ success: true, stato: 'annullata', message: 'Spedizione annullata e credito stornato.' })
+  }
+
   // STESSA regola della UI: la cancellazione va in ATTESA 48h (annullamento_pending), poi il cron
   // invia l'annullo al corriere e fa lo storno. Niente annullata immediata (no bypass del pending).
   const { error: updErr } = await admin.from('spedizioni').update({
