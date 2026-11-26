@@ -594,11 +594,15 @@ export async function inviaEmailGiacenza(p: {
   const replyTo = EMAIL_RE.test(String(p.mittEmail || '').trim().toLowerCase())
     ? String(p.mittEmail).trim().toLowerCase() : undefined
   try {
-    await invia({
+    // Resend non lancia quando rifiuta (troppe richieste al secondo, quota, dominio): restituisce
+    // { error }. Rispondere ok senza guardarlo faceva segnare la giacenza come avvisata, e il giro
+    // non riprovava piu': un avviso perso senza traccia.
+    const r: any = await invia({
       from: fromBrand, to: dest, replyTo,
       subject: `Il tuo pacco \u00e8 in attesa \u2014 spedizione ${p.numero}`,
       html: (brandLogo || brandNome) ? wrapBrand(corpo, { logo: brandLogo, nome: brandNome }) : wrap(corpo),
     })
+    if (r?.error) return { ok: false, error: r.error?.message || 'invio non riuscito' }
     return { ok: true }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'invio non riuscito' }
