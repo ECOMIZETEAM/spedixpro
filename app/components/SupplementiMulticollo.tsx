@@ -39,6 +39,7 @@ export default function SupplementiMulticollo({ valore, onChange, sola, chi, cos
             <thead><tr style={{ background: '#fafafa' }}>
               <th style={th}>Zona</th><th style={th}>Minimo <span style={{ color: '#666', fontWeight: 400 }}>€</span></th><th style={th}>Al kg <span style={{ color: '#666', fontWeight: 400 }}>€</span></th>
               <th style={th} title="Si somma anche quando vale il minimo per collo (UPS Italia, isole minori)">Anche sul minimo</th>
+              {tipo === 'partenza' && <th style={th} title="Si somma anche se la destinazione è nella stessa zona (UPS Italia, comuni remoti)">Anche verso la stessa zona</th>}
             </tr></thead>
             <tbody>
               {righe.map(z => {
@@ -60,6 +61,13 @@ export default function SupplementiMulticollo({ valore, onChange, sola, chi, cos
                         onChange={e => cambia(x => { const cur = x[tipo][z] || { minimo: 0, kg: 0 }; if (e.target.checked) cur.sempre = true; else delete cur.sempre; x[tipo][z] = cur })} />
                       {chi === 'cliente' && c?.sempre && !v?.sempre && <div style={{ fontSize: '10px', color: '#dc2626', marginTop: '2px' }}>al costo sì</div>}
                     </td>
+                    {tipo === 'partenza' && (
+                      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}>
+                        <input type="checkbox" checked={!!v?.cumula} disabled={!modificabile}
+                          onChange={e => cambia(x => { const cur = x[tipo][z] || { minimo: 0, kg: 0 }; if (e.target.checked) cur.cumula = true; else delete cur.cumula; x[tipo][z] = cur })} />
+                        {chi === 'cliente' && c?.cumula && !v?.cumula && <div style={{ fontSize: '10px', color: '#dc2626', marginTop: '2px' }}>al costo sì</div>}
+                      </td>
+                    )}
                   </tr>
                 )
               })}

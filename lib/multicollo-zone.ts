@@ -42,7 +42,10 @@ export const TIPO_MULTICOLLO_SUPPLEMENTI = 'multicollo_supplementi'
 //            + i supplementi "sempre", che si sommano DOPO, anche quando vale il minimo (isole minori +4,43:
 //            Lipari 2 colli da 0,5 kg 20,64 = 16,21 di minimo + 4,43).
 // Su UPS Europa la localita' remota si somma alla tariffa e non al minimo: e' il caso senza "sempre".
-export type SupplementoAlKg = { minimo: number; kg: number; sempre?: boolean }
+// `cumula` (solo partenza): il supplemento di partenza si paga anche se la destinazione sta nella stessa zona.
+// UPS Italia (preventivi 26/11): da 01016 a 03034, 2x20 kg, +2,44 di partenza e +2,44 di destinazione. Senza,
+// vale la regola di sempre (lib/pricing, zoneMittenteAgganciate): stessa zona = una volta sola (verificata su DVA).
+export type SupplementoAlKg = { minimo: number; kg: number; sempre?: boolean; cumula?: boolean }
 export type SupplementiMulticollo = {
   remota: Record<string, SupplementoAlKg>; partenza: Record<string, SupplementoAlKg>
   minimoFisso?: number   // JSON "minimo_fisso": euro per spedizione, sommati a minimo per collo x colli
@@ -60,7 +63,12 @@ export function normalizzaSupplementiMulticollo(d: any): SupplementiMulticollo |
     const out: Record<string, SupplementoAlKg> = {}
     for (const [k, v] of Object.entries<any>(o || {})) {
       const minimo = Number(v?.minimo) || 0, kg = Number(v?.kg) || 0
-      if (String(k).trim() && (minimo > 0 || kg > 0)) out[String(k).trim()] = v?.sempre === true ? { minimo, kg, sempre: true } : { minimo, kg }
+      if (String(k).trim() && (minimo > 0 || kg > 0)) {
+        const s: SupplementoAlKg = { minimo, kg }
+        if (v?.sempre === true) s.sempre = true
+        if (v?.cumula === true) s.cumula = true
+        out[String(k).trim()] = s
+      }
     }
     return out
   }
@@ -189,7 +197,7 @@ export function supplementiSottoCosto(vendita: SupplementiMulticollo | null, cos
     for (const [zona, c] of Object.entries(costo[tipo])) {
       const v = vendita?.[tipo]?.[zona]
       // "sempre" al costo e non in vendita: sul minimo il supplemento non si incassa ma si paga.
-      if (!v || v.minimo < c.minimo - 0.005 || v.kg < c.kg - 0.000005 || (c.sempre && !v.sempre)) out.push(`${tipo}|${zona}`)
+      if (!v || v.minimo < c.minimo - 0.005 || v.kg < c.kg - 0.000005 || (c.sempre && !v.sempre) || (c.cumula && !v.cumula)) out.push(`${tipo}|${zona}`)
     }
   }
   if ((costo.minimoFisso || 0) > (vendita?.minimoFisso || 0) + 0.005) out.push('regola|minimo_fisso')

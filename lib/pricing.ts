@@ -565,7 +565,12 @@ export async function noloMulticolloZone(supabase: any, p: {
     const nomeZona = (fasceZona.find((f: any) => (f.zone as any)?.nome)?.zone as any)?.nome
     if (!(((nomeZona && supplementi?.minimoPerZona?.[nomeZona]) || minimoACollo(p.suppl)) > 0)) return { esito: null }
   }
-  const nomiMitt = await nomiZoneMittente(supabase, p.fasceTutte, p.mitt, p.dest, [p.corriereId])
+  let nomiMitt = await nomiZoneMittente(supabase, p.fasceTutte, p.mitt, p.dest, [p.corriereId])
+  // Partenza che si somma anche verso la stessa zona (`cumula`, UPS Italia): la regola "stessa zona, una volta
+  // sola" l'ha tolta qui sopra; la si ripesca senza destinazione e vale solo se quella partenza cumula.
+  if (!nomiMitt.length && Object.values(supplementi?.partenza || {}).some(s => s.cumula)) {
+    nomiMitt = (await nomiZoneMittente(supabase, p.fasceTutte, p.mitt, undefined, [p.corriereId])).filter(n => supplementi?.partenza?.[n]?.cumula)
+  }
   const zonaMitt = nomiMitt.find(n => supplementi?.partenza?.[n]) ?? nomiMitt[0] ?? null
   const base = { fasceZona, zonaId: zonaId!, T: pesoMulticolloFornitore(p.packages, p.divisore, p.regola?.arrotondamentoKg), colli: p.packages.length, minimoCollo: minimoACollo(p.suppl), supplementi, zonaMitt }
   if (!p.soloMulticollo) return { esito: noloMulticolloDaFasce({ ...base, zonaDest: p.zonaDest }) }
@@ -603,9 +608,12 @@ export async function noloMulticolloZone(supabase: any, p: {
 //    "senza prezzi"): senza, nessuna localita' remota verrebbe mai riconosciuta;
 //  - la destinazione non cade in nessuna di quelle zone: col contratto unico non aveva prezzo, e non lo ha.
 // `nomi`: le zone in cui cade la destinazione (piu' d'una allo stesso livello di precisione: la scelta la fa
-// noloMulticolloZone, che prende la piu' cara). `esclusive`: quelle esclusive del contratto (isole,
-// disagiate, CAP elencati per nome): senza un supplemento multicollo prezzato per loro non si vende, come
-// col contratto unico una zona esclusiva senza fascia escludeva il corriere.
+// noloMulticolloZone, che prende la piu' cara). `esclusive`: quelle che ELENCANO CAP precisi (isole minori,
+// disagiate, Livigno/Campione, localita' remote estere): senza un supplemento multicollo prezzato per loro non
+// si vende, come col contratto unico una zona esclusiva senza fascia escludeva il corriere. Le zone d'area
+// (provincia o jolly: Sicilia, Calabria, Sardegna, i paesi esteri) no: la loro differenza di prezzo nel
+// multicollo la fanno le zone multicollo, non un supplemento. Contarle per nome, come fa il collo singolo,
+// toglieva il prezzo a tutta la zona B di UPS Italia (Palermo, Cosenza, Cagliari: 83 preventivi su 246).
 export async function zonaDestContrattoMulticollo(
   supabase: any, corriereId: string, dest: { paese?: string; provincia?: string; cap?: string; citta?: string },
 ): Promise<{ ok: boolean; nomi: string[]; esclusive: string[] }> {
@@ -634,7 +642,10 @@ export async function zonaDestContrattoMulticollo(
   }
   if (!scelte.length) return no('destinazione fuori dalle zone del contratto')
   const nomi = Array.from(new Set(scelte.map(id => nomePer.get(id)!))).sort()
-  const esclusive = Array.from(new Set(scelte.filter(id => esclCorr.has(id)).map(id => nomePer.get(id)!)))
+  const { data: conCap, error: eCap } = await supabase.from('zone_cap').select('zona_id').in('zona_id', scelte).neq('cap', '*')
+  if (eCap) return no('CAP delle zone non leggibili: ' + eCap.message)
+  const elencano = new Set(((conCap || []) as any[]).map((r: any) => r.zona_id))
+  const esclusive = Array.from(new Set(scelte.filter(id => elencano.has(id)).map(id => nomePer.get(id)!)))
   return { ok: true, nomi, esclusive }
 }
 
