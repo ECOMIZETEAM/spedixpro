@@ -8,8 +8,29 @@
 // spedizione propria del master, che il preventivo cliente non attraversa.
 //
 // Tutti i limiti sono OPZIONALI: se il contratto non li configura, nessun controllo scatta.
+
+// PESO MINIMO FATTURATO (`settings.peso_min_fatturato` = { kg, divisore }): sotto, il fornitore rifiuta la
+// spedizione. Nato per i bancali BRT (BRT Bancali S, 26/11/2026): il servizio vuole PIU' di 200 kg fatturati,
+// cioe' il maggiore fra il peso totale e il volume totale a 200 kg/m³ (divisore 5000 sui centimetri). E' la
+// regola del fornitore, contata come la conta lui (sulle somme, non collo per collo): un bancale 120×80×150 da
+// 50 kg vale 288 kg e passa, un 80×60×100 da 150 kg ne vale 150 e viene rifiutato.
+function pesoMinimoNonRaggiunto(settings: any, colli: any[]): number | null {
+  const pm = settings?.peso_min_fatturato
+  const kg = Number(pm?.kg) || 0
+  if (!(kg > 0)) return null
+  const divisore = Number(pm?.divisore) || 5000
+  let reale = 0, volume = 0
+  for (const c of colli || []) {
+    reale += Number(c.weight) || Number(c.peso) || 0
+    const L = Number(c.length) || Number(c.lunghezza) || 0, W = Number(c.width) || Number(c.larghezza) || 0, H = Number(c.height) || Number(c.altezza) || 0
+    if (L && W && H) volume += (L * W * H) / divisore
+  }
+  return Math.max(reale, volume) > kg ? null : kg
+}
+
 export function superaLimitiCollo(settings: any, pesoReale: number, colli: any[]): boolean {
   const arr = colli || []
+  if (pesoMinimoNonRaggiunto(settings, arr) !== null) return true
   // N. massimo colli
   const colliMax = Number(settings?.colli_max) || 0
   if (colliMax > 0 && arr.length > colliMax) return true
@@ -55,6 +76,8 @@ export function superaLimitiCollo(settings: any, pesoReale: number, colli: any[]
 // generico "corriere non disponibile". Restituisce null se nessun limite e' superato.
 export function motivoLimiteCollo(settings: any, pesoReale: number, colli: any[]): string | null {
   const arr = colli || []
+  const pesoMin = pesoMinimoNonRaggiunto(settings, arr)
+  if (pesoMin !== null) return `questo contratto si usa oltre i ${pesoMin} kg fatturati (conta il maggiore fra il peso e l'ingombro dei colli): per spedizioni più leggere scegli un altro contratto`
   const colliMax = Number(settings?.colli_max) || 0
   if (colliMax > 0 && arr.length > colliMax) return `questo contratto accetta al massimo ${colliMax} colli per spedizione`
   const colliMin = Number(settings?.colli_min) || 0

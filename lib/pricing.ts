@@ -462,7 +462,7 @@ export const TIPO_MINIMO_COLLO = 'minimo_collo'
 // `arrotondamentoKg` (settings.multicollo_arrotondamento_kg): a quanto si arrotonda in su il peso di ogni collo
 // nel multicollo a zone. Mezzo chilo se manca (UPS Europa), un chilo per UPS Italia (preventivi del 26/11). Sta
 // sul contratto del detentore e non nel listino: e' come il fornitore misura, non un prezzo, e vale uguale a ogni livello.
-export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[]; soloAZone?: boolean; arrotondamentoKg?: number; illeggibile?: boolean }
+export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[]; soloAZone?: boolean; arrotondamentoKg?: number; illeggibile?: boolean; prezzoACollo?: boolean }
 
 // Il valore della voce in un elenco di supplementi (gia' filtrato per listino e contratto). 0 = non
 // prezzata. Con due righe (un contratto salvato in due listini dello stesso master, succede) vince la
@@ -482,6 +482,13 @@ export function noloMulticollo(nolo: number, colli: number, minimo: number, rego
   const p = String(paese || 'IT').toUpperCase().trim()
   if (regola?.paesiEsclusi.includes(p)) return null
   if (regola?.soloAZone) return null
+  // PREZZO A COLLO (`settings.prezzo_a_collo` sul contratto del detentore): la fascia, scelta sul peso
+  // fatturato totale, e' il prezzo di UN collo, e la spedizione costa quel prezzo per il numero dei colli.
+  // Nato per i bancali BRT (BRT Bancali S, 26/11/2026): il fornitore fa pagare a bancale, 72,59 € l'uno
+  // fino a 1.000 kg in tutto e 95,14 € oltre (Calabria, Sicilia e Sardegna 97,12 e 127,29), qualunque
+  // sia il peso del singolo bancale. Col minimo a collo 2 bancali per Palermo sarebbero costati 145,18
+  // invece di 194,24: il minimo e' uno per listino, il prezzo a bancale cambia con la zona.
+  if (regola?.prezzoACollo) return nolo * colli
   if (minimo > 0) return Math.max(nolo, colli * minimo)
   return regola?.minimoObbligatorio ? null : nolo
 }
@@ -523,7 +530,7 @@ export async function regoleMulticollo(corriereIds: string[]): Promise<Map<strin
   for (const r of (righe || []) as any[]) {
     const s = settPerDet.get(r.contratto_id || r.id) || {}
     const esclusi = Array.isArray(s.multicollo_paesi_esclusi) ? s.multicollo_paesi_esclusi.map((x: any) => String(x).toUpperCase().trim()) : []
-    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi, soloAZone: s.multicollo_solo_a_zone === true, arrotondamentoKg: Number(s.multicollo_arrotondamento_kg) > 0 ? Number(s.multicollo_arrotondamento_kg) : undefined })
+    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi, soloAZone: s.multicollo_solo_a_zone === true, arrotondamentoKg: Number(s.multicollo_arrotondamento_kg) > 0 ? Number(s.multicollo_arrotondamento_kg) : undefined, prezzoACollo: s.prezzo_a_collo === true })
   }
   return out
 }
@@ -1543,6 +1550,8 @@ async function creaCalcolatoreCorriereBase(
     if (!supplPerCorriere.has(s.corriere_id)) supplPerCorriere.set(s.corriere_id, [])
     supplPerCorriere.get(s.corriere_id)!.push(s)
   }
+  // Il prezzo a collo (vedi noloMulticollo) vale anche qui, o elenco e report direbbero un costo e l'addebito un altro.
+  const regoleMCCosto = await regoleMulticollo(Array.from(fascePerCorriere.keys()))
 
   const zonaIds = Array.from(new Set((fasce || []).filter((f: any) => !f.zone?.multicollo).map((f: any) => f.zone?.id).filter(Boolean)))
   // ORDINE FISSO, o le pagine si accavallano. A blocchi da 1000 senza ordine il database non
@@ -1614,7 +1623,7 @@ async function creaCalcolatoreCorriereBase(
     // Multicollo: il minimo a collo (vedi noloMulticollo), prima del fuel come nell'addebito. Qui si
     // mostra un prezzo di ripiego per una spedizione che esiste gia': niente esclusione.
     const nColliC = Math.max(1, Number(s.colli) || (Array.isArray(s.colli_dettaglio) ? s.colli_dettaglio.length : 0) || 1)
-    if (nColliC > 1) prezzo = Math.max(prezzo, nColliC * minimoACollo(supplPerCorriere.get(s.corriere_id) || []))
+    if (nColliC > 1) prezzo = regoleMCCosto.get(s.corriere_id)?.prezzoACollo ? prezzo * nColliC : Math.max(prezzo, nColliC * minimoACollo(supplPerCorriere.get(s.corriere_id) || []))
     if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
     const nolo = prezzo
@@ -1674,6 +1683,8 @@ async function creaCalcolatoreListinoClienteBase(
     if (!supplPerCorriere.has(s.corriere_id)) supplPerCorriere.set(s.corriere_id, [])
     supplPerCorriere.get(s.corriere_id)!.push(s)
   }
+  // Il prezzo a collo, come nel calcolatore del costo qui sopra.
+  const regoleMCListino = await regoleMulticollo(Array.from(fascePerCorriere.keys()))
 
   // Impostazioni corriere (agevolazione peso reale + "peso reale fino a X kg"): il peso fatturato
   // deve seguire la STESSA logica del preventivo, altrimenti il costo cade in una fascia diversa.
@@ -1782,7 +1793,7 @@ async function creaCalcolatoreListinoClienteBase(
       } else return null   // peso oltre l'ultima fascia e nessuna "oltre": nessun prezzo
     }
     // Multicollo: il minimo a collo, come nel calcolatore del costo qui sopra (niente esclusione).
-    if (pacchi.length > 1) prezzo = Math.max(prezzo, pacchi.length * minimoACollo(supplPerCorriere.get(s.corriere_id) || []))
+    if (pacchi.length > 1) prezzo = regoleMCListino.get(s.corriere_id)?.prezzoACollo ? prezzo * pacchi.length : Math.max(prezzo, pacchi.length * minimoACollo(supplPerCorriere.get(s.corriere_id) || []))
     if (fuelPct) prezzo = prezzo * (1 + fuelPct / 100)
 
     const supplList = supplPerCorriere.get(s.corriere_id) || []
