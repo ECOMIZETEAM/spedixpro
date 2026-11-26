@@ -33,7 +33,11 @@ export async function GET(req: NextRequest) {
   const dal = new Date(inizioGiornoRomaISO(oggi)), al = new Date(new Date(fineGiornoRomaISO(oggi)).getTime() + 1)
   const base = (process.env.NEXT_PUBLIC_APP_URL || 'https://moovexpress.com').replace(/\/$/, '')
   const giorno = dal.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', weekday: 'long', day: 'numeric', month: 'long' })
-  const conti = { iscritti: 0, mandati: 0, vuoti: 0, saltati: 0, errori: 0 }
+  const conti = { iscritti: 0, mandati: 0, vuoti: 0, saltati: 0, errori: 0, riprovate: 0 }
+  // Mail rifiutate per un motivo passeggero (limite al secondo di Resend, guasto): si riprovano in coda al giro.
+  // Il segno «mandato oggi» si scrive PRIMA di spedire e il giro delle 7 e' uno solo al giorno (l'altro orario UTC
+  // si salta): senza questa seconda prova, un rifiuto di un secondo era il riepilogo di quel giorno perso.
+  const daRiprovare: { utente: string; dati: Parameters<typeof inviaEmailRiepilogo>[0] }[] = []
 
   const { data: chi, error } = await admin.from('calendario_preferenze').select('utente_id,riepilogo_inviato_il').eq('riepilogo_mattino', true).limit(5000)
   if (error) { console.error('[CALENDARIO-RIEPILOGO] iscritti non letti:', error.message); return NextResponse.json({ error: error.message }, { status: 500 }) }
@@ -96,11 +100,12 @@ export async function GET(req: NextRequest) {
       const email = acc?.user?.email
       if (email) {
         const { data: m } = await admin.from('masters').select('logo_url,nome').eq('id', u.master_id).maybeSingle()
-        const r = await inviaEmailRiepilogo({
+        const dati = {
           to: email, giorno, voci: righe, ritiri, giacenze, inviti: inviti || 0, arretrati, link: `${base}${href}`,
           brand: m ? { logo: (m as any).logo_url, nome: (m as any).nome } : undefined,
-        })
-        if (!r.ok && !/non valida|destinatario interno/.test(r.error || '')) { conti.errori++; console.error('[CALENDARIO-RIEPILOGO] email non mandata:', r.error) }
+        }
+        const r = await inviaEmailRiepilogo(dati)
+        if (!r.ok && !/non valida|destinatario interno/.test(r.error || '')) daRiprovare.push({ utente: u.id, dati })
       }
       conti.mandati++
     } catch (e: any) {
@@ -108,5 +113,15 @@ export async function GET(req: NextRequest) {
       console.error('[CALENDARIO-RIEPILOGO] persona saltata:', c.utente_id, e?.message || e)
     }
   }))
+
+  // seconda prova, una alla volta (cosi' restiamo sotto il limite al secondo) dopo una pausa
+  if (daRiprovare.length) {
+    await new Promise((r) => setTimeout(r, 5000))
+    for (const d of daRiprovare) {
+      conti.riprovate++
+      const r = await inviaEmailRiepilogo(d.dati)
+      if (!r.ok) { conti.errori++; console.error('[CALENDARIO-RIEPILOGO] email non mandata nemmeno alla seconda prova:', d.utente, r.error) }
+    }
+  }
   return NextResponse.json({ ok: true, giorno: oggi, ...conti })
 }

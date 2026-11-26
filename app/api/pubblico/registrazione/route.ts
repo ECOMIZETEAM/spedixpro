@@ -174,20 +174,27 @@ export async function POST(req: NextRequest) {
 
   // ── Credenziali per email. Sul sito pubblico la password NON torna nella risposta (a differenza
   // del portale master, dove il master la legge per darla): esce solo dalla casella del cliente.
-  try {
-    await inviaCredenzialiCliente({
-      email, nomeCliente: ragioneSociale, masterNome: 'MoovExpress',
-      dominio: 'moovexpress.com', password,
-    })
-  } catch (e) {
-    // L'accesso esiste comunque: se la mail non parte, il cliente puo' usare il recupero password.
-    console.error('[pubblico/registrazione] email credenziali', e)
+  // inviaCredenzialiCliente NON lancia, restituisce { ok }: il try/catch che c'era qui non scattava
+  // mai, e al visitatore dicevamo «inviate» anche quando la mail non era partita. Un rifiuto
+  // passeggero (il limite di Resend e' per secondo e condiviso con tutto il portale) si riprova una
+  // volta; un indirizzo che Resend dichiara non valido no, tanto il secondo tentativo fa uguale.
+  const credenziali = { email, nomeCliente: ragioneSociale, masterNome: 'MoovExpress', dominio: 'moovexpress.com', password }
+  const motivo = (e: unknown) => String((e as any)?.message || e || '')
+  let esitoMail = await inviaCredenzialiCliente(credenziali)
+  if (!esitoMail.ok && !/non valida|destinatario interno/.test(motivo(esitoMail.error))) {
+    await new Promise((r) => setTimeout(r, 1500))
+    esitoMail = await inviaCredenzialiCliente(credenziali)
   }
+  const emailInviata = esitoMail.ok
+  // L'accesso esiste comunque: se la mail non parte, il cliente entra col recupero password.
+  if (!emailInviata) console.error('[pubblico/registrazione] credenziali NON inviate, cliente', nuovoCliente.id, motivo(esitoMail.error))
 
   return NextResponse.json({
     ok: true,
     email,
-    // Cosa dire al visitatore: controlla la posta, poi accedi e ricarica per spedire.
-    messaggio: 'Account creato. Ti abbiamo inviato le credenziali via email. Accedi e ricarica il credito per spedire.',
+    emailInviata,   // il sito sceglie cosa dire al visitatore da qui
+    messaggio: emailInviata
+      ? 'Account creato. Ti abbiamo inviato le credenziali via email. Accedi e ricarica il credito per spedire.'
+      : 'Account creato, ma la email con la password non è partita. Dalla pagina di accesso del portale usa «Password dimenticata?» con questa email e scegli tu la password.',
   }, { headers: H })
 }
