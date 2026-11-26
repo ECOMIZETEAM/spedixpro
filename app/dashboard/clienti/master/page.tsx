@@ -1,6 +1,8 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
 import { useDialog } from '@/app/components/DialogProvider'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 interface NodoMaster {
   id: string
@@ -16,6 +18,9 @@ interface NodoCliente {
 }
 
 function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string; isRoot?: boolean }) {
+  // con la grafica nuova icone a linea al posto delle emoji (👑 🏢 👤); con quella di oggi restano le emoji: le icone a
+  // linea stanno nel foglio che solo la cornice nuova carica
+  const nuova = useContext(GraficaNuova).attiva
   // `dialog` era usato in risincronizza() ma dichiarato SOLO nell'altro componente del file:
   // qui non esisteva, e al click su "Risincronizza" la pagina si rompeva con un errore a runtime
   // (il progetto ignora gli errori di tipo in compilazione, quindi non emergeva prima).
@@ -60,7 +65,7 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
         border: '1px solid #e8e8e8', marginBottom: '4px',
       }}>
         <span style={{ fontSize: '11px', color: '#999', width: '14px', display: 'inline-block', transform: espanso ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .15s' }}>▶</span>
-        <span style={{ fontSize: '14px' }}>{isRoot ? '👑' : '🏢'}</span>
+        {nuova ? <Icona id={isRoot ? 'i-stella' : 'i-rete'} className="vs-ico" /> : <span style={{ fontSize: '14px' }}>{isRoot ? '👑' : '🏢'}</span>}
         <span style={{ fontWeight: '700', fontSize: '13px', color: '#1a1a1a' }}>{nome}</span>
         {isRoot && <span style={{ fontSize: '10px', color: '#f97316', fontWeight: '700', background: '#fff7ed', padding: '2px 6px', borderRadius: '4px' }}>ROOT</span>}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
@@ -104,7 +109,7 @@ function NodoAlbero({ masterId, nome, isRoot }: { masterId: string; nome: string
               borderRadius: '6px', background: '#f9fafb', border: '1px solid #f0f0f0',
               marginBottom: '4px', marginLeft: '24px',
             }}>
-              <span style={{ fontSize: '13px' }}>👤</span>
+              {nuova ? <Icona id="i-clienti" className="vs-ico" /> : <span style={{ fontSize: '13px' }}>👤</span>}
               <span style={{ fontSize: '12.5px', color: '#1a1a1a' }}>{c.ragione_sociale}</span>
               <span style={{ fontSize: '11px', color: '#999' }}>{c.email}</span>
             </div>
@@ -227,7 +232,7 @@ function Collegamenti() {
 
   return (
     <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: '8px', padding: '16px 18px', marginBottom: '18px' }}>
-      <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a1a1a', marginBottom: '12px' }}>🔗 Collegamenti tra master</div>
+      <div style={{ fontSize: '14px', fontWeight: 800, color: '#1a1a1a', marginBottom: '12px' }}>Collegamenti tra master</div>
       <div style={{ fontSize: '12.5px', color: '#444', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <span>Il tuo codice:</span>
         <code style={{ background: '#f4f4f5', border: '1px solid #e4e4e7', borderRadius: '6px', padding: '3px 8px', fontWeight: 700, letterSpacing: '1px' }}>{codice || '…'}</code>

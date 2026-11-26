@@ -173,3 +173,29 @@
 .gx .gx-vestito :is(.recharts-cartesian-axis-line, .recharts-cartesian-axis-tick-line, .recharts-cartesian-grid line) { stroke: var(--gx-filo); }
 .gx .gx-vestito .recharts-tooltip-cursor { fill: color-mix(in srgb, var(--gx-attenuato) 12%, transparent); }
 .gx .gx-vestito .recharts-default-tooltip { background: var(--vs-carta) !important; border: 0 !important; border-radius: 10px; box-shadow: 0 0 0 1px var(--gx-filo), 0 8px 24px rgba(0,0,0,.12); color: var(--gx-inchiostro); }
+
+/* LE ICONE A LINEA che le pagine mettono al posto delle loro emoji quando la cornice è nuova (Elenco master: 👑 🏢 👤;
+   Nuovo cliente: 📄): piccole e grigie come quelle del menu, più grandi nei riquadri */
+.gx .gx-vestito .vs-ico { width: 16px; height: 16px; color: var(--gx-attenuato); }
+.gx .gx-vestito .vs-ico--grande { width: 26px; height: 26px; color: var(--gx-accento); }
+
+/* i tasti pieni indaco o viola («Collega master»): neri come gli altri tasti principali; spenti, grigi */
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(79, 70, 229)"], [style*="background:#4f46e5"], [style*="background: rgb(99, 102, 241)"], [style*="background:#6366f1"], [style*="background: rgb(124, 58, 237)"], [style*="background:#7c3aed"]):not(:disabled) {
+  background: var(--vs-nero) !important; color: #fff !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 3px 9px rgba(0,0,0,.18); }
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(79, 70, 229)"], [style*="background:#4f46e5"], [style*="background: rgb(99, 102, 241)"], [style*="background:#6366f1"], [style*="background: rgb(124, 58, 237)"], [style*="background:#7c3aed"]):disabled {
+  background: var(--gx-incavo) !important; color: var(--gx-attenuato) !important; border: 0 !important; border-radius: 999px !important; opacity: 1 !important; }
+
+/* i tasti azzurrini col testo blu («Risincronizza» nell'Elenco master): secondari bianchi col filo e la scritta nera,
+   anche di notte (qui pesano più della regola notturna dei riquadri tinti) */
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(239, 246, 255)"], [style*="background:#eff6ff"], [style*="background: rgb(238, 242, 255)"], [style*="background:#eef2ff"]):not(:disabled):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background: var(--vs-carta) !important; color: var(--gx-inchiostro) !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 0 0 1px var(--gx-filo), 0 2px 8px rgba(0,0,0,.04) !important; }
+
+/* i tasti e i collegamenti a tasto grigi («Annulla» del Nuovo cliente è un <a>, gli interruttori spenti «OFF» hanno il
+   fondo #e8e8e8): il grigio della dashboard con la scritta scura, di notte il grigio scuro con la scritta chiara.
+   Solo tasti e collegamenti: lo stesso #e8e8e8 fa da riga divisoria nelle pagine, che deve restare com'è */
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(245, 245, 245)"], [style*="background:#f5f5f5"], [style*="background: rgb(243, 244, 246)"], [style*="background:#f3f4f6"], [style*="background: rgb(249, 250, 251)"], [style*="background:#f9fafb"], [style*="background: rgb(250, 250, 250)"], [style*="background:#fafafa"], [style*="background: rgb(232, 232, 232)"], [style*="background:#e8e8e8"], [style*="background: rgb(229, 231, 235)"], [style*="background:#e5e7eb"], [style*="background: rgb(238, 238, 238)"], [style*="background:#eee"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background: var(--gx-incavo) !important; border-color: transparent !important; color: var(--gx-inchiostro) !important; }
+/* i cartellini grigi scritti come <span> o <code> (il codice del master nell'Elenco master): stesso grigio; di notte
+   restavano un rettangolo chiaro */
+.gx .gx-vestito :is(span, code):is([style*="background: rgb(244, 244, 245)"], [style*="background:#f4f4f5"], [style*="background: rgb(245, 245, 245)"], [style*="background:#f5f5f5"], [style*="background: rgb(243, 244, 246)"], [style*="background:#f3f4f6"], [style*="background: rgb(249, 250, 251)"], [style*="background:#f9fafb"], [style*="background: rgb(250, 250, 250)"], [style*="background:#fafafa"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background: var(--gx-incavo) !important; border-color: transparent !important; color: var(--gx-inchiostro) !important; }

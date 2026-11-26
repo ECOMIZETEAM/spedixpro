@@ -24,6 +24,9 @@ export const PAGINE_PROVA = new Set([
   // listino vuoto se il primo contratto non ne ha uno
   '/dashboard/listini/aumenti', '/dashboard/listini/check-sotto-costo', '/dashboard/listini/check-volumetrici',
   '/dashboard/listini/clienti/nuovo', '/dashboard/listini/da-adeguare', '/dashboard/listini/mio',
+  // 26/11 sera, i Clienti: l'Elenco master con le icone a linea al posto delle emoji
+  '/dashboard/clienti/accessi', '/dashboard/clienti/gerarchia', '/dashboard/clienti/master', '/dashboard/clienti/master/nuovo',
+  '/dashboard/clienti/nuovo',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

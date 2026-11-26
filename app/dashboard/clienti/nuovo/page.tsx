@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useRouter } from 'next/navigation'
 import { PROVINCE_IT } from '@/lib/province-it'
 
@@ -11,6 +13,8 @@ const secb = {padding:'16px',display:'flex' as const,flexDirection:'column' as c
 
 
 export default function NuovoClientePage() {
+  // con la grafica nuova l'icona a linea al posto del 📄 (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const router = useRouter()
   const [credenziali, setCredenziali] = useState<any>(null)
   const [staffList, setStaffList] = useState<any[]>([])
@@ -146,7 +150,7 @@ export default function NuovoClientePage() {
 
       {/* Compilazione automatica da visura camerale */}
       <div style={{background:'#fff',border:'2px dashed #f97316',borderRadius:'10px',padding:'18px 20px',marginBottom:'18px',display:'flex',alignItems:'center',gap:'16px',flexWrap:'wrap' as const}}>
-        <div style={{width:'52px',height:'52px',borderRadius:'12px',background:'#fff7ed',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'26px',flexShrink:0}}>📄</div>
+        <div style={{width:'52px',height:'52px',borderRadius:'12px',background:'#fff7ed',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'26px',flexShrink:0}}>{nuova ? <Icona id="i-carta" className="vs-ico vs-ico--grande" /> : '📄'}</div>
         <div style={{flex:1,minWidth:'220px'}}>
           <div style={{fontSize:'15px',fontWeight:'700',color:'#1a1a1a'}}>Inserisci la visura camerale</div>
           <div style={{fontSize:'12.5px',color:'#666',marginTop:'3px',lineHeight:1.4}}>Carica il PDF della visura e compiliamo automaticamente i dati aziendali (ragione sociale, P.IVA, indirizzo, PEC…).</div>
