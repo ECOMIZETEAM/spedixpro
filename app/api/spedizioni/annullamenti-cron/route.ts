@@ -14,9 +14,9 @@ export const maxDuration = 300
 // Annullo rifiutato: la spedizione torna com'era, con la nota. Se intanto il cliente ha rifatto la spedizione per
 // lo stesso ordine, il vincolo uniq_sped_ordine_attivo_v2 rifiuta il ripristino. Prima l'errore non si leggeva: la
 // riga restava in attesa con la richiesta aperta e il giro la riprendeva ogni ora per sempre (su SpediamoPro con
-// un annullo al corriere a ogni giro; 5 cosi' al 26/11/2026, la piu' vecchia dal 29/09). In quel caso la richiesta
-// si chiude col motivo scritto e la riga resta in attesa e addebitata: due spedizioni per lo stesso ordine le
-// guarda una persona (la sentinella le conta). Ogni altro errore si rilancia: il giro la riprende l'ora dopo.
+// un annullo al corriere a ogni giro; 5 cosi' al 26/11/2026, la piu' vecchia dal 29/09). Stessa regola del giro dei
+// ripristini (lib/annulli-ripristino): la riga va nella coda del detentore con la nota «ordine gia' rispedito», che
+// la sua schermata mostra come «decidi tu» (tenerla o annullarla). Ogni altro errore si rilancia: si riprova.
 async function rimettiComEra(admin: any, s: any, nota: string): Promise<void> {
   const { error } = await admin.from('spedizioni').update({
     stato: s.stato_precedente || 'in_lavorazione',
@@ -24,14 +24,19 @@ async function rimettiComEra(admin: any, s: any, nota: string): Promise<void> {
     annullamento_errore: nota,
   }).eq('id', s.id)
   if (!error) return
-  const doppio = error.code === '23505' || /uniq_sped_ordine/i.test(error.message || '')
+  const doppio = error.code === '23505' && /uniq_sped_ordine_attivo/.test(String(error.message))
   if (!doppio) throw new Error('ripristino non riuscito: ' + error.message)
-  console.error('[ANNULLI][CRON] ripristino rifiutato, stesso ordine gia\' rispedito:', s.numero)
+  const { NOTA_ORDINE_GIA_RISPEDITO } = await import('@/lib/annulli-ripristino')
+  const { data: corr, error: eCorr } = await admin.from('corrieri').select('id,master_id,nome_contratto,contratto_id').eq('id', s.corriere_id).maybeSingle()
+  if (eCorr || !corr) throw new Error('contratto non leggibile per la coda: ' + (eCorr?.message || 'non trovato'))
+  const ownerId = await masterDetentore(admin, corr)
   const { error: e2 } = await admin.from('spedizioni').update({
-    annullamento_richiesto_at: null,
-    annullamento_errore: `${nota} Non si può rimettere attiva: per lo stesso ordine esiste già un'altra spedizione.`.slice(0, 500),
-  }).eq('id', s.id)
-  if (e2) throw new Error('nota del ripristino rifiutato non scritta: ' + e2.message)
+    stato: 'annullamento_manuale',
+    annullamento_owner_id: ownerId,
+    annullamento_errore: NOTA_ORDINE_GIA_RISPEDITO,
+  }).eq('id', s.id).eq('stato', 'annullamento_pending')
+  if (e2) throw new Error('ordine gia\' rispedito, coda del detentore non scritta: ' + e2.message)
+  console.warn('[ANNULLI][CRON] annullo rifiutato e ordine gia\' rispedito: in coda al detentore per una decisione', s.numero)
 }
 
 // Una richiesta in attesa su un pacco Poste diretto: annullata subito, oppure rimessa com'era se il pacco
