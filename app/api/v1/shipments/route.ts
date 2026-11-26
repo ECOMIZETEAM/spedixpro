@@ -26,6 +26,7 @@ import { corpoPerIlVenditoreV1, rigaV1, parametriAlberoV1, parametriCatenaV1 } f
 import { apriRichiestaPonte, chiudiRichiestaPonte, leggiRichiestaPonte, codiceRichiestaValido, type RegistroPonte } from '@/lib/ponte-richieste'
 import { codiciServiziContratto } from '@/lib/v1-servizi'
 import { venditaDaZonaNormale, dvaDiceSpeciale, spedisciDiceSpeciale, spediamoproDiceSpeciale, messaggioDestinazioneSpeciale } from '@/lib/guardia-destinazione-speciale'
+import { upsSupplementoScoperto, messaggioSupplementoUps } from '@/lib/guardia-ups-supplemento'
 
 // IL TETTO DI DURATA, che qui non c'era.
 // Oltre la chiamata d'ordine il pacco e' COMPRATO: se la funzione viene uccisa fra l'ordine e la
@@ -331,6 +332,17 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         () => spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee }),
       )) {
         return errore(messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode || '').trim()))
+      }
+      // UPS: supplemento remoto dentro il prezzo base, che le zone non conoscono e farebbe andare sotto il detentore.
+      // Stessa regola del portale (lib/guardia-ups-supplemento). Chi chiama l'API e' sempre un cliente.
+      {
+        const ups = await upsSupplementoScoperto(admin, {
+          quotation, masterDirettoId: masterId, corriereOwnerId: corriere.master_id, corriereNome: corriere.nome_contratto,
+          provincia: body.shipTo?.state || '', cap: body.shipTo?.postalCode || '', citta: body.shipTo?.city || '', paese: body.shipTo?.country || 'IT',
+          packages, mittCap: body.shipFrom?.postalCode, mittProvincia: body.shipFrom?.state,
+          prezzoClienteTotale: costoCliente || undefined,
+        })
+        if (ups.ferma) return errore(messaggioSupplementoUps(String(body.shipTo?.city || body.shipTo?.postalCode || '').trim()))
       }
       const externalRefV1 = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined
       // La NOTA del cliente va al riquadro NOTE dell'etichetta del corriere (come fa il portale), non

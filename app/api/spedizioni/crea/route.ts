@@ -34,6 +34,7 @@ import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 // le porte (portale e API v1), in lib/guardia-destinazione-speciale.
 import { venditaDaZonaNormale, dvaDiceSpeciale, spedisciDiceSpeciale, spediamoproDiceSpeciale, messaggioDestinazioneSpeciale } from '@/lib/guardia-destinazione-speciale'
 import { detentoreContratto } from '@/lib/contratto-per-nome'
+import { upsSupplementoScoperto, messaggioSupplementoUps } from '@/lib/guardia-ups-supplemento'
 import { colliConPesoPulito } from '@/lib/colli-puliti'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
@@ -1170,10 +1171,24 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
         return NextResponse.json({ error: messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode).trim()) }, { status: 400 })
       }
 
-      // NB: nessun blocco "vendita sotto costo" basato sul confronto costo-live vs prezzo listino:
+      // NB: nessun blocco "vendita sotto costo" GENERICO basato sul confronto costo-live vs prezzo listino:
       // dava troppi falsi positivi (bloccava destinazioni legittime dove il listino è più basso del
       // costo live). Il controllo sulle destinazioni disagiate è ora PER-ZONA (zone disagiate), non
-      // per confronto di prezzo.
+      // per confronto di prezzo. L'unica eccezione è UPS, dove il supplemento remoto non si vede negli
+      // accessori: lì si ferma solo se il fornitore supera il listino del detentore di 1,40 € E il
+      // detentore andrebbe sotto (lib/guardia-ups-supplemento, provata su 388 spedizioni vere).
+      {
+        const ups = await upsSupplementoScoperto(adminCrea, {
+          quotation, masterDirettoId: masterId, corriereOwnerId: corriereRecord.master_id, corriereNome: corriereRecord.nome_contratto,
+          provincia: body.shipTo.state, cap: body.shipTo.postalCode, citta: body.shipTo.city, paese: body.shipTo.country || 'IT',
+          packages, mittCap: body.shipFrom.postalCode, mittProvincia: body.shipFrom.state,
+          prezzoClienteTotale: isProprio ? undefined : (prezzoServerCliente || undefined),
+        })
+        if (ups.ferma) {
+          await stornaPrenotazione()
+          return NextResponse.json({ error: messaggioSupplementoUps(String(body.shipTo?.city || body.shipTo?.postalCode).trim()) }, { status: 400 })
+        }
+      }
 
       // ── GUARDIA DIMENSIONI LOCKER S ── Il costo InPost dipende dalla TAGLIA DEL LOCKER (dalle
       // MISURE), non dal peso; il listino invece è a PESO e non la conosce. Un pacco troppo grande per
