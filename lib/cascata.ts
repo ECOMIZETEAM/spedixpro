@@ -5,6 +5,7 @@ import { createAdminSupabase } from '@/lib/supabase-admin'
 import { corriereDiMasterPerNome, detentoreContratto } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
 import { radiceDi } from '@/lib/rete-masters'
+import { archivioCostoPerPacco } from '@/lib/prezzi-archivio'
 
 export type LivelloCatena = {
   masterId: string
@@ -143,9 +144,9 @@ async function costruisciCatenaGrezza(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
-    // SOLO ricalcolo RETTIFICHE (pacco già partito): il costo di un livello i cui prezzi sono stati
-    // cancellati si legge da quelli archiviati (lib/prezzi-archivio.ts). La creazione non lo passa mai.
-    dopoPartenza?: boolean
+    // SOLO ricalcolo RETTIFICHE: quando è partito il pacco. Il costo di un livello i cui prezzi sono stati
+    // cancellati dopo si legge da quelli archiviati (lib/prezzi-archivio.ts). La creazione non lo passa mai.
+    partenza?: string | null
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string; dipendeDalCosto?: boolean }> {
   const catena: LivelloCatena[] = []
@@ -235,7 +236,7 @@ async function costruisciCatenaGrezza(
           zonaForzata: params.zonaForzata,
           pesoSuRealeCost,
           mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
-          dopoPartenza: params.dopoPartenza,
+          archivio: params.partenza ? await archivioCostoPerPacco(adminDb, m.id, mCorr.id, params.partenza) : null,
         })
         if (pz != null) {
           prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true

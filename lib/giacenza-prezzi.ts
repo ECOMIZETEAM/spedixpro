@@ -7,8 +7,8 @@
 // e tutta la catena sopra pagavano lo stesso: riconsegne e resi gratis, a spese del master.
 // Il calcolo deve essere UNO solo, per il portale e per l'API.
 
-import { noloClienteDopoPartenza } from '@/lib/reso-prezzi'
-import { archivioCoppia, haFasceVive, listiniDopoPartenza, listinoDiPartenza } from '@/lib/prezzi-archivio'
+import { noloClienteDopoPartenzaCon } from '@/lib/reso-prezzi'
+import type { FonteCliente } from '@/lib/prezzi-archivio'
 
 // Mappa i nomi dei servizi giacenza del listino sulle 3 operazioni
 export function chiaveServizio(nome: string): string | null {
@@ -47,32 +47,40 @@ function prezziDaRighe(suppl: any[]) {
   return out
 }
 
-// Legge i prezzi giacenza dal listino del cliente della spedizione (prezzo CLIENTE).
-// Dopo la partenza si paga sempre (lib/prezzi-archivio.ts): il listino di oggi, poi quello con cui il
-// pacco e' partito; per ognuno i supplementi vivi se il listino prezza ancora il contratto, altrimenti
-// quelli archiviati quando e' stato tolto. Stesso ordine del nolo (noloClienteDopoPartenza).
-export async function leggiPrezzi(admin: any, sped: any) {
-  const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  const oggi = cliente?.listino_cliente_id
-  if (sped?.corriere_id) {
-    const partenza = await listinoDiPartenza(admin, sped)
-    for (const l of listiniDopoPartenza(oggi, { listino_cliente_id: partenza })) {
-      if (await haFasceVive(admin, l, sped.corriere_id)) return leggiPrezziDaListino(admin, l, sped.corriere_id)
-      const arch = await archivioCoppia(admin, l, sped.corriere_id)
-      if (arch) {
-        const righe = arch.supplementi
-          .filter((s: any) => s.tipo === 'giacenza' || s.tipo === 'giacenza_apertura')
-          .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id)))
-        return prezziDaRighe(righe)
-      }
-    }
+// LA FONTE DEI PREZZI DI GIACENZA DEL CLIENTE, una per pacco: la stessa da cui viene il nolo.
+// Il servizio e' "fisso + percentuale × nolo": fisso, percentuale e nolo devono venire dallo stesso
+// listino. Prima i servizi si leggevano dal primo listino che aveva ancora il contratto e il nolo dal
+// primo che prezzava il pacco: col cliente spostato da A a B e B che non copre la destinazione, il
+// riquadro mostrava il nolo di A per la percentuale di B, e il reso addebitato (percentuale di A) era
+// un altro numero (revisione 26/11). Le fonti e il loro ordine li decide lib/prezzi-archivio.ts.
+async function fonteGiacenza(admin: any, sped: any): Promise<{ nolo: number | null; fonte: FonteCliente | null; oggi: string | null }> {
+  if (!sped?.cliente_id) return { nolo: null, fonte: null, oggi: null }
+  const { data: cliente, error } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
+  if (error) throw new Error('prezzi giacenza: cliente non leggibile (' + error.message + ')')
+  const oggi = cliente?.listino_cliente_id || null
+  const n = await noloClienteDopoPartenzaCon(admin, sped, oggi)
+  return { nolo: n.nolo, fonte: n.fonte, oggi }
+}
+
+// I prezzi giacenza di una fonte: le righe vive del listino, o quelle archiviate se il listino non ha piu'
+// supplementi di quel contratto (stessa precedenza di fn_reso_perc_cliente: vince il vivo).
+async function prezziDaFonte(admin: any, f: FonteCliente, corriereId: string | null) {
+  if (f.archivio?.supplementi) {
+    return prezziDaRighe(f.archivio.supplementi.filter((s: any) => s.tipo === 'giacenza' || s.tipo === 'giacenza_apertura'))
   }
-  // Nessun listino prezza piu' il contratto: come prima, quello che c'e' nel listino di oggi.
+  return leggiPrezziDaListino(admin, f.listinoId, corriereId)
+}
+
+// Legge i prezzi giacenza del cliente della spedizione (prezzo CLIENTE), dalla stessa fonte del nolo.
+// Se nessun listino prezza piu' il pacco, come prima: quello che c'e' nel listino di oggi.
+export async function leggiPrezzi(admin: any, sped: any) {
+  const { fonte, oggi } = await fonteGiacenza(admin, sped)
+  if (fonte) return prezziDaFonte(admin, fonte, sped.corriere_id)
   return leggiPrezziDaListino(admin, oggi, sped.corriere_id)
 }
 
 // RIPIEGO per le spedizioni SENZA cliente (del master stesso): quanto era costata l'andata. Per un
-// cliente non si usa piu': il nolo viene dal suo listino, anche a contratto tolto (noloClienteDopoPartenza).
+// cliente non si usa piu': il nolo viene dal suo listino, anche a contratto tolto (noloClienteSpedizione).
 //
 // ATTENZIONE — qui c'era una trappola di unita' di misura. `spedizioni.assicurazione` NON e' la
 // commissione dell'assicurazione: e' il VALORE dichiarato della merce (lo stesso numero che parte
@@ -91,10 +99,11 @@ export function noloBase(sped: any) {
 // lo stesso reso costa uguale da qualsiasi parte arrivi.
 export async function noloClienteSpedizione(admin: any, sped: any): Promise<number> {
   if (!sped?.cliente_id) return noloBase(sped)
-  const { data: cliente } = await admin.from('clienti').select('listino_cliente_id').eq('id', sped.cliente_id).maybeSingle()
-  // Dal listino, anche a contratto tolto o listino cambiato (noloClienteDopoPartenza); mai il ripiego sul
-  // prezzo pieno, che ha dentro le commissioni. Senza cliente (spedizione del master) resta il ripiego sopra.
-  return noloClienteDopoPartenza(admin, sped, cliente?.listino_cliente_id)
+  // Dal listino, anche a contratto tolto o listino cambiato (fonteGiacenza, la stessa dei prezzi); mai il
+  // ripiego sul prezzo pieno, che ha dentro le commissioni. Senza cliente (spedizione del master) resta il
+  // ripiego sopra. Se nessun listino prezza piu' il pacco la base e' 0, come prima: la parte fissa del
+  // servizio si paga, la percentuale no.
+  return (await fonteGiacenza(admin, sped)).nolo ?? 0
 }
 
 // Costi dell'operazione di SVINCOLO = SOLO il servizio scelto (riconsegna/reso/…).

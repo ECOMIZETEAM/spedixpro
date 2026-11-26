@@ -4,7 +4,7 @@ import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { noloMaster, noloCliente, noloClienteDopoPartenzaCon, applicaServizio, addebitaResi, resoPagato, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
 import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
-import { archivioCoppia, haFasceVive, listiniDopoPartenza, listinoDiPartenza, giacenzaCostoArchiviata } from '@/lib/prezzi-archivio'
+import { giacenzaCostoArchiviata, partenzaDi } from '@/lib/prezzi-archivio'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -23,16 +23,19 @@ function chiaveServizio(nome: string): string | null {
 // fisso a zero, e finche' qui si leggeva il solo valore fisso l'intera rete pagava zero mentre il
 // cliente pagava il reso per intero. Chi chiama la applica al nolo di QUEL master (vedi
 // lib/reso-prezzi.ts): la percentuale senza base non vuol dire niente.
-async function prezzoGiacenzaMaster(admin: any, corriereId: string, operazione: string): Promise<{ apertura: number; servizio: number; perc: number }> {
+// `partenza`: quando e' partito il pacco. Se i prezzi di costo del contratto sono stati cancellati DOPO,
+// valgono quelli archiviati (lib/prezzi-archivio.ts); senza data, si legge solo il listino vivo.
+async function prezzoGiacenzaMaster(admin: any, corriereId: string, operazione: string, partenza: string | null = null): Promise<{ apertura: number; servizio: number; perc: number }> {
   // SOLO i listini DEL MASTER PROPRIETARIO del contratto: esistono righe "fantasma" che stanno nel
   // listino di un ALTRO master ma puntano a questo corriere (39 in archivio). Leggendo per solo
   // corriere_id quelle righe SCAVALCAVANO il listino configurato: nell'editor "Riconsegna 0" ma
   // in addebito 0,70. Ora vale ciò che è impostato nel listino del master, punto.
   // Dopo la partenza si paga sempre (26/11/2026): se i prezzi di costo del contratto sono stati
-  // cancellati, valgono quelli archiviati (lib/prezzi-archivio.ts). Prima il master non pagava niente.
-  let suppl: any[] | null = await giacenzaCostoArchiviata(admin, corriereId)
+  // cancellati dopo la partenza, valgono quelli archiviati (lib/prezzi-archivio.ts). Prima il master non
+  // pagava niente.
+  const { data: corr } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
+  let suppl: any[] | null = await giacenzaCostoArchiviata(admin, (corr as any)?.master_id || '', corriereId, partenza)
   if (!suppl) {
-    const { data: corr } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
     const { data: listini } = await admin.from('listini_corrieri').select('id').eq('master_id', (corr as any)?.master_id || '')
     const listinoIds = (listini || []).map((l: any) => l.id)
     if (!listinoIds.length) return { apertura: 0, servizio: 0, perc: 0 }
@@ -107,7 +110,7 @@ export async function addebitaGiacenzaCatena(
   let sped: any = null
   if (params.spedizioneId) {
     const { data } = await admin.from('spedizioni')
-      .select('id,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+      .select('id,created_at,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
       .eq('id', params.spedizioneId).maybeSingle()
     sped = data || null
   }
@@ -121,7 +124,7 @@ export async function addebitaGiacenzaCatena(
     const mCorrId = await corriereDiMasterPerNome(admin, m.id, params.corriereNome)
     if (mCorrId) {
       const mCorr = { id: mCorrId }
-      const pr = await prezzoGiacenzaMaster(admin, mCorr.id, params.operazione)
+      const pr = await prezzoGiacenzaMaster(admin, mCorr.id, params.operazione, sped?.created_at ?? null)
       const apertura = params.conApertura ? pr.apertura : 0
       // Due voci separate (come per il cliente): apertura giacenza + servizio.
       if (apertura > 0) {
@@ -196,7 +199,10 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
   if (full.cliente_id) {
     const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', full.cliente_id).maybeSingle()
     const n = await noloClienteDopoPartenzaCon(admin, full, (cli as any)?.listino_cliente_id)
-    righe.push({ spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id, corriere_id: full.corriere_id,
+    // Nessun listino prezza piu' il pacco: la riga del cliente NON si scrive (a 0 si chiuderebbe per sempre,
+    // senza che nessuno lo veda). Il pacco resta nella sentinella "pacchi a reso senza addebito al cliente".
+    if (n.nolo == null) console.warn('[RESO] nessun listino prezza il pacco, cliente da addebitare a mano', full.id)
+    else righe.push({ spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id, corriere_id: full.corriere_id,
       nolo: n.nolo, listino_id: n.listinoId, da_giacenza: daGiacenza })
   }
   for (const liv of catena) {
@@ -205,10 +211,13 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
       // L'addebito scala il LEDGER (clienti.credito del "(ingrosso)"), non masters.credito.
       const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
       const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto)
-      const nolo = ((lc as any)?.listino_cliente_id && corrVend)
-        ? await noloCliente(admin, { ...full, corriere_id: corrVend }, (lc as any).listino_cliente_id) : null
+      // Dopo la partenza si paga sempre anche sul ledger: il suo listino di oggi, vivo o archiviato (il ledger
+      // non ha un "listino di partenza" sul pacco: listino_cliente_id della gamba e' del cliente finale).
+      const n = ((lc as any)?.listino_cliente_id && corrVend)
+        ? await noloClienteDopoPartenzaCon(admin, { ...full, corriere_id: corrVend, listino_cliente_id: null }, (lc as any).listino_cliente_id)
+        : { nolo: null, listinoId: null }
       righe.push({ spedizione_id: full.id, cliente_id: liv.ledgerClienteId, master_owner_id: liv.fornitore, corriere_id: corrVend,
-        nolo: nolo ?? 0, da_giacenza: daGiacenza })
+        nolo: n.nolo ?? 0, listino_id: n.listinoId, da_giacenza: daGiacenza })
     } else {
       // ALBERO / OWNER: self/self, nolo dal listino del livello (owner = corriere reale → credito_proprio).
       righe.push({ spedizione_id: full.id, master_target_id: liv.master, master_owner_id: liv.master, corriere_id: liv.corriereId,
@@ -280,7 +289,10 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
     // Dopo la partenza si paga sempre: contratto tolto o listino cambiato non azzerano il reso
     // (noloClienteDopoPartenzaCon). La percentuale dallo stesso listino del nolo (listino_id).
     const n = await noloClienteDopoPartenzaCon(admin, full, cli?.listino_cliente_id)
-    righe.push({
+    // Nessun listino prezza piu' il pacco: la riga del cliente NON si scrive (a 0 si chiuderebbe per sempre,
+    // senza che nessuno lo veda). Il pacco resta nella sentinella "pacchi a reso senza addebito al cliente".
+    if (n.nolo == null) console.warn('[RESO] nessun listino prezza il pacco, cliente da addebitare a mano', full.id)
+    else righe.push({
       spedizione_id: full.id, cliente_id: full.cliente_id, master_owner_id: full.master_id,
       corriere_id: full.corriere_id,
       nolo: n.nolo, listino_id: n.listinoId,
@@ -444,41 +456,30 @@ export async function catenaContratto(
 const OP_LABEL: Record<string, string> = { riconsegna: 'Riconsegna', riconsegna_nuovo: 'Riconsegna a nuovo destinatario', reso: 'Reso al mittente' }
 
 // Prezzo giacenza dal listino del CLIENTE (apertura + servizio dell'operazione) per un corriere.
-// Dopo la partenza si paga sempre (lib/prezzi-archivio.ts): il listino di oggi, poi quello con cui il
-// pacco e' partito (`spedizioneId`, solo per il cliente finale); per ognuno i supplementi vivi se il
-// listino prezza ancora il contratto, altrimenti quelli archiviati quando e' stato tolto.
+// Col pacco (`spedizioneId`, il cliente finale): dalla stessa fonte del nolo e del riquadro della giacenza
+// (leggiPrezzi, lib/giacenza-prezzi.ts), cosi' l'apertura addebitata e' quella mostrata, anche a contratto
+// tolto o listino cambiato. Senza pacco (il ledger di un salto a collegamento): il suo listino di oggi.
 async function prezzoGiacenzaClienteListino(admin: any, clienteId: string, corriereId: string, operazione: string, spedizioneId?: string): Promise<{ apertura: number; servizio: number }> {
+  if (spedizioneId && corriereId) {
+    const { data: sped, error } = await admin.from('spedizioni').select('*').eq('id', spedizioneId).maybeSingle()
+    if (error) throw new Error('prezzo giacenza: spedizione non leggibile (' + error.message + ')')
+    if (sped) {
+      const pr = await leggiPrezzi(admin, { ...sped, cliente_id: clienteId, corriere_id: corriereId })
+      return { apertura: Number(pr.apertura) || 0, servizio: Number(pr.servizi?.[operazione]?.valore) || 0 }
+    }
+  }
   const { data: cli } = await admin.from('clienti').select('listino_cliente_id').eq('id', clienteId).maybeSingle()
-  const daRighe = (suppl: any[]) => {
-    let apertura = 0, servizio = 0, aSet = false, sSet = false
-    for (const s of suppl) {
-      if (s.tipo === 'giacenza_apertura') { if (!aSet) { apertura = Number(s.valore) || 0; aSet = true } continue }
-      if (chiaveServizio(s.nome) === operazione && !sSet) { servizio = Number(s.valore) || 0; sSet = true }
-    }
-    return { apertura, servizio }
-  }
-  const vive = async (listinoId: string) => {
-    let q = admin.from('listini_clienti_supplementi').select('id,tipo,nome,valore')
-      .eq('listino_id', listinoId).in('tipo', ['giacenza', 'giacenza_apertura']).order('id', { ascending: true })
-    if (corriereId) q = q.eq('corriere_id', corriereId)
-    const { data: suppl } = await q
-    return daRighe(suppl || [])
-  }
-  if (corriereId) {
-    const partenza = spedizioneId ? await listinoDiPartenza(admin, { id: spedizioneId }) : null
-    for (const l of listiniDopoPartenza(cli?.listino_cliente_id, { listino_cliente_id: partenza })) {
-      if (await haFasceVive(admin, l, corriereId)) return vive(l)
-      const arch = await archivioCoppia(admin, l, corriereId)
-      if (arch) {
-        return daRighe(arch.supplementi
-          .filter((s: any) => s.tipo === 'giacenza' || s.tipo === 'giacenza_apertura')
-          .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id))))
-      }
-    }
-  }
-  // Nessun listino prezza piu' il contratto: come prima, quello che c'e' nel listino di oggi.
   if (!cli?.listino_cliente_id) return { apertura: 0, servizio: 0 }
-  return vive(cli.listino_cliente_id)
+  let q = admin.from('listini_clienti_supplementi').select('id,tipo,nome,valore')
+    .eq('listino_id', cli.listino_cliente_id).in('tipo', ['giacenza', 'giacenza_apertura']).order('id', { ascending: true })
+  if (corriereId) q = q.eq('corriere_id', corriereId)
+  const { data: suppl } = await q
+  let apertura = 0, servizio = 0, aSet = false, sSet = false
+  for (const s of (suppl || [])) {
+    if (s.tipo === 'giacenza_apertura') { if (!aSet) { apertura = Number(s.valore) || 0; aSet = true } continue }
+    if (chiaveServizio(s.nome) === operazione && !sSet) { servizio = Number(s.valore) || 0; sSet = true }
+  }
+  return { apertura, servizio }
 }
 
 type SpedGiac = { id: string; numero: string; cliente_id: string | null; master_id: string; corriere_id: string; giacenza_apertura_addebitata?: boolean; tracking_number?: string | null }
@@ -534,7 +535,7 @@ export async function pianoAperturaGiacenzaCondivisione(admin: any, originanteId
       const pr = await prezzoGiacenzaClienteListino(admin, liv.ledgerClienteId, liv.corriereFornitoreId, 'riconsegna')
       if (pr.apertura > 0) piano.push({ cliente: { masterId: liv.fornitore, clienteId: liv.ledgerClienteId }, importo: pr.apertura })
     } else {
-      const pr = await prezzoGiacenzaMaster(admin, liv.corriereId, 'riconsegna')
+      const pr = await prezzoGiacenzaMaster(admin, liv.corriereId, 'riconsegna', await partenzaDi(admin, o))
       if (pr.apertura > 0) piano.push({ master: liv.master, importo: pr.apertura })
     }
   }
@@ -644,7 +645,7 @@ export async function pianoServizioGiacenzaCondivisione(
 ): Promise<{ o: any; piano: VoceGiacenza[] }> {
   const originanteId = gambe[0].spedizioneId
   const { data: o, error: eO } = await admin.from('spedizioni')
-    .select('id,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
+    .select('id,created_at,numero,cliente_id,master_id,corriere_id,costo_totale,colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta')
     .eq('id', originanteId).maybeSingle()
   if (eO || !o) throw new Error('gamba originante non leggibile: servizio giacenza non addebitato')
   const catena = await catenaDaCorriere(admin, o.corriere_id)
@@ -660,11 +661,13 @@ export async function pianoServizioGiacenzaCondivisione(
   for (const liv of catena) {
     if (liv.ruolo === 'codice') {
       if (!liv.ledgerClienteId || !liv.fornitore || !liv.corriereFornitoreId) throw new Error(`salto a collegamento senza ledger (${liv.master}): servizio giacenza non addebitato`)
-      const sp = { ...o, cliente_id: liv.ledgerClienteId, corriere_id: liv.corriereFornitoreId }
+      // listino_cliente_id null: il listino di partenza segnato sulla gamba e' quello del cliente finale, non
+      // del ledger; per il ledger vale il suo listino di oggi (vivo o archiviato).
+      const sp = { ...o, cliente_id: liv.ledgerClienteId, corriere_id: liv.corriereFornitoreId, listino_cliente_id: null }
       const imp = calcolaCosti(operazione, await leggiPrezzi(admin, sp), sp, await noloClienteSpedizione(admin, sp)).costo_servizio
       if (imp > 0) piano.push({ cliente: { masterId: liv.fornitore, clienteId: liv.ledgerClienteId }, importo: imp })
     } else {
-      const pr = await prezzoGiacenzaMaster(admin, liv.corriereId, operazione)
+      const pr = await prezzoGiacenzaMaster(admin, liv.corriereId, operazione, o.created_at ?? null)
       let servizio = pr.servizio
       if (pr.perc > 0) {
         const nolo = await noloMaster(admin, liv.master, liv.corriereId, o)

@@ -10,7 +10,7 @@ import { gambePerTracking } from '@/lib/condivisione-catena'
 // che prima registrava le richieste con costo zero.
 import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
 import { noloCliente, noloMaster } from '@/lib/reso-prezzi'
-import { giacenzaCostoArchiviata } from '@/lib/prezzi-archivio'
+import { giacenzaCostoArchiviata, partenzaDi } from '@/lib/prezzi-archivio'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -24,7 +24,8 @@ type Ctx = { admin: any; sped: any; ruolo: 'cliente' | 'master'; agente?: boolea
 
 
 // Prezzi giacenza dal LISTINO CORRIERE del master (quello che paga il master).
-async function leggiPrezziMaster(admin: any, corriereId: string | null) {
+// `sped`: il pacco, per sapere quando e' partito (prezzi di costo cancellati dopo = quelli archiviati).
+async function leggiPrezziMaster(admin: any, corriereId: string | null, sped?: any) {
   const out = prezziVuoti()
   if (!corriereId) return out
   // STESSA REGOLA di lib/giacenza-cascata (ordine per id, vince il PRIMO): con supplementi
@@ -34,10 +35,10 @@ async function leggiPrezziMaster(admin: any, corriereId: string | null) {
   // Come lib/giacenza-cascata: SOLO i listini del master proprietario del contratto, cosi' il
   // prezzo mostrato e' esattamente quello impostato nel suo Listino Corrieri (niente righe
   // "fantasma" appartenenti al listino di un altro master).
-  // Prezzi di costo cancellati: quelli archiviati, come li addebita lib/giacenza-cascata.
-  let suppl: any[] | null = await giacenzaCostoArchiviata(admin, corriereId)
+  // Prezzi di costo cancellati dopo la partenza: quelli archiviati, come li addebita lib/giacenza-cascata.
+  const { data: corrOwner } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
+  let suppl: any[] | null = await giacenzaCostoArchiviata(admin, (corrOwner as any)?.master_id || '', corriereId, await partenzaDi(admin, sped))
   if (!suppl) {
-    const { data: corrOwner } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
     const { data: listiniOwner } = await admin.from('listini_corrieri').select('id').eq('master_id', (corrOwner as any)?.master_id || '')
     const idsOwner = (listiniOwner || []).map((l: any) => l.id)
     if (!idsOwner.length) return out
@@ -119,7 +120,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (ruolo === 'master') {
     if (sopraContratto) { prezziControparte = prezziVuoti(); etichettaControparte = 'master' }
     else if (agente) { prezziControparte = await leggiPrezziDaListino(admin, listinoAgenteId, sped.corriere_id); etichettaControparte = 'agente' }
-    else { prezziControparte = await leggiPrezziMaster(admin, sped.corriere_id); etichettaControparte = 'master' }
+    else { prezziControparte = await leggiPrezziMaster(admin, sped.corriere_id, sped); etichettaControparte = 'master' }
   }
   const [{ data: storico }, { data: costi }] = await Promise.all([
     admin.from('giacenza_richieste').select('*').eq('spedizione_id', id).order('created_at', { ascending: false }),

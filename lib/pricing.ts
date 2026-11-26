@@ -11,7 +11,7 @@
 
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
-import { archivioSeTolto, archivioCostoSeTolto, perId } from '@/lib/prezzi-archivio'
+import { perId, type ArchivioCoppia, type ArchivioCosto } from '@/lib/prezzi-archivio'
 import { leggiZoneCap } from '@/lib/zone-cap'
 import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
 import { leggiSupplementiMulticollo, noloMulticolloDaFasce, pesoMulticolloFornitore, zonaMulticolloDi, TIPO_MULTICOLLO_SUPPLEMENTI, type EsitoMulticollo } from '@/lib/multicollo-zone'
@@ -634,11 +634,11 @@ export async function calcolaPrezzoListino(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
-    // SOLO eventi DOPO LA PARTENZA (reso, giacenza, rettifica), e solo col client di servizio: se il
-    // listino non ha piu' nessuna fascia di `corriereId` (contratto tolto), si prezza con le sue righe
-    // archiviate (lib/prezzi-archivio.ts). La creazione, i preventivi e ogni porta che vende non lo
-    // passano mai: per loro un contratto tolto resta tolto.
-    dopoPartenza?: boolean
+    // SOLO eventi DOPO LA PARTENZA (reso, giacenza, rettifica): le righe archiviate di `corriereId` in
+    // questo listino, gia' scelte da lib/prezzi-archivio.ts (fontiCliente), che decide quando valgono. Il
+    // motore non le cerca da solo: la creazione, i preventivi e ogni porta che vende non le passano mai,
+    // e per loro un contratto tolto resta tolto.
+    archivio?: ArchivioCoppia | null
   }
 ): Promise<RisultatoPrezzo> {
   const { listinoId, provincia } = params
@@ -649,9 +649,11 @@ export async function calcolaPrezzoListino(
   const { data: listino } = await supabase
     .from('listini_clienti').select('fattore_volume,solo_peso_reale,master_id').eq('id', listinoId).single()
   let fattore = parseFloat(listino?.fattore_volume) || 5000
-  const arch = params.dopoPartenza && params.corriereId
-    ? await archivioSeTolto(supabase, listinoId, params.corriereId)
-    : null
+  const arch = params.corriereId ? (params.archivio ?? null) : null
+  // Con i prezzi archiviati serve la riga del listino: divisore e "solo peso reale" stanno li', e non sono
+  // in archivio. Listino eliminato (o non letto): non si prezza. Un reso sul volume sbagliato (÷5000
+  // invece del peso reale) e' peggio di nessun prezzo, che almeno resta in vista (revisione 26/11).
+  if (arch && !listino) return null
   // Override PER-CORRIERE (come nel listino corriere): il peso fatturato deve usare lo stesso fattore.
   if (params.corriereId) {
     const { data: agg } = await supabase.from('listini_clienti_corrieri')
@@ -792,8 +794,9 @@ export async function calcolaPrezzoListino(
         .eq('listino_id', listinoId).in('tipo', [TIPO_MINIMO_COLLO, TIPO_MULTICOLLO_SUPPLEMENTI]).in('corriere_id', idsC),
       regoleMulticollo(idsC),
     ])
-    // Contratto tolto: i suoi supplementi multicollo sono quelli archiviati con le fasce.
-    const supMEff = arch
+    // Contratto tolto: i suoi supplementi multicollo sono quelli archiviati con le fasce (se il listino non
+    // ne ha piu' di vivi: lib/prezzi-archivio.ts, regola 4).
+    const supMEff = arch?.supplementi
       ? [...((supM || []) as any[]).filter((s: any) => s.corriere_id !== params.corriereId),
          ...arch.supplementi.filter((s: any) => s.tipo === TIPO_MINIMO_COLLO || s.tipo === TIPO_MULTICOLLO_SUPPLEMENTI)]
       : (supM || [])
@@ -893,7 +896,7 @@ export async function calcolaPrezzoListino(
   // controllare una fattura trovava un'altra regola.
   let sponda = 0
   try {
-    const sp = arch && miglior.corriereId === params.corriereId
+    const sp = arch?.supplementi && miglior.corriereId === params.corriereId
       ? (arch.supplementi.find((s: any) => s.tipo === 'sponda') ?? null)
       : (await supabase.from('listini_clienti_supplementi')
           .select('descrizione,valore').eq('listino_id', listinoId).eq('corriere_id', miglior.corriereId).eq('tipo', 'sponda').maybeSingle()).data
@@ -950,11 +953,10 @@ export async function calcolaPrezzoCorriereDettaglio(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
-    // SOLO eventi DOPO LA PARTENZA (rettifica, reso, giacenza), col client di servizio: se il contratto non
-    // ha piu' nessuna fascia di costo (prezzi cancellati), il costo si legge dalle sue righe archiviate
-    // (lib/prezzi-archivio.ts). La creazione e i preventivi non lo passano mai: per loro un contratto
-    // senza prezzi resta senza prezzi.
-    dopoPartenza?: boolean
+    // SOLO eventi DOPO LA PARTENZA (rettifica, reso, giacenza): i prezzi di costo archiviati del contratto,
+    // gia' scelti da lib/prezzi-archivio.ts (archivioCostoPerPacco), che decide quando valgono. La creazione
+    // e i preventivi non li passano mai: per loro un contratto senza prezzi resta senza prezzi.
+    archivio?: ArchivioCosto | null
   }
 ): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
@@ -978,11 +980,11 @@ export async function calcolaPrezzoCorriereDettaglio(
     .from('listini_corrieri')
     .select('id,corriere_id,fattore_volume,solo_peso_reale')
     .eq('master_id', masterId)
-  // Dopo la partenza, prezzi di costo cancellati: quelli archiviati. Anche se il master non ha piu'
-  // nessun listino (eliminato), il pacco partito con quel costo lo paga lo stesso.
-  const arch = params.dopoPartenza ? await archivioCostoSeTolto(supabase, corriereId) : null
-  if (!listiniLetti?.length && !arch) return null
-  const listini: any[] = listiniLetti || []
+  // Dopo la partenza, prezzi di costo cancellati: quelli archiviati (che valgono solo se il loro listino
+  // esiste ancora: lo controlla archivioCostoPerPacco).
+  const arch = params.archivio ?? null
+  if (!listiniLetti?.length) return null
+  const listini: any[] = listiniLetti
   const listinoIds = listini.map((l: any) => l.id)
   // Fattore volume PER-CORRIERE: l'editor lo salva in listini_corrieri_corrieri (per corriere),
   // NON nel default del listino. Va letto da lì, altrimenti si conteggia 5000 anche se hai messo 4000.
@@ -992,15 +994,20 @@ export async function calcolaPrezzoCorriereDettaglio(
   // garantito: il divisore di un contratto senza listino proprio usciva a caso fra quelli. Se non
   // c'e' niente di suo, si usa 5000, che e' il valore dichiarato di default — mai quello di un altro.
   // Un solo posto decide il divisore, con l'eredita' dalla catena (vedi fattoreVolumeCorriere).
-  // Con i prezzi archiviati, il divisore e' quello dell'aggancio archiviato con loro (stessa scelta di
-  // fattoreDiUnMaster: l'aggancio del listino legato a questo contratto, altrimenti il primo per listino);
-  // se non ne aveva uno, la regola di sempre.
-  const aggArch = (arch?.agganci || [])
-    .filter((a: any) => parseFloat(a?.fattore_volume) > 0)
-    .sort((a: any, b: any) => perId({ id: a.listino_id }, { id: b.listino_id }))
-  const propArch = listini.find((l: any) => l.corriere_id === corriereId)
-  const fvArch = parseFloat((aggArch.find((a: any) => a.listino_id === propArch?.id) || aggArch[0])?.fattore_volume)
-  const fattore = fvArch > 0 ? fvArch : await fattoreVolumeCorriere(supabase, masterId, corriereId)
+  // Con i prezzi archiviati il divisore e', in ordine: quello che il master ha ancora per questo contratto
+  // (vince il vivo, come lato cliente), quello dell'aggancio archiviato con le fasce (stessa scelta di
+  // fattoreDiUnMaster), e solo dopo quello ereditato dalla catena.
+  let fattore: number
+  const fvVivo = arch ? await fattoreDiUnMaster(supabase, masterId, corriereId) : null
+  if (fvVivo && fvVivo > 0) fattore = fvVivo
+  else {
+    const aggArch = (arch?.agganci || [])
+      .filter((a: any) => parseFloat(a?.fattore_volume) > 0)
+      .sort((a: any, b: any) => perId({ id: a.listino_id }, { id: b.listino_id }))
+    const propArch = listini.find((l: any) => l.corriere_id === corriereId)
+    const fvArch = parseFloat((aggArch.find((a: any) => a.listino_id === propArch?.id) || aggArch[0])?.fattore_volume)
+    fattore = fvArch > 0 ? fvArch : await fattoreVolumeCorriere(supabase, masterId, corriereId)
+  }
 
   // "TASSA SOLO SUL PESO REALE" E' DI QUESTO CONTRATTO, NON DEL MASTER.
   //
@@ -1104,7 +1111,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // contrassegno/assicurazione poteva cambiare tra una chiamata e l'altra. Ora la scelta e' stabile.
   // Col multicollo si leggono PRIMA della fascia (servono al multicollo); col collo singolo nello stesso
   // punto di sempre, dopo la fascia: se la fascia manca non si fa nemmeno questa lettura.
-  const leggiSuppl = async () => arch ? arch.supplementi : (await supabase
+  const leggiSuppl = async () => arch?.supplementi ? arch.supplementi : (await supabase
     .from('listini_corrieri_supplementi')
     .select('tipo,valore,tipo_calcolo,descrizione')
     .in('listino_id', listinoIds)
@@ -1255,8 +1262,8 @@ export async function calcolaPrezzoCorriere(
 // supera il massimo scaglione (il contratto non copre quell'importo).
 export async function calcolaSupplementiCliente(
   supabase: any,
-  // dopoPartenza: come in calcolaPrezzoListino (contratto tolto → supplementi archiviati). Solo rettifiche.
-  params: { listinoId: string; corriereId: string; contrassegno?: number; assicurazione?: number; valoreMerce?: number; nolo: number; pesoReale?: number; dopoPartenza?: boolean }
+  // archivio: come in calcolaPrezzoListino (righe archiviate scelte da lib/prezzi-archivio.ts). Solo rettifiche.
+  params: { listinoId: string; corriereId: string; contrassegno?: number; assicurazione?: number; valoreMerce?: number; nolo: number; pesoReale?: number; archivio?: ArchivioCoppia | null }
 ): Promise<{ contrassegno: number; assicurazione: number; disponibile: boolean }> {
   const cod = Number(params.contrassegno) || 0
   const ass = Number(params.assicurazione) || 0
@@ -1264,9 +1271,9 @@ export async function calcolaSupplementiCliente(
   const nolo = Number(params.nolo) || 0
   if (cod <= 0 && ass <= 0) return { contrassegno: 0, assicurazione: 0, disponibile: true }
 
-  const arch = params.dopoPartenza ? await archivioSeTolto(supabase, params.listinoId, params.corriereId) : null
-  const suppl = arch
-    ? arch.supplementi.filter((s: any) => s.tipo === 'contrassegno' || s.tipo === 'assicurazione')
+  const supplArch = params.archivio?.supplementi
+  const suppl = supplArch
+    ? supplArch.filter((s: any) => s.tipo === 'contrassegno' || s.tipo === 'assicurazione')
     : (await supabase
         .from('listini_clienti_supplementi')
         .select('tipo, descrizione, valore, tipo_calcolo')

@@ -25,6 +25,14 @@ begin
     raise exception 'fn_addebita_resi e'' cambiata dal 25/11: non la sovrascrivo. Rileggerla e rifare lo script.';
   end if;
 end $$;
+-- fn_reso_perc_cliente decide la percentuale di OGNI reso cliente, non solo dei contratti tolti: si riscrive
+-- solo se e' ancora quella letta il 26/11 (revisione del 26/11: prima lo script la ricreava alla cieca).
+do $$
+begin
+  if md5(pg_get_functiondef('public.fn_reso_perc_cliente(uuid,uuid)'::regprocedure)) <> 'c4d3e7972eb66d2f9dc3784c2d637025' then
+    raise exception 'fn_reso_perc_cliente e'' cambiata dal 26/11: non la sovrascrivo. Rileggerla e rifare lo script.';
+  end if;
+end $$;
 -- Il testo di prima, per controllare in fondo che sia cambiata SOLO la riga della percentuale.
 create temp table _addebita_resi_prima on commit drop as
   select pg_get_functiondef('public.fn_addebita_resi(jsonb,uuid)'::regprocedure) d;
@@ -37,18 +45,20 @@ language sql stable security definer set search_path = public as $$
   with l as (
     select coalesce(p_listino_id, c.listino_cliente_id) id from public.clienti c where c.id = p_cliente_id
   ), vive as (
-    select s.valore, s.descrizione, s.id::text ordine
+    select s.valore, s.descrizione, s.id ordine
       from public.listini_clienti_supplementi s, l
      where s.listino_id = l.id and s.tipo = 'giacenza' and s.corriere_id = p_corriere_id
        and lower(s.nome) like '%reso%' and lower(s.nome) not like '%nuovo%'
   ), archiviate as (
-    -- solo se il contratto non e' piu' nel listino (nessuna fascia viva): stessa condizione del codice
-    select (a.riga->>'valore')::numeric valore, a.riga->>'descrizione' descrizione, a.riga->>'id' ordine
+    -- solo se il contratto non e' piu' nel listino (nessuna fascia viva) e il listino non ha piu' nessun suo
+    -- supplemento: stesse condizioni del codice (lib/prezzi-archivio.ts, regola 4: vince il vivo)
+    select (a.riga->>'valore')::numeric valore, a.riga->>'descrizione' descrizione, (a.riga->>'id')::uuid ordine
       from public.listini_clienti_archivio a, l
      where a.tabella = 'listini_clienti_supplementi' and a.listino_id = l.id and a.corriere_id = p_corriere_id
        and a.riga->>'tipo' = 'giacenza'
        and lower(coalesce(a.riga->>'nome', '')) like '%reso%' and lower(coalesce(a.riga->>'nome', '')) not like '%nuovo%'
        and not exists (select 1 from public.listini_clienti_fasce f where f.listino_id = l.id and f.corriere_id = p_corriere_id)
+       and not exists (select 1 from public.listini_clienti_supplementi v where v.listino_id = l.id and v.corriere_id = p_corriere_id)
        -- una descrizione che non e' JSON farebbe fallire la conversione qui sotto, e con lei tutto l'addebito
        -- dei resi della chiamata: la riga archiviata si salta (le vive si leggono come prima)
        and (btrim(coalesce(a.riga->>'descrizione', '')) = '' or pg_input_is_valid(btrim(a.riga->>'descrizione'), 'jsonb'))
@@ -256,6 +266,7 @@ language sql stable security definer set search_path = public as $$
        and lower(a.riga ->> 'nome') like '%reso%'
        and lower(a.riga ->> 'nome') not like '%nuovo%'
        and not exists (select 1 from public.listini_corrieri_fasce f where f.corriere_id = p_corriere_id)
+       and not exists (select 1 from public.listini_corrieri_supplementi v where v.corriere_id = p_corriere_id)
        -- descrizione non JSON: la riga archiviata si salta invece di far fallire tutto l'addebito dei resi
        and (btrim(coalesce(a.riga ->> 'descrizione', '')) = '' or pg_input_is_valid(btrim(a.riga ->> 'descrizione'), 'jsonb'))
   ) x

@@ -255,7 +255,7 @@ export async function POST(req: NextRequest) {
         master_target_id: targetMasterId,
         master_owner_id: utente!.master_id!,
         corriere_id: suoCorriere,
-        nolo: (suoCorriere && spD ? await noloMaster(adminDb, targetMasterId, suoCorriere, spD) : null) || 0,
+        nolo: (suoCorriere && spD ? await noloMaster(adminDb, targetMasterId, suoCorriere, spD, { spedizioneId: v.id }) : null) || 0,
         pagato: await pagatoDaMaster(adminDb, v.id, targetMasterId),
       })
     }
@@ -301,6 +301,9 @@ export async function POST(req: NextRequest) {
       .eq('id', v.id).single()
     // Dopo la partenza si paga sempre (noloClienteDopoPartenzaCon): la percentuale dallo stesso listino.
     const n = await noloClienteDopoPartenzaCon(adminDb, sp, cliRec?.listino_cliente_id, { spedizioneId: v.id })
+    // Nessun listino prezza piu' il pacco: la riga del cliente NON si scrive (a 0 si chiuderebbe per sempre,
+    // senza che nessuno lo veda). Il pacco resta nella sentinella "pacchi a reso senza addebito al cliente".
+    if (n.nolo == null) { console.warn('[RESO] nessun listino prezza il pacco, cliente da addebitare a mano', v.id); continue }
     righeCli.push({
       spedizione_id: v.id,
       cliente_id: clienteId,

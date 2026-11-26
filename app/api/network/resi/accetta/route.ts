@@ -105,6 +105,9 @@ export async function POST(req: NextRequest) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
       // Dopo la partenza si paga sempre (noloClienteDopoPartenzaCon): la percentuale dallo stesso listino.
       const n = await noloClienteDopoPartenzaCon(admin, s, cli?.listino_cliente_id)
+      // Nessun listino prezza piu' il pacco: la riga del cliente NON si scrive (a 0 si chiuderebbe per sempre,
+      // senza che nessuno lo veda). Il pacco resta nella sentinella "pacchi a reso senza addebito al cliente".
+      if (n.nolo == null) { console.warn('[RESO] nessun listino prezza il pacco, cliente da addebitare a mano', s.id); continue }
       righe.push({
         spedizione_id: s.id, cliente_id: clienteId, master_owner_id: mio, corriere_id: s.corriere_id || null,
         nolo: n.nolo, listino_id: n.listinoId,

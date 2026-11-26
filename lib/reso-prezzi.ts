@@ -1,5 +1,5 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
-import { listiniDopoPartenza, listinoDiPartenza } from '@/lib/prezzi-archivio'
+import { fontiCliente, archivioCostoPerPacco, partenzaDi, type ArchivioCoppia, type FonteCliente } from '@/lib/prezzi-archivio'
 
 // QUANTO COSTA UN RESO — una regola sola, per tutti e due i modi in cui un reso nasce.
 //
@@ -86,9 +86,9 @@ export async function pacchiVeri(admin: any, sped: any): Promise<any[]> {
 // percentuale della fascia stessa e non un servizio a parte). Niente contrassegno, niente
 // assicurazione, niente sponda: il pacco torna indietro e basta, non c'è niente da incassare, da
 // assicurare o da scaricare con la sponda — quei supplementi il cliente li ha già pagati all'andata.
-// null se non calcolabile. E' sempre un conto DOPO la partenza: se il contratto e' stato tolto da quel
-// listino, il motore usa i suoi prezzi archiviati (lib/prezzi-archivio.ts).
-export async function noloCliente(admin: any, sped: any, listinoId: string | null | undefined): Promise<number | null> {
+// null se non calcolabile. `archivio`: le righe archiviate di quel listino, quando il contratto e' stato
+// tolto (le sceglie lib/prezzi-archivio.ts, fontiCliente); senza, si prezza dal listino vivo.
+export async function noloCliente(admin: any, sped: any, listinoId: string | null | undefined, archivio?: ArchivioCoppia | null): Promise<number | null> {
   if (!listinoId) return null
   const ris = await calcolaPrezzoListino(admin, {
     listinoId,
@@ -98,7 +98,7 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
     citta: sped?.dest_citta || '',   // CAP condivisi fra piu' comuni
     packages: await pacchiVeri(admin, sped),
     corriereId: sped?.corriere_id,
-    dopoPartenza: true,
+    archivio,
   })
   if (!ris || !(ris.prezzo > 0)) return null
   // Il motore somma la sponda al prezzo di fascia: si toglie quella che ha sommato lui (ris.sponda).
@@ -110,18 +110,19 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
 // IL NOLO DEL CLIENTE PER CIO' CHE SUCCEDE DOPO LA PARTENZA (reso, riconsegna, nuovo destinatario).
 //
 // Regola di Lorenzo del 25/11/2026: dopo la partenza SI PAGA SEMPRE, anche se il master ha tolto il
-// contratto dal listino del cliente o l'ha spostato su un altro listino. Si prova, in ordine:
-//   1. il listino che il cliente ha oggi (come sempre);
-//   2. il listino con cui il pacco e' partito, se e' un altro (spedizioni.listino_cliente_id);
-// e per ognuno i prezzi vivi o, se il contratto e' stato tolto, quelli archiviati.
+// contratto dal listino del cliente o l'ha spostato su un altro listino. Le fonti, e il loro ordine, le
+// decide lib/prezzi-archivio.ts (fontiCliente): prezzi vivi di oggi, vivi del listino di partenza,
+// archiviati del listino di partenza; vale la prima che prezza il pacco.
 //
 // Sostituisce la regola del 18/09 ("contratto tolto = al cliente niente, lo assorbe il master"),
 // nata da un caso vero che resta valido: NN668406880, il 17/09 il master aveva tolto il contratto
 // dal listino del cliente e il reso del giorno dopo, non trovando fasce, ripiego' su quanto pagato
 // all'andata (costo_totale) e gli addebito' 17,41 EUR — nolo PIU' commissione su 407 EUR di
 // contrassegno. Il ripiego sull'andata resta vietato: si prezza dal listino, con le sue fasce.
-// Solo se nessun listino prezza piu' il contratto il nolo vale 0 e il cliente ha la sua riga a -0 EUR
-// (fn_addebita_resi): sono i casi che il controllo giornaliero elenca, da addebitare a mano.
+// Se nessuna fonte prezza piu' il pacco, `nolo` e' null e chi chiama NON scrive la riga del cliente:
+// scriverla a 0 la chiuderebbe per sempre (l'indice unico dei resi vieta il secondo addebito) e la
+// renderebbe invisibile. Senza riga, il pacco finisce nella sentinella "pacchi a reso senza addebito al
+// cliente" (controllo_giornaliero_4) e si addebita a mano. La catena dei master paga comunque.
 //
 // `listinoId` dice da quale listino viene il nolo: fn_addebita_resi ne legge la percentuale del reso,
 // che deve venire dallo stesso listino.
@@ -129,17 +130,13 @@ export async function noloCliente(admin: any, sped: any, listinoId: string | nul
 // il listino di partenza, senza cambiare i colli su cui si calcola il nolo (pacchiVeri guarda sped.id).
 export async function noloClienteDopoPartenzaCon(
   admin: any, sped: any, listinoOggi: string | null | undefined, opz?: { spedizioneId?: string },
-): Promise<{ nolo: number; listinoId: string | null }> {
-  const partenza = await listinoDiPartenza(admin, opz?.spedizioneId ? { ...sped, id: opz.spedizioneId } : sped)
-  for (const l of listiniDopoPartenza(listinoOggi, { listino_cliente_id: partenza })) {
-    const n = await noloCliente(admin, sped, l)
-    if (n != null) return { nolo: n, listinoId: l }
+): Promise<{ nolo: number | null; listinoId: string | null; fonte: FonteCliente | null }> {
+  const fonti = await fontiCliente(admin, opz?.spedizioneId ? { ...sped, id: opz.spedizioneId } : sped, listinoOggi)
+  for (const f of fonti) {
+    const n = await noloCliente(admin, sped, f.listinoId, f.archivio)
+    if (n != null) return { nolo: n, listinoId: f.listinoId, fonte: f }
   }
-  return { nolo: 0, listinoId: null }
-}
-
-export async function noloClienteDopoPartenza(admin: any, sped: any, listinoOggi: string | null | undefined): Promise<number> {
-  return (await noloClienteDopoPartenzaCon(admin, sped, listinoOggi)).nolo
+  return { nolo: null, listinoId: null, fonte: null }
 }
 
 
@@ -147,9 +144,12 @@ export async function noloClienteDopoPartenza(admin: any, sped: any, listinoOggi
 // Stessa regola del cliente — sul ritorno non si paga ne' contrassegno ne' assicurazione ne'
 // sponda. null se non calcolabile.
 // Dopo la partenza si paga sempre (25-26/11/2026): se i prezzi di costo del contratto sono stati
-// cancellati, si prezza con quelli archiviati. Prima usciva null e il reso del master ripiegava su
-// quanto aveva pagato all'andata, contrassegno compreso.
-export async function noloMaster(admin: any, masterId: string, corriereId: string, sped: any): Promise<number | null> {
+// cancellati DOPO la partenza del pacco, si prezza con quelli archiviati (lib/prezzi-archivio.ts). Prima
+// usciva null e il reso del master ripiegava su quanto aveva pagato all'andata, contrassegno compreso.
+// `opz.spedizioneId`: per chi ha letto la spedizione senza id (resi/distinte), per trovarne la partenza.
+export async function noloMaster(admin: any, masterId: string, corriereId: string, sped: any, opz?: { spedizioneId?: string }): Promise<number | null> {
+  const archivio = await archivioCostoPerPacco(admin, masterId, corriereId,
+    await partenzaDi(admin, opz?.spedizioneId ? { ...sped, id: opz.spedizioneId } : sped))
   const pacchi = await pacchiVeri(admin, sped)
   const pesoReale = pacchi.reduce((s: number, p: any) => s + (Number(p?.weight) || 0), 0) || 1
   const d = await calcolaPrezzoCorriereDettaglio(admin, {
@@ -159,7 +159,7 @@ export async function noloMaster(admin: any, masterId: string, corriereId: strin
     paese: sped?.dest_paese || 'IT',
     citta: sped?.dest_citta || '',
     pesoReale, packages: pacchi,
-    dopoPartenza: true,
+    archivio,
   })
   if (!d) return null
   const nolo = r2((Number(d.nolo) || 0) + (Number(d.fuel) || 0))   // niente sponda, niente commissioni
