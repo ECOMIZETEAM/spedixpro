@@ -1,0 +1,96 @@
+/* IL VESTITO COMUNE della grafica nuova (Lorenzo 26/11/2026: «ora sistema le altre pagine del menu»). Le pagine del menu
+   sono un centinaio, scritte con gli stili in linea e con un vocabolario molto regolare: schede bianche con l'angolo da
+   8 px e il bordo grigio, titoli da 20 px, tasti arancio #f97316, testate delle tabelle in maiuscolo, campi col bordo
+   #d1d5db. Qui le si veste tutte nella lingua della Dashboard nuova (dashboard-finexy.css) senza toccare il loro codice:
+   schede bianche con l'ombra morbida, titolo grande, tasti principali neri, testate su una fascia grigia, campi grigi.
+   Vale SOLO dentro .gx-vestito, che la cornice mette sulle pagine senza un disegno loro (PAGINE_DISEGNATE in
+   pagine-prova.ts): con la grafica di oggi la classe non c'è e le pagine restano identiche al pixel.
+   Gli stili in linea si leggono in due forme: come li scrive il server («background:#fff») e come li riscrive il browser
+   quando li cambia («background: rgb(255, 255, 255)»). Le finestre fisse (le modali, bianche su ogni fondo) restano
+   come sono: lì niente colori della notte, che darebbero testo chiaro sul bianco. */
+
+.gx .gx-vestito { --gx-inchiostro: #111111; --gx-testo: #1F1F1F; --gx-attenuato: #6E6E73; --gx-filo: #ECECEC; --gx-incavo: #F6F6F6; --gx-vetro: #FFFFFF;
+  --gx-accento: #EA5326; --gx-accento-testo: #C2410C; --gx-bene: #2E9B55; --gx-problema: #D9474E;
+  --vs-carta: #FFFFFF; --vs-nero: linear-gradient(180deg, #3A3A38, #121212); --vs-scelta: #1C1C1C;
+  --vs-ombra: 0 1px 3px rgba(0,0,0,.035), 0 6px 22px rgba(0,0,0,.035);
+  font-family: var(--font-inter, 'Inter'), system-ui, -apple-system, sans-serif; font-variant-numeric: tabular-nums; color: var(--gx-testo); }
+.gx[data-luce="notte"] .gx-vestito { color-scheme: dark; --gx-inchiostro: #F2F2F3; --gx-testo: #E6E6E8; --gx-attenuato: #A4A4AA; --gx-filo: #36363A;
+  --gx-incavo: #2A2A2E; --gx-vetro: #1E1E21; --gx-accento-testo: #FF9C7A; --gx-bene: #4CC37A; --gx-problema: #FF6B6B;
+  --vs-carta: #1E1E21; --vs-nero: linear-gradient(180deg, #4A4A4F, #222225); --vs-scelta: #ECECEC;
+  --vs-ombra: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 30px rgba(0,0,0,.35); }
+
+/* il titolo della pagina, come quello della dashboard */
+.gx .gx-vestito h1 { font-size: 34px !important; font-weight: 500 !important; letter-spacing: -0.6px; line-height: 1.15; color: var(--gx-inchiostro) !important; }
+
+/* LE SCHEDE: bianche, senza bordo, angolo 15, l'ombra morbida della dashboard. Anche i tasti grandi bianchi (angolo da
+   8 px in su), che nelle pagine fanno da schede cliccabili: le caselle «Credito clienti», i conti della Lista Movimenti */
+.gx .gx-vestito :is(div, button):is([style*="background: rgb(255, 255, 255)"], [style*="background:#fff;"], [style$="background:#fff"], [style*="background: white"], [style*="background:white"]):is([style*="border-radius: 8px"], [style*="border-radius:8px"], [style*="border-radius: 10px"], [style*="border-radius:10px"], [style*="border-radius: 12px"], [style*="border-radius:12px"], [style*="border-radius: 14px"], [style*="border-radius:14px"]):not([style*="position: fixed"], [style*="position:fixed"], [style*="position: absolute"], [style*="position:absolute"]) {
+  background: var(--vs-carta) !important; border: 0 !important; border-radius: 15px !important; box-shadow: var(--vs-ombra) !important; }
+/* la scheda scelta, che oggi è un tasto arancio chiaro col bordo arancio (il conto aperto nella Lista Movimenti): bianca
+   con l'anello nero, come la scelta nella Nuova spedizione. Gli avvisi arancio chiaro (bordo #fed7aa) restano avvisi */
+.gx .gx-vestito button:is([style*="background: rgb(255, 247, 237)"], [style*="background:#fff7ed"]):is([style*="rgb(249, 115, 22)"], [style*="#f97316"]):is([style*="border-radius: 8px"], [style*="border-radius:8px"], [style*="border-radius: 10px"], [style*="border-radius:10px"], [style*="border-radius: 12px"], [style*="border-radius:12px"], [style*="border-radius: 14px"], [style*="border-radius:14px"]):not([style*="position: fixed"], [style*="position:fixed"]) {
+  background: var(--vs-carta) !important; border: 0 !important; border-radius: 15px !important; box-shadow: inset 0 0 0 2px var(--vs-scelta), var(--vs-ombra) !important; }
+/* i riquadri grigi dentro le schede (e i tasti grigi, come i periodi del Report Guadagno): il grigio della dashboard,
+   senza bordo */
+.gx .gx-vestito :is(div, button):is([style*="background: rgb(249, 250, 251)"], [style*="background:#f9fafb"], [style*="background: rgb(250, 250, 250)"], [style*="background:#fafafa"],
+  [style*="background: rgb(245, 245, 245)"], [style*="background:#f5f5f5"], [style*="background: rgb(243, 244, 246)"], [style*="background:#f3f4f6"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background: var(--gx-incavo) !important; border-color: transparent !important; }
+
+/* LE TABELLE: la testata su una fascia grigia con gli angoli tondi, scritte minuscole e grigie */
+.gx .gx-vestito table { border-collapse: separate !important; border-spacing: 0; }
+.gx .gx-vestito thead tr, .gx .gx-vestito tr:has(> th) { background: transparent !important; }
+.gx .gx-vestito th { background: var(--gx-incavo) !important; color: var(--gx-attenuato) !important; font-size: 12px !important; font-weight: 500 !important;
+  text-transform: none !important; letter-spacing: 0 !important; border-top: 0 !important; border-bottom: 0 !important; white-space: nowrap; }
+.gx .gx-vestito tr > th:first-child { border-radius: 10px 0 0 10px; }
+.gx .gx-vestito tr > th:last-child { border-radius: 0 10px 10px 0; }
+.gx .gx-vestito td { border-color: var(--gx-filo) !important; }
+.gx .gx-vestito tbody tr:hover > td { background-color: color-mix(in srgb, var(--gx-incavo) 70%, transparent); }
+
+/* I CAMPI: grigi, senza bordo, angolo 10; il bordo arancio quando ci si scrive */
+.gx .gx-vestito :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="submit"], [type="button"]), select, textarea):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background-color: var(--gx-incavo) !important; border: 1px solid transparent !important; border-radius: 10px !important; color: var(--gx-inchiostro) !important; box-shadow: none !important; }
+.gx .gx-vestito :is(input, select, textarea):focus:not([style*="position: fixed"] *) { outline: none; border-color: var(--gx-accento) !important; }
+.gx .gx-vestito :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--vs-scelta); }
+
+/* I TASTI: l'arancio pieno di oggi diventa il nero della dashboard, a pillola; i tasti bianchi a pillola col filo */
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(249, 115, 22)"], [style*="background:#f97316"], [style*="background: rgb(234, 88, 12)"], [style*="background:#ea580c"]):not(:disabled) {
+  background: var(--vs-nero) !important; color: #fff !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 3px 9px rgba(0,0,0,.18); }
+/* i tasti bianchi piccoli (angolo da 4-6 px) a pillola col filo; quelli grandi (angolo 8 px e oltre, come le schede
+   dei conti della Lista Movimenti) restano schede, sennò diventano ovali */
+.gx .gx-vestito button:is([style*="background: rgb(255, 255, 255)"], [style*="background:#fff;"], [style$="background:#fff"]):is([style*="border-radius: 4px"], [style*="border-radius:4px"], [style*="border-radius: 5px"], [style*="border-radius:5px"], [style*="border-radius: 6px"], [style*="border-radius:6px"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  border-radius: 999px !important; border-color: var(--gx-filo) !important; }
+/* i tasti tinti di arancio chiaro («Azzera filtri», «Modifica», «Visualizza») e il blu pieno («Stampa selezionate»):
+   tasti secondari bianchi col filo, come «Fatture» nella dashboard. Il verde pieno («Conferma selezionate») è
+   un'azione principale: nero */
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(255, 247, 237)"], [style*="background:#fff7ed"], [style*="background: rgb(37, 99, 235)"], [style*="background:#2563eb"]):is([style*="border-radius: 4px"], [style*="border-radius:4px"], [style*="border-radius: 5px"], [style*="border-radius:5px"], [style*="border-radius: 6px"], [style*="border-radius:6px"]):not(:disabled):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background: var(--vs-carta) !important; color: var(--gx-inchiostro) !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 0 0 1px var(--gx-filo), 0 2px 8px rgba(0,0,0,.04) !important; }
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(22, 163, 74)"], [style*="background:#16a34a"]):not(:disabled) {
+  background: var(--vs-nero) !important; color: #fff !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 3px 9px rgba(0,0,0,.18); }
+/* l'arancio pieno spento (es. «Crea distinta (0)»): grigio, come i tasti spenti della dashboard */
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(249, 115, 22)"], [style*="background:#f97316"]):disabled { background: var(--gx-incavo) !important; color: var(--gx-attenuato) !important; border: 0 !important; border-radius: 999px !important; opacity: 1 !important; }
+/* i numeri delle spedizioni e gli altri collegamenti scritti in arancio: in nero come nell'Elenco (l'arancio al
+   passaggio); il resto del testo arancio un tono più scuro, leggibile sul bianco */
+.gx .gx-vestito :is(button, a):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"]):not([style*="background"]) { color: var(--gx-inchiostro) !important; text-decoration: none !important; font-weight: 600; }
+.gx .gx-vestito :is(button, a):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"]):not([style*="background"]):hover { color: var(--gx-accento-testo) !important; text-decoration: underline !important; }
+.gx .gx-vestito :is(span, div, p, td, b, strong):is([style*="color: rgb(249, 115, 22)"], [style*="color:#f97316"], [style*="color: rgb(234, 88, 12)"], [style*="color:#ea580c"]):not([style*="background"]) { color: var(--gx-accento-testo) !important; }
+
+/* I FILI dei bordi scritti a mano, del colore dei fili della dashboard */
+.gx .gx-vestito :is([style*="rgb(232, 232, 232)"], [style*="#e8e8e8"], [style*="rgb(209, 213, 219)"], [style*="#d1d5db"], [style*="rgb(238, 238, 238)"], [style*="#eee"],
+  [style*="rgb(229, 231, 235)"], [style*="#e5e7eb"], [style*="rgb(240, 240, 240)"], [style*="#f0f0f0"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  border-color: var(--gx-filo) !important; }
+
+/* I TESTI scritti a mano (#1a1a1a, i grigi): i colori della dashboard, così di notte diventano chiari. Solo dove
+   l'elemento non ha un fondo suo: un cartellino colorato tiene la sua scritta */
+.gx .gx-vestito :is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"], [style*="color: rgb(51, 51, 51)"], [style*="color:#333"]):not([style*="background"], [style*="position: fixed"] *, [style*="position:fixed"] *) { color: var(--gx-inchiostro) !important; }
+.gx .gx-vestito :is([style*="color: rgb(102, 102, 102)"], [style*="color:#666"], [style*="color: rgb(153, 153, 153)"], [style*="color:#999"], [style*="color: rgb(107, 114, 128)"], [style*="color:#6b7280"],
+  [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(85, 85, 85)"], [style*="color:#555"], [style*="color: rgb(136, 136, 136)"], [style*="color:#888"], [style*="color: rgb(156, 163, 175)"], [style*="color:#9ca3af"]):not([style*="background"], [style*="position: fixed"] *, [style*="position:fixed"] *) { color: var(--gx-attenuato) !important; }
+
+/* LA NOTTE: ogni fondo bianco scritto a mano (righe, riquadri senza angolo, tasti bianchi) prende il fondo della
+   scheda, altrimenti resterebbe un rettangolo bianco con le scritte ormai chiare; dove sullo stesso elemento c'è anche
+   la scritta scura, diventa chiara */
+.gx[data-luce="notte"] .gx-vestito :is([style*="background: rgb(255, 255, 255)"], [style*="background:#fff;"], [style$="background:#fff"], [style*="background: white"], [style*="background:white"]):not([style*="position: fixed"], [style*="position:fixed"], [style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background-color: var(--vs-carta) !important; }
+.gx[data-luce="notte"] .gx-vestito :is([style*="background: rgb(255, 255, 255)"], [style*="background:#fff;"], [style$="background:#fff"], [style*="background: white"], [style*="background:white"]):is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  color: var(--gx-inchiostro) !important; }
+.gx[data-luce="notte"] .gx-vestito :is(div, button):is([style*="background: rgb(249, 250, 251)"], [style*="background:#f9fafb"], [style*="background: rgb(243, 244, 246)"], [style*="background:#f3f4f6"], [style*="background: rgb(245, 245, 245)"], [style*="background:#f5f5f5"], [style*="background: rgb(250, 250, 250)"], [style*="background:#fafafa"]):is([style*="color: rgb(26, 26, 26)"], [style*="color:#1a1a1a"], [style*="color: rgb(55, 65, 81)"], [style*="color:#374151"], [style*="color: rgb(17, 24, 39)"], [style*="color:#111827"], [style*="color: rgb(107, 114, 128)"], [style*="color:#6b7280"]):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  color: var(--gx-inchiostro) !important; }

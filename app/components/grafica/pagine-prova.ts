@@ -6,4 +6,17 @@ export const PAGINE_PROVA = new Set([
   '/cliente/dashboard', '/cliente/spedizioni', '/cliente/spedizioni/nuova',
   // il calendario (25/11) nasce già nella grafica nuova
   '/dashboard/calendario', '/cliente/calendario',
+  // 26/11, col vestito comune (vestito.css), fotografate coi dati veri di giorno, di notte e sul telefono
+  '/dashboard/spedizioni/giacenze', '/dashboard/spedizioni/rettifica', '/dashboard/spedizioni/cancellate',
+  '/dashboard/contrassegni', '/dashboard/ritiri/elenco', '/dashboard/distinte/elenco', '/dashboard/distinte/crea',
+  '/dashboard/resi/distinte', '/dashboard/network', '/dashboard/listini', '/dashboard/clienti', '/dashboard/movimenti',
+  '/dashboard/reports/spedizioni', '/dashboard/statistiche/profitto', '/dashboard/impostazioni', '/dashboard/costi-gestione',
+])
+
+// LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro
+// la cornice nuova, prendono il vestito comune (grafica/vestito.css, classe gx-vestito sulla pagina). Un elenco a parte
+// da quello della prova: una pagina si apre nella prova quando il vestito le sta bene, ma il disegno resta quello comune.
+export const PAGINE_DISEGNATE = new Set([
+  '/dashboard', '/dashboard/spedizioni', '/dashboard/spedizioni/nuova', '/dashboard/calendario',
+  '/cliente/dashboard', '/cliente/spedizioni', '/cliente/spedizioni/nuova', '/cliente/calendario',
 ])

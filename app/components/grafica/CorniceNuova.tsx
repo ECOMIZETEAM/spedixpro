@@ -15,8 +15,9 @@ import { FoglioIcone, Icona, ICONA_VOCE } from './icone'
 import { GraficaNuova } from './contesto'
 import { useAppNativa } from '@/lib/app-nativa'
 import Sondaggio from './Sondaggio'
-import { PAGINE_PROVA } from './pagine-prova'
+import { PAGINE_PROVA, PAGINE_DISEGNATE } from './pagine-prova'
 import './grafica.css'
+import './vestito.css'
 
 export type VoceMenu = { label: string; href?: string; external?: boolean; sub?: { label: string; href: string }[] }
 export type Pallino = { n: number; title?: string }
@@ -334,7 +335,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
             {/* sul telefono una riga sola (Lorenzo 20/11, «vai con la B»): frase e tasti corti, la striscia passa da 165 a
                 44 px; i lettori di schermo leggono sempre le parole intere (aria-label) */}
             <span className="gx-prova__testo">
-              <span className="gx-prova__lungo"><b>Stai provando la nuova MoovExpress.</b> Per ora sono pronte la Dashboard, l'Elenco spedizioni e la Nuova spedizione: le altre voci arrivano presto.</span>
+              <span className="gx-prova__lungo"><b>Stai provando la nuova MoovExpress.</b> Le voci del menu ancora spente arrivano presto.</span>
               <span className="gx-prova__corto" aria-hidden="true"><b>Nuova versione</b> in prova</span>
             </span>
             <button type="button" className="gx-prova__voto" aria-label="Lascia il tuo voto" onClick={() => setVoto('voto')}>
@@ -384,7 +385,8 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
             <MenuProfilo nome={user?.nome} ruolo={user?.ruolo} voci={vociProfilo} compatto={isMobile} aspetto="nuova" iniziali={iniziali} />
           </div>
         </header>
-        <main className="gx-pagina">
+        {/* il vestito comune (vestito.css) sulle pagine di oggi che non hanno ancora un disegno loro */}
+        <main className={'gx-pagina' + (PAGINE_DISEGNATE.has(path) ? '' : ' gx-vestito')}>
           <FlashBanner />
           <GraficaNuova.Provider value={{ attiva: true, ruolo: (user?.ruolo || '').toLowerCase(), luce, tema, chi: `${user?.brandNome || ''}|${user?.nome || ''}`, entrata: !!user?.graficaEntrata, proposta: user?.graficaProposta || '' }}>{children}</GraficaNuova.Provider>
         </main>
