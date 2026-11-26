@@ -731,16 +731,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
       if (s.stato === 'annullamento_manuale' || s.stato === 'annullamento_pending') {
         const PARTITA = ['in_transito', 'in_consegna', 'consegnata', 'in_giacenza', 'non_consegnato', 'reso_mittente']
         if (nuovo && PARTITA.includes(nuovo)) {
-          await admin.from('spedizioni').update({
-            stato: (s as any).stato_precedente || 'in_lavorazione',
-            stato_precedente: null,
-            annullamento_richiesto_at: null,
-            annullamento_da: null,
-            annullamento_errore: null,
-            annullamento_owner_id: null,
-          }).eq('id', s.id)
-          aggiornate++
-          console.warn('[TRACKING][ANNULLO] partita (' + nuovo + ') → ripristinata:', (s as any).numero)
+          // l'esito si legge: prima un rifiuto del database finiva comunque nel log come «ripristinata»
+          const { ripristinaPartita } = await import('@/lib/annulli-ripristino')
+          if (await ripristinaPartita(admin, s as any, `[TRACKING][ANNULLO] (${nuovo})`) === 'ripristinata') aggiornate++
         }
         return
       }

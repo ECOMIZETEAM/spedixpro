@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
+import { AVVISO_NON_ARRIVATA } from '@/lib/spedisci'
+import { ripristinaPartita } from '@/lib/annulli-ripristino'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -52,26 +54,25 @@ export async function GET(req: NextRequest) {
     const { data: mv } = await admin.from('movimenti')
       .select('spedizione_id').eq('tipo', 'rettifica').like('riferimento', 'RIPFORN-%').in('spedizione_id', chunk)
     for (const m of (mv || [])) if ((m as any).spedizione_id) partite.add((m as any).spedizione_id)
-    // Evento di tracking con uno stato che implica il transito (basta un id: mi serve solo SAPERE se c'e').
+    // Evento di tracking con uno stato che implica il transito. Si salta l'avviso GLS «non (ancora) arrivata
+    // presso la sede»: gli eventi salvati prima del 26/11/2026 lo hanno come in_transito, ma su un pacco mai
+    // affidato al corriere non prova niente (vedi lib/spedisci, AVVISO_NON_ARRIVATA).
     const { data: ev } = await admin.from('tracking_events')
-      .select('spedizione_id').in('stato', STATI_PARTITA).in('spedizione_id', chunk)
-    for (const e of (ev || [])) if ((e as any).spedizione_id) partite.add((e as any).spedizione_id)
+      .select('spedizione_id,descrizione').in('stato', STATI_PARTITA).in('spedizione_id', chunk)
+    for (const e of (ev || [])) {
+      if (!(e as any).spedizione_id || AVVISO_NON_ARRIVATA.test(String((e as any).descrizione || ''))) continue
+      partite.add((e as any).spedizione_id)
+    }
   }
 
-  let ripristinate = 0, errori = 0
+  let ripristinate = 0, ordineGiaRispedito = 0, errori = 0
   for (const s of (coda || [])) {
     if (!partite.has((s as any).id)) continue
-    const { error } = await admin.from('spedizioni').update({
-      stato: (s as any).stato_precedente || 'in_lavorazione',
-      stato_precedente: null,
-      annullamento_richiesto_at: null,
-      annullamento_da: null,
-      annullamento_errore: null,
-      annullamento_owner_id: null,
-    }).eq('id', (s as any).id)
-    if (error) { errori++; console.error('[ANNULLI][RECUPERO] ripristino fallito', (s as any).numero, error.message) }
-    else { ripristinate++; console.warn('[ANNULLI][RECUPERO] partita → ripristinata:', (s as any).numero) }
+    const esito = await ripristinaPartita(admin, s as any, '[ANNULLI][RECUPERO]')
+    if (esito === 'ripristinata') ripristinate++
+    else if (esito === 'ordine_gia_rispedito') ordineGiaRispedito++
+    else errori++
   }
 
-  return NextResponse.json({ ok: true, esaminate: ids.length, partite: partite.size, ripristinate, errori, sorveglianza })
+  return NextResponse.json({ ok: true, esaminate: ids.length, partite: partite.size, ripristinate, ordineGiaRispedito, errori, sorveglianza })
 }

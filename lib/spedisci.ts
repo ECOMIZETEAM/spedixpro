@@ -113,6 +113,10 @@ export function testoIndicaReso(testo: string): boolean {
     || /return(ed|ing)? to sender/.test(s)
 }
 
+// Avviso «non (ancora) arrivata presso la sede»: non dice che il pacco viaggia. Esportato perche' gli eventi
+// gia' salvati prima del 26/11/2026 hanno ancora stato in_transito e chi li usa come prova deve saltarli.
+export const AVVISO_NON_ARRIVATA = /\bnon (?:e'|è|e)?\s*(?:ancora )?arrivat/i
+
 export function mapStatoSpedisci(statusStr: string): string | null {
   const s = (statusStr || '').toLowerCase()
   if (!s) return null
@@ -136,6 +140,13 @@ export function mapStatoSpedisci(statusStr: string): string | null {
   // un pacco tornato indietro dal destinatario assente o dall'indirizzo sbagliato.
   if (/non andata a buon fine|consegna non riuscita|non consegnat/.test(s)) return 'non_consegnato'
   if (s.includes('in consegna') || s.includes('out for delivery') || s.includes('distribuzione') || s.includes('in distribuzione')) return 'in_consegna'
+  // «La spedizione non e' (ancora) arrivata presso la sede GLS destinataria» e' un AVVISO di GLS, non un
+  // passaggio: conteneva 'arrivat' e finiva letta come in transito. Al 26/11/2026, in 3 giorni, 84 spedizioni
+  // avevano SOLO questo oltre a «creata dal mittente» e «in attesa di ritiro»: mai affidate a GLS, mostrate
+  // «in transito», e il giro degli annulli le prendeva per partite togliendo la richiesta del cliente dalla
+  // coda (NN669563299 riannullata e ripristinata ogni ora). Su un pacco in viaggio il transito arriva dalle
+  // scansioni vere (1.413 su 1.497 le avevano). lib/gls.ts questa frase non la traduce gia'.
+  if (AVVISO_NON_ARRIVATA.test(s)) return null
   if (s.includes('transit') || s.includes('transito') || s.includes('arrivat') || s.includes('hub') || s.includes('partenz') || s.includes('viaggio') || s.includes('smistament')) return 'in_transito'
   if (s.includes('presa in carico') || s.includes('preso in caric') || s.includes('spedit') || s.includes('accettat') || s.includes('ritirat') || s.includes('partita') || s.includes('picked') || s.includes('lavorazione')) return 'spedita'
   if (s.includes('mancata') || s.includes('fallit') || s.includes('exception') || s.includes('rifiut') || s.includes('problema') || s.includes('indirizzo errato') || s.includes('anomal')) return 'non_consegnato'
