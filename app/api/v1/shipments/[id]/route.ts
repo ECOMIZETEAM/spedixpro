@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { autenticaApiKey, rispostaBlocco } from '@/lib/api-auth'
-import { trovaOwnerContratto } from '@/lib/annullaSpedizione'
+import { masterDetentore } from '@/lib/annullaSpedizione'
 import { registraAudit } from '@/lib/audit'
 import { ritiroInRisposta } from '@/lib/ritiro-api'
 import { codiceRitiroValido } from '@/lib/easyparcel'
@@ -86,7 +86,34 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // CONTRATTI DVA: stesso ramo di spedizioni/elimina. Prima anche dall'API si aspettavano le 48 ore e
   // solo dopo il cron chiedeva lo storno: altre 48 ore di etichetta valida, senza motivo, prima che
   // la richiesta arrivasse a chi la deve lavorare. Il rimborso resta alla conferma del corriere.
-  const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', sped.corriere_id).maybeSingle()
+  const { data: corr } = await admin.from('corrieri').select('id,tipo,nome_contratto,master_id,contratto_id').eq('id', sped.corriere_id).maybeSingle()
+
+  // PACCO VENDUTO FRA RETI (riga-ponte), LDV VERA FUORI DA POSTE E GLS: stesso ramo di spedizioni/elimina, la
+  // richiesta va alla riga del detentore con la regola del suo corriere (lib/annullo-pacco). 'attesa' cade nel
+  // ramo delle 48 ore in fondo.
+  if (corr?.tipo === 'moovexpress') {
+    const { data: tr } = await admin.from('spedizioni').select('tracking_number').eq('id', id).maybeSingle()
+    const { paccoAlDetentore, annullaPaccoAlDetentore } = await import('@/lib/annullo-pacco')
+    let esito
+    try {
+      const pacco = await paccoAlDetentore(admin, { id, tracking_number: tr?.tracking_number })
+      esito = pacco ? await annullaPaccoAlDetentore(admin, pacco, { da: null, subito: false }) : null
+    } catch (e: any) {
+      console.error('[ANNULLO-PACCO][api v1]', id, e?.message)
+      return NextResponse.json({ error: `Annullo non riuscito: ${e?.message || 'errore'}. La spedizione resta valida, riprova fra qualche minuto.` }, { status: 500 })
+    }
+    if (esito?.esito === 'annullata') return NextResponse.json({ success: true, stato: 'annullata', message: 'Spedizione annullata e credito stornato.' })
+    if (esito?.esito === 'coda') {
+      return NextResponse.json(esito.storno
+        ? { success: true, stato: 'annullamento_manuale', message: 'Annullamento richiesto al corriere: è in verifica. Il credito viene stornato appena il corriere conferma la cancellazione.' }
+        : { success: true, stato: 'annullamento_manuale', message: 'Annullamento richiesto: verrà completato dall\'assistenza e il credito stornato alla conferma.' })
+    }
+    if (esito?.esito === 'rifiutata') {
+      const msg = /^Non annullabile/.test(esito.motivo) ? esito.motivo : `Annullo non riuscito: ${esito.motivo}`
+      await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', id)
+      return NextResponse.json({ error: msg }, { status: 409 })
+    }
+  }
   if (corr?.tipo === 'easyparcel') {
     const { richiediStornoDva } = await import('@/lib/storno-dva')
     const { data: rr } = await admin.from('spedizioni').select('raw_response').eq('id', id).maybeSingle()
@@ -101,7 +128,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       return NextResponse.json({ success: true, stato: 'storno_richiesto', message: 'Annullamento richiesto al corriere: è in verifica. Il credito viene stornato appena il corriere conferma la cancellazione.' })
     }
     // Non stornabile / errore / transitorio -> coda del DETENTORE col motivo, come dal portale.
-    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const ownerId = await masterDetentore(admin, corr)
     const { error: manErr } = await admin.from('spedizioni').update({
       stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
       annullamento_richiesto_at: new Date().toISOString(), annullamento_da: null, annullamento_errore: r.messaggio || null,
@@ -113,7 +140,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   // DIELLE: stesso ramo di spedizioni/elimina — coda del DETENTORE subito, rimborso alla sua conferma
   // (il fornitore non ha annullo via API: lib/annullaSpedizione).
   if (corr?.tipo === 'dielle') {
-    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const ownerId = await masterDetentore(admin, corr)
     const { error: manErr } = await admin.from('spedizioni').update({
       stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
       annullamento_richiesto_at: new Date().toISOString(), annullamento_da: null, annullamento_errore: null,

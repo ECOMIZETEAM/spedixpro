@@ -147,9 +147,14 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
   if (masterSub) {
     cliente = { master_id: utente!.master_id, listino_cliente_id: subListino, tipo_contratto: subTipo, credito: subCredito, ragione_sociale: 'Sotto-master' }
   } else if (!isProprio) {
-    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito,agente,gestione_logistica,impostazioni').eq('id', clienteId).single()
+    const { data } = await supabase.from('clienti').select('master_id,ragione_sociale,listino_cliente_id,vieta_inserimento,tipo_contratto,credito,agente,gestione_logistica,impostazioni,ledger').eq('id', clienteId).single()
     cliente = data
     if (!cliente) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
+    // Un conto collegato (ledger) non e' un cliente: e' il conto con cui un ALTRO master compra un tuo
+    // contratto, e le sue spedizioni nascono solo dal ponte (API v1 / ponte unico, che non passano di qui).
+    // Il 18/11/2026 SEMPLICE SPEDIRE ha creato dal portale 026031010041765 scegliendo "Atlantik srl
+    // (ingrosso)": Atlantik e' stata addebitata di un pacco non suo. In 120 giorni nessun altro uso vero.
+    if (cliente.ledger === true) return NextResponse.json({ error: `"${cliente.ragione_sociale}" è il conto di un master che compra un tuo contratto, non un tuo cliente: le sue spedizioni le crea lui dal suo portale. Scegli un tuo cliente.` }, { status: 400 })
     // Agente: il cliente dev'essere assegnato a lui.
     if (isAgente(utente) && (cliente.agente || '').trim() !== nomeAgente(utente)) return NextResponse.json({ error: 'Cliente non trovato' }, { status: 400 })
     if (utente?.ruolo === 'cliente' && cliente.vieta_inserimento === true) return NextResponse.json({ error: 'Inserimento spedizioni non consentito per questo cliente.' }, { status: 403 })

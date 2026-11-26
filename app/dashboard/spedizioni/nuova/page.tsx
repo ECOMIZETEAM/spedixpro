@@ -245,7 +245,9 @@ function NuovaSpedizionePage() {
   // Il Locker InPost è consegna A UN PUNTO (come PuntoPoste): sta nella tab "a un punto", non a domicilio.
   const tariffeVis = tariffe.filter((t:any) => consegnaA==='punto' ? (!!t._consegna_punto || !!t._inpost_locker) : (!t._consegna_punto && !t._inpost_locker))
 
-  useEffect(() => { fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti(d||[])) }, [])
+  // Niente conti collegati (is_ledger): sono master che comprano un tuo contratto, non clienti per cui spedire
+  // (la creazione li rifiuta, app/api/spedizioni/crea).
+  useEffect(() => { fetch('/api/clienti/lista?conMaster=1').then(r=>r.json()).then(d=>setClienti((Array.isArray(d) ? d : []).filter((c:any) => !c.is_ledger))) }, [])
   const [isAgente, setIsAgente] = useState(false)
   useEffect(() => { fetch('/api/permessi').then(r=>r.json()).then(d=>setIsAgente((d?.ruolo||'')==='agente')).catch(()=>{}) }, [])
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { bloccaCronNonAutorizzato } from '@/lib/cron-auth'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, trovaOwnerContratto } from '@/lib/annullaSpedizione'
+import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, masterDetentore } from '@/lib/annullaSpedizione'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
   for (const s of (pendenti || [])) {
     try {
       // Il corriere della spedizione: Spedisci non è annullabile via API (contratto non nostro)
-      const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', (s as any).corriere_id).maybeSingle()
+      const { data: corr } = await admin.from('corrieri').select('id,tipo,nome_contratto,master_id,contratto_id').eq('id', (s as any).corriere_id).maybeSingle()
       // POSTE DIRETTO (SDA EXPRESS L, anche quando il cliente la compra da un ponte di condivisione):
       // POSTE non ha l'annullo via API, quindi si annulla sul portale tutto il pacco e lo si sorveglia
       // 30 giorni (vedi lib/annullo-poste). Prima qui il ponte rispondeva "va gestito dall'assistenza" e
@@ -120,10 +120,30 @@ export async function GET(req: NextRequest) {
           continue
         }
       }
+      // PACCO VENDUTO FRA RETI (riga-ponte), LDV VERA FUORI DA POSTE E GLS: la richiesta si gira alla riga del
+      // detentore e si annulla col SUO corriere (lib/annullo-pacco). Prima qui annullaSpedizioneSulCorriere sul
+      // ponte rispondeva sempre "va gestito dall'assistenza" e la richiesta tornava indietro, cliente addebitato.
+      if (corr?.tipo === 'moovexpress') {
+        const { paccoAlDetentore, annullaPaccoAlDetentore } = await import('@/lib/annullo-pacco')
+        const pacco = await paccoAlDetentore(admin, s as any)
+        if (pacco) {
+          const r = await annullaPaccoAlDetentore(admin, pacco, { da: (s as any).annullamento_da || null, subito: true })
+          if (r.esito === 'annullata') { annullate++; continue }
+          if (r.esito === 'coda') { manuali++; continue }
+          const motivo = r.esito === 'rifiutata' ? r.motivo : 'il corriere non ha risposto'
+          await admin.from('spedizioni').update({
+            stato: (s as any).stato_precedente || 'in_lavorazione',
+            annullamento_richiesto_at: null,
+            annullamento_errore: /^Non annullabile/.test(motivo) ? motivo : `Annullo rifiutato dal corriere: ${motivo}`,
+          }).eq('id', s.id)
+          rifiutate++
+          continue
+        }
+      }
       // SPEDISCI: nessun annullo via API (contratto non nostro) → coda manuale al DETENTORE.
       // DIELLE uguale: l'annullo lo fa il fornitore su richiesta del detentore (lib/annullaSpedizione).
       if (corr?.tipo === 'spedisci' || corr?.tipo === 'dielle') {
-        const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+        const ownerId = await masterDetentore(admin, corr)
         await admin.from('spedizioni').update({
           stato: 'annullamento_manuale', annullamento_owner_id: ownerId, annullamento_errore: null,
         }).eq('id', s.id)
@@ -145,7 +165,7 @@ export async function GET(req: NextRequest) {
         } else if (r.azione === 'richiesto') {
           // storno aperto a DVA: in verifica, la chiude storno-dva-cron. Non la conto fra le chiuse.
         } else {
-          const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+          const ownerId = await masterDetentore(admin, corr)
           await admin.from('spedizioni').update({ stato: 'annullamento_manuale', annullamento_owner_id: ownerId }).eq('id', s.id)
           manuali++
         }

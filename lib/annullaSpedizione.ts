@@ -25,6 +25,30 @@ export async function trovaOwnerContratto(admin: any, corriereMasterId: string, 
   return owner
 }
 
+// Chi detiene DAVVERO il contratto: lo dicono i puntatori (`corrieri.contratto_id` = riga del detentore,
+// vedi scripts/contratto-codice-catena.sql), non il nome. Risalire l'albero per nome sbaglia quando un
+// master ricompra via codice, con lo stesso nome, un contratto che un suo sotto-master detiene: il caso vero
+// e' SDA EXPRESS di SPEDIZIONI EXPRESS (sotto-master di Velox, che lo ricompra col ponte omonimo). Le
+// richieste di annullo dei clienti di SPEDIZIONI EXPRESS finivano nella coda di Velox, che non ha l'account
+// per annullarle: 9 ferme in coda dall'11/11 al 26/11/2026. Al 26/11 e' l'unico contratto Spedisci, Dielle o
+// DVA (su tutti) dove le due strade danno un detentore diverso.
+// Senza puntatore (riga vecchia mai collegata) resta la ricerca per nome di prima.
+export async function masterDetentore(
+  admin: any, corr: { id?: string | null; master_id: string; nome_contratto: string | null; contratto_id?: string | null },
+): Promise<string> {
+  let contrattoId = corr.contratto_id ?? null
+  if (contrattoId === null && corr.id) {
+    const { data } = await admin.from('corrieri').select('contratto_id').eq('id', corr.id).maybeSingle()
+    contrattoId = (data as any)?.contratto_id || null
+  }
+  if (contrattoId) {
+    const { data: det } = await admin.from('corrieri').select('master_id').eq('id', contrattoId).maybeSingle()
+    if ((det as any)?.master_id) return (det as any).master_id
+    console.warn('[ANNULLO] riga del detentore non trovata, detentore per nome:', corr.id, contrattoId)
+  }
+  return trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+}
+
 // Invia l'annullo al corriere (SpediamoPro/Spedisci). Ritorna ok=true se annullata (o già
 // inesistente sul corriere); ok=false col motivo se il corriere rifiuta (es. già spedita/chiusa).
 export async function annullaSpedizioneSulCorriere(

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { bloccaAgente } from '@/lib/agente'
 import { gestisceLaRete } from '@/lib/ruoli'
-import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, trovaOwnerContratto } from '@/lib/annullaSpedizione'
+import { annullaSpedizioneSulCorriere, rimborsaAnnulloSpedizione, masterDetentore } from '@/lib/annullaSpedizione'
 
 // Cancellazione LDV:
 // - SPEDISCI ONLINE: annullo IMMEDIATO (niente 48h). Si prova ad annullare via API; se riesce
@@ -72,8 +72,36 @@ export async function DELETE(req: NextRequest) {
   if (sped.stato === 'annullamento_manuale') return NextResponse.json({ success: true, manuale: true })
   if (sped.stato === 'storno_richiesto') return NextResponse.json({ success: true, storno: true, message: 'Annullo già richiesto al corriere: è in verifica.' })
 
+  const { data: corr } = await admin.from('corrieri').select('id,tipo,nome_contratto,master_id,contratto_id').eq('id', (sped as any).corriere_id).maybeSingle()
+
+  // ── PACCO VENDUTO FRA RETI (riga-ponte), LDV VERA FUORI DA POSTE E GLS: la richiesta va al detentore. ──
+  // Da sola una riga-ponte non annulla niente: prima andava in attesa 48 ore e tornava indietro con "va
+  // gestito dall'assistenza", cliente addebitato, senza che il detentore la vedesse mai (lib/annullo-pacco).
+  // Poste e GLS hanno le loro strade sul pacco intero, qui sotto; 'attesa' cade nel ramo delle 48 ore.
+  if (corr?.tipo === 'moovexpress') {
+    const { paccoAlDetentore, annullaPaccoAlDetentore } = await import('@/lib/annullo-pacco')
+    let esito
+    try {
+      const pacco = await paccoAlDetentore(admin, sped as any)
+      esito = pacco ? await annullaPaccoAlDetentore(admin, pacco, { da: user.id, subito: false }) : null
+    } catch (e: any) {
+      console.error('[ANNULLO-PACCO][elimina]', spedizioneId, e?.message)
+      return NextResponse.json({ error: `Annullo non riuscito: ${e?.message || 'errore'}. La spedizione resta valida, riprova fra qualche minuto.` }, { status: 500 })
+    }
+    if (esito?.esito === 'annullata') return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
+    if (esito?.esito === 'coda') {
+      return NextResponse.json(esito.storno
+        ? { success: true, storno: true, message: 'Richiesta di annullo inviata al corriere: è in verifica. Il credito verrà stornato a tutta la rete appena il corriere conferma la cancellazione.' }
+        : { success: true, manuale: true, message: 'Richiesta di annullo inviata: la spedizione è in cancellazione. Verrà annullata dal detentore del contratto e il credito stornato a tutta la rete.' })
+    }
+    if (esito?.esito === 'rifiutata') {
+      const msg = /^Non annullabile/.test(esito.motivo) ? esito.motivo : `Annullo non riuscito: ${esito.motivo}. La spedizione resta valida.`
+      await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+  }
+
   // ── SPEDISCI ONLINE: annullo IMMEDIATO (niente 48h) ──
-  const { data: corr } = await admin.from('corrieri').select('tipo,nome_contratto,master_id').eq('id', (sped as any).corriere_id).maybeSingle()
   if (corr?.tipo === 'spedisci') {
     // 1) Provo l'annullo via API (funziona solo se il richiedente possiede davvero l'account Spedisci)
     const esito = await annullaSpedizioneSulCorriere(admin, sped as any)
@@ -94,7 +122,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
     }
     // 2) Non annullabile via API -> coda manuale del DETENTORE, SUBITO (niente attesa 48h).
-    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const ownerId = await masterDetentore(admin, corr)
     const { error: manErr } = await admin.from('spedizioni').update({
       stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
       annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
@@ -107,7 +135,7 @@ export async function DELETE(req: NextRequest) {
   //    Coda manuale del DETENTORE SUBITO, non fra 48 ore: intanto il detentore conferma sul portale del
   //    fornitore le spedizioni del giorno e il pacco partirebbe. Il rimborso parte quando lui conferma.
   if (corr?.tipo === 'dielle') {
-    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const ownerId = await masterDetentore(admin, corr)
     const { error: manErr } = await admin.from('spedizioni').update({
       stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
       annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: null,
@@ -135,7 +163,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: true, storno: true, message: 'Richiesta di annullo inviata al corriere: è in verifica. Il credito verrà stornato a tutta la rete appena il corriere conferma la cancellazione.' })
     }
     // non stornabile / errore / transitorio -> coda del DETENTORE (vecchio comportamento), col motivo.
-    const ownerId = await trovaOwnerContratto(admin, corr.master_id, corr.nome_contratto)
+    const ownerId = await masterDetentore(admin, corr)
     const { error: manErr } = await admin.from('spedizioni').update({
       stato: 'annullamento_manuale', stato_precedente: sped.stato, annullamento_owner_id: ownerId,
       annullamento_richiesto_at: new Date().toISOString(), annullamento_da: user.id, annullamento_errore: r.messaggio || null,

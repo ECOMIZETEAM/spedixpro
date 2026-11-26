@@ -159,7 +159,8 @@ export default function PaginaUnica({ portale, prova }: { portale: Portale; prov
   // ── anagrafiche ──
   useEffect(() => {
     if (master) {
-      fetch('/api/clienti/lista?conMaster=1').then(r => r.json()).then(d => setClienti(Array.isArray(d) ? d : [])).catch(() => {})
+      // Niente conti collegati (is_ledger): la creazione li rifiuta (app/api/spedizioni/crea).
+      fetch('/api/clienti/lista?conMaster=1').then(r => r.json()).then(d => setClienti((Array.isArray(d) ? d : []).filter((c:any) => !c.is_ledger))).catch(() => {})
       fetch('/api/permessi').then(r => r.json()).then(d => setIsAgente((d?.ruolo || '') === 'agente')).catch(() => {})
       // Mittente predefinito: l'indirizzo operativo dell'azienda, altrimenti la sede legale.
       fetch('/api/master').then(r => r.json()).then(d => {
