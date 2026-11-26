@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import { useRouter } from 'next/navigation'
 
@@ -7,6 +8,8 @@ const inp = {width:'100%',padding:'8px 11px',border:'1px solid #d1d5db',borderRa
 const lbl = {fontSize:'12px',fontWeight:'600' as const,color:'#1a1a1a',display:'block' as const,marginBottom:'4px'}
 
 export default function AggiungiSpesaPage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const router = useRouter()
   const [clienti, setClienti] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
@@ -67,11 +70,11 @@ export default function AggiungiSpesaPage() {
         <p style={{color:'#1a1a1a',fontSize:'13px',marginTop:'4px'}}>Addebita una spesa al cliente</p>
       </div>
 
-      {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>⚠️ {errore}</div>}
-      {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#16a34a'}}>✅ {successo}</div>}
+      {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>{nuova ? '' : '⚠️ '}{errore}</div>}
+      {successo && <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:'6px',padding:'10px 14px',marginBottom:'16px',fontSize:'13px',color:'#16a34a'}}>{nuova ? '' : '✅ '}{successo}</div>}
 
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'20px'}}>
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'16px',display:'flex',alignItems:'center',gap:'6px'}}>🔍 Aggiungi Spesa</div>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'16px',display:'flex',alignItems:'center',gap:'6px'}}>{nuova ? '' : '🔍 '}Aggiungi Spesa</div>
 
         {/* Riga 1: Cliente | Data Acquisto | Vettore */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'16px',marginBottom:'16px'}}>

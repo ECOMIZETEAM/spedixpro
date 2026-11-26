@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState, Fragment } from 'react'
+import { useEffect, useState, Fragment, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 const ACCENT = '#f97316'
 const card = { background:'#fff', borderRadius:'8px', border:'1px solid #e8e8e8', padding:'16px' as const }
@@ -18,6 +20,8 @@ import { useDialog } from '@/app/components/DialogProvider'
 import { useAppNativa, ABBONAMENTO_NON_IN_APP } from '@/lib/app-nativa'
 import { giornoRoma } from '@/lib/date-roma'
 export default function AbbonamentoPage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const app = useAppNativa()
   const [stato, setStato] = useState<any>(null)
@@ -314,7 +318,7 @@ export default function AbbonamentoPage() {
         {!!anomalie.length && (
           <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
             <div style={{fontSize:'14px',fontWeight:800,color:'#b91c1c',display:'flex',alignItems:'center',gap:'8px'}}>
-              <span>⚠️</span> Canone su Stripe diverso dal listino — {anomalie.length} master
+              {!nuova && <span>⚠️</span>} Canone su Stripe diverso dal listino — {anomalie.length} master
             </div>
             <div style={{fontSize:'12.5px',color:'#7f1d1d',marginTop:'8px',lineHeight:1.7}}>
               {anomalie.map((a:any,i:number)=>(<div key={i}><strong>{a.nome}</strong> — {a.problema}</div>))}
@@ -737,7 +741,7 @@ export default function AbbonamentoPage() {
               02:00, perché il circuito ragiona a mezzanotte UTC. */}
           {stato.prossimoPagamento.quando && (
             <div style={{fontSize:'13.5px',color:'#7c2d12',marginTop:'8px',display:'flex',alignItems:'center',gap:'7px',flexWrap:'wrap'}}>
-              <span>🗓️</span>
+              {nuova ? <Icona id="i-calendario" className="vs-ico-tasto" /> : <span>🗓️</span>}
               <span>Prossimo rinnovo <strong>{new Date(stato.prossimoPagamento.quando).toLocaleDateString('it-IT',{timeZone:'Europe/Rome',weekday:'long',day:'numeric',month:'long',year:'numeric'})}</strong> alle <strong>{new Date(stato.prossimoPagamento.quando).toLocaleTimeString('it-IT',{timeZone:'Europe/Rome',hour:'2-digit',minute:'2-digit'})}</strong></span>
             </div>
           )}
@@ -765,7 +769,7 @@ export default function AbbonamentoPage() {
 
       {conCarta && !stato?.carta?.attiva && stato?.attivo && (
         <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'12px 16px',marginBottom:'14px',fontSize:'13.5px',color:'#9a3412',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
-          <span style={{fontSize:'15px'}}>💳</span>
+          {nuova ? <Icona id="i-euro" className="vs-ico-tasto" /> : <span style={{fontSize:'15px'}}>💳</span>}
           <div style={{flex:1,minWidth:'240px'}}>
             <strong>Non hai ancora attivato il pagamento con carta.</strong> Il canone si paga da qui, con
             rinnovo automatico il primo di ogni mese. Puoi farlo subito.
@@ -779,8 +783,8 @@ export default function AbbonamentoPage() {
       {stato?.cambioProgrammato && (
         <div style={{background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'8px',padding:'11px 16px',marginBottom:'14px',fontSize:'13px',color:'#9a3412'}}>
           {stato.cambioProgrammato.disdetta
-            ? <>⏳ <strong>Abbonamento in disdetta.</strong> Resta tutto attivo fino al {new Date(stato.cambioProgrammato.dal).toLocaleDateString('it-IT')}; da quel giorno il portale si blocca finché non scegli un nuovo piano.</>
-            : <>⏳ <strong>Passaggio a {stato.cambioProgrammato.piano} programmato</strong> per il {new Date(stato.cambioProgrammato.dal).toLocaleDateString('it-IT')}. Fino ad allora resti sul piano attuale, che hai già pagato.</>}
+            ? <>{nuova ? '' : '⏳ '}<strong>Abbonamento in disdetta.</strong> Resta tutto attivo fino al {new Date(stato.cambioProgrammato.dal).toLocaleDateString('it-IT')}; da quel giorno il portale si blocca finché non scegli un nuovo piano.</>
+            : <>{nuova ? '' : '⏳ '}<strong>Passaggio a {stato.cambioProgrammato.piano} programmato</strong> per il {new Date(stato.cambioProgrammato.dal).toLocaleDateString('it-IT')}. Fino ad allora resti sul piano attuale, che hai già pagato.</>}
         </div>
       )}
       {!!(stato?.mieiPagamenti||[]).length && (

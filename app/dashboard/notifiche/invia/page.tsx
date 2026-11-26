@@ -1,10 +1,14 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 const GRUPPI = ['Cliente', 'Amministratore', 'Operatore', 'Agente']
 
 import { useDialog } from '@/app/components/DialogProvider'
 export default function InviaNotifica() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [oggetto, setOggetto] = useState('')
   const [gruppi, setGruppi] = useState<string[]>([])
@@ -143,7 +147,7 @@ export default function InviaNotifica() {
 
           <div style={{ fontWeight:'700', color:'#1a1a1a', margin:'20px 0 10px', fontSize:'14px' }}>Allegati <span style={{ fontWeight:400, color:'#9ca3af', fontSize:'12px' }}>(moduli, PDF, immagini — max 10 file, 8 MB l'uno)</span></div>
           <input ref={fileRef} type="file" multiple onChange={e=>aggiungiFile(e.target.files)} style={{ display:'none' }} />
-          <button type="button" onClick={()=>fileRef.current?.click()} style={{ ...btnTool, display:'inline-flex', alignItems:'center', gap:'6px' }}>📎 Allega file</button>
+          <button type="button" onClick={()=>fileRef.current?.click()} style={{ ...btnTool, display:'inline-flex', alignItems:'center', gap:'6px' }}>{nuova ? <Icona id="i-carta" className="vs-ico-tasto" /> : '📎'} Allega file</button>
           {allegati.length > 0 && (
             <div style={{ display:'flex', flexWrap:'wrap', gap:'8px', marginTop:'12px' }}>
               {allegati.map((a, i) => (
@@ -186,7 +190,7 @@ export default function InviaNotifica() {
                       <div style={{ display:'flex', flexWrap:'wrap', gap:'6px', marginTop:'8px' }}>
                         {n.allegati.map((a:any, i:number)=>(
                           <a key={i} href={`/api/file?n=${n.id}&f=${encodeURIComponent(a.url || a.path || '')}`} target="_blank" rel="noopener noreferrer"
-                            style={{ display:'inline-flex', alignItems:'center', gap:'4px', background:'#f0f9ff', border:'1px solid #bae6fd', color:'#0369a1', borderRadius:'5px', padding:'3px 8px', fontSize:'12px', textDecoration:'none', maxWidth:'160px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>📎 {a.nome || 'allegato'}</a>
+                            style={{ display:'inline-flex', alignItems:'center', gap:'4px', background:'#f0f9ff', border:'1px solid #bae6fd', color:'#0369a1', borderRadius:'5px', padding:'3px 8px', fontSize:'12px', textDecoration:'none', maxWidth:'160px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{nuova ? '' : '📎 '}{a.nome || 'allegato'}</a>
                         ))}
                       </div>
                     )}

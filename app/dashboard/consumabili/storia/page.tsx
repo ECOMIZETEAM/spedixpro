@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { giornoRoma } from '@/lib/date-roma'
@@ -8,6 +10,8 @@ const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fo
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'auto'}
 
 export default function StoriaPage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const [movimenti, setMovimenti] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -88,7 +92,7 @@ export default function StoriaPage() {
             <DateRangePicker dal={dal} al={al} onChange={(d1,d2)=>{setDal(d1);setAl(d2);setPagina(1)}} />
           </div>
           <div>
-            <label style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>🔍 Cerca</label>
+            <label style={{fontSize:'11px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>{nuova ? '' : '🔍 '}Cerca</label>
             <input value={cerca} onChange={e=>{setCerca(e.target.value);setPagina(1)}} placeholder="Descrizione, cliente, importo..."
               style={{...inp,width:'100%',boxSizing:'border-box' as const}} />
           </div>
@@ -107,7 +111,7 @@ export default function StoriaPage() {
           <div style={{padding:'40px',textAlign:'center' as const,color:'#b91c1c'}}>{errore}</div>
         ) : !trovati.length ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>
-            <div style={{fontSize:'32px',marginBottom:'8px'}}>📋</div>
+            <div style={{fontSize:'32px',marginBottom:'8px'}}>{nuova ? <Icona id="i-report" className="vs-ico vs-ico--grande" /> : '📋'}</div>
             Nessun movimento trovato
           </div>
         ) : (<>

@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 // Allegati e POD non hanno più un link diretto allo storage: passano da /api/file, che controlla
 // che chi scarica sia parte di quella richiesta (vedi lib/file-riservati.ts).
 import { linkAllegato } from '@/lib/file-riservati'
@@ -28,6 +30,10 @@ const etichettaApertura = (tipo: string) =>
     : tipo === 'master_riservato' ? 'Riservato · il cliente non lo vede' : 'Cliente'
 
 export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket' | 'pod' }) {
+  // con la grafica nuova niente emoji davanti alle scritte, e icone a linea per chat e allegati (il foglio delle icone lo
+  // carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
+  const e = (x: string) => nuova ? x.replace(/^\S+\s/, '') : x
   const isPod = categoria === 'pod'
   const [ricevuti, setRicevuti] = useState<any[]>([])
   const [miei, setMiei] = useState<any[]>([])
@@ -243,7 +249,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a' }}>{isPod ? 'Richieste POD ricevute' : 'Ticket ricevuti'}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder="🔎 Cerca LDV, pratica, cliente o testo…"
+              <input value={cerca} onChange={e => { setCerca(e.target.value); setPagina(1) }} placeholder={e('🔎 Cerca LDV, pratica, cliente o testo…')}
                 style={{ padding: '7px 11px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', color: '#1a1a1a', minWidth: '240px' }} />
               {gestori.length > 0 && (
                 <select value={filtroGestore} onChange={e => { setFiltroGestore(e.target.value); setPagina(1) }} title="Filtra per chi ha in carico il ticket" style={{ padding: '7px 9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '12.5px', color: '#1a1a1a', background: '#fff' }}>
@@ -299,17 +305,17 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                       {t.non_letto_owner && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}
                       {t.inoltrato_a_master_id && <span style={{ background: '#1a1a1a', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>⤴ Inoltrato</span>}
                     </span>
-                    {Array.isArray(t.allegati) && t.allegati.length > 0 && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#2563eb' }}>📎{t.allegati.length}</span>}
+                    {Array.isArray(t.allegati) && t.allegati.length > 0 && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#2563eb' }}>{nuova ? <Icona id="i-carta" className="vs-ico-tasto" /> : '📎'}{t.allegati.length}</span>}
                   </td>
                   <td style={td}><Badge stato={t.stato} /></td>
                   <td style={td}>
                     {t.assegnato_nome
-                      ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 9px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>👤 {t.assegnato_nome}</span>
+                      ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 9px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>{nuova ? '' : '👤 '}{t.assegnato_nome}</span>
                       : <span style={{ fontSize: '11.5px', color: '#9ca3af', fontStyle: 'italic' }}>da assegnare</span>}
                   </td>
                   <td style={td}>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      <button onClick={() => apriDettaglio(t)} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>💬 Apri chat</button>
+                      <button onClick={() => apriDettaglio(t)} style={{ padding: '5px 10px', border: '1px solid #d1d5db', background: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer', color: '#1a1a1a' }}>{nuova ? <Icona id="i-messaggio" className="vs-ico-tasto" /> : '💬'} Apri chat</button>
                       {!isPod && t.stato !== 'in_lavorazione' && t.stato !== 'risolto' && (
                         <button onClick={() => aggiorna(t.id, { stato: 'in_lavorazione' })} style={{ padding: '5px 10px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: '5px', fontSize: '12px', cursor: 'pointer' }}>In lavorazione</button>
                       )}
@@ -359,7 +365,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <td style={{ ...td, whiteSpace: 'nowrap', fontSize: '12px' }}>{new Date(t.created_at).toLocaleDateString('it-IT')}</td>
                     <td style={td}>{t.oggetto} {t.aperto_letto === false && <span style={{ background: '#dc2626', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px' }}>● Nuovo</span>}</td>
                     <td style={td}><Badge stato={t.stato} /></td>
-                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={linkAllegato(t.id, t.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => { e.stopPropagation(); fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>💬 Apri chat</span>}</td>
+                    <td style={{ ...td, color: '#555', fontSize: '12px' }}>{isPod ? (t.pod_url ? <a href={linkAllegato(t.id, t.pod_url)} target="_blank" rel="noopener noreferrer" download style={{ color: '#f97316', fontWeight: 700, textDecoration: 'none' }} onClick={e => { e.stopPropagation(); fetch('/api/assistenza/' + t.id).catch(() => {}); setTimeout(() => carica(true), 600) }}>⬇ Scarica POD</a> : '—') : <span style={{ color: '#2563eb', fontWeight: 600 }}>{nuova ? <Icona id="i-messaggio" className="vs-ico-tasto" /> : '💬'} Apri chat</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -389,10 +395,10 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     <td style={td}><Badge stato={t.stato} /></td>
                     <td style={td}>
                       {t.assegnato_nome
-                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 9px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>👤 {t.assegnato_nome}</span>
+                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 9px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700, whiteSpace: 'nowrap' }}>{nuova ? '' : '👤 '}{t.assegnato_nome}</span>
                         : <span style={{ fontSize: '11.5px', color: '#9ca3af', fontStyle: 'italic' }}>da assegnare</span>}
                     </td>
-                    <td style={{ ...td, color: '#2563eb', fontWeight: 600, fontSize: '12px' }}>💬 Apri chat</td>
+                    <td style={{ ...td, color: '#2563eb', fontWeight: 600, fontSize: '12px' }}>{nuova ? <Icona id="i-messaggio" className="vs-ico-tasto" /> : '💬'} Apri chat</td>
                   </tr>
                 ))}
               </tbody>
@@ -425,7 +431,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '12px', color: '#666', background: '#f8fafc', border: '1px solid #eef2f7', borderRadius: '8px', padding: '8px 12px' }}>
                   <span>In carico a:</span>
                   {sel.assegnato_nome
-                    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 10px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700 }}>👤 {sel.assegnato_nome}{sel.assegnato_id === ioId ? ' · tu' : ''}</span>
+                    ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#eef6ff', color: '#0369a1', padding: '3px 10px', borderRadius: '10px', fontSize: '11.5px', fontWeight: 700 }}>{nuova ? '' : '👤 '}{sel.assegnato_nome}{sel.assegnato_id === ioId ? ' · tu' : ''}</span>
                     : <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>nessuno</span>}
                   <span style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
                     {sel.assegnato_id !== ioId && <button disabled={salvando} onClick={() => assegna(sel.id, 'io')} style={{ padding: '4px 11px', border: '1px solid #0369a1', background: '#fff', color: '#0369a1', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: salvando ? 'default' : 'pointer' }}>Prendi in carico</button>}
@@ -445,7 +451,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                         {/* Sempre il NOME di chi ha scritto (Sara/Giuliana), mai "Tu": col master
                             condiviso, "Tu" non diceva quale dei due. "· tu" marca i propri. */}
                         {m.autore_nome || (m.autore === 'cliente' ? 'Cliente' : m.autore === 'rete' ? 'Rete' : 'Assistenza')}{m.autore_azienda ? ` · ${m.autore_azienda}` : ''}{m.tu ? ' · tu' : ''}
-                        {interno && <span style={{ marginLeft: '5px', background: '#1a1a1a', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px' }}>🔒 RETE</span>}
+                        {interno && <span style={{ marginLeft: '5px', background: '#1a1a1a', color: '#fff', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '8px' }}>{e('🔒 RETE')}</span>}
                       </div>
                       {editId === m.id ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -456,7 +462,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                           </div>
                         </div>
                       ) : elim ? (
-                        <div style={{ background: '#eef2f6', color: '#94a3b8', border: '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', fontStyle: 'italic' }}>🚫 messaggio eliminato</div>
+                        <div style={{ background: '#eef2f6', color: '#94a3b8', border: '1px solid #e5e7eb', padding: '9px 13px', borderRadius: '12px', fontSize: '13px', fontStyle: 'italic' }}>{e('🚫 messaggio eliminato')}</div>
                       ) : (<>
                         {m.testo && <div style={{ background: interno ? (mio ? '#334155' : '#f1f5f9') : (mio ? '#f97316' : '#fff'), color: interno ? (mio ? '#fff' : '#334155') : (mio ? '#fff' : '#1a1a1a'), border: interno && !mio ? '1px dashed #94a3b8' : (mio ? 'none' : '1px solid #e5e7eb'), padding: '9px 13px', borderRadius: '12px', fontSize: '13px', lineHeight: 1.45, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>{m.testo}{m.modificato_il && <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '6px' }}>(modificato)</span>}</div>}
                         {Array.isArray(m.allegati) && m.allegati.length > 0 && (
@@ -543,7 +549,7 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
                     </div>
                   ) : (
                     <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>📎 Trascina qui la POD (PDF o foto), oppure</div>
+                      <div style={{ fontSize: '12.5px', color: '#555', marginBottom: '10px' }}>{e('📎 Trascina qui la POD (PDF o foto), oppure')}</div>
                       <label style={{ display: 'inline-block', padding: '8px 16px', background: '#2563eb', color: '#fff', borderRadius: '6px', fontSize: '12.5px', fontWeight: 700, cursor: 'pointer' }}>
                         {sel.pod_url ? 'Sostituisci file' : 'Scegli file'}
                         <input type="file" accept="application/pdf,image/*" onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) caricaPodDentro(f) }} style={{ display: 'none' }} />
@@ -559,18 +565,18 @@ export default function AssistenzaMasterView({ categoria }: { categoria: 'ticket
               {/* Input chat: si scrive finché non è chiuso — anche sulle richieste POD (cliente e
                   master possono scriversi, non solo scambiarsi il PDF). */}
               {(sel.stato === 'chiuso' ? (
-                <div style={{ padding: '12px', borderRadius: '8px', background: '#f3f4f6', color: '#6b7280', fontSize: '12.5px', textAlign: 'center' }}>🔒 Ticket chiuso e archiviato — sola lettura.</div>
+                <div style={{ padding: '12px', borderRadius: '8px', background: '#f3f4f6', color: '#6b7280', fontSize: '12.5px', textAlign: 'center' }}>{e('🔒 Ticket chiuso e archiviato — sola lettura.')}</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
                   {ruoloChat === 'rete' && (
-                    <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#1a1a1a', color: '#fff', fontSize: '12px', fontWeight: 600 }}>🔒 Risposta interna alla rete: la vede solo la catena dei master — il cliente finale NON la vede.</div>
+                    <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#1a1a1a', color: '#fff', fontSize: '12px', fontWeight: 600 }}>{e('🔒 Risposta interna alla rete: la vede solo la catena dei master — il cliente finale NON la vede.')}</div>
                   )}
                   {/* Sul riservato il cliente non c'e': "interno" non cambierebbe niente, e la spunta
                       farebbe credere che il resto il cliente lo legga. */}
                   {ruoloChat === 'master' && sel.tipo_apertura !== 'master_riservato' && Array.isArray(sel.rete_master_ids) && sel.rete_master_ids.length > 0 && (
                     <label style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: 600, color: internoMsg ? '#1a1a1a' : '#666', cursor: 'pointer' }}>
                       <input type="checkbox" checked={internoMsg} onChange={e => setInternoMsg(e.target.checked)} style={{ width: '15px', height: '15px', cursor: 'pointer' }} />
-                      🔒 Messaggio interno alla rete (il cliente non lo vede)
+                      {e('🔒 Messaggio interno alla rete (il cliente non lo vede)')}
                     </label>
                   )}
                   {chatFiles.length > 0 && (

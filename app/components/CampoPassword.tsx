@@ -1,5 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 
 // Campo password con occhio per MOSTRARE quello che si è digitato.
 // Serve davvero: le credenziali arrivano per email e vengono ricopiate a mano, quindi un
@@ -16,6 +18,9 @@ export default function CampoPassword({
   required?: boolean
 }) {
   const [visibile, setVisibile] = useState(false)
+  // con la grafica nuova l'occhio a linea al posto di 👁 e 🙈 (il foglio delle icone lo carica solo la cornice nuova; nelle
+  // pagine d'accesso, fuori dalla cornice, restano le emoji)
+  const nuova = useContext(GraficaNuova).attiva
   const controllato = typeof value === 'string' && typeof onChange === 'function'
 
   return (
@@ -39,7 +44,7 @@ export default function CampoPassword({
         title={visibile ? 'Nascondi password' : 'Mostra password'}
         style={{ position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', padding: '6px 8px', fontSize: '15px', lineHeight: 1, color: '#888' }}
       >
-        {visibile ? '🙈' : '👁'}
+        {nuova ? <Icona id={visibile ? 'i-occhio-no' : 'i-occhio'} className="vs-ico-tasto" /> : visibile ? '🙈' : '👁'}
       </button>
     </div>
   )

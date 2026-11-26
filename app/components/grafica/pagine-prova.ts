@@ -42,6 +42,12 @@ export const PAGINE_PROVA = new Set([
   // l'attrezzo delle foto blocca ogni scrittura; della Centrale di controllo fotografate solo le «Rettifiche da girare»
   '/dashboard/margini', '/dashboard/preventivi', '/dashboard/spedizioni/controllo-fattura', '/dashboard/controllo',
   '/dashboard/controllo-giacenze', '/dashboard/contrassegni/distinte', '/dashboard/contrassegni/check', '/dashboard/fatture/proforma',
+  // 26/11 notte, Strumenti. API clienti, Audit, Sicurezza, Demo e Voti grafica sono della piattaforma: fotografati come
+  // MoovExpress. Live View no: ha un disegno suo, da decidere con Lorenzo
+  '/dashboard/abbonamento', '/dashboard/api-clienti', '/dashboard/assistenza', '/dashboard/assistenza/pod',
+  '/dashboard/assistenza/prezzi-pod', '/dashboard/audit', '/dashboard/sicurezza', '/dashboard/impostazioni/password',
+  '/dashboard/notifiche/invia', '/dashboard/catalogo', '/dashboard/consumabili/aggiungi', '/dashboard/consumabili/storia',
+  '/dashboard/demo', '/dashboard/grafica-voti',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

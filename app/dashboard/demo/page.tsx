@@ -1,5 +1,6 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
 
 // Gestione ACCOUNT DEMO (solo super master): genera un account di prova pronto e pieno di dati finti,
 // mostra le credenziali da consegnare al potenziale cliente, elenca le demo attive e permette di
@@ -10,6 +11,8 @@ interface Demo { id: string; nome: string; email: string; scadenza: string | nul
 const dataIt = (s: string | null) => { if (!s) return '—'; const d = new Date(s); return isNaN(d.getTime()) ? '—' : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 
 export default function DemoPage() {
+  // con la grafica nuova niente emoji: icone a linea dove servono (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const [demos, setDemos] = useState<Demo[]>([])
   const [nome, setNome] = useState('')
   const [creando, setCreando] = useState(false)
@@ -68,7 +71,7 @@ export default function DemoPage() {
       {/* Credenziali appena create */}
       {nuovo && (
         <div style={{ ...card, marginBottom: '18px', borderColor: '#fdba74', background: '#fff7ed' }}>
-          <div style={{ fontSize: '14px', fontWeight: 800, color: '#9a3412', marginBottom: '10px' }}>✅ Demo pronta — consegna queste credenziali</div>
+          <div style={{ fontSize: '14px', fontWeight: 800, color: '#9a3412', marginBottom: '10px' }}>{nuova ? '' : '✅ '}Demo pronta — consegna queste credenziali</div>
           <div style={{ background: '#fff', border: '1px solid #fed7aa', borderRadius: '8px', padding: '14px 16px', fontSize: '13.5px', display: 'grid', gap: '8px' }}>
             {[['Portale', nuovo.url], ['Email', nuovo.email], ['Password', nuovo.password]].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
