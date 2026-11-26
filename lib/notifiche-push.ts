@@ -3,7 +3,11 @@
 //  - browser (computer e Android): Web Push con le chiavi VAPID nostre (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 //  - iPhone (app): APNs di Apple con la chiave .p8 del team (APNS_KEY_ID, APNS_TEAM_ID, APNS_KEY_P8 in base64,
 //    APNS_BUNDLE_ID; APNS_SANDBOX=1 solo per le build di prova);
-//  - Android (app): Firebase Cloud Messaging v1 col conto di servizio (FCM_SERVICE_ACCOUNT, il JSON in base64).
+//  - Android (app): Firebase Cloud Messaging v1, SENZA CHIAVE: Vercel dimostra a Google chi è col suo gettone OIDC e
+//    Google ci presta per un'ora il conto «moovexpress-push», che può solo mandare notifiche (FCM_PROJECT_ID,
+//    FCM_WIF_PROVIDER, FCM_SERVICE_ACCOUNT_EMAIL: nessuno dei tre è segreto). Perché così: l'organizzazione
+//    moovexpress.com vieta le chiavi scaricabili dei conti di servizio (Google, 26/11/2026) e Lorenzo ha scelto di non
+//    togliere il divieto. Resta il ripiego FCM_SERVICE_ACCOUNT (il JSON in base64) se un giorno servisse.
 // Le chiavi stanno solo nelle variabili di Vercel, mai nel codice né in chat. Un canale senza chiavi resta fermo (lo
 // dice il registro una volta) e gli altri vanno lo stesso.
 // Un indirizzo che il servizio dichiara morto (app tolta, permesso revocato) si spegne: la riga resta con il motivo.
@@ -99,12 +103,49 @@ async function mandaIos(lista: Dispositivo[], n: Notifica): Promise<Map<string, 
 
 // ── Android (FCM v1) ──
 let fcmToken: { t: string; scade: number; progetto: string } | null = null
+const fcmConfigurato = () => !!(process.env.FCM_SERVICE_ACCOUNT || (process.env.FCM_PROJECT_ID && process.env.FCM_WIF_PROVIDER && process.env.FCM_SERVICE_ACCOUNT_EMAIL))
+
+// Il gettone OIDC di Vercel di QUESTA richiesta: Vercel lo mette nell'intestazione x-vercel-oidc-token, che legge dal
+// contesto della richiesta (lo stesso simbolo che usa il pacchetto @vercel/oidc); in locale arriva da VERCEL_OIDC_TOKEN.
+// Dura pochi minuti e dice chi siamo (team ecomize, progetto, ambiente): Google lo accetta solo per produzione e sviluppo.
+function gettoneVercel(): string | null {
+  const contesto = (globalThis as any)[Symbol.for('@vercel/request-context')]?.get?.()
+  return contesto?.headers?.['x-vercel-oidc-token'] || process.env.VERCEL_OIDC_TOKEN || null
+}
+
 async function accessoFcm(): Promise<{ t: string; progetto: string } | null> {
-  const grezzo = process.env.FCM_SERVICE_ACCOUNT
-  if (!grezzo) { manca('android'); return null }
+  if (!fcmConfigurato()) { manca('android'); return null }
   const ora = Math.floor(Date.now() / 1000)
   if (fcmToken && fcmToken.scade > ora + 60) return fcmToken
-  const sa = JSON.parse(Buffer.from(grezzo, 'base64').toString('utf8'))
+  if (process.env.FCM_SERVICE_ACCOUNT) return accessoFcmConChiave(ora)
+  const oidc = gettoneVercel()
+  if (!oidc) { console.error('[PUSH] fcm: manca il gettone OIDC di Vercel (OIDC Federation spenta nel progetto?)'); return null }
+  // 1) Google scambia il gettone di Vercel con un suo gettone federato (regola «vercel» del progetto Google)
+  const sts = await fetch('https://sts.googleapis.com/v1/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grantType: 'urn:ietf:params:oauth:grant-type:token-exchange', audience: `//iam.googleapis.com/${process.env.FCM_WIF_PROVIDER}`,
+      scope: 'https://www.googleapis.com/auth/cloud-platform', requestedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt', subjectToken: oidc,
+    }),
+  })
+  const s = await sts.json().catch(() => null)
+  if (!sts.ok || !s?.access_token) { console.error('[PUSH] fcm: Google non ha accettato il gettone di Vercel:', sts.status, s?.error || '', s?.error_description || ''); return null }
+  // 2) col gettone federato, un'ora del conto «moovexpress-push» (può solo mandare notifiche)
+  const imp = await fetch(`https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(process.env.FCM_SERVICE_ACCOUNT_EMAIL!)}:generateAccessToken`, {
+    method: 'POST', headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope: ['https://www.googleapis.com/auth/firebase.messaging'], lifetime: '3600s' }),
+  })
+  const i = await imp.json().catch(() => null)
+  if (!imp.ok || !i?.accessToken) { console.error('[PUSH] fcm: conto di servizio non prestato:', imp.status, i?.error?.status || '', String(i?.error?.message || '').slice(0, 160)); return null }
+  const scade = Math.floor(new Date(i.expireTime).getTime() / 1000) || ora + 3000
+  fcmToken = { t: i.accessToken, scade, progetto: process.env.FCM_PROJECT_ID! }
+  return fcmToken
+}
+
+// ripiego: il JSON del conto di servizio (oggi l'organizzazione non permette di crearlo)
+async function accessoFcmConChiave(ora: number): Promise<{ t: string; progetto: string } | null> {
+  const sa = JSON.parse(Buffer.from(process.env.FCM_SERVICE_ACCOUNT!, 'base64').toString('utf8'))
   const testa = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
   const corpo = b64url(JSON.stringify({ iss: sa.client_email, scope: 'https://www.googleapis.com/auth/firebase.messaging', aud: 'https://oauth2.googleapis.com/token', iat: ora, exp: ora + 3600 }))
   const s = createSign('RSA-SHA256'); s.update(`${testa}.${corpo}`)
@@ -118,7 +159,7 @@ async function accessoFcm(): Promise<{ t: string; progetto: string } | null> {
 
 async function mandaAndroid(d: Dispositivo, n: Notifica): Promise<Esito> {
   const a = await accessoFcm()
-  if (!a) return process.env.FCM_SERVICE_ACCOUNT ? 'errore' : 'senza_chiavi'
+  if (!a) return fcmConfigurato() ? 'errore' : 'senza_chiavi'
   const r = await fetch(`https://fcm.googleapis.com/v1/projects/${a.progetto}/messages:send`, {
     method: 'POST', headers: { Authorization: `Bearer ${a.t}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message: {
