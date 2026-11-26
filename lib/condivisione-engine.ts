@@ -295,6 +295,15 @@ async function materializzaContratto(
   // la propagazione non riesce, così un giro successivo lo accende da solo.
   let creato = false
   if (!buyerCorrId) {
+    // SOSTITUZIONE: le copie morte del compratore con lo stesso nome si tolgono DOPO la nascita del ponte (sotto), ma
+    // il database ammette una sola riga attiva per nome e master (scripts/stacca-contratto-vincolo.sql). Prima si
+    // segnano staccate: non hanno storico né niente appeso (valutaContrattoPerCompratore), e se la sostituzione si
+    // annulla restano lì staccate, cioè come erano già di fatto (morte).
+    const sueCopie = (opt.sostituisci?.copie || []).filter(c => c.master_id === buyer).map(c => c.id)
+    if (sueCopie.length) {
+      const { error: eSt } = await admin.from('corrieri').update({ staccato_il: new Date().toISOString(), attivo: false }).in('id', sueCopie)
+      if (eSt) return { ok: false, reason: 'le copie da sostituire non si possono mettere da parte: non è stato cambiato niente' }
+    }
     const { data: nc, error: eC } = await admin.from('corrieri').insert({
       master_id: buyer, tipo: 'moovexpress', nome_contratto: corr.nome_contratto,
       credenziali: { api_key: chiave, fornitore_master_id: seller, corriere_origine_id: corriereId },
@@ -559,11 +568,14 @@ export async function disabilitaContrattoCondiviso(
 
   // Prima si legge tutto, poi si scrive: un controllo che fallisce a metà non lascia il lavoro a metà.
   const { data: corrBuyers, error: eB } = await admin.from('corrieri')
-    .select('id,settings,fornitore:credenziali->>fornitore_master_id,origine:credenziali->>corriere_origine_id')
+    .select('id,settings,staccato_il,fornitore:credenziali->>fornitore_master_id,origine:credenziali->>corriere_origine_id')
     .eq('master_id', buyer).eq('tipo', 'moovexpress')
   if (eB) return { ok: false, reason: 'lettura dei contratti del collegato non riuscita: non è stato cambiato niente' }
   // Il ponte del compratore per questo contratto, venduto da QUESTO venditore.
   const buyerCorr = (corrBuyers || []).find((c: any) => c.origine === corriereId && c.fornitore === seller)
+  // Il collegato se ne era già STACCATO (26/11/2026): il contratto per lui è già fermo, e la sua riga resta per i
+  // pacchi già partiti. La chiave NON si revoca: è quella con cui si leggono tracking ed etichette di quei pacchi.
+  const giaStaccato = !!(buyerCorr as any)?.staccato_il
   let listinoLedger: string | null = null
   let listinoCondiviso = false
   if (ledgerId) {
@@ -578,7 +590,7 @@ export async function disabilitaContrattoCondiviso(
     }
   }
 
-  if (buyerCorr) {
+  if (buyerCorr && !giaStaccato) {
     // Senza storico si toglie con la sua configurazione; con storico (spedizioni, ritiri o distinte) si
     // spegne, e perde il segno "in attesa di costo": non deve riaccendersi da solo al prossimo giro.
     const el = await eliminaContrattiSenzaStorico(admin, [buyerCorr.id])
@@ -588,8 +600,10 @@ export async function disabilitaContrattoCondiviso(
     }
   }
   // Revoca la chiave e togli il contratto dal listino del ledger (se è ancora solo suo).
-  await admin.from('api_keys').update({ attivo: false }).eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
-  let avviso: string | undefined
+  if (!giaStaccato) await admin.from('api_keys').update({ attivo: false }).eq('cliente_id', ledgerId).eq('corriere_id', corriereId)
+  let avviso: string | undefined = giaStaccato
+    ? 'Il collegato si era già staccato da questo contratto: la sua chiave resta attiva solo per i pacchi già partiti.'
+    : undefined
   if (ledgerId) {
     if (listinoLedger && listinoCondiviso) {
       avviso = 'Il listino d’ingrosso lo usano anche altri: i prezzi di questo contratto restano. Toglilo a mano da Listini Clienti se serve.'

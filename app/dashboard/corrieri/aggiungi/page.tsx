@@ -184,7 +184,12 @@ async function salvaCorriere(formData: FormData) {
       credenziali, settings, multicollo: true, inserimento_ritiri: true, attivo: true, livello: 1,
     })
 
-    if (error) redirect(`/dashboard/corrieri?error=${encodeURIComponent(error.message)}`)
+    // Un solo contratto attivo per nome e master (scripts/stacca-contratto-vincolo.sql): due righe omonime facevano
+    // scegliere a caso la catena dei costi (GTS aveva tre "GLS CASERTA", 26/11/2026). Il messaggio è per il master.
+    if (error) {
+      const doppio = /corrieri_un_attivo_per_nome/.test(error.message || '')
+      redirect(`/dashboard/corrieri?error=${encodeURIComponent(doppio ? 'Hai già un contratto con questo nome: scegline un altro.' : error.message)}`)
+    }
     redirect('/dashboard/corrieri?success=corriere_aggiunto')
   }
 }

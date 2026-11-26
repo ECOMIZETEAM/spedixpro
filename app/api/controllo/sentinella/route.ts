@@ -48,7 +48,10 @@ export async function GET(req: NextRequest) {
   // fornitore ci fa pagare e che il cliente non paga e' una perdita che non lascia errori, quindi si
   // guarda la coda degli addebiti, i resi senza addebito, i resi fatturati su pacchi non a reso e il
   // titolare pagato due volte.
-  for (const [n, funzione] of [[1, 'controllo_giornaliero_1'], [2, 'controllo_giornaliero_2'], [3, 'controllo_giornaliero_3'], [4, 'controllo_giornaliero_4']] as const) {
+  // La parte 5 del database sono i contratti staccati (26/11/2026, scripts/sentinella-contratti-staccati.sql):
+  // nessuna spedizione nuova su un contratto staccato, nessuno riacceso, nessun doppio attivo per nome, e quanti
+  // pacchi e addebiti dopo la partenza girano ancora su di loro.
+  for (const [n, funzione] of [[1, 'controllo_giornaliero_1'], [2, 'controllo_giornaliero_2'], [3, 'controllo_giornaliero_3'], [4, 'controllo_giornaliero_4'], [5, 'controllo_giornaliero_5']] as const) {
     const { data, error } = await admin.rpc(funzione)
     if (error || !data) {
       console.error('[SENTINELLA] controllo non eseguito:', funzione, error?.message)
