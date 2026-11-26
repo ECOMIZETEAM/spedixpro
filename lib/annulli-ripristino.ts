@@ -12,21 +12,25 @@
 export const NOTA_ORDINE_GIA_RISPEDITO =
   "Risulta partita, ma lo stesso ordine ha già un'altra spedizione attiva: va decisa a mano (annullare o tenere)."
 
-export type EsitoRipristino = 'ripristinata' | 'ordine_gia_rispedito' | 'errore'
+export type EsitoRipristino = 'ripristinata' | 'ordine_gia_rispedito' | 'non_piu_in_coda' | 'errore'
 
 export async function ripristinaPartita(
   admin: any,
   s: { id: string; numero?: string | null; stato_precedente?: string | null },
   etichetta: string,   // prefisso del log, es. '[ANNULLI][RECUPERO]'
 ): Promise<EsitoRipristino> {
-  const { error } = await admin.from('spedizioni').update({
+  // SOLO se e' ancora in coda d'annullo. Il tracking lavora su righe lette fino a qualche minuto prima e
+  // parte alla stessa ora del cron degli annulli: senza questo filtro poteva rimettere attiva una
+  // spedizione appena annullata e rimborsata — pacco che viaggia e rimborso gia' dato.
+  const { error, count } = await admin.from('spedizioni').update({
     stato: s.stato_precedente || 'in_lavorazione',
     stato_precedente: null,
     annullamento_richiesto_at: null,
     annullamento_da: null,
     annullamento_errore: null,
     annullamento_owner_id: null,
-  }).eq('id', s.id)
+  }, { count: 'exact' }).eq('id', s.id).in('stato', ['annullamento_pending', 'annullamento_manuale'])
+  if (!error && count === 0) return 'non_piu_in_coda'
   if (!error) { console.warn(`${etichetta} partita → ripristinata:`, s.numero); return 'ripristinata' }
 
   if (error.code === '23505' && /uniq_sped_ordine_attivo/.test(String(error.message))) {

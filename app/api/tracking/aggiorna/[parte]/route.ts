@@ -733,7 +733,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         if (nuovo && PARTITA.includes(nuovo)) {
           // l'esito si legge: prima un rifiuto del database finiva comunque nel log come «ripristinata»
           const { ripristinaPartita } = await import('@/lib/annulli-ripristino')
-          if (await ripristinaPartita(admin, s as any, `[TRACKING][ANNULLO] (${nuovo})`) === 'ripristinata') aggiornate++
+          const esito = await ripristinaPartita(admin, s as any, `[TRACKING][ANNULLO] (${nuovo})`)
+          if (esito === 'ripristinata') aggiornate++
+          else if (esito === 'errore') errori++
         }
         return
       }

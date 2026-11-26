@@ -40,38 +40,47 @@ export async function GET(req: NextRequest) {
     sorveglianza = { pacchi: r.pacchi, partiti: r.partiti, riaddebitati: r.riaddebitati }
   } catch (e: any) { console.error('[ANNULLI][SORVEGLIANZA-POSTE]', e?.message) }
 
-  const { data: coda } = await admin.from('spedizioni')
+  const { data: coda, error: eCoda } = await admin.from('spedizioni')
     .select('id,numero,stato,stato_precedente')
     .in('stato', ['annullamento_pending', 'annullamento_manuale'])
+    .order('id')
     .limit(3000)
+  if (eCoda) { console.error('[ANNULLI][RECUPERO] coda non letta:', eCoda.message); return NextResponse.json({ ok: false, error: eCoda.message, sorveglianza }, { status: 500 }) }
+  if ((coda || []).length >= 1000) console.warn('[ANNULLI][RECUPERO] coda di', (coda || []).length, 'righe: oltre le 1.000 la lettura puo\' essere troncata')
   const ids = (coda || []).map((s: any) => s.id)
   if (!ids.length) return NextResponse.json({ ok: true, esaminate: 0, ripristinate: 0, sorveglianza })
 
+  // Blocchi da 100: una spedizione in coda da settimane accumula molti eventi, e una lettura oltre le
+  // 1.000 righe si tronca senza dirlo. Una lettura fallita si dice: prima diventava «nessuna partita».
   const partite = new Set<string>()
-  for (let i = 0; i < ids.length; i += 300) {
-    const chunk = ids.slice(i, i + 300)
+  let lettureFallite = 0
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100)
     // Ripesatura del fornitore = misura reale sul collo = e' partita.
-    const { data: mv } = await admin.from('movimenti')
+    const { data: mv, error: eMv } = await admin.from('movimenti')
       .select('spedizione_id').eq('tipo', 'rettifica').like('riferimento', 'RIPFORN-%').in('spedizione_id', chunk)
+    if (eMv) { lettureFallite++; console.error('[ANNULLI][RECUPERO] ripesature non lette:', eMv.message) }
     for (const m of (mv || [])) if ((m as any).spedizione_id) partite.add((m as any).spedizione_id)
     // Evento di tracking con uno stato che implica il transito. Si salta l'avviso GLS «non (ancora) arrivata
-    // presso la sede»: gli eventi salvati prima del 26/11/2026 lo hanno come in_transito, ma su un pacco mai
-    // affidato al corriere non prova niente (vedi lib/spedisci, AVVISO_NON_ARRIVATA).
-    const { data: ev } = await admin.from('tracking_events')
-      .select('spedizione_id,descrizione').in('stato', STATI_PARTITA).in('spedizione_id', chunk)
+    // presso la sede» registrato come in_transito: gli eventi salvati prima del 26/11/2026 lo hanno cosi', ma
+    // su un pacco mai affidato al corriere non prova niente (vedi lib/spedisci, AVVISO_NON_ARRIVATA).
+    const { data: ev, error: eEv } = await admin.from('tracking_events')
+      .select('spedizione_id,stato,descrizione').in('stato', STATI_PARTITA).in('spedizione_id', chunk)
+    if (eEv) { lettureFallite++; console.error('[ANNULLI][RECUPERO] eventi non letti:', eEv.message) }
     for (const e of (ev || [])) {
-      if (!(e as any).spedizione_id || AVVISO_NON_ARRIVATA.test(String((e as any).descrizione || ''))) continue
+      if (!(e as any).spedizione_id) continue
+      if ((e as any).stato === 'in_transito' && AVVISO_NON_ARRIVATA.test(String((e as any).descrizione || ''))) continue
       partite.add((e as any).spedizione_id)
     }
   }
 
-  let ripristinate = 0, ordineGiaRispedito = 0, errori = 0
+  let ripristinate = 0, ordineGiaRispedito = 0, errori = lettureFallite
   for (const s of (coda || [])) {
     if (!partite.has((s as any).id)) continue
     const esito = await ripristinaPartita(admin, s as any, '[ANNULLI][RECUPERO]')
     if (esito === 'ripristinata') ripristinate++
     else if (esito === 'ordine_gia_rispedito') ordineGiaRispedito++
-    else errori++
+    else if (esito === 'errore') errori++
   }
 
   return NextResponse.json({ ok: true, esaminate: ids.length, partite: partite.size, ripristinate, ordineGiaRispedito, errori, sorveglianza })
