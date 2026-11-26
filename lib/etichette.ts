@@ -478,9 +478,23 @@ async function ponteFinisceSuGls(admin: any, raw: any): Promise<boolean> {
 // rispondeva, il registro dei cron non la prendeva), e nel frattempo il database cresceva di 239 MB
 // al giorno. Appoggiarsi a un cron gia' vivo toglie di mezzo quel problema: due inneschi, una sola
 // implementazione.
-export async function archiviaLotto(admin: any, quante = 100): Promise<{
+//
+// IL GIRO DEDICATO NE FA A GRUPPI, ENTRO UN TEMPO. Una alla volta erano ~0,5 secondi a riga (caricamento
+// e rilettura su Storage), 100 righe in ~50 secondi ogni 10 minuti: circa 17.500 al giorno contando anche
+// tmp-recupero. Dal 23/11/2026 di righe con l'etichetta ne nascono 18-28 mila al giorno (le gambe dei
+// condivisi ne portano una copia ciascuna) e il 26/11 sera 20.036 aspettavano ancora, la piu' vecchia del
+// giorno prima: il PDF restava nella riga piu' di un giorno, e di notte se ne liberava solo quello gia'
+// archiviato. A gruppi di pochi (`inParallelo`) il PDF si legge solo per il gruppo in lavorazione: leggere
+// l'etichetta di centinaia di righe in un colpo solo sono decine di MB tirati fuori dal database insieme.
+// Senza opzioni fa come prima: una alla volta, l'etichetta letta con la scelta (tmp-recupero).
+export async function archiviaLotto(admin: any, quante = 100, opz: {
+  entroMs?: number        // tempo massimo: si chiude il gruppo in corso e ci si ferma
+  inParallelo?: number    // righe lavorate (e lette) insieme
+} = {}): Promise<{
   esaminate: number; archiviate: number; saltate: number; fallite: number
 }> {
+  const scadenza = opz.entroMs ? Date.now() + opz.entroMs : Infinity
+  const insieme = Math.max(1, Math.min(10, opz.inParallelo ?? 1))
   const impronta = (b: Buffer) => createHash('sha1').update(b).digest('hex')
   // QUESTA QUERY DIPENDE DA UN INDICE, e senza va in timeout.
   // Cercare 'data:%' dentro una colonna di testo su una tabella da 4 GB significa leggersela tutta:
@@ -492,19 +506,20 @@ export async function archiviaLotto(admin: any, quante = 100): Promise<{
   // sparire da solo quando non ce n'e' piu' nessuna. Le tre condizioni qui sotto devono restare
   // IDENTICHE al predicato dell'indice, altrimenti Postgres non lo usa e si torna al timeout.
   // Le piu' VECCHIE per prime: nessuno le sta stampando adesso.
+  const aGruppi = insieme > 1 || Number.isFinite(scadenza)
   const { data: righe, error } = await admin
-    .from('spedizioni').select('id,numero,etichetta_url,created_at')
+    .from('spedizioni').select(aGruppi ? 'id,numero,created_at' : 'id,numero,etichetta_url,created_at')
     .is('etichetta_path', null).like('etichetta_url', 'data:%')
     .order('created_at', { ascending: true }).limit(quante)
   if (error) { console.error('[ARCHIVIA-ETICHETTE] lettura fallita', error.message); return { esaminate: 0, archiviate: 0, saltate: 0, fallite: 0 } }
 
-  let archiviate = 0, saltate = 0, fallite = 0
-  for (const r of righe || []) {
+  let esaminate = 0, archiviate = 0, saltate = 0, fallite = 0
+  const lavora = async (r: any) => {
     const dato = scomponiDataUrl(r.etichetta_url)
-    if (!dato?.buffer?.length) { saltate++; continue }
+    if (!dato?.buffer?.length) { saltate++; return }
 
     const path = await caricaEtichetta(admin, r.id, dato.buffer, dato.mime, r.created_at ? new Date(r.created_at) : new Date())
-    if (!path) { fallite++; continue }
+    if (!path) { fallite++; return }
 
     // SI RILEGGE PRIMA DI FIDARSI. Un caricamento senza errore non garantisce un file integro: un
     // buffer troncato o un'interruzione a meta' passerebbero lo stesso. Se il file riletto non e'
@@ -513,13 +528,30 @@ export async function archiviaLotto(admin: any, quante = 100): Promise<{
     if (!riletto || impronta(riletto.buffer) !== impronta(dato.buffer)) {
       fallite++
       console.error('[ARCHIVIA-ETICHETTE] verifica fallita', r.numero, path)
-      continue
+      return
     }
-    const { error: upErr } = await admin.from('spedizioni').update({ etichetta_path: path }).eq('id', r.id)
-    if (upErr) { fallite++; console.error('[ARCHIVIA-ETICHETTE]', r.numero, upErr.message); continue }
+    // Solo se nel frattempo nessuno l'ha archiviata (tmp-recupero prende le stesse righe, dalle piu' vecchie).
+    const { error: upErr } = await admin.from('spedizioni').update({ etichetta_path: path }).eq('id', r.id).is('etichetta_path', null)
+    if (upErr) { fallite++; console.error('[ARCHIVIA-ETICHETTE]', r.numero, upErr.message); return }
     archiviate++
   }
-  const esito = { esaminate: (righe || []).length, archiviate, saltate, fallite }
+  const tutte = (righe || []) as any[]
+  for (let i = 0; i < tutte.length && Date.now() < scadenza; i += insieme) {
+    let gruppo = tutte.slice(i, i + insieme)
+    if (aGruppi) {
+      const { data: pesanti, error: eP } = await admin.from('spedizioni')
+        .select('id,etichetta_url').in('id', gruppo.map(r => r.id)).is('etichetta_path', null)
+      if (eP) { console.error('[ARCHIVIA-ETICHETTE] lettura etichette fallita', eP.message); break }
+      const per = new Map((pesanti || []).map((p: any) => [p.id, p.etichetta_url]))
+      // Una riga che non torna e' stata archiviata da tmp-recupero intanto: niente da fare.
+      gruppo = gruppo.filter(r => per.has(r.id)).map(r => ({ ...r, etichetta_url: per.get(r.id) }))
+    }
+    esaminate += gruppo.length
+    await Promise.all(gruppo.map(r => lavora(r).catch((e: any) => {
+      fallite++; console.error('[ARCHIVIA-ETICHETTE]', r.numero, e?.message)
+    })))
+  }
+  const esito = { esaminate, archiviate, saltate, fallite }
   if (esito.esaminate) console.log('[ARCHIVIA-ETICHETTE]', JSON.stringify(esito))
   return esito
 }

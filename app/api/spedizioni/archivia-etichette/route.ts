@@ -43,10 +43,15 @@ export async function GET(req: NextRequest) {
   const _b = bloccaCronNonAutorizzato(req); if (_b) return _b
   const inizio = Date.now()
   const admin = createAdminSupabase()
-  const archiviate = await archiviaLotto(admin, 100)
+  // A gruppi di 5 entro un tempo (vedi archiviaLotto): ~100 righe ogni 10 minuti non bastavano piu', il
+  // 26/11/2026 la coda era di 20.036 righe, la piu' vecchia del giorno prima. Misurato: ~0,5 s a riga una
+  // alla volta. Di giorno fino a 200 secondi; di notte 45, perche' il resto serve a liberare le righe
+  // (quello e' il lavoro che restituisce spazio, e si puo' fare solo di notte).
+  const notte = oraDiNotteRoma()
+  const archiviate = await archiviaLotto(admin, 3000, { entroMs: notte ? 45_000 : 200_000, inParallelo: 5 })
   // Dentro i 300 secondi della funzione, con margine: quello che resta dopo l'archiviazione.
   const resta = 270_000 - (Date.now() - inizio)
-  const liberate = oraDiNotteRoma() && resta > 10_000
+  const liberate = notte && resta > 10_000
     ? await liberaEtichetteArchiviate(admin, 3000, { entroMs: Math.min(210_000, resta), inParallelo: 6 })
     : null
   return NextResponse.json({ ...archiviate, liberate })
