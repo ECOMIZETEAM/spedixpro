@@ -74,7 +74,9 @@ export default function ApiKeysPage() {
 
       <div style={{...card, marginBottom:'16px'}}>
         <div style={{fontSize:'13px',fontWeight:700,color:'#1a1a1a',marginBottom:'8px'}}>Come si usa</div>
-        <div style={{fontSize:'12.5px',color:'#444',lineHeight:1.6}}>
+        {/* Gli indirizzi delle chiamate non hanno spazi: sul telefono quello dell'etichetta
+            (…/shipments/{id}/label) usciva dalla scheda. Qui possono andare a capo dove serve. */}
+        <div style={{fontSize:'12.5px',color:'#444',lineHeight:1.6,overflowWrap:'anywhere'}}>
           Base URL: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>{base}/api/v1</code><br/>
           Autenticazione: header <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>Authorization: Bearer &lt;api_key&gt;</code><br/>
           Tariffa: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>POST {base}/api/v1/rates</code><br/>
@@ -88,8 +90,8 @@ export default function ApiKeysPage() {
               contratto a punto perche' ogni chiave e' legata a un solo contratto. */}
           Consegna a un punto (PuntoPoste, Ufficio Postale, Fermopoint, locker): genera la chiave sul contratto a punto, cerca i punti con <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/delivery-points?postalCode=</code> e manda quello scelto in <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>deliveryPoint</code> — <a href="https://docs.moovexpress.com/integrare-piattaforma#consegna-a-un-punto-puntoposte-ufficio-postale-fermopoint-locker" target="_blank" rel="noopener noreferrer" style={{color:ACCENT,fontWeight:600}}>guida</a><br/>
           Elenco spedizioni: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments</code> (<code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>?limit=&amp;offset=&amp;stato=</code>)<br/>
-          Stato: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;</code> · Etichetta LDV: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/&#123;id&#125;/label</code><br/>
-          Annulla (solo se non ancora affidata al corriere): <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>DELETE {base}/api/v1/shipments/&#123;id&#125;</code>
+          Stato: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/<wbr/>&#123;id&#125;</code> · Etichetta LDV: <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>GET {base}/api/v1/shipments/<wbr/>&#123;id&#125;/label</code><br/>
+          Annulla (solo se non ancora affidata al corriere): <code style={{background:'#f5f5f5',padding:'1px 6px',borderRadius:'4px'}}>DELETE {base}/api/v1/shipments/<wbr/>&#123;id&#125;</code>
         </div>
       </div>
 
