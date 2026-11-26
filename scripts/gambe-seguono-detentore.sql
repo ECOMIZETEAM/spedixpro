@@ -63,6 +63,7 @@ declare
   v_tipo   text;
   v_altre  uuid[];
   v_evento text;
+  v_lock   text;
   r        record;
 begin
   -- Solo la riga del detentore: nessun venditore sopra, contratto vero (non un ponte).
@@ -115,10 +116,15 @@ begin
   for r in select g.id, g.numero, g.stato, g.stato_precedente, g.annullamento_owner_id from spedizioni g where g.id = any(v_altre)
   loop
     begin
-      -- Mai aspettare una riga tenuta da un'altra transazione: un'attesa finita in timeout farebbe fallire la
-      -- scrittura del detentore (tracking, conferma, storno), cioe' proprio cio' che non deve succedere.
-      -- lock_not_available lo prende il gestore qui sotto: la riga finisce fra le anomalie, le altre seguono.
-      perform 1 from spedizioni where id = r.id for update nowait;
+      -- Una riga tenuta da un'altra transazione si aspetta al massimo 2 secondi: il giro del tracking puo' scriverla
+      -- nello stesso istante, e quella contesa dura millisecondi. Oltre, lock_not_available lo prende il gestore qui
+      -- sotto (la riga va fra le anomalie, le altre seguono): un'attesa lunga finita in timeout farebbe fallire la
+      -- scrittura del detentore. Il limite vale solo qui: si rimette quello di prima, e se il blocco fallisce
+      -- Postgres lo annulla da se' con la sotto-transazione.
+      v_lock := current_setting('lock_timeout');
+      perform set_config('lock_timeout', '2s', true);
+      perform 1 from spedizioni where id = r.id for update;
+      perform set_config('lock_timeout', v_lock, true);
       -- 1. LDV annullata: si annullano le righe ancora ferme (il rimborso lo fa la coda annulli_da_rimborsare).
       if v_evento = 'annullata' then
         if r.stato in ('in_lavorazione', 'spedita', 'annullamento_pending', 'annullamento_manuale', 'storno_richiesto') then

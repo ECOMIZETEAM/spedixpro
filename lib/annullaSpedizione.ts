@@ -333,7 +333,13 @@ export async function annullaGambePacco(
   // rimborsa da questa strada: e' entrata nella coda annulli_da_rimborsare quando e' diventata annullata.
   const prese: any[] = []
   const nonScritte: string[] = []
-  for (const r of (righe || [])) {
+  // Nell'ordine delle gambe (il detentore per ultimo, come lo passano tutti i chiamanti), non in quello in cui le
+  // rende il database: se il detentore passasse per primo, il trigger trg_gambe_seguono_detentore annullerebbe le
+  // altre righe, gli update qui sotto non le prenderebbero e il loro rimborso slitterebbe alla coda (30 minuti),
+  // mentre il portale dice "credito stornato".
+  const ordine = new Map(ids.map((id, i) => [id, i]))
+  const inOrdine = [...(righe || [])].sort((a: any, b: any) => (ordine.get(a.id) ?? 0) - (ordine.get(b.id) ?? 0))
+  for (const r of inOrdine) {
     if (r.stato === 'annullata') continue
     // Una riga in viaggio non si annulla ne' si rimborsa: chi chiama l'ha gia' escluso (paccoPartito, annullo-pacco),
     // ma fra la sua lettura e questa il tracking puo' averla mossa.
@@ -348,7 +354,12 @@ export async function annullaGambePacco(
       annullamento_errore: null,
     }).eq('id', r.id).eq('stato', r.stato).select('id')
     if (error) { nonScritte.push(`${r.numero}: ${error.message}`); continue }
-    if (presa?.length) prese.push(r)
+    if (presa?.length) { prese.push(r); continue }
+    // Non presa: un'altra porta l'ha cambiata nel frattempo. Se e' annullata ci pensa chi l'ha annullata (o la
+    // coda dei rimborsi); se e' andata altrove (coda manuale, in viaggio) il pacco NON e' chiuso, e va detto.
+    const { data: ora, error: errOra } = await admin.from('spedizioni').select('stato').eq('id', r.id).maybeSingle()
+    if (errOra) { nonScritte.push(`${r.numero}: ${errOra.message}`); continue }
+    if (ora?.stato !== 'annullata') nonScritte.push(`${r.numero}: è passata a ${ora?.stato || 'stato sconosciuto'}`)
   }
   // Si rimborsa solo cio' che si e' annullato qui: una riga rimasta attiva non si rimborsa.
   for (const r of prese) await rimborsaAnnulloSpedizione(admin, r, rich.da || null)
