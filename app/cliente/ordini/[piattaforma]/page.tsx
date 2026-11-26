@@ -16,6 +16,7 @@ import { apriCompletaDatiNegozio, EVENTO_DATI_NEGOZIO_SALVATI } from '@/app/clie
 import { leggiCondiviso } from '@/lib/richiesta-condivisa'
 import IvaPrezzo from '@/app/components/IvaPrezzo'
 import type { RegimeIva } from '@/lib/iva-calcolo'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 
 // Il prezzo si calcola per gli ordini della pagina a schermo e per quelli selezionati, fino a questo
 // tetto: chi seleziona centinaia di ordini vede il totale sui primi, e al clic si prezzano tutti.
@@ -227,8 +228,8 @@ export default function OrdiniPage() {
       // oggi; "ultimi 30 giorni" -> quelli. Se non hai scelto date, default agli ultimi 30 giorni,
       // cosi' il primo sync non parte vuoto. (Prima si mandava un'unione fissa >=30gg che ignorava il
       // selettore: mettere "oggi" scaricava comunque tutto il mese.)
-      const trentaGiorniFa = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
-      const oggi = new Date().toISOString().slice(0, 10)
+      const trentaGiorniFa = giorniFaRoma(30)
+      const oggi = giornoRoma()
       const res = await fetch('/api/integrazioni/'+piattaforma+'/sync', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({

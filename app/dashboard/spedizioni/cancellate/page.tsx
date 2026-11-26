@@ -15,12 +15,13 @@ function oreRestanti(richiestoAt: string): { txt: string; pronto: boolean } {
 
 import { useDialog } from '@/app/components/DialogProvider'
 import { riferimentoFornitore } from '@/lib/numero-spedizione'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 // Default: ultimi 60 giorni di annullate (le code pending/manuali restano complete: sono attive e
 // poche). Prima si scaricavano e arricchivano TUTTE le annullate di sempre -> pagina sempre piu' lenta.
 // Calcolate all'APERTURA della pagina, non al caricamento del modulo: nell'app il modulo resta in
 // memoria per giorni se la scheda non si ricarica, e "oggi" restava il giorno in cui la si era aperta.
-const oggiC = () => new Date().toISOString().slice(0, 10)
-const da60C = () => new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+const oggiC = () => giornoRoma()
+const da60C = () => giorniFaRoma(60)
 // Etichettina della SECONDA riga (valori sotto): piccola e tenue, non deve pesare.
 const secLbl = { fontSize:'10px', textTransform:'uppercase' as const, letterSpacing:'0.3px', color:'#9ca3af', fontWeight:700, marginRight:'5px' }
 export default function SpedizioniCancellatePage() {

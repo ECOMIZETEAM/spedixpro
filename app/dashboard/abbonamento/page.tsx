@@ -16,6 +16,7 @@ const sessioneLabel = (iso:string|null) => {
 
 import { useDialog } from '@/app/components/DialogProvider'
 import { useAppNativa, ABBONAMENTO_NON_IN_APP } from '@/lib/app-nativa'
+import { giornoRoma } from '@/lib/date-roma'
 export default function AbbonamentoPage() {
   const dialog = useDialog()
   const app = useAppNativa()
@@ -263,7 +264,7 @@ export default function AbbonamentoPage() {
     // IMMINENTE: il 29/09 mostrava novembre (€417, i 3 già su nov) e nascondeva i €3.815 dei 20 che
     // rinnovano il 1° ottobre. Ora si prende il mese del rinnovo (`rinnovo_attuale`) più prossimo da oggi.
     const stripePronto = !!allinea && !allinea.error && Array.isArray(allinea?.righe)
-    const oggiISO = new Date().toISOString().slice(0, 10)
+    const oggiISO = giornoRoma()
     const meseProssimo = (allinea?.righe || [])
       .filter((r: any) => !r.escluso && r.rinnovo_attuale && r.rinnovo_attuale >= oggiISO)
       .map((r: any) => String(r.rinnovo_attuale).slice(0, 7))

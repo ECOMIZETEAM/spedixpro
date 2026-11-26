@@ -2,13 +2,15 @@
 import { useEffect, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import DateRangePicker from '@/app/components/DateRangePicker'
+import { giornoRoma, periodoRapidoRoma } from '@/lib/date-roma'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const ARANCIO = '#f97316', VERDE = '#16a34a', ROSSO = '#dc2626', NERO = '#1a1a1a'
 const col = (x: number) => (x >= 0 ? VERDE : ROSSO)
 
-function oggiStr() { return new Date().toISOString().slice(0, 10) }
-function primoMese() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10) }
+// i giorni di Roma (lib/date-roma): con toISOString «Questo mese» partiva dall'ultimo giorno del mese prima
+function oggiStr() { return giornoRoma() }
+function primoMese() { return periodoRapidoRoma('mese').dal }
 
 export default function StatProfittoPage() {
   const [dal, setDal] = useState(primoMese())
@@ -29,16 +31,7 @@ export default function StatProfittoPage() {
 
   // Imposta un range rapido E ricarica subito (come la dashboard).
   function rangeVeloce(tipo: string) {
-    const oggi = new Date(); let start = new Date(), end = new Date()
-    if (tipo === 'oggi') { /* start=end=oggi */ }
-    else if (tipo === 'ieri') { start.setDate(oggi.getDate() - 1); end.setDate(oggi.getDate() - 1) }
-    else if (tipo === 'mese') start = new Date(oggi.getFullYear(), oggi.getMonth(), 1)
-    else if (tipo === 'mesescorso') { start = new Date(oggi.getFullYear(), oggi.getMonth() - 1, 1); end = new Date(oggi.getFullYear(), oggi.getMonth(), 0) }
-    else if (tipo === '7') start.setDate(oggi.getDate() - 6)
-    else if (tipo === '30') start.setDate(oggi.getDate() - 29)
-    else if (tipo === '90') start.setDate(oggi.getDate() - 89)
-    else if (tipo === 'anno') start = new Date(oggi.getFullYear(), 0, 1)
-    const da = start.toISOString().slice(0, 10), a = end.toISOString().slice(0, 10)
+    const { dal: da, al: a } = periodoRapidoRoma(tipo)
     setDal(da); setAl(a); carica(da, a)
   }
 

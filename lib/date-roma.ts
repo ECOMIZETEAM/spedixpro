@@ -81,3 +81,26 @@ export function confineGiornoRoma(v: string | null, lato: 'dal' | 'al'): string 
   if (lato === 'al' && (resto === '' || /^T23:59:59(\.\d+)?$/.test(resto))) return fineGiornoRomaISO(giorno)
   return s
 }
+
+/**
+ * I periodi rapidi delle pagine (Oggi, Ieri, Questo mese, Mese scorso, Ultimi 7/30/90 giorni, Quest'anno) come giorni
+ * di Roma 'YYYY-MM-DD'. Le Statistiche li facevano con `new Date(anno, mese, 1).toISOString()`: la mezzanotte
+ * italiana del primo del mese, letta a Greenwich, è ancora il giorno prima. «Questo mese» partiva dall'ultimo giorno
+ * del mese prima, «Mese scorso» andava dal 30/09 al 30/10 (un giorno di settembre dentro, il 31 ottobre fuori).
+ * Un tipo sconosciuto vale «Oggi».
+ */
+export function periodoRapidoRoma(tipo: string, d: Date = new Date()): { dal: string; al: string } {
+  const oggi = giornoRoma(d)
+  const [y, m] = oggi.split('-').map(Number)
+  const giorno = (anno: number, mese: number, g: number) => new Date(Date.UTC(anno, mese - 1, g)).toISOString().slice(0, 10)
+  switch (tipo) {
+    case 'ieri': { const ieri = giorniFaRoma(1, d); return { dal: ieri, al: ieri } }
+    case 'mese': return { dal: giorno(y, m, 1), al: oggi }
+    case 'mesescorso': return { dal: giorno(y, m - 1, 1), al: giorno(y, m, 0) }
+    case '7': return { dal: giorniFaRoma(6, d), al: oggi }
+    case '30': return { dal: giorniFaRoma(29, d), al: oggi }
+    case '90': return { dal: giorniFaRoma(89, d), al: oggi }
+    case 'anno': return { dal: `${y}-01-01`, al: oggi }
+    default: return { dal: oggi, al: oggi }
+  }
+}

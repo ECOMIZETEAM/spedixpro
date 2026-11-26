@@ -1,18 +1,20 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { giornoRoma, periodoRapidoRoma } from '@/lib/date-roma'
 
 const eur = (x: number) => '€ ' + Number(x || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const ARANCIO = '#f97316', VERDE = '#16a34a', NERO = '#1a1a1a', BLU = '#2563eb'
-const oggi = () => new Date().toISOString().slice(0, 10)
-const primoMese = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10) }
+const oggi = () => giornoRoma()
+const primoMese = () => periodoRapidoRoma('mese').dal
 
 export default function StatCorrieriPage() {
   const [dal, setDal] = useState(primoMese()); const [al, setAl] = useState(oggi())
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true)
   async function carica(da = dal, a = al) { setLoading(true); try { const r = await fetch(`/api/statistiche/corrieri?dal=${da}&al=${a}`); const j = await r.json(); setD(j.error ? null : j) } catch { setD(null) } setLoading(false) }
   useEffect(() => { carica() }, [])  // eslint-disable-line
-  function range(t: string) { const dd = new Date(); let s = new Date(), e = new Date(); if (t === 'oggi') { } else if (t === 'ieri') { s.setDate(dd.getDate() - 1); e.setDate(dd.getDate() - 1) } else if (t === 'mese') s = new Date(dd.getFullYear(), dd.getMonth(), 1); else if (t === 'mesescorso') { s = new Date(dd.getFullYear(), dd.getMonth() - 1, 1); e = new Date(dd.getFullYear(), dd.getMonth(), 0) } else if (t === '7') s.setDate(dd.getDate() - 6); else if (t === '30') s.setDate(dd.getDate() - 29); else if (t === '90') s.setDate(dd.getDate() - 89); else if (t === 'anno') s = new Date(dd.getFullYear(), 0, 1); const da = s.toISOString().slice(0, 10), a = e.toISOString().slice(0, 10); setDal(da); setAl(a); carica(da, a) }
+  // i giorni di Roma (lib/date-roma): con toISOString «Questo mese» partiva dall'ultimo giorno del mese prima
+  function range(t: string) { const { dal: da, al: a } = periodoRapidoRoma(t); setDal(da); setAl(a); carica(da, a) }
   const k = d?.kpi
   return (
     <div>

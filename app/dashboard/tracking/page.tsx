@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { giornoRoma } from '@/lib/date-roma'
 
 // IL CIRCUITO INTERNO, DAL LATO DI CHI CI LAVORA.
 //
@@ -265,7 +266,7 @@ function Elenco({ vista }: { vista: 'partenza' | 'arrivo' }) {
 
 // ────────────────────────────────────────────────────────────────────────────────────────────
 function Consegne() {
-  const [giorno, setGiorno] = useState(new Date().toISOString().slice(0, 10))
+  const [giorno, setGiorno] = useState(giornoRoma())
   const [dati, setDati] = useState<any>(null)
   useEffect(() => {
     setDati(null)

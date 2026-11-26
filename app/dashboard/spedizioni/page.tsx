@@ -21,6 +21,7 @@ import '@/app/components/grafica/elenco.css'
 import TrackingLaterale from '@/app/components/grafica/TrackingLaterale'
 import MenuAzioni from '@/app/components/grafica/MenuAzioni'
 import Percorso from '@/app/components/grafica/Percorso'
+import { giornoRoma, giorniFaRoma } from '@/lib/date-roma'
 
 const inp = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
 const sel = {padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'12px',background:'#fff',color:'#1a1a1a',width:'100%',boxSizing:'border-box' as const}
@@ -64,8 +65,8 @@ function codBadgeStyle(stato?: string, parziale?: boolean) {
 // Default: ultimi 30 giorni. Prima partiva senza data → al primo caricamento scaricava e arricchiva
 // (movimenti/prezzi) TUTTO lo storico = elenco lento. Con la finestra recente è istantaneo; l'utente
 // allarga la data quando serve. La ricerca per N. Spedizione resta comunque su tutto lo storico.
-const _oggiISO = new Date().toISOString().slice(0, 10)
-const _da30ISO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+const _oggiISO = giornoRoma()
+const _da30ISO = giorniFaRoma(30)
 const FILTRI_DEFAULT = {
   clienteId:'', negozio:'', vettore:'', contratto:'', stato:'', id_ordine:'',
   numero:'', dal:_da30ISO, al:_oggiISO, contrassegno:'', stato_contrassegni:'',
@@ -1005,7 +1006,7 @@ async function apriTracking(s: any) {
               <div style={{display:'flex',gap:'12px',padding:'2px 0 6px 30px',flexWrap:'wrap'}}>
                 <div>
                   <div style={{fontSize:'11px',color:'#6b7280',marginBottom:'3px'}}>Data ritiro</div>
-                  <input type="date" value={resoOpts.dataRitiro} min={new Date().toISOString().slice(0,10)} onChange={e=>setResoOpts(o=>({...o,dataRitiro:e.target.value}))} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
+                  <input type="date" value={resoOpts.dataRitiro} min={giornoRoma()} onChange={e=>setResoOpts(o=>({...o,dataRitiro:e.target.value}))} style={{padding:'7px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',color:'#1a1a1a',background:'#fff'}}/>
                 </div>
                 <div>
                   <div style={{fontSize:'11px',color:'#6b7280',marginBottom:'3px'}}>Fascia</div>
