@@ -1,4 +1,5 @@
 import type { ModalitaCod } from '@/lib/contrassegno-modalita'
+import { colliConPesoPulito } from '@/lib/colli-puliti'
 
 // DUE PEZZI DI /api/v1/shipments SPOSTATI QUI SENZA CAMBIARLI (fase 3 di PONTE-UNICO.md): la richiesta che un
 // livello manda al venditore sotto, e la riga che un livello scrive. Li usano la rotta, come prima, e il ponte
@@ -112,7 +113,8 @@ export function colliDelCorpo(body: any): any[] {
   const packages = Array.isArray(body.packages) && body.packages.length
     ? body.packages
     : [{ weight: Number(body.weight) || 1, length: 20, width: 15, height: 10 }]
-  return packages
+  // Peso pulito ai grammi, come nel portale (lib/colli-puliti).
+  return colliConPesoPulito(packages)
 }
 
 // IL RITIRO CHIESTO DA CHI INTEGRA.

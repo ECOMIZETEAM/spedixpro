@@ -34,6 +34,7 @@ import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 // le porte (portale e API v1), in lib/guardia-destinazione-speciale.
 import { venditaDaZonaNormale, dvaDiceSpeciale, spedisciDiceSpeciale, spediamoproDiceSpeciale, messaggioDestinazioneSpeciale } from '@/lib/guardia-destinazione-speciale'
 import { detentoreContratto } from '@/lib/contratto-per-nome'
+import { colliConPesoPulito } from '@/lib/colli-puliti'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
@@ -342,7 +343,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     if (cd.normalizzata) body.shipTo.city = cd.citta   // prosegue col nome ufficiale: la zona speciale ora aggancia
   }
 
-  const packages = body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }]
+  const packages = colliConPesoPulito(body.packages || [{ length: 20, width: 15, height: 10, weight: 1 }])
   // RITIRO richiesto insieme alla spedizione. Serve a due cose: ai contratti DVA, dove e' l'UNICO
   // momento in cui si puo' prenotare (il corriere non ha una chiamata per aggiungerlo dopo), e a
   // tutti gli altri per lasciare traccia sulla spedizione che il ritiro e' stato chiesto.

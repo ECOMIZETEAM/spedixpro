@@ -12,7 +12,23 @@
 // Per evitare bleed cross-master, il match e' ristretto alle zone gia'
 // candidate (quelle presenti nelle fasce del listino in esame).
 
+import { siglaProvincia } from '@/lib/province-it'
+
 export type DestZona = { paese?: string; provincia?: string; cap?: string; citta?: string }
+
+// LA PROVINCIA SI CONFRONTA COME SIGLA, COMUNQUE SIA SCRITTA.
+// Le zone a provincia hanno la sigla ("AG", "CA"); le spedizioni a volte arrivano col nome intero
+// ("Agrigento", "CAGLIARI", "enna") da API, import e negozi. Confrontata cosi' com'era, la riga
+// della provincia non agganciava e la destinazione scivolava sul prezzo Italia, mentre il corriere
+// la faceva pagare come Sicilia/Sardegna: dal 10 al 26/11/2026 cinque spedizioni Poste Business
+// Express V (es. 3UW1WLJ103492 Casteltermini "Agrigento": Velox pagava 5,05, il costo era 5,91).
+// Solo per l'Italia: le regioni estere non sono province nostre.
+export function provinciaPerZona(paese: unknown, provincia: unknown): string {
+  const p = String(provincia ?? '').toUpperCase().trim()
+  if (!p) return ''
+  const pa = String(paese ?? 'IT').toUpperCase().trim() || 'IT'
+  return pa === 'IT' ? siglaProvincia(p) : p
+}
 
 // CITTÀ-AWARE (CAP condivisi): alcuni CAP coprono più comuni con trattamento diverso
 // (es. 25050 = Rodengo Saiano NORMALE e Monte Isola ISOLA; 65010 = Spoltore NORMALE e
@@ -133,7 +149,7 @@ export async function trovaZoneMatchDett(
   esclCorr?: Map<string, string>
 ): Promise<{ ids: string[]; capEsclusivo: boolean; corrieriEsclusi: Set<string> }> {
   const paese = (dest.paese || 'IT').toUpperCase().trim()
-  const provincia = (dest.provincia || '').toUpperCase().trim()
+  const provincia = provinciaPerZona(paese, dest.provincia)
   const cap = (dest.cap || '').trim()
 
   const ids = Array.from(new Set(candidateZonaIds.filter(Boolean)))

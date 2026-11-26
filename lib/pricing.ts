@@ -9,7 +9,7 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona, provinciaPerZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
 import { perId, type ArchivioCoppia, type ArchivioCosto } from '@/lib/prezzi-archivio'
 import { leggiZoneCap } from '@/lib/zone-cap'
@@ -23,7 +23,7 @@ const ZONE_MAP: Record<string, string> = {
 }
 
 export function zonaDaProvincia(provincia: string): string {
-  return ZONE_MAP[(provincia || '').toUpperCase().trim()] || 'Italia'
+  return ZONE_MAP[provinciaPerZona('IT', provincia)] || 'Italia'
 }
 
 // Fattore volume EFFETTIVO per un corriere sul LISTINO CLIENTE (ricavo).
@@ -250,7 +250,7 @@ async function zoneMittenteAgganciate(
   if (!origIds.length) return nessuna
   const paese = (mitt.paese || 'IT').toUpperCase().trim()
   const cap = (mitt.cap || '').trim()
-  const prov = (mitt.provincia || '').toUpperCase().trim()
+  const prov = provinciaPerZona(mitt.paese || 'IT', mitt.provincia)
   // Match sul MITTENTE: CAP esatto > provincia (cap jolly) > jolly totale. Nessuna esclusione.
   const { data: zc } = await supabase
     .from('zone_cap').select('zona_id,provincia,cap').eq('paese', paese)
@@ -266,7 +266,7 @@ async function zoneMittenteAgganciate(
   if (dest?.cap || dest?.provincia) {
     const dPaese = (dest.paese || 'IT').toUpperCase().trim()
     const dCap = (dest.cap || '').trim()
-    const dProv = (dest.provincia || '').toUpperCase().trim()
+    const dProv = provinciaPerZona(dest.paese || 'IT', dest.provincia)
     const { data: zcD } = await supabase
       .from('zone_cap').select('zona_id,provincia,cap').eq('paese', dPaese)
       .in('zona_id', Array.from(zoneMatch)).in('cap', Array.from(new Set([dCap, '*'].filter(Boolean))))
@@ -306,7 +306,7 @@ export async function origineCopertaCap(
   const cap = String(mitt?.cap || '').trim()
   if (!cap) return true   // senza CAP mittente non escludo qui
   const paese = String(mitt?.paese || 'IT').toUpperCase().trim()
-  const prov = String(mitt?.provincia || '').toUpperCase().trim()
+  const prov = provinciaPerZona(mitt?.paese || 'IT', mitt?.provincia)
   const { data: zone } = await supabase.from('zone').select('id').eq('corriere_id', corriereId).eq('su_mittente', false)
   const zoneIds = (zone || []).map((z: any) => z.id)
   if (!zoneIds.length) return true
@@ -1411,7 +1411,7 @@ async function creaCalcolatoreCorriereBase(
     // campo: ripiego sul totale (come prima).
     const pesoFatturato = Number(s.peso_fatturato) > 0 ? Number(s.peso_fatturato) : Math.max(pesoReale, pesoVolume)
 
-    const provincia = (s.dest_provincia || '').toUpperCase().trim()
+    const provincia = provinciaPerZona(s.dest_paese || 'IT', s.dest_provincia)
     const cap = (s.dest_cap || '').trim()
     const paese = (s.dest_paese || 'IT').toUpperCase().trim()
     const cand = fasceList.map((f: any) => f.zone?.id).filter(Boolean)
@@ -1577,7 +1577,7 @@ async function creaCalcolatoreListinoClienteBase(
       ? pesoReale
       : (Number(s.peso_fatturato) > 0 ? Number(s.peso_fatturato) : Math.max(pesoReale, pesoVolume))
 
-    const provincia = (s.dest_provincia || '').toUpperCase().trim()
+    const provincia = provinciaPerZona(s.dest_paese || 'IT', s.dest_provincia)
     const cap = (s.dest_cap || '').trim()
     const paese = (s.dest_paese || 'IT').toUpperCase().trim()
     const cand = fasceList.map((f: any) => f.zone?.id).filter(Boolean)
