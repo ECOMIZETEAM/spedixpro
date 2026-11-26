@@ -25,6 +25,7 @@ import { ldvPosteV1 } from '@/lib/v1-poste'
 import { corpoPerIlVenditoreV1, rigaV1, parametriAlberoV1, parametriCatenaV1 } from '@/lib/v1-riga'
 import { apriRichiestaPonte, chiudiRichiestaPonte, leggiRichiestaPonte, codiceRichiestaValido, type RegistroPonte } from '@/lib/ponte-richieste'
 import { codiciServiziContratto } from '@/lib/v1-servizi'
+import { venditaDaZonaNormale, dvaDiceSpeciale, spedisciDiceSpeciale, spediamoproDiceSpeciale, messaggioDestinazioneSpeciale } from '@/lib/guardia-destinazione-speciale'
 
 // IL TETTO DI DURATA, che qui non c'era.
 // Oltre la chiamata d'ordine il pacco e' COMPRATO: se la funzione viene uccisa fra l'ordine e la
@@ -221,6 +222,11 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     const { trovaRateContratto } = await import('@/lib/spedisci')
     const rate = trovaRateContratto(rates, cred)
     if (!rate) return errore('Contratto non disponibile per questo corriere')
+    // Destinazione che il corriere tratta come periferica/disagiata/isola, venduta da una zona normale: si
+    // ferma, come nel portale (lib/guardia-destinazione-speciale).
+    if (venditaDaZonaNormale(ris.zona) && spedisciDiceSpeciale(rate)) {
+      return errore(messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode || '').trim()))
+    }
     const res = await fetch(`${baseUrl}/shipping/create`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${cred.password}`, 'Content-Type': 'application/json' },
       // EMAIL SCHERMO: al provider va l'email di servizio, mai quelle vere (vedi lib/email-corriere).
@@ -317,6 +323,15 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     // senza cattura diventavano un 500 muto, con la prenotazione del credito appesa.
     try {
       const quotation = await spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee, cashOnDeliveryAmount: cod, insuredAmount: ins })
+      // Supplemento di destinazione disagiata/isola minore (8,00–9,10 €) su una vendita da zona normale: si
+      // ferma, come nel portale. Dall'API ne erano passati 13 dal 10 al 26/11/2026, tutti BRT Express a 8,00 €
+      // di supplemento venduti a prezzo Italia (es. 050162293196346 Cecina: 12,59 € al fornitore, 4,88 € incassati).
+      if (venditaDaZonaNormale(ris.zona) && await spediamoproDiceSpeciale(
+        quotation, !!(cod || ins),
+        () => spediamoproGetQuotation(cred.authcode, serviceIdV1, { parcels, sender, consignee }),
+      )) {
+        return errore(messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode || '').trim()))
+      }
       const externalRefV1 = (body.notes ? String(body.notes) : '').substring(0, 64) || undefined
       // La NOTA del cliente va al riquadro NOTE dell'etichetta del corriere (come fa il portale), non
       // solo nel Riferimento. Il campo NOTE di SpediamoPro e' max ~20 char (oltre = 422): si tronca; i
@@ -371,6 +386,11 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
         offerta = trovaOffertaVettore(offertePallet, vettore, servizio)
       }
       if (!offerta) return errore('Nessuna tariffa disponibile per questa destinazione con il contratto scelto')
+      // DVA dice da solo se la destinazione è periferica/disagiata: venduta da una zona normale si ferma, come
+      // nel portale (lib/guardia-destinazione-speciale). Senza, dall'API passavano a prezzo Italia.
+      if (dvaDiceSpeciale(offerta) && venditaDaZonaNormale(ris.zona)) {
+        return errore(messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode || '').trim()))
+      }
       const opz = offerta.serviziopzionali || {}
       const codReq = Number(body.codValue || 0) > 0, assReq = Number(body.insuranceValue || 0) > 0
       if (codReq && String(opz?.contrassegno?.attivabile || 'N').toUpperCase() !== 'S') return errore('Contrassegno non disponibile su questo contratto per questa destinazione')

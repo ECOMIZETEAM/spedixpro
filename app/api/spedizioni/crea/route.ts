@@ -30,11 +30,10 @@ import { stampaMittenteSpedizione } from '@/lib/etichetta-mittente'
 // e che ora condivide l'anteprima dei prezzi (import e ordini dei negozi). Una regola, due porte.
 import { cittaPerLaSpedizione } from '@/lib/citta-spedizione'
 import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
-import { isZonaDisagiata } from '@/lib/zone-match'
-// La zona di vendita "copre" il supplemento disagiata/isola SOLO se è una zona disagiata/periferica o
-// isole. Le zone regionali base (Sicilia/Sardegna/Calabria) NON lo coprono: lì il corriere può ancora
-// addebitare il supplemento disagiata (es. Villasmundo risolve "Sicilia" base 5,64 ma costa 13,60).
-const zonaCopreDisagiata = (z: string | undefined | null): boolean => !!z && (isZonaDisagiata(z) || /isol/i.test(String(z)))
+// Destinazione che il corriere fa pagare come periferica/disagiata/isola: la regola è una sola, per tutte
+// le porte (portale e API v1), in lib/guardia-destinazione-speciale.
+import { venditaDaZonaNormale, dvaDiceSpeciale, spedisciDiceSpeciale, spediamoproDiceSpeciale, messaggioDestinazioneSpeciale } from '@/lib/guardia-destinazione-speciale'
+import { detentoreContratto } from '@/lib/contratto-per-nome'
 import { motivoLimiteCollo } from '@/lib/limiti-collo'
 import { vedeLaRete } from '@/lib/perimetro'
 import { emailAlCorriere } from '@/lib/email-corriere'
@@ -584,13 +583,26 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
 
   // Spedizione propria del master: prezzo dal listino corriere (server-side, non ci fidiamo del body).
   let costoMaster = 0
+  // Zona da cui esce il prezzo della spedizione propria. Senza cliente non c'e' `zonaCliente`, e le guardie
+  // "destinazione speciale" qui sotto non scattavano mai: 050148293174937 (APS CORRIERE ESPRESSO, Portella di
+  // Mare, 16/11/2026) e' partita a prezzo Italia con 9,10 € di supplemento del corriere, MULTIEXPRESS ha
+  // pagato 13,69 € e incassato 5,88 €. Stessa funzione di prima (calcolaPrezzoCorriere ne restituisce il
+  // totale), si tiene anche la zona.
+  let zonaProprio: string | undefined
   if (isProprio) {
-    costoMaster = (await calcolaPrezzoCorriere(adminCrea, {
+    const dettProprio = await calcolaPrezzoCorriereDettaglio(adminCrea, {
       corriereId: corriereRecord.id, masterId,
       provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
       pesoReale, packages,
       contrassegno: Number(body.codValue || 0), assicurazione: Number(body.insuranceValue || 0),
-    })) ?? null as any
+    })
+    costoMaster = dettProprio ? dettProprio.totale : null as any
+    // Se a spedire per se' e' il DETENTORE del contratto, paga lui il costo vero del corriere e a valle non
+    // c'e' nessuno che ci perda: la guardia non deve togliergli il corriere. Vale per chi sta sotto (APS).
+    if (dettProprio) {
+      const { detentore } = await detentoreContratto(adminCrea, corriereRecord.master_id, corriereRecord.nome_contratto)
+      if (detentore !== masterId) zonaProprio = dettProprio.zona
+    }
 
     // Nessun prezzo a listino per questa destinazione = non vendibile, punto. Prima si ripiegava
     // su body.totalPrice, cioe' sul numero mandato dal browser: la spedizione partiva lo stesso e
@@ -845,9 +857,9 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     // disagiata/isole), il CAP/la frazione non è tra le zone speciali di questo contratto (o è una
     // frazione non elencata) → venduta a tariffa pianura sotto costo. Il flag disagiata è per-corriere
     // (Villasmundo è SCS per Poste ma disagiata per BRT): qui vale quello che dice QUESTO contratto.
-    if (rate && zonaCliente && !zonaCopreDisagiata(zonaCliente) && /disagiat|periferic|isol/i.test(String((rate as any).zone_name || ''))) {
+    if (rate && venditaDaZonaNormale(zonaCliente ?? zonaProprio) && spedisciDiceSpeciale(rate)) {
       await stornaPrenotazione()
-      return NextResponse.json({ error: `Destinazione periferica/isola (${String(body.shipTo?.city || body.shipTo?.postalCode).trim()}): questo contratto non la prezza come zona speciale e verrebbe venduta a tariffa pianura sotto costo. Scegli un altro corriere che copre questa destinazione.` }, { status: 400 })
+      return NextResponse.json({ error: messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode).trim()) }, { status: 400 })
     }
 
     // Servizi accessori da TRASMETTERE al corriere via spedisci (Exchange/Saturday per ora): mappa il
@@ -1149,21 +1161,12 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       // completare le liste) → venduta a tariffa pianura sotto costo. Serve il segnale del corriere,
       // non la lista città (incompletabile). accessoryServicePrice include anche COD/assicurazione:
       // se presenti, si riconferma con un preventivo pulito per isolare il supplemento di DESTINAZIONE.
-      {
-        const accessory = Number((quotation.priceBreakdown as any)?.accessoryServicePrice) || 0
-        if (zonaCliente && !zonaCopreDisagiata(zonaCliente) && accessory >= 300) {
-          let supplDest = accessory
-          if (cashOnDeliveryAmount || insuredAmount) {
-            try {
-              const pulito = await spediamoproGetQuotation(cred.authcode, serviceId, { parcels, sender, consignee })
-              supplDest = Number((pulito.priceBreakdown as any)?.accessoryServicePrice) || 0
-            } catch { supplDest = 0 }   // non riesco a isolare → non blocco (prudente)
-          }
-          if (supplDest >= 300) {
-            await stornaPrenotazione()
-            return NextResponse.json({ error: `Destinazione periferica/isola (${String(body.shipTo?.city || body.shipTo?.postalCode).trim()}): questo contratto non la prezza come zona speciale e verrebbe venduta a tariffa pianura sotto costo. Scegli un altro corriere che copre questa destinazione.` }, { status: 400 })
-          }
-        }
+      if (venditaDaZonaNormale(zonaCliente ?? zonaProprio) && await spediamoproDiceSpeciale(
+        quotation, !!(cashOnDeliveryAmount || insuredAmount),
+        () => spediamoproGetQuotation(cred.authcode, serviceId, { parcels, sender, consignee }),
+      )) {
+        await stornaPrenotazione()
+        return NextResponse.json({ error: messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode).trim()) }, { status: 400 })
       }
 
       // NB: nessun blocco "vendita sotto costo" basato sul confronto costo-live vs prezzo listino:
@@ -1512,9 +1515,9 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       // speciale): qui copre il caso in cui il CAP NON è in nessuna zona speciale del contratto. Preciso:
       // il flag DVA è true SOLO sulle periferiche vere (18–46 €), non sulle Sicilia/Sardegna base (6,67,
       // flag=false), e non blocca se la vendita è già su una zona speciale (isZonaEsclusiva).
-      if ((offerta.flag_localitaperiferica || offerta.flag_localitadisagiata) && zonaCliente && !zonaCopreDisagiata(zonaCliente)) {
+      if (dvaDiceSpeciale(offerta) && venditaDaZonaNormale(zonaCliente ?? zonaProprio)) {
         await stornaPrenotazione()
-        return NextResponse.json({ error: `Destinazione periferica/isola (${String(body.shipTo?.city || body.shipTo?.postalCode).trim()}): questo contratto non la prezza come zona speciale e verrebbe venduta a tariffa pianura sotto costo. Scegli un altro corriere che copre questa destinazione.` }, { status: 400 })
+        return NextResponse.json({ error: messaggioDestinazioneSpeciale(String(body.shipTo?.city || body.shipTo?.postalCode).trim()) }, { status: 400 })
       }
 
       // Servizi richiesti ma non attivabili su questa offerta: va fermato ORA. Ordinare comunque
