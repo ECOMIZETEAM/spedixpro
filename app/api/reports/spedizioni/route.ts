@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { SPED_COLS } from '@/lib/spedizioni-cols'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
-import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
+import { creaCalcolatoreListinoCliente, creaCalcolatoreListinoClientePerRighe, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 import { confineGiornoRoma } from '@/lib/date-roma'
 import { vettoreFisico } from '@/lib/vettore'
@@ -320,7 +320,7 @@ async function report(req: NextRequest) {
 
   // AGENTE: il suo COSTO non è un movimento del master, ma il prezzo del suo LISTINO AGENTE.
   const calcAgente = isAgente(utente) && (utente as any)?.listino_agente_id
-    ? await creaCalcolatoreListinoCliente(supabase, (utente as any).listino_agente_id)
+    ? await creaCalcolatoreListinoClientePerRighe(supabase, (utente as any).listino_agente_id, spedizioni)
     : null
 
   // CONDIVISIONE (stesse due regole dell'Elenco spedizioni, perche' il report dia i suoi stessi numeri):

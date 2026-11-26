@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { clientiAgente } from '@/lib/agente'
-import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
+import { creaCalcolatoreListinoClientePerRighe } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 
 // Guadagno dell'AGENTE = margine tra quello che paga il CLIENTE (costo_totale della spedizione)
@@ -45,7 +45,8 @@ export async function GET(req: NextRequest) {
     // + id: a parità di data (import in blocco) le pagine da 1000 si accavallano: righe doppie o perse.
     .order('created_at', { ascending: false }).order('id', { ascending: false }))
 
-  const calcCosto = await creaCalcolatoreListinoCliente(supabase, listinoAg)
+  // Con le righe: i piu' colli dei contratti con la tabella multicollo li prezza il motore (vedi pricing).
+  const calcCosto = await creaCalcolatoreListinoClientePerRighe(supabase, listinoAg, speds || [])
 
   // Prezzo cliente REALE = movimenti (spedizione + rettifica) del cliente, come nei report del
   // master: le rettifiche allineano il prezzo dopo una correzione. Fallback al campo costo_totale.

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { SPED_COLS, SPED_COLS_LISTA } from '@/lib/spedizioni-cols'
-import { creaCalcolatoreListinoCliente, creaCalcolatoreCorriere } from '@/lib/pricing'
+import { creaCalcolatoreListinoCliente, creaCalcolatoreListinoClientePerRighe, creaCalcolatoreCorriere } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 import { vettoreFisico } from '@/lib/vettore'
 import { ledgerGambeInterne } from '@/lib/gambe-visibilita'
@@ -681,7 +681,8 @@ export async function GET(req: NextRequest) {
   let calcAgente = null as ((s: any) => any) | null
   const caricaCalcAgente = async () => {
     if (!light && ruolo === 'agente' && (utente as any)?.listino_agente_id && (spedizioni || []).length) {
-      try { calcAgente = await creaCalcolatoreListinoCliente(db, (utente as any).listino_agente_id, capPagina) } catch { calcAgente = null }
+      // Con le righe della pagina: i piu' colli dei contratti con la tabella multicollo li prezza il motore (vedi pricing).
+      try { calcAgente = await creaCalcolatoreListinoClientePerRighe(db, (utente as any).listino_agente_id, spedizioni || [], capPagina) } catch (e: any) { console.error('[LISTA] costo agente non calcolato', e?.message || e); calcAgente = null }
     }
   }
   // IL COSTO DEL MASTER lo vede solo il master. Cliente e agente MAI: l'agente ha come costo SOLO il

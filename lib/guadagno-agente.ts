@@ -1,5 +1,5 @@
 import { clientiAgente } from '@/lib/agente'
-import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
+import { creaCalcolatoreListinoClientePerRighe } from '@/lib/pricing'
 import { fetchAll } from '@/lib/fetch-all'
 import { spedizioniConColliLeggeri } from '@/lib/colli-senza-etichette'
 
@@ -126,7 +126,8 @@ export async function calcolaGuadagnoAgente(
   const listinoAg = agente.listino_agente_id || null
   let costoAgTot: number | null = null
   if (listinoAg) {
-    const calcCosto = await creaCalcolatoreListinoCliente(admin, listinoAg)
+    // Con le righe: i piu' colli dei contratti con la tabella multicollo li prezza il motore (vedi pricing).
+    const calcCosto = await creaCalcolatoreListinoClientePerRighe(admin, listinoAg, sped)
     // Il listino prezza collo per collo (peso e lati di ognuno): si attaccano alle righe i colli SENZA
     // etichette, gli stessi oggetti di prima per tutto cio' che il calcolo legge.
     const colli = await spedizioniConColliLeggeri(admin, spedIds, '')

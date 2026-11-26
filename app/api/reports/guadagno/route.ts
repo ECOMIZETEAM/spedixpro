@@ -1,4 +1,4 @@
-import { creaCalcolatoreListinoCliente } from '@/lib/pricing'
+import { creaCalcolatoreListinoClientePerRighe } from '@/lib/pricing'
 import { isAgente, clientiAgente, idClientiPerFiltro } from '@/lib/agente'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
@@ -62,7 +62,6 @@ export async function GET(req: NextRequest) {
         costiProvider: null, senzaListino: !listinoAg,
       })
     }
-    const calcAg = await creaCalcolatoreListinoCliente(admin, listinoAg)
     // SENZA colli_dettaglio: li' dentro ci sono anche le etichette dei colli in base64 (fino a qualche MB
     // per spedizione), e un agente con 3.800 spedizioni nel mese scaricava ~360 MB per disegnare la sua
     // card. Il 25/10/2026 la stessa lettura dal Report Agenti ha fermato il database (vedi
@@ -74,6 +73,8 @@ export async function GET(req: NextRequest) {
     const colliLeggeri = await spedizioniConColliLeggeri(admin,
       (sped || []).filter((x: any) => x.stato !== 'annullata').map((x: any) => x.id), '')
     for (const sp of (sped || [])) (sp as any).colli_dettaglio = colliLeggeri.get((sp as any).id)?.colli_dettaglio ?? []
+    // Dopo aver letto le spedizioni: i piu' colli dei contratti con la tabella multicollo li prezza il motore (vedi pricing).
+    const calcAg = await creaCalcolatoreListinoClientePerRighe(admin, listinoAg, (sped || []).filter((x: any) => x.stato !== 'annullata'))
     // Quello che il cliente ha pagato DAVVERO (movimenti), non il campo sulla spedizione: cosi'
     // resi e giacenze entrano nel conto come nell'elenco. Le rettifiche no (vedi TIPI): il costo
     // dell'agente e' il listino sulla spedizione originale, e contare la ripesatura pagata dal

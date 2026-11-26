@@ -1706,7 +1706,11 @@ async function creaCalcolatoreListinoClienteBase(
     return Array.from(new Set(m.map((r: any) => r.zona_id)))
   }
 
-  return function prezzoListinoRow(s: any): DettaglioPrezzo | null {
+  // I contratti con la tabella multicollo in questo listino: i loro piu' colli qui sotto sono solo un
+  // ripiego, il prezzo vero lo da' il motore (vedi creaCalcolatoreListinoClientePerRighe).
+  const corrieriMC = new Set<string>((fasce || []).filter((f: any) => f.zone?.multicollo && f.corriere_id).map((f: any) => f.corriere_id))
+
+  return Object.assign(function prezzoListinoRow(s: any): DettaglioPrezzo | null {
     const fasceList = fascePerCorriere.get(s.corriere_id) || []
     if (!fasceList.length) return null
 
@@ -1791,7 +1795,7 @@ async function creaCalcolatoreListinoClienteBase(
     const feeAss = commissioneSupp(supplList, 'assicurazione', ass, pesoReale)
     const _r2 = (n: number) => Math.round(n * 100) / 100
     return { totale: _r2(noloBase + spondaAmt + feeContr + feeAss), nolo: _r2(noloBase), sponda: _r2(spondaAmt), contrassegno: _r2(feeContr), assicurazione: _r2(feeAss) }
-  }
+  }, { corrieriMC })
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // CACHE A TEMPO DEI CALCOLATORI.
@@ -1859,4 +1863,81 @@ export async function creaCalcolatoreListinoCliente(
   if (pronto) return pronto
   if (capDaPrezzare && capDaPrezzare.length) return creaCalcolatoreListinoClienteBase(supabase, listinoId, capDaPrezzare)
   return inCache(k, await creaCalcolatoreListinoClienteBase(supabase, listinoId))
+}
+
+// I PIU' COLLI DEI CONTRATTI CON LA TABELLA MULTICOLLO LI PREZZA IL MOTORE.
+//
+// Il calcolatore qui sopra prezza i piu' colli sulle fasce del collo singolo (piu' il minimo a collo): per un
+// contratto con la tabella multicollo e' solo un'approssimazione, e un contratto SOLO multicollo (UPS Europa
+// Multicollo, UPS Italia Multicollo: nessuna fascia del collo singolo) non lo prezza affatto. Nel compenso
+// dell'agente «nessun prezzo» vuol dire costo = lordo, cioe' margine 0: l'agente non avrebbe preso niente su
+// quelle spedizioni, e nessun errore l'avrebbe detto.
+// Quelle righe le prezza il motore della vendita (calcolaPrezzoListino), una per una: la regola resta in un
+// posto solo. Sono poche (multicollo UPS: 3 in 30 giorni su tutta la rete, novembre 2026); tutte le altre
+// restano al calcolatore, senza nessuna lettura in piu'.
+// Colli, misure collo per collo e mittente si rileggono qui (senza etichette): i chiamanti non leggono tutti le
+// stesse colonne, e senza il mittente mancherebbe la partenza remota.
+// Lettura fallita: errore, non un prezzo. Un compenso contato a meta' e' peggio di un report che non si apre.
+export async function creaCalcolatoreListinoClientePerRighe(
+  supabase: any,
+  listinoId: string,
+  righe: any[],
+  capDaPrezzare?: string[] | null,
+  // Solo per le prove: il client di servizio da usare al posto di quello vero (dati simulati).
+  opzioni?: { admin?: any }
+): Promise<(s: any) => DettaglioPrezzo | null> {
+  const calc = await creaCalcolatoreListinoCliente(supabase, listinoId, capDaPrezzare)
+  const conTabella: Set<string> | undefined = (calc as any).corrieriMC
+  if (!conTabella?.size || !righe?.length) return calc
+  // Una riga che dice gia' di avere un collo solo non va riletta.
+  const unCollo = (s: any) => s.colli != null && Number(s.colli) <= 1 && !(Array.isArray(s.colli_dettaglio) && s.colli_dettaglio.length > 1)
+  const ids = Array.from(new Set<string>(righe.filter((s: any) => s?.id && conTabella.has(s.corriere_id) && !unCollo(s)).map((s: any) => s.id)))
+  if (!ids.length) return calc
+
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const { spedizioniConColliLeggeri } = await import('@/lib/colli-senza-etichette')
+  const admin = opzioni?.admin || createAdminSupabase()
+  const lette = await spedizioniConColliLeggeri(admin, ids,
+    'corriere_id,peso_reale,lunghezza,larghezza,altezza,dest_cap,dest_provincia,dest_citta,dest_paese,mitt_cap,mitt_provincia,mitt_paese,contrassegno,assicurazione')
+  // spedizioniConColliLeggeri salta in silenzio le righe che non legge: qui una riga mancante e' un errore.
+  const mancanti = ids.filter(id => !lette.has(id))
+  if (mancanti.length) throw new Error(`[MULTICOLLO] ${mancanti.length} spedizioni non lette: il costo dei piu' colli non si calcola`)
+  const multi = ids.map(id => lette.get(id)).filter((r: any) => Math.max(Number(r.colli) || 1, r.colli_dettaglio?.length || 0) > 1)
+  if (!multi.length) return calc
+
+  // Commissioni contrassegno/assicurazione: stesse righe e stessa regola del calcolatore.
+  const { data: supCA, error: eCA } = await admin.from('listini_clienti_supplementi')
+    .select('corriere_id,tipo,valore,tipo_calcolo,descrizione').eq('listino_id', listinoId)
+    .in('tipo', ['contrassegno', 'assicurazione']).in('corriere_id', Array.from(new Set(multi.map((r: any) => r.corriere_id))))
+  if (eCA) throw new Error('[MULTICOLLO] commissioni del listino non lette: ' + eCA.message)
+
+  const _r2 = (n: number) => Math.round(n * 100) / 100
+  const prezzi = new Map<string, DettaglioPrezzo | null>()
+  let prossima = 0
+  // Quattro alla volta: ogni chiamata al motore sono una decina di letture.
+  await Promise.all(Array.from({ length: Math.min(4, multi.length) }, async () => {
+    while (prossima < multi.length) {
+      const r: any = multi[prossima++]
+      const n = Math.max(1, Number(r.colli) || 1)
+      const dett: any[] = Array.isArray(r.colli_dettaglio) ? r.colli_dettaglio : []
+      // Spedizioni vecchie senza il dettaglio dei colli: la misura unica ripetuta e il peso diviso fra i colli,
+      // com'erano state create.
+      const packages = dett.length >= n
+        ? dett.map((c: any) => ({ weight: Number(c.peso) || 0, length: Number(c.lunghezza) || 0, width: Number(c.larghezza) || 0, height: Number(c.altezza) || 0 }))
+        : Array.from({ length: n }, () => ({ weight: (Number(r.peso_reale) || 0) / n, length: Number(r.lunghezza) || 0, width: Number(r.larghezza) || 0, height: Number(r.altezza) || 0 }))
+      const ris = await calcolaPrezzoListino(admin, {
+        listinoId, corriereId: r.corriere_id, provincia: r.dest_provincia || '', cap: r.dest_cap || '', paese: r.dest_paese || 'IT',
+        citta: r.dest_citta || '', packages, mittCap: r.mitt_cap || undefined, mittProvincia: r.mitt_provincia || undefined, mittPaese: r.mitt_paese || undefined,
+      })
+      // Il motore non la prezza (destinazione senza prezzo in questo listino): come un contratto non coperto.
+      if (!ris) { prezzi.set(r.id + '|' + r.corriere_id, null); continue }
+      const sup = (supCA || []).filter((x: any) => x.corriere_id === r.corriere_id)
+      const feeC = commissioneSupp(sup, 'contrassegno', Number(r.contrassegno) || 0, ris.peso_reale)
+      const feeA = commissioneSupp(sup, 'assicurazione', Number(r.assicurazione) || 0, ris.peso_reale)
+      prezzi.set(r.id + '|' + r.corriere_id, { totale: _r2(ris.prezzo + feeC + feeA), nolo: _r2(ris.prezzo - (ris.sponda || 0)), sponda: _r2(ris.sponda || 0), contrassegno: _r2(feeC), assicurazione: _r2(feeA) })
+    }
+  }))
+  // Per riga E contratto: chi chiama col contratto rimappato (stesso nome, altro livello) non deve ricevere il
+  // prezzo calcolato sull'altro contratto; torna al calcolatore.
+  return (s: any) => { const k = s?.id + '|' + s?.corriere_id; return prezzi.has(k) ? prezzi.get(k)! : calc(s) }
 }
