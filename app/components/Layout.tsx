@@ -142,7 +142,6 @@ const NAV: NavItem[] = [
   { label: 'Impostazioni', href: '/dashboard/impostazioni', icon: '◉', sub: [
     { label: 'Azienda', href: '/dashboard/impostazioni' },
     { label: 'Logo', href: '/dashboard/impostazioni/logo' },
-    { label: 'Filiale / Rete Interna', href: '/dashboard/impostazioni/filiale' },
     { label: 'Corrieri', href: '/dashboard/corrieri' },
     { label: 'SMS', href: '/dashboard/reports/storico-sms' },
     { label: 'Staff', href: '/dashboard/impostazioni/staff' },
