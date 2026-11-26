@@ -59,8 +59,10 @@ async function eVertice(admin: any, masterId: string): Promise<boolean> {
   return !p?.parent_master_id
 }
 
+// `primaRiga`: la riga del pacco, quando si arriva qui per ripiego da catenaDaCorriere. Al primo livello vale quella,
+// non la viva omonima: per un pacco partito su una riga poi staccata, la viva e' il fornitore di OGGI (26/11/2026).
 export async function risolviCatenaCondivisione(
-  admin: any, masterOriginante: string, nomeContratto: string,
+  admin: any, masterOriginante: string, nomeContratto: string, primaRiga?: string,
 ): Promise<LivelloCondivisione[]> {
   const out: LivelloCondivisione[] = []
   const visti = new Set<string>()
@@ -74,7 +76,8 @@ export async function risolviCatenaCondivisione(
     // quel nome, la catena delle spedizioni nuove passa da quella. Senza il filtro, una copia vera staccata
     // veniva presa per "detentore" (la ricerca qui sotto guarda il tipo, non l'ordine) e la catena si fermava.
     const vive = omonime.filter((c: any) => !c.staccato_il)
-    const corrieri = vive.length ? vive : omonime
+    const delPacco = i === 0 && primaRiga ? omonime.filter((c: any) => c.id === primaRiga) : []
+    const corrieri = delPacco.length ? delPacco : vive.length ? vive : omonime
 
     // OWNER REALE: ha un corriere NON ponte per questo contratto → paga il corriere vero.
     const reale = corrieri.find((c: any) => c.tipo !== 'moovexpress')
@@ -132,10 +135,12 @@ export async function risolviCatenaCondivisione(
 export async function catenaDaCorriere(
   admin: any, corriereId: string, ripiego?: { master: string; nomeContratto: string },
 ): Promise<LivelloCondivisione[]> {
-  const { data, error } = await admin.rpc('catena_contratto', { p_corriere_id: corriereId })
+  // Un guasto di un istante non deve far ripiegare sul nome: si riprova una volta.
+  let { data, error } = await admin.rpc('catena_contratto', { p_corriere_id: corriereId })
+  if (error) ({ data, error } = await admin.rpc('catena_contratto', { p_corriere_id: corriereId }))
   if (error) {
     console.error('[condivisione-catena] fila dai puntatori non leggibile:', corriereId, error.message)
-    if (ripiego) return risolviCatenaCondivisione(admin, ripiego.master, ripiego.nomeContratto)
+    if (ripiego) return risolviCatenaCondivisione(admin, ripiego.master, ripiego.nomeContratto, corriereId)
     throw new Error('catena del contratto non leggibile')
   }
   const fila = (data || []) as any[]
@@ -144,7 +149,7 @@ export async function catenaDaCorriere(
     // ieri (catena per nome, che regge un ponte orfano), invece di lasciare un reso o un contrassegno senza
     // nessuno che lo paghi. La sentinella (controllo_catena_contratti) la segnala.
     console.error('[condivisione-catena] fila del contratto interrotta, uso la catena per nome:', corriereId)
-    return ripiego ? risolviCatenaCondivisione(admin, ripiego.master, ripiego.nomeContratto) : []
+    return ripiego ? risolviCatenaCondivisione(admin, ripiego.master, ripiego.nomeContratto, corriereId) : []
   }
   const out: LivelloCondivisione[] = []
   for (let i = 0; i < fila.length; i++) {

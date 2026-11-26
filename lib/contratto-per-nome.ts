@@ -15,6 +15,8 @@
 // Qui il confronto e' uno solo, e vale da entrambi i lati: si normalizza il nome cercato E quello
 // salvato.
 
+import { fetchAllStretto } from '@/lib/fetch-all'
+
 export function nomeContrattoNormalizzato(v: string | null | undefined): string {
   return String(v || '').trim().toLowerCase()
 }
@@ -201,10 +203,18 @@ export async function caricaSorgenteCatena(adminDb: any): Promise<SorgenteCatena
 }
 
 async function costruisciSorgenteCatena(adminDb: any): Promise<SorgenteCatena> {
-  const [mRes, cRes]: any = await Promise.all([
+  // A PAGINE (26/11/2026): i contratti sono 1.010 e una lettura semplice si ferma a 1.000, in ordine casuale. Le
+  // dieci righe mancanti cambiavano a ogni lettura, e con loro il detentore e il colore di quei contrassegni.
+  // Se la lettura a pagine non riesce si torna alla lettura di prima (nessuna pagina che si rompe per i colori).
+  const [mRes, cRighe]: any = await Promise.all([
     adminDb.from('masters').select('id,parent_master_id'),
-    adminDb.from('corrieri').select('master_id,nome_contratto,proprio,staccato_il'),
+    fetchAllStretto(() => adminDb.from('corrieri').select('id,master_id,nome_contratto,proprio,staccato_il').order('id', { ascending: true }))
+      .catch(async (e: any) => {
+        console.error('[contratto-per-nome] contratti a pagine non letti, lettura semplice:', e?.message)
+        return ((await adminDb.from('corrieri').select('id,master_id,nome_contratto,proprio,staccato_il')).data || [])
+      }),
   ])
+  const cRes = { data: cRighe }
   const padri = new Map<string, string | null>()
   for (const m of (mRes.data || [])) padri.set(m.id, m.parent_master_id || null)
   const copie = new Map<string, { proprio: boolean; staccata?: boolean }>()

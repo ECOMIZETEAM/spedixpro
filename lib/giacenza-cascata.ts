@@ -88,9 +88,15 @@ export async function addebitaGiacenzaCatena(
   // La riga del contratto di ogni livello si legge dalla catena del PACCO (26/11/2026): un master staccato da un
   // fornitore puo' avere due righe con lo stesso nome, e la giacenza di un pacco vecchio va prezzata su quella
   // con cui e' partito (lib/contratto-per-nome.ts, corriereDiMasterPerNome).
-  const sPacco: any = params.spedizioneId
-    ? (await admin.from('spedizioni').select('corriere_id,created_at').eq('id', params.spedizioneId).maybeSingle()).data
-    : null
+  // Si riprova una volta: senza la riga del pacco, con due omonime vincerebbe quella di oggi (e lo si scrive).
+  let sPacco: any = null
+  if (params.spedizioneId) {
+    for (let t = 1; t <= 2 && !sPacco; t++) {
+      const { data, error } = await admin.from('spedizioni').select('corriere_id,created_at').eq('id', params.spedizioneId).maybeSingle()
+      if (error) console.error('[giacenza-cascata] riga del pacco non leggibile:', params.spedizioneId, error.message, 'tentativo', t)
+      else { sPacco = data || {}; break }
+    }
+  }
   const pacco: OpzioniRiga = { corrierePacco: sPacco?.corriere_id ?? null, partenza: sPacco?.created_at ?? null }
   let ownerReale = params.corriereOwnerId
   {

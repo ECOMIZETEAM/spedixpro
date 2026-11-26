@@ -42,39 +42,34 @@ export async function sincronizzaZonaAiDiscendenti(admin: any, ownerZonaId: stri
   // non le ricevevano MAI e prezzavano quelle destinazioni come "Italia").
   // Le righe STACCATE (26/11/2026) restano con le zone di quando i loro pacchi sono partiti: i resi e le rettifiche
   // di quei pacchi si prezzano su quelle zone.
-  const { data: corrSub } = await admin.from('corrieri').select('id,master_id,collegamento_id').eq('nome_contratto', corrNome).in('master_id', discendenti)
+  const { data: corrSub } = await admin.from('corrieri').select('id,master_id').eq('nome_contratto', corrNome).in('master_id', discendenti)
     .is('staccato_il', null)
   if (!corrSub?.length) return
 
-  // RICOMPRATO ALTROVE (26/11/2026). Un discendente che si è staccato da questo contratto e lo ha ricomprato via
-  // codice da un altro venditore ha una riga col nome uguale ma le zone del SUO venditore, che gliele porta lui
-  // (lib/condivisione-propaga.ts): le zone di qui gliele riscriverebbero, e venderebbe un CAP a un prezzo mentre lo
-  // paga a un altro. Riceve le zone di qui solo se questo contratto sta davvero sulla sua fila (catena_contratto).
-  // Le righe a codice SENZA uno stacco alle spalle restano come prima (oggi 8 righe, 3 delle quali non comprano da
-  // chi propaga: è una decisione a parte, non di questo rilascio).
-  const ricomprati = new Set<string>()
-  const aCodice = corrSub.filter((c: any) => c.collegamento_id)
-  if (aCodice.length) {
-    const { data: staccate, error: eSt } = await admin.from('corrieri').select('master_id,nome_contratto')
-      .in('master_id', Array.from(new Set(aCodice.map((c: any) => c.master_id)))).not('staccato_il', 'is', null)
-    if (eSt) console.error('[ZONE] righe staccate non lette: le righe a codice si aggiornano come prima', eSt.message)
-    const conStacco = new Set((staccate || [])
-      .filter((r: any) => String(r.nome_contratto || '').trim().toLowerCase() === String(corrNome).trim().toLowerCase())
-      .map((r: any) => r.master_id))
-    for (const c of aCodice) {
-      if (!conStacco.has((c as any).master_id)) continue
+  // RICOMPRATO ALTROVE (26/11/2026). Un master che si è staccato da questo contratto e lo ha ricomprato da un altro
+  // fornitore (via codice, o con un contratto suo) ha una riga col nome uguale ma le zone del SUO fornitore; e così
+  // i suoi sotto-master, le cui copie d'albero ora scendono da lui. Le zone di qui gliele riscriverebbero, e
+  // venderebbero un CAP a un prezzo mentre lo pagano a un altro. Quando sotto chi propaga c'è anche una sola riga
+  // STACCATA con questo nome, ogni riga riceve le zone di qui solo se questo contratto sta davvero sulla sua fila
+  // (catena_contratto). Senza righe staccate non cambia niente: oggi 8 righe a codice ricevono queste zone per nome,
+  // e 3 di loro non comprano da chi propaga (decisione a parte, non di questo rilascio).
+  const escluse = new Set<string>()
+  const { data: staccate, error: eSt } = await admin.from('corrieri').select('id,nome_contratto')
+    .in('master_id', discendenti).not('staccato_il', 'is', null)
+  if (eSt) console.error('[ZONE] righe staccate non lette: si propaga per nome come prima', eSt.message)
+  const nomeNorm = String(corrNome).trim().toLowerCase()
+  if ((staccate || []).some((r: any) => String(r.nome_contratto || '').trim().toLowerCase() === nomeNorm)) {
+    for (const c of corrSub) {
       const { data: fila, error: eF } = await admin.rpc('catena_contratto', { p_corriere_id: (c as any).id })
-      // Fila non leggibile: non si riscrive niente (le zone giuste gliele porta il suo venditore), e lo si dice.
-      if (eF || !(fila || []).some((f: any) => f.corriere_id === (z as any).corriere_id)) {
-        if (eF) console.error('[ZONE] fila del contratto ricomprato non leggibile, zone non riscritte:', (c as any).id, eF.message)
-        ricomprati.add((c as any).id)
-      }
+      // Fila non leggibile: non si riscrive (le zone giuste gliele porta il suo fornitore), e lo si dice.
+      if (eF) console.error('[ZONE] fila non leggibile, zone non riscritte:', (c as any).id, eF.message)
+      if (eF || !(fila || []).some((f: any) => f.corriere_id === (z as any).corriere_id)) escluse.add((c as any).id)
     }
   }
 
   for (const cs of corrSub) {
     const subCorrId = (cs as any).id
-    if (ricomprati.has(subCorrId)) continue
+    if (escluse.has(subCorrId)) continue
     // .limit(1): difensivo se il discendente ha zone duplicate con lo stesso nome (altrimenti
     // .maybeSingle() andrebbe in errore). Prende la più vecchia (id più basso), deterministico.
     let { data: zsub } = await admin.from('zone').select('id').eq('nome', zonaNome).eq('corriere_id', subCorrId).order('id', { ascending: true }).limit(1).maybeSingle()

@@ -308,6 +308,10 @@ async function materializzaContratto(
   // il loro master le ha tolte: toglierle prima non ferma nessun pacco. Il registro si scrive prima della
   // cancellazione; se la cancellazione non riesce non si è cambiato niente. Se poi il ponte non nasce, le copie
   // sono già tolte e lo si dice: al giro dopo il ponte nasce senza sostituzione.
+  // Limite noto: fra la cancellazione e la nascita del ponte c'è un istante senza riga con quel nome; se proprio lì
+  // passa la propagazione del listino del padre con un omonimo, la copia rinasce e il ponte no (errore visibile, da
+  // sistemare a mano). Chiuderlo vuol dire fare lo scambio in una funzione del database; la sostituzione è stata
+  // usata una volta in sei settimane (14/10/2026).
   let copieGiaTolte = false
   if (!buyerCorrId && opt.sostituisci?.copie.length) {
     const { error: eReg } = await admin.from('audit_log').insert({ ...opt.sostituisci.registro, record_id: null })
