@@ -1,5 +1,5 @@
-import { fetchAll } from '@/lib/fetch-all'
-import { leggiZoneCap } from '@/lib/zone-cap'
+import { fetchAll, fetchAllStretto } from '@/lib/fetch-all'
+import { abbinaZone } from '@/lib/zone-catena'
 import { pontiCodiceDi } from '@/lib/ponti-codice'
 
 // Chiavi di IMPOSTAZIONI DI CONTRATTO che si propagano al sotto-master (NON il mittente,
@@ -52,8 +52,8 @@ export async function propagaListinoACascata(admin: any, listinoId: string): Pro
 
 // Copia il listino che il master padre ha ASSEGNATO al sotto-master
 // (masters.parent_listino_id, un listini_clienti) nella struttura PROPRIA del
-// sotto-master: corrieri (contratti attivati) + zone (+CAP) + listini_corrieri
-// (+ link) + fasce + supplementi. Così il sotto-master lo vede nel suo editor
+// sotto-master: corrieri (contratti attivati) + listini_corrieri (+ link) + fasce + supplementi. Le zone
+// (+CAP) dei contratti copiati le mette e le tiene uguali il database (scripts/zone-catena-trigger.sql). Così il sotto-master lo vede nel suo editor
 // "Listino Corrieri" completo, può modificarlo e usare "Aggiungi contratto".
 //
 // Idempotente: di default NON tocca nulla se il sotto-master ha già delle fasce
@@ -226,81 +226,43 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     await admin.from('corrieri').update({ attivo: false }).in('id', subDisabIds)
   }
 
-  // 2) ZONE (+CAP): una per il sotto-master per ciascuna del padre, mappando il corriere.
-  //    I CAP vengono SEMPRE sincronizzati col padre — anche sulle zone GIÀ esistenti — così quando
-  //    il padre aggiunge/toglie un CAP (es. una zona disagiata) la modifica PROPAGA a valle e non
-  //    resta solo sul padre. (Era il bug: i CAP si copiavano solo alla PRIMA creazione della zona,
-  //    quindi le aggiunte successive non scendevano -> a valle si prezzava la zona sbagliata.)
-  const { data: zoneSrc } = zonaIds.length ? await admin.from('zone').select('id,nome,descrizione,con_fuel,su_mittente,multicollo,corriere_id').in('id', zonaIds) : { data: [] }
-  // CAP del padre: UNA query per TUTTE le zone (prima era una query PER ZONA: con 78 zone erano 78
-  // round-trip solo per leggere). L'embed annidato non si usa perche' si fermerebbe a 1000 righe.
-  const capSrcPerZona = new Map<string, any[]>()
-  {
-    // Una lettura sola, in ordine di id (lib/zone-cap): prima a blocchi da 1.000 in fila.
-    let tutti: any[]
-    try { tutti = await leggiZoneCap(admin, zonaIds as string[], null, { stretto: true }) }
-    catch (e: any) { console.error('[copia-listino]', subMasterId, e?.message); return { ok: false, reason: 'CAP delle zone non leggibili: CAP del sotto-master non toccati' } }
-    for (const r of tutti) {
-      const k = (r as any).zona_id
-      if (!capSrcPerZona.has(k)) capSrcPerZona.set(k, [])
-      capSrcPerZona.get(k)!.push(r)
+  // 2) ZONE: le copie le tiene il DATABASE (scripts/zone-catena-trigger.sql, 26/11/2026). Ogni contratto del
+  //    sotto-master che compra quello del padre ha già le sue zone, uguali nei CAP, e quando il padre ne cambia una il
+  //    trigger la porta giù. Qui si LEGGONO e si abbinano per chiave intera (nome, multicollo, partenza), per copiare
+  //    i prezzi. Prima qui si creavano e riscrivevano le zone, abbinando per solo NOME: una zona multicollo e quella del
+  //    collo singolo con lo stesso nome finivano sulla stessa zona del figlio.
+  // A pagine e in ordine fisso (oltre mille righe PostgREST tronca in silenzio); una pagina che non si legge FERMA:
+  // fin qui sulle fasce non si è scritto niente, e meglio un giro saltato che prezzi persi.
+  const contrattiFiglio = [...new Set(mapCorr.values())]
+  let zoneSrc: any[], zoneMiei: any[]
+  try {
+    zoneSrc = zonaIds.length ? await fetchAllStretto(() => admin.from('zone').select('id,nome,multicollo,su_mittente,corriere_id').in('id', zonaIds).order('id', { ascending: true })) : []
+    zoneMiei = contrattiFiglio.length ? await fetchAllStretto(() => admin.from('zone').select('id,nome,multicollo,su_mittente,corriere_id').in('corriere_id', contrattiFiglio).order('id', { ascending: true })) : []
+  } catch (e: any) {
+    console.error('[copia-listino]', subMasterId, e?.message)
+    return { ok: false, reason: 'zone non leggibili: listino del sotto-master non toccato' }
+  }
+  const { mappa: mapZona } = abbinaZone(zoneSrc, zoneMiei, (z: any) => mapCorr.get(z.corriere_id))
+  // Un contratto del figlio a cui manca una zona del padre non è una copia del contratto del padre: lo compra da un
+  // altro (una riga comprata con una condivisione, col nome uguale a quello del padre: il 26/11 ce n'è una su SDA
+  // EXPRESS L, di solito la salta già il controllo dei ponti qui sopra), oppure il trigger non ha
+  // fatto il suo lavoro. In entrambi i casi i prezzi del padre non vanno scritti lì sopra: si salta QUEL contratto
+  // (né fasce né supplementi), si dice quale, e gli altri vanno avanti.
+  const zonePerContratto = new Map<string, any[]>()
+  for (const z of zoneSrc) {
+    const k = (z as any).corriere_id
+    if (!zonePerContratto.has(k)) zonePerContratto.set(k, [])
+    zonePerContratto.get(k)!.push(z)
+  }
+  const contrattiSaltati: string[] = []
+  for (const [padreCid, figlioCid] of [...mapCorr.entries()]) {
+    const senzaCopia = (zonePerContratto.get(padreCid) || []).filter((z: any) => !mapZona.has(z.id)).map((z: any) => z.nome)
+    if (senzaCopia.length) {
+      console.error(`[copia-listino] ${subMasterId}: il contratto ${figlioCid} non ha le zone del padre (${senzaCopia.join(', ')}): prezzi non copiati su quel contratto`)
+      mapCorr.delete(padreCid)
+      contrattiSaltati.push(String((corrSrc || []).find((c: any) => c.id === padreCid)?.nome_contratto || figlioCid).trim())
     }
   }
-  const { data: zoneMiei } = await admin.from('zone').select('id,nome,corriere_id').eq('master_id', subMasterId)
-  const mappaZonaMio = new Map((zoneMiei || []).map((z: any) => [`${z.corriere_id}|${(z.nome || '').trim().toLowerCase()}`, z.id]))
-  // CAP GIA' PRESENTI sul sotto-master: servono a capire se c'e' davvero qualcosa da cambiare.
-  // Prima si cancellava e reinseriva SEMPRE tutto (58.836 righe riscritte a ogni salvataggio,
-  // anche senza modifiche): era la causa principale della lentezza.
-  const capMieiPerZona = new Map<string, any[]>()
-  {
-    const idsMiei = (zoneMiei || []).map((z: any) => z.id)
-    let tutti: any[]
-    try { tutti = await leggiZoneCap(admin, idsMiei as string[], null, { stretto: true }) }
-    catch (e: any) { console.error('[copia-listino]', subMasterId, e?.message); return { ok: false, reason: 'CAP delle zone non leggibili: CAP del sotto-master non toccati' } }
-    for (const r of tutti) {
-      const k = (r as any).zona_id
-      if (!capMieiPerZona.has(k)) capMieiPerZona.set(k, [])
-      capMieiPerZona.get(k)!.push(r)
-    }
-  }
-  // Impronta di un insieme di CAP: uguale impronta = niente da riscrivere.
-  const impronta = (caps: any[]) => caps
-    .map((c: any) => `${c.paese || ''}|${c.provincia || ''}|${c.cap || ''}|${c.citta || ''}`)
-    .sort().join('\n')
-
-  const mapZona = new Map<string, string>()
-  const lavoriCap: Array<() => Promise<void>> = []
-  for (const z of (zoneSrc || [])) {
-    const subCorr = mapCorr.get(z.corriere_id) || null
-    const key = `${subCorr}|${(z.nome || '').trim().toLowerCase()}`
-    let subZid: string | undefined = mappaZonaMio.get(key) as string | undefined
-    if (!subZid) {
-      const { data: nuovaZ } = await admin.from('zone').insert({ master_id: subMasterId, corriere_id: subCorr, nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false, su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo }).select('id').single()
-      subZid = (nuovaZ as any)?.id
-      if (subZid) mappaZonaMio.set(key, subZid)
-    } else {
-      // Zona già presente sul sub: riallineo il flag su_mittente (partenza) al proprietario, altrimenti
-      // una zona diventata "di partenza" resterebbe destinazione sul figlio e prezzerebbe male.
-      // Lo stesso per il segno multicollo (lib/multicollo-zone).
-      await admin.from('zone').update({ su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo }).eq('id', subZid)
-    }
-    if (subZid) {
-      const zid = subZid
-      const caps = capSrcPerZona.get(z.id) || []
-      // SOLO SE DIVERSI: a regime (nessuna modifica ai CAP) qui non parte alcuna scrittura.
-      if (impronta(caps) !== impronta(capMieiPerZona.get(zid) || [])) {
-        lavoriCap.push(async () => {
-          await admin.from('zone_cap').delete().eq('zona_id', zid)
-          for (let i = 0; i < caps.length; i += 1000) {
-            await admin.from('zone_cap').insert(caps.slice(i, i + 1000).map((cp: any) => ({ zona_id: zid, paese: cp.paese, provincia: cp.provincia, cap: cp.cap, citta: cp.citta })))
-          }
-        })
-      }
-      mapZona.set(z.id, zid)
-    }
-  }
-  // Le zone da riallineare si lavorano a gruppi in PARALLELO (prima una alla volta).
-  for (let i = 0; i < lavoriCap.length; i += 6) await Promise.all(lavoriCap.slice(i, i + 6).map(fn => fn()))
 
   // 3) UN LISTINO PER CONTRATTO, non uno per tutti.
   //
@@ -426,5 +388,9 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   if (subCorrIds.length) await admin.from('listini_corrieri_supplementi').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
   if (supplIns.length) await admin.from('listini_corrieri_supplementi').insert(supplIns)
 
-  return { ok: true, corrieri: subCorrIds.length, fasce: fasceIns.length }
+  // I contratti saltati si dicono anche a chi chiama (non solo nel log): il listino di quel contratto non è aggiornato.
+  return {
+    ok: true, corrieri: subCorrIds.length, fasce: fasceIns.length,
+    ...(contrattiSaltati.length ? { contrattiSaltati, avviso: `Prezzi non aggiornati su: ${contrattiSaltati.join(', ')} (il contratto del sotto-master non ha le zone di quello del padre)` } : {}),
+  }
 }

@@ -31,6 +31,12 @@ export default function ZonePage() {
 
   useEffect(() => { load() }, [])
 
+  // Le zone di un contratto COMPRATO sono quelle del fornitore e le tiene uguali il database (scripts/zone-catena-
+  // trigger.sql, 26/11/2026): qui si guardano e si esportano, non si modificano. Prima i pulsanti c'erano anche lì, e
+  // una modifica bloccata dal database rispondeva "fatto" senza aver fatto niente.
+  const modificabile = (c:any) => c?.proprio === true && !c?.staccato_il
+  const proprio = corrieri.filter(modificabile)
+
   // Brand = prima parola del nome contratto (BRT, SDA, Poste, UPS…)
   const brandKey = (c:any) => ((c?.nome_contratto||'').trim().split(/\s+/)[0]||'').toUpperCase()
   const brands:{key:string,label:string}[] = []
@@ -65,8 +71,11 @@ export default function ZonePage() {
 
   async function salvaMod() {
     setSaving(true)
-    await fetch('/api/zone/'+modalModifica.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(formMod)})
-    setModalModifica(null); setSaving(false); load()
+    const res = await fetch('/api/zone/'+modalModifica.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(formMod)})
+    const d = await res.json().catch(()=>({}))
+    setSaving(false)
+    if(!res.ok || d?.error){ await dialog.alert({ title: 'Zona non salvata', message: d?.error || 'Errore durante il salvataggio.' }); return }
+    setModalModifica(null); load()
   }
   async function caricaRegioni(zonaId:string) {
     const r = await fetch('/api/zone/'+zonaId+'/cap').then(r=>r.json()).catch(()=>[])
@@ -105,17 +114,41 @@ export default function ZonePage() {
   }
   async function eliminaRegione(capId:string) {
     if(!modalModifica) return
-    await fetch('/api/zone/'+modalModifica.id+'/cap?capId='+capId,{method:'DELETE'})
+    const res = await fetch('/api/zone/'+modalModifica.id+'/cap?capId='+capId,{method:'DELETE'})
+    const d = await res.json().catch(()=>({}))
+    if(!res.ok || d?.error){ await dialog.alert({ title: 'Regione non eliminata', message: d?.error || 'Errore durante l\'eliminazione.' }); return }
     caricaRegioni(modalModifica.id); load()
   }
 
   async function elimina(id:string,nome:string) {
-    if(!await dialog.confirm({ title: 'Eliminare la zona?', message: '"'+nome+'" verrà eliminata.', danger: true, confirmText: 'Elimina' })) return
-    await fetch('/api/zone/'+id,{method:'DELETE'}); load()
+    // Prima di cancellare si dice cosa c'è attaccato più giù: la zona sparisce anche dai contratti che la comprano.
+    const imp = await fetch('/api/zone/'+id+'/impatto').then(async r=>({ok:r.ok,...(await r.json().catch(()=>({})))})).catch(()=>({ok:false} as any))
+    if(!imp.ok){ await dialog.alert({ title: 'Zona non eliminata', message: imp.error || 'Non riesco a contare chi usa questa zona: riprova tra poco.' }); return }
+    const valle = imp.contratti > 0
+      ? ` Sparirà anche dai ${imp.contratti} contratti che la comprano da te (${imp.master} master)`
+        + (imp.prezzi > 0 ? `, con ${imp.prezzi} prezzi nei loro listini: andranno in archivio.` : ', che non le hanno dato prezzi.')
+      : ''
+    if(!await dialog.confirm({ title: 'Eliminare la zona?', message: '"'+nome+'" verrà eliminata.'+valle, danger: true, confirmText: 'Elimina' })) return
+    const res = await fetch('/api/zone/'+id,{method:'DELETE'})
+    const d = await res.json().catch(()=>({}))
+    if(!res.ok || d?.error){ await dialog.alert({ title: 'Zona non eliminata', message: d?.error || 'Errore durante l\'eliminazione.' }); return }
+    load()
   }
 
   async function sposta(zonaId:string,corrId:string) {
-    await fetch('/api/zone/'+zonaId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({corriere_id:corrId})})
+    // Spostata su un altro contratto, la zona sparisce dai contratti che comprano quello di adesso (coi loro prezzi su
+    // di lei, che vanno in archivio) e nasce in quelli che comprano l'altro: si dice prima, con i numeri.
+    const imp = await fetch('/api/zone/'+zonaId+'/impatto').then(async r=>({ok:r.ok,...(await r.json().catch(()=>({})))})).catch(()=>({ok:false} as any))
+    if(!imp.ok){ await dialog.alert({ title: 'Zona non spostata', message: imp.error || 'Non riesco a contare chi usa questa zona: riprova tra poco.' }); return }
+    if(imp.contratti > 0){
+      const msg = `Sparirà dai ${imp.contratti} contratti che la comprano da te (${imp.master} master)`
+        + (imp.prezzi > 0 ? `, con ${imp.prezzi} prezzi nei loro listini: andranno in archivio.` : '.')
+        + ' Nei contratti che comprano il corriere di arrivo nascerà senza prezzi.'
+      if(!await dialog.confirm({ title: 'Spostare la zona?', message: msg, danger: true, confirmText: 'Sposta' })) return
+    }
+    const res = await fetch('/api/zone/'+zonaId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({corriere_id:corrId})})
+    const d = await res.json().catch(()=>({}))
+    if(!res.ok || d?.error){ await dialog.alert({ title: 'Zona non spostata', message: d?.error || 'Errore durante lo spostamento.' }); return }
     setModalSposta(null); load()
   }
 
@@ -165,10 +198,19 @@ export default function ZonePage() {
         return {paese:String(paese).trim(),provincia:String(provincia).trim(),cap:String(cap).trim(),citta:String(citta).trim()}
       }).filter(r=>r.paese)
       if(!rows.length){ await dialog.alert({ title: 'File non valido', message: 'Nessuna riga valida nel file (attese colonne country_id/province/cap/city).' }); setImporting(''); return }
-      const res = await fetch('/api/zone/'+zonaId+'/cap',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,replace:true})})
-      const d = await res.json()
-      if(d?.error){ await dialog.alert({ title: 'Errore', message: d.error }); setImporting(''); return }
-      await dialog.alert({ title: 'Import completato', message: `Importate ${d.inserite} regioni nella zona.` })
+      let res = await fetch('/api/zone/'+zonaId+'/cap',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,replace:true})})
+      let d = await res.json().catch(()=>({}))
+      // Un import che toglie regioni risponde prima con l'anteprima: le stesse regioni spariscono anche dai contratti
+      // che comprano questo. Un file esportato a metà, reimportato, ne toglierebbe a migliaia.
+      if(d?.anteprima){
+        const ok = await dialog.confirm({ title: 'Togliere regioni dalla zona?', danger: true, confirmText: 'Importa',
+          message: `Oggi la zona ha ${d.oggi} regioni, il file ${d.inserite}: ne aggiungo ${d.aggiunte} e ne TOLGO ${d.tolte}. Le stesse modifiche arrivano ai contratti che comprano questo.` })
+        if(!ok){ setImporting(''); return }
+        res = await fetch('/api/zone/'+zonaId+'/cap',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,replace:true,conferma:true})})
+        d = await res.json().catch(()=>({}))
+      }
+      if(!res.ok || d?.error){ await dialog.alert({ title: 'Errore', message: d?.error || 'Import non riuscito.' }); setImporting(''); return }
+      await dialog.alert({ title: 'Import completato', message: `La zona ha ora ${d.inserite} regioni (${d.aggiunte??0} aggiunte, ${d.tolte??0} tolte).` })
       if(modalModifica?.id===zonaId) caricaRegioni(zonaId)
       load()
     } catch(e:any){
@@ -224,6 +266,7 @@ export default function ZonePage() {
                 )}
                 <span style={{fontSize:'16px',fontWeight:'700',color:'#1a1a1a'}}>{c?.nome_contratto}</span>
               </div>
+              {modificabile(c) ? (
               <div style={{display:'flex',gap:'8px',marginBottom:'16px'}}>
                 <button onClick={()=>{setFormNuova({nome:'',descrizione:'',con_fuel:false,multicollo:false});setModalNuovaCorr(c.id)}} style={{background:'none',border:'none',color:'#f97316',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>+Aggiungi zona</button>
                 {zoneC.length>0 && <button onClick={()=>setModalCopia(c)} style={{padding:'6px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#2563eb',fontWeight:'600'}}>⧉ Copia zone su altro corriere</button>}
@@ -231,6 +274,16 @@ export default function ZonePage() {
                     copiano le zone DA un altro corriere gia' configurato (zone + CAP), in un clic. */}
                 {zoneC.length===0 && <button onClick={()=>setModalCopiaDa(c)} style={{padding:'6px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#2563eb',fontWeight:'600'}}>⧉ Copia zone da un altro corriere</button>}
               </div>
+              ) : (
+              <div style={{display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap' as const,marginBottom:'16px'}}>
+                <div style={{fontSize:'12.5px',color:'#666',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'8px 12px'}}>
+                  {c.staccato_il
+                    ? 'Contratto staccato: le zone restano quelle di quando i suoi pacchi sono partiti.'
+                    : 'Zone del fornitore del contratto: si aggiornano da sole quando le cambia lui. Qui si guardano e si esportano.'}
+                </div>
+                {zoneC.length>0 && proprio.length>0 && <button onClick={()=>setModalCopia(c)} style={{padding:'6px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'6px',fontSize:'12px',cursor:'pointer',color:'#2563eb',fontWeight:'600'}}>⧉ Copia zone su un tuo corriere</button>}
+              </div>
+              )}
               {!zoneC.length ? (
                 <div style={{padding:'30px',textAlign:'center' as const,color:'#666',fontSize:'13px'}}>Nessuna zona configurata</div>
               ) : (
@@ -251,19 +304,19 @@ export default function ZonePage() {
                         <td style={{padding:'10px 12px',color:'#1a1a1a',fontSize:'12px',maxWidth:'500px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}} title={riepilogoRegioni(z)}>{riepilogoRegioni(z)}</td>
                         <td style={{padding:'10px 12px'}}>
                           <div style={{display:'flex',gap:'4px'}}>
-                            <button onClick={()=>{setModalModifica(z);setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false,multicollo:!!z.multicollo});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} style={ibtn('#16a34a','#fff','#86efac')}>{nuova ? <Icona id="i-matita" className="vs-ico-tasto" /> : '✏️'}</button>
+                            <button onClick={()=>{setModalModifica({...z,sola:!modificabile(c)});setFormMod({nome:z.nome,descrizione:z.descrizione||'',con_fuel:z.con_fuel||false,multicollo:!!z.multicollo});setRegioni([]);setEditReg(null);caricaRegioni(z.id)}} title={modificabile(c)?'Modifica':'Vedi le regioni'} style={modificabile(c)?ibtn('#16a34a','#fff','#86efac'):ibtn('#fff','#1a1a1a','#d1d5db')}>{modificabile(c) ? (nuova ? <Icona id="i-matita" className="vs-ico-tasto" /> : '✏️') : (nuova ? <Icona id="i-occhio" className="vs-ico-tasto" /> : '👁')}</button>
                             <button onClick={()=>esporta(z)} title="Esporta zona (XLSX)" style={ibtn('#fff','#1a1a1a','#d1d5db')}>{nuova ? <Icona id="i-scarica" className="vs-ico-tasto" /> : '⬇'}</button>
-                            <label title="Importa regioni (XLSX spedisci.online)" style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:importing===z.id?'wait':'pointer',opacity:importing===z.id?0.5:1}}>
+                            {modificabile(c) && <label title="Importa regioni (XLSX spedisci.online)" style={{...ibtn('#fff','#1a1a1a','#d1d5db'),cursor:importing===z.id?'wait':'pointer',opacity:importing===z.id?0.5:1}}>
                               {importing===z.id?'…':nuova ? <Icona id="i-carica" className="vs-ico-tasto" /> : '⬆'}<input type="file" accept=".xlsx,.xls,.csv" disabled={!!importing} style={{display:'none'}} onChange={async e=>{
                                 const f=e.target.files?.[0]; e.target.value=''; if(!f)return
                                 await importaXlsx(z.id, f)
                               }}/>
-                            </label>
-                            <button onClick={()=>setModalSposta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>{nuova ? <Icona id="i-sposta" className="vs-ico-tasto" /> : '↪'}</button>
+                            </label>}
+                            {modificabile(c) && <button onClick={()=>setModalSposta(z)} style={ibtn('#fff','#1a1a1a','#d1d5db')}>{nuova ? <Icona id="i-sposta" className="vs-ico-tasto" /> : '↪'}</button>}
                           </div>
                         </td>
                         <td style={{padding:'10px 8px'}}>
-                          <button onClick={()=>elimina(z.id,z.nome)} style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑️'}</button>
+                          {modificabile(c) && <button onClick={()=>elimina(z.id,z.nome)} style={{background:'none',border:'none',color:'#dc2626',fontSize:'16px',cursor:'pointer'}}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑️'}</button>}
                         </td>
                       </tr>
                     ))}
@@ -301,20 +354,20 @@ export default function ZonePage() {
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}} onClick={()=>setModalModifica(null)}>
           <div style={{background:'#fff',borderRadius:'8px',width:'600px'}} onClick={e=>e.stopPropagation()}>
             <div style={{padding:'14px 20px',borderBottom:'1px solid #e5e7eb',display:'flex',justifyContent:'space-between'}}>
-              <span style={{fontWeight:'700',color:'#1a1a1a'}}>Modifica — {modalModifica.nome}</span>
+              <span style={{fontWeight:'700',color:'#1a1a1a'}}>{modalModifica.sola?'Zona del fornitore':'Modifica'} — {modalModifica.nome}</span>
               <button onClick={()=>setModalModifica(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:'18px'}}>✕</button>
             </div>
             <div style={{padding:'20px'}}>
-              <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Nome</label><input value={formMod.nome} onChange={e=>setFormMod(f=>({...f,nome:e.target.value}))} style={inp}/></div>
-              <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label><textarea value={formMod.descrizione} onChange={e=>setFormMod(f=>({...f,descrizione:e.target.value}))} rows={5} style={{...inp,resize:'vertical' as const}}/></div>
-              <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formMod.con_fuel} onChange={e=>setFormMod(f=>({...f,con_fuel:e.target.checked}))} id="fm"/><label htmlFor="fm" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Applica supplemento Fuel</label></div>
-              <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formMod.multicollo} onChange={e=>setFormMod(f=>({...f,multicollo:e.target.checked}))} id="fmmc"/><label htmlFor="fmmc" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Zona multicollo</label></div>
+              <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Nome</label><input value={formMod.nome} disabled={!!modalModifica.sola} onChange={e=>setFormMod(f=>({...f,nome:e.target.value}))} style={inp}/></div>
+              <div style={{marginBottom:'12px'}}><label style={{fontSize:'12px',fontWeight:'600',color:'#1a1a1a',display:'block',marginBottom:'4px'}}>Descrizione</label><textarea value={formMod.descrizione} disabled={!!modalModifica.sola} onChange={e=>setFormMod(f=>({...f,descrizione:e.target.value}))} rows={5} style={{...inp,resize:'vertical' as const}}/></div>
+              <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formMod.con_fuel} disabled={!!modalModifica.sola} onChange={e=>setFormMod(f=>({...f,con_fuel:e.target.checked}))} id="fm"/><label htmlFor="fm" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Applica supplemento Fuel</label></div>
+              <div style={{marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><input type="checkbox" checked={formMod.multicollo} disabled={!!modalModifica.sola} onChange={e=>setFormMod(f=>({...f,multicollo:e.target.checked}))} id="fmmc"/><label htmlFor="fmmc" style={{fontSize:'13px',color:'#1a1a1a',cursor:'pointer'}}>Zona multicollo</label></div>
               <div style={{fontSize:'11.5px',color:'#666',margin:'-10px 0 16px 24px',lineHeight:1.5}}>Si prezza nella scheda <b>Multicollo</b> del listino (2 o più colli, sul peso totale) e non vale mai per il collo singolo. Qui un CAP più corto vale come inizio del codice: <b>DE · 66</b> = tutti i codici tedeschi che iniziano per 66.</div>
               <div style={{marginBottom:'8px',paddingTop:'12px',borderTop:'1px solid #e5e7eb'}}>
                 <label style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',display:'block',marginBottom:'8px'}}>Regioni (Paese / Provincia / CAP / Città)</label>
                 <div style={{maxHeight:'180px',overflowY:'auto' as const,marginBottom:'10px',border:'1px solid #e8e8e8',borderRadius:'6px'}}>
                   {regioni.length===0 ? (
-                    <div style={{padding:'14px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>Nessuna regione. Aggiungine una qui sotto.</div>
+                    <div style={{padding:'14px',textAlign:'center' as const,color:'#999',fontSize:'12px'}}>{modalModifica.sola?'Nessuna regione.':'Nessuna regione. Aggiungine una qui sotto.'}</div>
                   ) : (
                     <table style={{width:'100%',borderCollapse:'collapse' as const,fontSize:'12px'}}>
                       <thead><tr style={{background:'#f9fafb'}}>
@@ -344,8 +397,10 @@ export default function ZonePage() {
                               <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.cap}</td>
                               <td style={{padding:'6px 8px',color:'#1a1a1a'}}>{r.citta}</td>
                               <td style={{padding:'6px 8px',textAlign:'right' as const,whiteSpace:'nowrap' as const}}>
+                                {!modalModifica.sola && <>
                                 <button onClick={()=>setEditReg({capId:r.id,paese:r.paese,provincia:r.provincia,cap:r.cap,citta:r.citta})} title="Modifica" style={{background:'none',border:'none',cursor:'pointer',color:'#16a34a',fontSize:'13px'}}>{nuova ? <Icona id="i-matita" className="vs-ico-tasto" /> : '✏️'}</button>
                                 <button onClick={()=>eliminaRegione(r.id)} title="Elimina" style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',fontSize:'14px'}}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑'}</button>
+                                </>}
                               </td>
                             </tr>
                           )
@@ -354,6 +409,7 @@ export default function ZonePage() {
                     </table>
                   )}
                 </div>
+                {!modalModifica.sola && <>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr auto',gap:'6px',alignItems:'end'}}>
                   <div><label style={{fontSize:'11px',color:'#666',display:'block',marginBottom:'2px'}}>Paese</label><input value={formRegione.paese} onChange={e=>setFormRegione(f=>({...f,paese:e.target.value}))} placeholder="IT" style={{...inp,padding:'6px 8px',fontSize:'12px'}}/></div>
                   <div><label style={{fontSize:'11px',color:'#666',display:'block',marginBottom:'2px'}}>Provincia</label><input value={formRegione.provincia} onChange={e=>setFormRegione(f=>({...f,provincia:e.target.value}))} placeholder="* o RM" style={{...inp,padding:'6px 8px',fontSize:'12px'}}/></div>
@@ -362,10 +418,11 @@ export default function ZonePage() {
                   <button onClick={aggiungiRegione} disabled={savingReg} style={{padding:'7px 12px',background:'#16a34a',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',fontWeight:'700',cursor:'pointer',whiteSpace:'nowrap' as const}}>+ Aggiungi</button>
                 </div>
                 <div style={{fontSize:'11px',color:'#999',marginTop:'6px'}}>Usa <b>*</b> per "qualsiasi". Es: Paese IT, Provincia RM, CAP * = tutta la provincia di Roma. Paese DE, Provincia *, CAP * = tutta la Germania. Nel campo CAP puoi inserire <b>più valori</b> separati da virgola o spazio.</div>
+                </>}
               </div>
               <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
-                <button onClick={()=>setModalModifica(null)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>Annulla</button>
-                <button onClick={salvaMod} disabled={saving} style={{padding:'8px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>Salva</button>
+                <button onClick={()=>setModalModifica(null)} style={{padding:'8px 16px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a'}}>{modalModifica.sola?'Chiudi':'Annulla'}</button>
+                {!modalModifica.sola && <button onClick={salvaMod} disabled={saving} style={{padding:'8px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>Salva</button>}
               </div>
             </div>
           </div>
@@ -380,12 +437,12 @@ export default function ZonePage() {
               <button onClick={()=>setModalCopia(null)} style={{background:'none',border:'none',cursor:'pointer',fontSize:'18px'}}>✕</button>
             </div>
             <div style={{padding:'20px'}}>
-              <div style={{fontSize:'12.5px',color:'#666',marginBottom:'12px'}}>Scegli il corriere su cui copiare tutte le zone (con i CAP) di <b>{modalCopia.nome_contratto}</b>. Le zone con lo stesso nome già presenti vengono saltate.</div>
+              <div style={{fontSize:'12.5px',color:'#666',marginBottom:'12px'}}>Scegli il corriere su cui copiare tutte le zone (con i CAP) di <b>{modalCopia.nome_contratto}</b>. Le zone con lo stesso nome già presenti vengono saltate. Si copia solo sui contratti tuoi: quelli comprati hanno le zone del loro fornitore.</div>
               <div style={{display:'flex',flexDirection:'column' as const,gap:'8px'}}>
-                {corrieri.filter(c=>c.id!==modalCopia.id).map(c=>(
+                {proprio.filter(c=>c.id!==modalCopia.id).map(c=>(
                   <button key={c.id} disabled={copiando} onClick={()=>copiaZone(modalCopia,c.id)} style={{padding:'10px 14px',background:'#f9fafb',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:copiando?'wait':'pointer',color:'#1a1a1a',textAlign:'left' as const,opacity:copiando?0.6:1}}>{c.nome_contratto}</button>
                 ))}
-                {corrieri.filter(c=>c.id!==modalCopia.id).length===0 && <div style={{fontSize:'12px',color:'#999',textAlign:'center' as const,padding:'10px'}}>Nessun altro corriere disponibile</div>}
+                {proprio.filter(c=>c.id!==modalCopia.id).length===0 && <div style={{fontSize:'12px',color:'#999',textAlign:'center' as const,padding:'10px'}}>Nessun altro corriere tuo su cui copiarle</div>}
               </div>
               <button onClick={()=>setModalCopia(null)} disabled={copiando} style={{marginTop:'12px',padding:'8px',background:'#f5f5f5',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a',width:'100%'}}>Annulla</button>
             </div>
@@ -424,7 +481,7 @@ export default function ZonePage() {
             </div>
             <div style={{padding:'20px'}}>
               <div style={{display:'flex',flexDirection:'column' as const,gap:'8px'}}>
-                {corrieri.filter(c=>c.id!==modalSposta.corriere_id).map(c=>(
+                {proprio.filter(c=>c.id!==modalSposta.corriere_id).map(c=>(
                   <button key={c.id} onClick={()=>sposta(modalSposta.id,c.id)} style={{padding:'10px 14px',background:'#f9fafb',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',cursor:'pointer',color:'#1a1a1a',textAlign:'left' as const}}>{c.nome_contratto}</button>
                 ))}
               </div>

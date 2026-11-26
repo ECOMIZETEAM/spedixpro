@@ -1,4 +1,5 @@
-import { fetchAll } from '@/lib/fetch-all'
+import { fetchAll, fetchAllStretto } from '@/lib/fetch-all'
+import { abbinaZone } from '@/lib/zone-catena'
 
 /* PROPAGAZIONE DEL COSTO DI UNA CONDIVISIONE (CONDIVISIONE-CONTRATTI.md, Fase 4).
  *
@@ -11,11 +12,10 @@ import { fetchAll } from '@/lib/fetch-all'
  * d'ingrosso è un `listini_clienti` sotto il VENDITORE, agganciato al cliente-ledger e al CORRIERE DEL
  * VENDITORE; il corriere di destinazione esiste già (NON si accoppia per nome, non si cammina l'albero).
  *
- * Copia (idempotente, come la cascata): zone(+CAP) del corriere venditore → zone del compratore sul suo
- * corriere; fasce del listino d'ingrosso (W) → listini_corrieri_fasce del compratore; + listino_corriere,
- * link con fattore volume, supplementi. Le zone si copiano TUTTE (anche senza prezzo): una zona senza
- * prezzo rende il corriere NON vendibile lì — esattamente ciò che deve essere finché il compratore non
- * decide il suo prezzo (vedi la nota lunga in copia-listino-submaster.ts).
+ * Copia (idempotente, come la cascata): fasce del listino d'ingrosso (W) → listini_corrieri_fasce del compratore;
+ * + listino_corriere, link con fattore volume, supplementi. Le ZONE non le copia più il codice: le tiene uguali il
+ * database (scripts/zone-catena-trigger.sql, 26/11/2026), TUTTE anche senza prezzo — una zona senza prezzo rende il
+ * corriere NON vendibile lì, esattamente ciò che deve essere finché il compratore non decide il suo prezzo.
  *
  * Il costo VERO addebitato alla spedizione resta `ris.prezzo` dall'/api/v1 del venditore (autorevole, nessun
  * disallineamento): questa copia serve a VISIBILITÀ, base del margine nell'editor e risoluzione zona a CAP.
@@ -49,67 +49,24 @@ export async function propagaCosto(admin: any, p: { corriereVenditore: string; c
   const fattore = Number((pcSrc as any)?.fattore_volume) || Number(listinoSrc?.fattore_volume) || 5000
   const soloPesoR = !!listinoSrc?.solo_peso_reale
 
-  // ── ZONE: TUTTE quelle del corriere del venditore → zone del compratore sul suo corriere. ──────────
-  const { data: zoneSrc } = await admin.from('zone')
-    .select('id,nome,descrizione,con_fuel,su_mittente,multicollo').eq('corriere_id', corriereVenditore)
-  const zonaIds = (zoneSrc || []).map((z: any) => z.id)
-
-  const capSrcPerZona = new Map<string, any[]>()
-  if (zonaIds.length) {
-    const tutti = await fetchAll(() => admin.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', zonaIds).order('id', { ascending: true }))
-    for (const r of tutti) {
-      const k = (r as any).zona_id
-      if (!capSrcPerZona.has(k)) capSrcPerZona.set(k, [])
-      capSrcPerZona.get(k)!.push(r)
-    }
+  // ── ZONE: le tiene il DATABASE (scripts/zone-catena-trigger.sql, 26/11/2026). Il ponte del compratore compra dal
+  // corriere del venditore (fornitore_corriere_id = corriereVenditore, 24 su 24 il 26/11): nasce con le sue zone e
+  // le riceve a ogni modifica. Qui si leggono e si abbinano per chiave intera (nome, multicollo, partenza), per
+  // copiare le fasce. Prima qui si creavano e riscrivevano, abbinando per solo NOME. ─────────────────────────────
+  let zoneSrc: any[], zoneMiei: any[]
+  try {
+    zoneSrc = await fetchAllStretto(() => admin.from('zone').select('id,nome,multicollo,su_mittente,corriere_id').eq('corriere_id', corriereVenditore).order('id', { ascending: true }))
+    zoneMiei = await fetchAllStretto(() => admin.from('zone').select('id,nome,multicollo,su_mittente,corriere_id').eq('corriere_id', corriereAcquirente).order('id', { ascending: true }))
+  } catch (e: any) {
+    return { ok: false, reason: 'zone non leggibili: ' + (e?.message || e) }
   }
-
-  const { data: zoneMiei } = await admin.from('zone').select('id,nome').eq('master_id', masterAcquirente).eq('corriere_id', corriereAcquirente)
-  const mappaZonaMio = new Map((zoneMiei || []).map((z: any) => [(z.nome || '').trim().toLowerCase(), z.id]))
-  const capMieiPerZona = new Map<string, any[]>()
-  {
-    const idsMiei = (zoneMiei || []).map((z: any) => z.id)
-    if (idsMiei.length) {
-      const tutti = await fetchAll(() => admin.from('zone_cap').select('zona_id,paese,provincia,cap,citta').in('zona_id', idsMiei).order('id', { ascending: true }))
-      for (const r of tutti) {
-        const k = (r as any).zona_id
-        if (!capMieiPerZona.has(k)) capMieiPerZona.set(k, [])
-        capMieiPerZona.get(k)!.push(r)
-      }
-    }
+  const { mappa: mapZona, mancanti } = abbinaZone(zoneSrc, zoneMiei, () => corriereAcquirente)
+  // Una zona del venditore che il ponte non ha: il ponte non compra (più) da questo corriere, o il trigger non ha
+  // fatto il suo lavoro. Le fasce di quella zona andrebbero perse: non si tocca niente e lo si dice.
+  if (mancanti.length) {
+    console.error('[condivisione-propaga]', `${corriereVenditore}->${corriereAcquirente}`, ': zone del venditore assenti sul ponte:', mancanti.join(', '))
+    return { ok: false, reason: `zone del venditore assenti sul contratto del compratore (${mancanti.join(', ')})` }
   }
-  const impronta = (caps: any[]) => caps.map((c: any) => `${c.paese || ''}|${c.provincia || ''}|${c.cap || ''}|${c.citta || ''}`).sort().join('\n')
-
-  const mapZona = new Map<string, string>()   // zona venditore → zona compratore
-  const lavoriCap: Array<() => Promise<void>> = []
-  for (const z of (zoneSrc || [])) {
-    const key = (z.nome || '').trim().toLowerCase()
-    let subZid = mappaZonaMio.get(key) as string | undefined
-    if (!subZid) {
-      const { data: nuovaZ } = await admin.from('zone').insert({
-        master_id: masterAcquirente, corriere_id: corriereAcquirente,
-        nome: z.nome, descrizione: z.descrizione, con_fuel: z.con_fuel || false, su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo,
-      }).select('id').single()
-      subZid = (nuovaZ as any)?.id
-      if (subZid) mappaZonaMio.set(key, subZid)
-    } else {
-      await admin.from('zone').update({ su_mittente: !!(z as any).su_mittente, multicollo: !!(z as any).multicollo, con_fuel: z.con_fuel || false }).eq('id', subZid)
-    }
-    if (subZid) {
-      const zid = subZid
-      const caps = capSrcPerZona.get(z.id) || []
-      if (impronta(caps) !== impronta(capMieiPerZona.get(zid) || [])) {
-        lavoriCap.push(async () => {
-          await admin.from('zone_cap').delete().eq('zona_id', zid)
-          for (let i = 0; i < caps.length; i += 1000) {
-            await admin.from('zone_cap').insert(caps.slice(i, i + 1000).map((cp: any) => ({ zona_id: zid, paese: cp.paese, provincia: cp.provincia, cap: cp.cap, citta: cp.citta })))
-          }
-        })
-      }
-      mapZona.set(z.id, zid)
-    }
-  }
-  for (let i = 0; i < lavoriCap.length; i += 6) await Promise.all(lavoriCap.slice(i, i + 6).map(fn => fn()))
 
   // ── LISTINO CORRIERE del compratore per QUESTO corriere (uno suo, altrimenti si crea) + link. ──────
   let { data: listino } = await admin.from('listini_corrieri').select('id').eq('master_id', masterAcquirente).eq('corriere_id', corriereAcquirente).maybeSingle()

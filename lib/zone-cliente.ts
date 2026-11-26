@@ -94,7 +94,7 @@ export async function zoneDelContrattoCliente(supabase: any, admin: any, c: Cont
   const ids = Array.from(zone.keys())
   const righePer = new Map<string, any[]>()
   // Una zona alla volta e in pagine da 1000 con ordine fisso: SCS ha 692 righe, ma una zona di
-  // contratto puo' superare le mille, e senza ordine le pagine si accavallano (vedi lib/propaga-zona).
+  // contratto puo' superare le mille (fino a 3.580 il 26/11), e senza ordine le pagine si accavallano.
   for (const zid of ids) {
     const tutte: any[] = []
     for (let da = 0; ; da += 1000) {

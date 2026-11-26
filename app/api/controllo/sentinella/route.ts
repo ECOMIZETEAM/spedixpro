@@ -52,7 +52,9 @@ export async function GET(req: NextRequest) {
   // La parte 5 del database sono i contratti staccati (26/11/2026, scripts/sentinella-contratti-staccati.sql):
   // nessuna spedizione nuova su un contratto staccato, nessuno riacceso, nessun doppio attivo per nome, e quanti
   // pacchi e addebiti dopo la partenza girano ancora su di loro.
-  for (const [n, funzione] of [[1, 'controllo_giornaliero_1'], [2, 'controllo_giornaliero_2'], [3, 'controllo_giornaliero_3'], [4, 'controllo_giornaliero_4'], [5, 'controllo_giornaliero_5']] as const) {
+  // La parte 6 del database sono le zone lungo la catena d'acquisto (26/11/2026, scripts/zone-catena-trigger.sql): nessun contratto
+  // comprato con zone diverse dal suo fornitore, e gli 8 trigger che le tengono uguali tutti accesi.
+  for (const [n, funzione] of [[1, 'controllo_giornaliero_1'], [2, 'controllo_giornaliero_2'], [3, 'controllo_giornaliero_3'], [4, 'controllo_giornaliero_4'], [5, 'controllo_giornaliero_5'], [6, 'controllo_giornaliero_6']] as const) {
     const { data, error } = await admin.rpc(funzione)
     if (error || !data) {
       console.error('[SENTINELLA] controllo non eseguito:', funzione, error?.message)

@@ -399,8 +399,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     // Svuota le dipendenze SOLO dei corrieri rimpiazzati (verranno rimossi in cascade con la
     // riga masters). Quelli passati al genitore mantengono i loro listini/fasce.
+    // Le ZONE no (26/11/2026): cadono da sole con la riga del contratto. Cancellarle qui, a contratto ancora in piedi,
+    // le toglierebbe anche a chi compra da lui (scripts/zone-catena-trigger.sql); con la cascata il trigger vede che
+    // il contratto non c'è più e le copie degli altri restano.
     if (corrGemelli.length) {
-      for (const t of ['listini_corrieri_supplementi', 'listini_corrieri_fasce', 'listini_corrieri_corrieri', 'listini_clienti_supplementi', 'listini_clienti_corrieri', 'listini_clienti_fasce', 'listini_fasce', 'zone']) {
+      for (const t of ['listini_corrieri_supplementi', 'listini_corrieri_fasce', 'listini_corrieri_corrieri', 'listini_clienti_supplementi', 'listini_clienti_corrieri', 'listini_clienti_fasce', 'listini_fasce']) {
         try { await admin.from(t).delete().in('corriere_id', corrGemelli) } catch {}
       }
     }

@@ -21,6 +21,11 @@ export async function POST(req: NextRequest) {
   const { data: utente } = await supabase.from('utenti').select('master_id').eq('id', user.id).single()
   const body = await req.json()
   const { nome, descrizione, con_fuel, corriereId, multicollo } = body
+  // Su un contratto comprato le zone sono quelle del fornitore (lib/zone-catena): qui non se ne aggiungono.
+  const { createAdminSupabase } = await import('@/lib/supabase-admin')
+  const { zoneNonModificabili } = await import('@/lib/zone-catena')
+  const bloccato = await zoneNonModificabili(createAdminSupabase(), corriereId, utente?.master_id ?? null)
+  if (bloccato) return NextResponse.json({ error: bloccato }, { status: 403 })
   const { data, error } = await supabase.from('zone').insert({
     master_id: utente?.master_id,
     corriere_id: corriereId,

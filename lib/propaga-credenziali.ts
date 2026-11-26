@@ -1,5 +1,6 @@
 // Propagazione AUTOMATICA delle credenziali dal proprietario di un contratto alle sue COPIE rivendute.
-// Gemella di sincronizzaZonaAiDiscendenti (lib/propaga-zona), ma per le API key.
+// Era la gemella di lib/propaga-zona per le API key; le zone dal 26/11/2026 le porta alle copie il database
+// (scripts/zone-catena-trigger.sql).
 //
 // Un contratto con proprio=true tiene l'account vero (client_id/secret/account). I sotto-master che lo
 // RIVENDONO hanno una COPIA (proprio=false, stesso nome_contratto) e usano LO STESSO account: e' il
