@@ -14,8 +14,9 @@ export const maxDuration = 300
 // Annullo rifiutato: la spedizione torna com'era, con la nota. Se intanto il cliente ha rifatto la spedizione per
 // lo stesso ordine, il vincolo uniq_sped_ordine_attivo_v2 rifiuta il ripristino. Prima l'errore non si leggeva: la
 // riga restava in attesa con la richiesta aperta e il giro la riprendeva ogni ora per sempre (su SpediamoPro con
-// un annullo al corriere a ogni giro). Ora la richiesta si chiude col motivo scritto e la riga resta addebitata
-// com'era: due spedizioni per lo stesso ordine le guarda una persona (la sentinella le conta).
+// un annullo al corriere a ogni giro; 5 cosi' al 26/11/2026, la piu' vecchia dal 29/09). In quel caso la richiesta
+// si chiude col motivo scritto e la riga resta in attesa e addebitata: due spedizioni per lo stesso ordine le
+// guarda una persona (la sentinella le conta). Ogni altro errore si rilancia: il giro la riprende l'ora dopo.
 async function rimettiComEra(admin: any, s: any, nota: string): Promise<void> {
   const { error } = await admin.from('spedizioni').update({
     stato: s.stato_precedente || 'in_lavorazione',
@@ -23,13 +24,14 @@ async function rimettiComEra(admin: any, s: any, nota: string): Promise<void> {
     annullamento_errore: nota,
   }).eq('id', s.id)
   if (!error) return
-  console.error('[ANNULLI][CRON] ripristino rifiutato:', s.numero, error.message)
-  const doppio = /duplicate|unique|uniq_sped_ordine/i.test(error.message)
+  const doppio = error.code === '23505' || /uniq_sped_ordine/i.test(error.message || '')
+  if (!doppio) throw new Error('ripristino non riuscito: ' + error.message)
+  console.error('[ANNULLI][CRON] ripristino rifiutato, stesso ordine gia\' rispedito:', s.numero)
   const { error: e2 } = await admin.from('spedizioni').update({
     annullamento_richiesto_at: null,
-    annullamento_errore: `${nota} ${doppio ? 'Non si può rimettere attiva: per lo stesso ordine esiste già un\'altra spedizione.' : 'Ripristino non riuscito: ' + error.message}`.slice(0, 500),
+    annullamento_errore: `${nota} Non si può rimettere attiva: per lo stesso ordine esiste già un'altra spedizione.`.slice(0, 500),
   }).eq('id', s.id)
-  if (e2) throw new Error('ripristino e nota non scritti: ' + e2.message)
+  if (e2) throw new Error('nota del ripristino rifiutato non scritta: ' + e2.message)
 }
 
 // Una richiesta in attesa su un pacco Poste diretto: annullata subito, oppure rimessa com'era se il pacco

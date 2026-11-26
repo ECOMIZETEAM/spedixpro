@@ -74,13 +74,16 @@ export async function GET(req: NextRequest) {
     righe.push({ area: 'sentinella', controllo: `controllo annulli SDA EXPRESS L NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
   }
   // Gli annulli dei pacchi venduti fra reti (26/11/2026): righe rimaste addebitate sotto un detentore annullato,
-  // code manuali senza detentore, ripristini rifiutati. Sta in lib/annullo-pacco, vicino alla regola che controlla.
-  try {
-    const { controlloAnnulliPacco } = await import('@/lib/annullo-pacco')
-    righe.push(...await controlloAnnulliPacco(admin))
-  } catch (e: any) {
-    console.error('[SENTINELLA] controllo annulli dei pacchi fra reti non eseguito:', e?.message)
-    righe.push({ area: 'sentinella', controllo: `controllo annulli dei pacchi fra reti NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
+  // code manuali senza detentore, ripristini rifiutati. Sta nel database (scripts/gambe-seguono-detentore.sql),
+  // accanto al trigger che controlla, e legge solo dagli indici.
+  {
+    const { data, error } = await admin.rpc('controllo_annulli_pacco')
+    if (error || !data) {
+      console.error('[SENTINELLA] controllo annulli dei pacchi fra reti non eseguito:', error?.message)
+      righe.push({ area: 'sentinella', controllo: `controllo annulli dei pacchi fra reti NON eseguito (${error?.message || 'nessuna risposta'})`, valore: 0, atteso: 'eseguito', allarme: true })
+    } else {
+      righe.push(...(data as any[]))
+    }
   }
   // La sesta e' il margine di MULTIEXPRESS pacco per pacco del giorno prima (26/11/2026): le guardie fermano le
   // destinazioni speciali, ma un rincaro del corriere sulle zone normali (BRT Express isole, 19/11) lo si vedeva

@@ -181,8 +181,11 @@ export async function GET(req: NextRequest) {
           }
           await rimborsaAnnulloSpedizione(admin, sp, null)
           // rimborsaAnnulloSpedizione INGOIA gli errori dei singoli movimenti: il successo si rilegge.
-          const { data: mvDopo } = await admin.from('movimenti')
+          const { data: mvDopo, error: errDopo } = await admin.from('movimenti')
             .select('tipo,importo,cliente_id,master_id,master_target_id').eq('spedizione_id', spId)
+          // Rilettura fallita: non si sa se il rimborso c'e'. Prima diventava "nessun soggetto aperto" e la riga
+          // usciva dalla coda come rimborsata; ora conta come tentativo e si rilegge al giro dopo.
+          if (errDopo) throw new Error('movimenti non riletti dopo il rimborso: ' + errDopo.message)
           const dopo = aperti(mvDopo || [])
           if (!dopo.length) {
             await togli()

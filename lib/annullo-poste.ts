@@ -22,14 +22,13 @@
 // annulli e la sorveglianza oraria (annulli-recupero-cron).
 
 import { risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
-import { annullaGambePacco } from '@/lib/annullaSpedizione'
+import { annullaGambePacco, STATI_PARTITA } from '@/lib/annullaSpedizione'
 import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { statoDaLetturaPoste, mappaStatoPoste } from '@/lib/tracking-poste'
 
-// "Il pacco e' nelle mani del corriere". "spedita" da sola NON conta: su questi contratti e' spesso solo
-// la LDV accettata, senza scansione. Stesso elenco della guardia della coda d'annullo nel tracking
-// (app/api/tracking/aggiorna) e di annulli-recupero-cron.
-export const STATI_PARTITA = ['in_transito', 'in_consegna', 'consegnata', 'in_giacenza', 'non_consegnato', 'reso_mittente']
+// "Il pacco e' nelle mani del corriere": l'elenco vive in lib/annullaSpedizione (lo usa anche annullaGambePacco
+// per non annullare mai una riga in viaggio) e si riesporta da qui per chi lo importava gia'.
+export { STATI_PARTITA }
 export const GIORNI_SORVEGLIANZA = 30
 
 // Marca del riaddebito nella descrizione dei movimenti: e' la guardia anti-doppione (un pacco si

@@ -2,6 +2,11 @@ import { registraMovimento, registraMovimentoMaster } from '@/lib/movimenti'
 import { spediamoproCancelShipment, spediamoproGetTracking } from '@/lib/spediamopro'
 import type { GambaSpedizione } from '@/lib/condivisione-catena'
 
+// "Il pacco e' nelle mani del corriere". "spedita" da sola NON conta: su molti contratti e' solo la LDV
+// accettata, senza scansione. Stesso elenco della guardia della coda d'annullo nel tracking
+// (app/api/tracking/aggiorna) e di annulli-recupero-cron. Riesportato da lib/annullo-poste.
+export const STATI_PARTITA = ['in_transito', 'in_consegna', 'consegnata', 'in_giacenza', 'non_consegnato', 'reso_mittente']
+
 // Il corriere considera la spedizione GIÀ eliminata/inesistente → possiamo cancellarla anche da Moove.
 export function giaEliminataSulCorriere(text: string, status?: number): boolean {
   if (status === 404) return true
@@ -322,25 +327,33 @@ export async function annullaGambePacco(
   const { data: righe, error: errRighe } = await admin.from('spedizioni').select('id,numero,dest_nome,stato,stato_precedente').in('id', ids)
   if (errRighe) throw new Error('righe del pacco non leggibili: ' + errRighe.message)
   const quando = rich.richiestoAt || new Date().toISOString()
-  const annullate: any[] = []
+  // Ogni riga si PRENDE: passa ad annullata solo se e' ancora nello stato appena letto. Due richieste insieme
+  // sullo stesso pacco (API ripetuta dopo un timeout, cliente e master su due righe) prendono righe diverse e
+  // ognuna rimborsa solo le sue: il rimborso non e' mai doppio. Una riga gia' annullata prima di qui non si
+  // rimborsa da questa strada: e' entrata nella coda annulli_da_rimborsare quando e' diventata annullata.
+  const prese: any[] = []
   const nonScritte: string[] = []
   for (const r of (righe || [])) {
-    if (r.stato === 'annullata') { annullate.push(r); continue }
-    const { error } = await admin.from('spedizioni').update({
+    if (r.stato === 'annullata') continue
+    // Una riga in viaggio non si annulla ne' si rimborsa: chi chiama l'ha gia' escluso (paccoPartito, annullo-pacco),
+    // ma fra la sua lettura e questa il tracking puo' averla mossa.
+    if (STATI_PARTITA.includes(r.stato)) { nonScritte.push(`${r.numero}: risulta ${r.stato}`); continue }
+    const { data: presa, error } = await admin.from('spedizioni').update({
       stato: 'annullata',
       // Della gamba in attesa conta lo stato di prima della richiesta; le altre non erano in attesa.
-      stato_precedente: r.stato === 'annullamento_pending' ? (r.stato_precedente || 'in_lavorazione') : r.stato,
+      stato_precedente: ['annullamento_pending', 'annullamento_manuale', 'storno_richiesto'].includes(r.stato) ? (r.stato_precedente || 'in_lavorazione') : r.stato,
       annullamento_richiesto_at: quando,
       annullamento_da: rich.da || null,
+      annullamento_owner_id: null,
       annullamento_errore: null,
-    }).eq('id', r.id)
+    }).eq('id', r.id).eq('stato', r.stato).select('id')
     if (error) { nonScritte.push(`${r.numero}: ${error.message}`); continue }
-    annullate.push(r)
+    if (presa?.length) prese.push(r)
   }
-  // Si rimborsa solo cio' che risulta annullato: una riga rimasta attiva non si rimborsa.
-  for (const r of annullate) await rimborsaAnnulloSpedizione(admin, r, rich.da || null)
+  // Si rimborsa solo cio' che si e' annullato qui: una riga rimasta attiva non si rimborsa.
+  for (const r of prese) await rimborsaAnnulloSpedizione(admin, r, rich.da || null)
   // Lo store non deve restare con l'ordine "Fulfilled" e un tracking morto (vedi lib/shopify).
-  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, annullate.map(r => r.id)) } catch {}
+  try { const { annullaFulfillmentShopify } = await import('@/lib/shopify'); await annullaFulfillmentShopify(admin, prese.map(r => r.id)) } catch {}
   if (nonScritte.length) throw new Error('righe del pacco non annullate: ' + nonScritte.join('; '))
-  return { gambe: annullate.length }
+  return { gambe: prese.length }
 }

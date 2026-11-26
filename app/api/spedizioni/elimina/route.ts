@@ -86,7 +86,7 @@ export async function DELETE(req: NextRequest) {
       esito = pacco ? await annullaPaccoAlDetentore(admin, pacco, { da: user.id, subito: false }) : null
     } catch (e: any) {
       console.error('[ANNULLO-PACCO][elimina]', spedizioneId, e?.message)
-      return NextResponse.json({ error: `Annullo non riuscito: ${e?.message || 'errore'}. La spedizione resta valida, riprova fra qualche minuto.` }, { status: 500 })
+      return NextResponse.json({ error: `Annullo avviato ma non completato su tutti i livelli del pacco (${e?.message || 'errore'}). Riprova fra qualche minuto: un nuovo tentativo chiude quello che manca.` }, { status: 500 })
     }
     if (esito?.esito === 'annullata') return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
     if (esito?.esito === 'coda') {
@@ -178,7 +178,15 @@ export async function DELETE(req: NextRequest) {
   // 48 ore col cliente addebitato, senza nessun annullo da mandare: Poste non ne ha uno via API.
   if (corr?.tipo === 'moovexpress' || corr?.tipo === 'poste') {
     const { annullaSubitoPoste } = await import('@/lib/annullo-poste')
-    const r = await annullaSubitoPoste(admin, (sped as any).tracking_number, { da: user.id })
+    // Un errore a meta' (lib/annullaSpedizione annullaGambePacco) non deve diventare un 500 muto: si dice e si scrive.
+    let r
+    try { r = await annullaSubitoPoste(admin, (sped as any).tracking_number, { da: user.id }) }
+    catch (e: any) {
+      const msg = `Annullo avviato ma non completato su tutti i livelli del pacco (${e?.message || 'errore'}). Riprova fra qualche minuto: un nuovo tentativo chiude quello che manca.`
+      console.error('[ANNULLO-POSTE][elimina]', spedizioneId, e?.message)
+      await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
     if (r.esito === 'annullata') return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete. Se il pacco viene comunque affidato al corriere, verrà riaddebitata.' })
     if (r.esito === 'partito') {
       await admin.from('spedizioni').update({ annullamento_errore: r.messaggio }).eq('id', spedizioneId)
@@ -194,7 +202,14 @@ export async function DELETE(req: NextRequest) {
     const { gambePaccoGls, annullaPaccoGls } = await import('@/lib/annullo-gls')
     const gambe = await gambePaccoGls(admin, (sped as any).tracking_number)
     if (gambe) {
-      const r = await annullaPaccoGls(admin, gambe, { da: user.id })
+      let r
+      try { r = await annullaPaccoGls(admin, gambe, { da: user.id }) }
+      catch (e: any) {
+        const msg = `Annullo avviato ma non completato su tutti i livelli del pacco (${e?.message || 'errore'}). Riprova fra qualche minuto: un nuovo tentativo chiude quello che manca.`
+        console.error('[ANNULLO-GLS][elimina]', spedizioneId, e?.message)
+        await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)
+        return NextResponse.json({ error: msg }, { status: 500 })
+      }
       if (r.ok) return NextResponse.json({ success: true, annullata: true, message: 'Spedizione annullata e credito stornato a tutta la rete.' })
       const msg = `Annullo non riuscito: ${r.motivo} La spedizione resta valida.`
       await admin.from('spedizioni').update({ annullamento_errore: msg }).eq('id', spedizioneId)

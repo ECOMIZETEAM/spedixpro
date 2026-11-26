@@ -18,8 +18,7 @@
 // tutte le righe nello stesso momento, come fanno Poste e GLS, invece di aspettare la coda dei rimborsi.
 
 import { risolviGambeSpedizione, type GambaSpedizione } from '@/lib/condivisione-catena'
-import { annullaSpedizioneSulCorriere, annullaGambePacco, masterDetentore } from '@/lib/annullaSpedizione'
-import { STATI_PARTITA } from '@/lib/annullo-poste'
+import { annullaSpedizioneSulCorriere, annullaGambePacco, masterDetentore, STATI_PARTITA } from '@/lib/annullaSpedizione'
 
 // Poste e GLS diretto hanno gia' la loro strada sul pacco intero.
 const TIPI_GIA_SUL_PACCO = new Set(['poste', 'gls'])
@@ -172,26 +171,13 @@ async function chiudiRigheFerme(admin: any, p: PaccoAlDetentore, da: string | nu
   }
 }
 
-// Il fornitore ha appena annullato la LDV: si annulla e si rimborsa tutto il pacco. La riga del detentore si
-// PRENDE prima (passa ad annullata solo se e' ancora ferma): se due richieste arrivano insieme da due righe dello
-// stesso pacco, rimborsa una sola; l'altra trova il detentore gia' annullato e lascia fare alla coda.
+// Il fornitore ha appena annullato la LDV: si annulla e si rimborsa tutto il pacco. Ogni riga la prende e la
+// rimborsa annullaGambePacco (update condizionato sullo stato): con due richieste insieme sullo stesso pacco
+// ognuna rimborsa solo le righe che ha preso, mai due volte. Se una riga non si riesce a chiudere (in viaggio,
+// errore) annullaGambePacco lo dice con un errore, e chi chiama non risponde "annullata".
 async function annullaTutto(admin: any, p: PaccoAlDetentore, da: string | null): Promise<EsitoPacco> {
-  const quando = new Date().toISOString()
-  const { data: presa, error } = await admin.from('spedizioni').update({
-    stato: 'annullata',
-    stato_precedente: p.det.stato === 'annullamento_pending' ? (p.det.stato_precedente || 'in_lavorazione') : p.det.stato,
-    annullamento_richiesto_at: quando,
-    annullamento_da: da,
-    annullamento_owner_id: null,
-    annullamento_errore: null,
-  }).eq('id', p.det.id).in('stato', STATI_FERMI).select('id')
-  if (error) throw new Error('riga del detentore non annullata: ' + error.message)
-  if (!presa?.length) {
-    await chiudiRigheFerme(admin, p, da)
-    return { esito: 'annullata' }
-  }
-  await annullaGambePacco(admin, p.gambe, { richiestoAt: quando, da })
-  console.info('[ANNULLO-PACCO] annullato sul detentore:', p.det.numero, `${p.gambe.length} righe`, p.corr.tipo)
+  const r = await annullaGambePacco(admin, p.gambe, { richiestoAt: new Date().toISOString(), da })
+  console.info('[ANNULLO-PACCO] annullato sul detentore:', p.det.numero, `${r.gambe} righe prese su ${p.gambe.length}`, p.corr.tipo)
   return { esito: 'annullata' }
 }
 
@@ -282,57 +268,3 @@ export async function annullaPaccoAlDetentore(
   }
 }
 
-// IL CONTROLLO DI OGNI MATTINA (Sentinella, app/api/controllo/sentinella). L'annullo per pacco si rompe senza
-// errori visibili: una riga rimasta addebitata sotto un detentore annullato non la nota nessuno (026031010041765,
-// Atlantik, otto giorni), e una coda senza owner non compare da nessuna parte (tre DVA dal 15/10). Quindi si
-// contano gli effetti, non i log.
-export async function controlloAnnulliPacco(admin: any): Promise<{ area: string; controllo: string; valore: number; atteso: string; allarme: boolean }[]> {
-  const area = 'annulli dei pacchi fra reti'
-  const ora = Date.now()
-  const conta = async (q: any) => { const { count, error } = await q; if (error) throw new Error(error.message); return count || 0 }
-
-  // 1. Righe che il trigger non e' riuscito a far seguire al detentore (scripts/gambe-seguono-detentore.sql).
-  const anomalie = await conta(admin.from('gambe_pacco_anomalie').select('id', { count: 'exact', head: true })
-    .gte('at', new Date(ora - 48 * 3600000).toISOString()))
-
-  // 2. Code manuali senza owner sulla riga con la LDV vera: non le vede e non le chiude nessuno.
-  const { data: veri, error: ev } = await admin.from('corrieri').select('id').neq('tipo', 'moovexpress')
-  if (ev) throw new Error('contratti non leggibili: ' + ev.message)
-  const idVeri = (veri || []).map((c: any) => c.id)
-  let senzaOwner = 0
-  for (let i = 0; i < idVeri.length; i += 200) {
-    senzaOwner += await conta(admin.from('spedizioni').select('id', { count: 'exact', head: true })
-      .eq('stato', 'annullamento_manuale').is('annullamento_owner_id', null).in('corriere_id', idVeri.slice(i, i + 200)))
-  }
-
-  // 3. Righe a valle ancora ferme (quindi addebitate) sotto un detentore annullato negli ultimi 3 giorni.
-  const { data: annullate, error: ea } = await admin.from('spedizioni').select('id,tracking_number')
-    .eq('stato', 'annullata').gte('updated_at', new Date(ora - 3 * 86400000).toISOString())
-    .is('raw_response->>venditore_spedizione_id', null).not('tracking_number', 'is', null).limit(2000)
-  if (ea) throw new Error('annullate non leggibili: ' + ea.message)
-  const { gambePerTracking } = await import('@/lib/condivisione-catena')
-  const perTrk = await gambePerTracking(admin, (annullate || []).map((s: any) => s.tracking_number))
-  const idDet = new Set((annullate || []).map((s: any) => s.id))
-  const sotto: string[] = []
-  for (const legs of perTrk.values()) {
-    if (legs.length < 2) continue
-    for (const g of legs) if (g.venditoreSpedizioneId && !idDet.has(g.spedizioneId)) sotto.push(g.spedizioneId)
-  }
-  let ferme = 0
-  for (let i = 0; i < sotto.length; i += 200) {
-    ferme += await conta(admin.from('spedizioni').select('id', { count: 'exact', head: true })
-      .in('id', sotto.slice(i, i + 200)).in('stato', STATI_FERMI))
-  }
-
-  // 4. Richieste chiuse dal giro delle 48 ore perche' il ripristino e' stato rifiutato (stesso ordine rispedito):
-  //    restano addebitate e "in annullamento", la decisione e' di una persona.
-  const bloccate = await conta(admin.from('spedizioni').select('id', { count: 'exact', head: true })
-    .eq('stato', 'annullamento_pending').is('annullamento_richiesto_at', null))
-
-  return [
-    { area, controllo: 'righe che non hanno seguito il detentore (ultime 48 ore)', valore: anomalie, atteso: '0', allarme: anomalie > 0 },
-    { area, controllo: 'annulli in coda manuale senza detentore (non li vede nessuno)', valore: senzaOwner, atteso: '0', allarme: senzaOwner > 0 },
-    { area, controllo: 'righe ancora addebitate sotto un detentore annullato (ultimi 3 giorni)', valore: ferme, atteso: '0', allarme: ferme > 0 },
-    { area, controllo: 'annulli fermi: rifiutati dal corriere e non ripristinabili (stesso ordine rispedito)', valore: bloccate, atteso: '0', allarme: bloccate > 0 },
-  ]
-}

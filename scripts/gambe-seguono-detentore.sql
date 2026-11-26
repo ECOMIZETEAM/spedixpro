@@ -29,6 +29,9 @@
 -- nel suo blocco, e quella che non si scrive finisce in gambe_pacco_anomalie (la conta la sentinella), mentre
 -- la riga del detentore e le altre passano lo stesso.
 --
+-- Ogni riga seguita apre una sotto-transazione: una correzione di massa dal SQL Editor che annulla centinaia di
+-- detentori in un solo UPDATE ne aprirebbe centinaia insieme. Le correzioni di massa si fanno a blocchi piccoli.
+--
 -- Da lanciare nel SQL Editor PRIMA di rilasciare il codice dell'annullo per pacco.
 
 -- Le righe che non si riescono a far seguire finiscono qui: nei log di Postgres non le leggerebbe nessuno.
@@ -112,6 +115,10 @@ begin
   for r in select g.id, g.numero, g.stato, g.stato_precedente, g.annullamento_owner_id from spedizioni g where g.id = any(v_altre)
   loop
     begin
+      -- Mai aspettare una riga tenuta da un'altra transazione: un'attesa finita in timeout farebbe fallire la
+      -- scrittura del detentore (tracking, conferma, storno), cioe' proprio cio' che non deve succedere.
+      -- lock_not_available lo prende il gestore qui sotto: la riga finisce fra le anomalie, le altre seguono.
+      perform 1 from spedizioni where id = r.id for update nowait;
       -- 1. LDV annullata: si annullano le righe ancora ferme (il rimborso lo fa la coda annulli_da_rimborsare).
       if v_evento = 'annullata' then
         if r.stato in ('in_lavorazione', 'spedita', 'annullamento_pending', 'annullamento_manuale', 'storno_richiesto') then
@@ -123,7 +130,7 @@ begin
             annullamento_da = coalesce(g.annullamento_da, new.annullamento_da),
             annullamento_owner_id = null,
             annullamento_errore = null
-          where g.id = r.id;
+          where g.id = r.id and g.stato = r.stato;
         end if;
 
       -- 2. Il detentore entra in coda: le altre righe ferme mostrano l'annullo in corso, senza owner.
@@ -137,7 +144,7 @@ begin
             annullamento_da = coalesce(g.annullamento_da, new.annullamento_da),
             annullamento_owner_id = null,
             annullamento_errore = null
-          where g.id = r.id;
+          where g.id = r.id and g.stato = r.stato;
         end if;
 
       -- 3. Il detentore esce dalla coda senza annullarsi: tornano com'erano le righe messe in coda al punto 2
@@ -152,11 +159,11 @@ begin
               annullamento_richiesto_at = null,
               annullamento_owner_id = null,
               annullamento_errore = new.annullamento_errore
-            where g.id = r.id;
+            where g.id = r.id and g.stato = r.stato;
           exception when unique_violation then
             update spedizioni g set
               annullamento_errore = 'Il detentore non ha annullato la spedizione, ma non si può rimettere attiva: per lo stesso ordine ne esiste già un''altra.'
-            where g.id = r.id;
+            where g.id = r.id and g.stato = r.stato;
             insert into gambe_pacco_anomalie (detentore_id, spedizione_id, numero, evento, errore)
               values (new.id, r.id, r.numero, v_evento, 'ripristino rifiutato: stesso ordine già rispedito');
           end;
@@ -188,15 +195,79 @@ create trigger trg_gambe_seguono_detentore
         or old.stato in ('annullamento_manuale', 'storno_richiesto')))
   execute function public.fn_gambe_seguono_detentore();
 
--- CONTROLLO (sola lettura): pacchi a più righe col detentore annullato e un livello sotto ancora fermo.
--- Deve tornare vuoto. Leggero: parte dalle annullate recenti (indice su stato) e legge per tracking.
---
--- with det as (
---   select s.id, s.tracking_number from spedizioni s join corrieri c on c.id = s.corriere_id
---   where s.stato = 'annullata' and s.created_at > now() - interval '60 days'
---     and c.tipo <> 'moovexpress' and (s.raw_response->>'venditore_spedizione_id') is null
--- )
--- select g.numero, g.stato, det.tracking_number
--- from det join spedizioni g on g.tracking_number = det.tracking_number and g.id <> det.id
--- where (g.raw_response->>'venditore_spedizione_id') is not null
---   and g.stato in ('in_lavorazione', 'spedita', 'annullamento_pending', 'annullamento_manuale', 'storno_richiesto');
+-- CONTROLLO DI OGNI MATTINA (Sentinella, app/api/controllo/sentinella): l'annullo dei pacchi fra reti si rompe
+-- senza errori visibili, quindi si contano gli effetti. Sola lettura, solo service_role. Le annullate si leggono
+-- dall'indice (stato, updated_at) negli ultimi 3 giorni: una riga annullata non la tocca piu' il tracking, salvo
+-- la sorveglianza SDA EXPRESS L, che le rilegge per 30 giorni (poche migliaia di righe).
+create or replace function public.controllo_annulli_pacco()
+ returns table(area text, controllo text, valore numeric, atteso text, allarme boolean)
+ language sql
+ stable security definer
+ set search_path to 'public'
+as $$
+  with ann as (
+    select s.id, s.tracking_number, (s.raw_response->>'venditore_spedizione_id') as vend, c.tipo
+    from spedizioni s join corrieri c on c.id = s.corriere_id
+    where s.stato = 'annullata' and s.updated_at > now() - interval '3 days' and s.tracking_number is not null
+  ),
+  ferme_sotto as (
+    select coalesce(sum(x.n), 0) n
+    from ann d
+    cross join lateral (
+      select count(*) n from spedizioni g
+      where g.tracking_number = d.tracking_number and g.id <> d.id
+        and (g.raw_response->>'venditore_spedizione_id') is not null
+        and g.stato in ('in_lavorazione', 'spedita', 'annullamento_pending', 'annullamento_manuale', 'storno_richiesto')
+    ) x
+    where d.vend is null and d.tipo <> 'moovexpress'
+  ),
+  -- LATERAL ... LIMIT 1: si parte dalle poche annullate recenti e si cerca per tracking. Con un join normale il
+  -- planner sceglieva di scorrere tutte le spedizioni attive (spedita / in lavorazione) leggendone il JSON.
+  sopra_annullate as (
+    select count(*) n
+    from ann a
+    cross join lateral (
+      select 1 from spedizioni d join corrieri cd on cd.id = d.corriere_id
+      where d.tracking_number = a.tracking_number and d.id <> a.id
+        and (d.raw_response->>'venditore_spedizione_id') is null and cd.tipo <> 'moovexpress'
+        and d.stato in ('in_lavorazione', 'spedita', 'annullamento_pending')
+      limit 1
+    ) x
+    where a.vend is not null
+  ),
+  senza_detentore as (
+    select count(*) n
+    from spedizioni s join corrieri c on c.id = s.corriere_id
+    where s.stato = 'annullamento_manuale' and s.annullamento_owner_id is null and c.tipo <> 'moovexpress'
+  ),
+  ponti_orfani as (
+    select count(*) n
+    from spedizioni s join corrieri c on c.id = s.corriere_id
+    where s.stato = 'annullamento_manuale' and s.annullamento_owner_id is null and c.tipo = 'moovexpress'
+      and not exists (
+        select 1 from spedizioni d join corrieri cd on cd.id = d.corriere_id
+        where d.tracking_number = s.tracking_number and d.id <> s.id and cd.tipo <> 'moovexpress'
+          and (d.raw_response->>'venditore_spedizione_id') is null
+          and d.stato in ('annullamento_manuale', 'storno_richiesto'))
+  ),
+  fermi as (
+    select count(*) n from spedizioni s where s.stato = 'annullamento_pending' and s.annullamento_richiesto_at is null
+  ),
+  anomalie as (
+    select count(*) n from gambe_pacco_anomalie where at > now() - interval '48 hours'
+  )
+  select 'annulli dei pacchi fra reti', 'righe che non hanno seguito il detentore (ultime 48 ore)', n, '0', n > 0 from anomalie
+  union all
+  select 'annulli dei pacchi fra reti', 'righe ancora ferme sotto un detentore annullato (ultimi 3 giorni)', n, '0', n > 0 from ferme_sotto
+  union all
+  select 'annulli dei pacchi fra reti', 'righe annullate sopra un detentore ancora attivo (ultimi 3 giorni)', n, '0', n > 0 from sopra_annullate
+  union all
+  select 'annulli dei pacchi fra reti', 'annulli in coda manuale senza detentore (non li vede nessuno)', n, '0', n > 0 from senza_detentore
+  union all
+  select 'annulli dei pacchi fra reti', 'righe-ponte in «annullo in corso» con il detentore non in coda', n, '0', n > 0 from ponti_orfani
+  union all
+  select 'annulli dei pacchi fra reti', 'annulli fermi: rifiutati dal corriere e non ripristinabili (stesso ordine rispedito)', n, '0', n > 0 from fermi;
+$$;
+
+revoke all on function public.controllo_annulli_pacco() from public, anon, authenticated;
+grant execute on function public.controllo_annulli_pacco() to service_role;
