@@ -572,7 +572,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const costoMinimoCollo = costiSupplMaster?.['minimo_collo|minimo a collo']?.valore || 0
   const minimoCollSotto = costoMinimoCollo > 0 && (Number(minimoCollo) || 0) > 0 && (Number(minimoCollo) || 0) < costoMinimoCollo - 0.005
   // Multicollo: fasce sulle zone multicollo, minimo a collo e localita' remota / partenza remota.
-  const multicolloSotto = zoneMC.length > 0 && (fasciaSotto(fasceMC, zoneMC) || minimoCollSotto || supplementiSottoCosto(supplMC, costoSupplMC).length > 0)
+  const multicolloSotto = zoneMC.length > 0 && (fasciaSotto(fasceMC, zoneMC) || minimoCollSotto || supplementiSottoCosto(supplMC, costoSupplMC, Number(minimoCollo) || 0, costoMinimoCollo, zoneMC.map((z:any)=>z.nome)).length > 0)
   const tabSotto: Record<string, boolean> = { pesi: qualcheFasciaSotto, multicollo: multicolloSotto, giacenze: qualcheGiacenzaSotto, servizi: qualcheAccessorioSotto, extra: !zoneMC.length && minimoCollSotto }
 
   // Il minimo a collo: nella scheda Multicollo sui contratti con zone multicollo, in Extra sugli altri.
@@ -744,12 +744,12 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       {tab==='multicollo' && (
         <div>
           <div style={{margin:'12px 16px 0',padding:'10px 14px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'8px',fontSize:'12.5px',color:'#4b5563',lineHeight:1.5}}>
-            Con <b>due o più colli</b> il prezzo è il più alto fra <b>colli × minimo per collo</b> e la fascia della <b>zona multicollo</b> sul <b>peso totale</b> della spedizione, più località remota e partenza remota. Il peso totale si conta collo per collo: misure al centimetro in su, volume, il più alto fra peso e volume arrotondato a mezzo chilo in su, poi la somma. Il collo singolo resta su <b>Pesi / Zone</b>. Una casella vuota = in quella zona e a quel peso il multicollo non si vende.
+            Con <b>due o più colli</b> il prezzo è il più alto fra <b>colli × minimo per collo</b> e la fascia della <b>zona multicollo</b> sul <b>peso totale</b> della spedizione, più località remota e partenza remota. Il peso totale si conta collo per collo: misure al centimetro in su, volume, il più alto fra peso e volume arrotondato in su come fa il corriere (mezzo chilo per UPS Europa, un chilo per UPS Italia), poi la somma. Il collo singolo resta su <b>Pesi / Zone</b>. Una casella vuota = in quella zona e a quel peso il multicollo non si vende.
           </div>
           {grigliaPesi(fasceMC, setFasceMC, zoneMC, 'Fasce sul peso totale della spedizione. Usa "Oltre X ogni" per i pesi oltre l\'ultima fascia.')}
           <div style={{padding:'0 16px 18px'}}>
             {bloccoMinimo}
-            <SupplementiMulticollo chi="cliente" valore={supplMC} onChange={setSupplMC} costo={costoSupplMC}
+            <SupplementiMulticollo chi="cliente" valore={supplMC} onChange={setSupplMC} costo={costoSupplMC} minimoVendita={Number(minimoCollo) || 0} minimoCosto={costoMinimoCollo} zoneMulticollo={zoneMC.map((z:any)=>z.nome)}
               zoneRemote={zoneMono.filter((z:any)=>!z.su_mittente).map((z:any)=>z.nome)} zonePartenza={zoneMono.filter((z:any)=>z.su_mittente).map((z:any)=>z.nome)} />
           </div>
         </div>

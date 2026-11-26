@@ -459,7 +459,10 @@ export function supplPresenteMax(suppl: any[], tipo: string, pesoReale?: number 
 // Un collo solo non passa mai di qui: per il monocollo non cambia niente, nemmeno una lettura.
 export const TIPO_MINIMO_COLLO = 'minimo_collo'
 
-export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[]; soloAZone?: boolean }
+// `arrotondamentoKg` (settings.multicollo_arrotondamento_kg): a quanto si arrotonda in su il peso di ogni collo
+// nel multicollo a zone. Mezzo chilo se manca (UPS Europa), un chilo per UPS Italia (preventivi del 26/11). Sta
+// sul contratto del detentore e non nel listino: e' come il fornitore misura, non un prezzo, e vale uguale a ogni livello.
+export type RegolaMulticollo = { minimoObbligatorio: boolean; paesiEsclusi: string[]; soloAZone?: boolean; arrotondamentoKg?: number; illeggibile?: boolean }
 
 // Il valore della voce in un elenco di supplementi (gia' filtrato per listino e contratto). 0 = non
 // prezzata. Con due righe (un contratto salvato in due listini dello stesso master, succede) vince la
@@ -494,22 +497,33 @@ function regolaPerRicalcolo(regola: RegolaMulticollo | undefined, zonaForzata?: 
 // La regola di ogni contratto, letta sul contratto del DETENTORE. Client di servizio, sempre: il
 // contratto del detentore e' di un altro master, e chi prezza la spedizione propria lo fa col token
 // della sua sessione, che quella riga non la vede. Si leggono solo `contratto_id` e `settings` — mai
-// le credenziali. Lettura fallita = nessuna regola: si applica comunque il minimo dove e' prezzato.
+// le credenziali.
+// Lettura fallita: la regola risulta "illeggibile". Il multicollo A ZONE (fasce multicollo) su quel contratto
+// non si prezza: senza la regola il peso tornava al mezzo chilo (UPS Italia lo conta al chilo) e, livello per
+// livello, la stessa spedizione poteva uscire con due pesi diversi. Sul multicollo senza fasce a zone
+// (noloMulticollo) resta come prima: si applica comunque il minimo dove e' prezzato.
 export async function regoleMulticollo(corriereIds: string[]): Promise<Map<string, RegolaMulticollo>> {
   const out = new Map<string, RegolaMulticollo>()
   const ids = Array.from(new Set((corriereIds || []).filter(Boolean)))
   if (!ids.length) return out
   const { createAdminSupabase } = await import('@/lib/supabase-admin')
   const admin = createAdminSupabase()
-  const { data: righe } = await admin.from('corrieri').select('id,contratto_id').in('id', ids)
+  const illeggibile = (e: any) => {
+    console.error('[MULTICOLLO] regola del contratto non leggibile', ids, e?.message || e)
+    for (const id of ids) out.set(id, { minimoObbligatorio: false, paesiEsclusi: [], illeggibile: true })
+    return out
+  }
+  const { data: righe, error: e1 } = await admin.from('corrieri').select('id,contratto_id').in('id', ids)
+  if (e1) return illeggibile(e1)
   const detIds = Array.from(new Set((righe || []).map((r: any) => r.contratto_id || r.id).filter(Boolean))) as string[]
   if (!detIds.length) return out
-  const { data: det } = await admin.from('corrieri').select('id,settings').in('id', detIds)
+  const { data: det, error: e2 } = await admin.from('corrieri').select('id,settings').in('id', detIds)
+  if (e2) return illeggibile(e2)
   const settPerDet = new Map<string, any>((det || []).map((d: any) => [d.id, d.settings || {}]))
   for (const r of (righe || []) as any[]) {
     const s = settPerDet.get(r.contratto_id || r.id) || {}
     const esclusi = Array.isArray(s.multicollo_paesi_esclusi) ? s.multicollo_paesi_esclusi.map((x: any) => String(x).toUpperCase().trim()) : []
-    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi, soloAZone: s.multicollo_solo_a_zone === true })
+    out.set(r.id, { minimoObbligatorio: s.multicollo_minimo_a_collo === true, paesiEsclusi: esclusi, soloAZone: s.multicollo_solo_a_zone === true, arrotondamentoKg: Number(s.multicollo_arrotondamento_kg) > 0 ? Number(s.multicollo_arrotondamento_kg) : undefined })
   }
   return out
 }
@@ -531,6 +545,8 @@ export async function noloMulticolloZone(supabase: any, p: {
   soloMulticollo?: { nomi: string[]; esclusive: string[] }
 }): Promise<{ esito: EsitoMulticollo | null; zonaDest?: string | null } | null> {
   if (!((p.packages || []).length > 1) || !(p.fasceMC || []).length) return null
+  // Regola del contratto non letta: senza (peso, paesi esclusi, minimo obbligatorio) il multicollo a zone non si prezza.
+  if (p.regola?.illeggibile) return { esito: null }
   const paese = String(p.paese || 'IT').toUpperCase().trim()
   if (p.regola?.paesiEsclusi.includes(paese)) return null
   const { data: zoneMC } = await supabase.from('zone').select('id').eq('corriere_id', p.corriereId).eq('multicollo', true)
@@ -541,9 +557,17 @@ export async function noloMulticolloZone(supabase: any, p: {
   const fasceZona = zonaId ? p.fasceMC.filter((f: any) => (f.zona_id ?? (f.zone as any)?.id) === zonaId) : []
   if (!fasceZona.length) return { esito: null }
   const supplementi = leggiSupplementiMulticollo(p.suppl)
+  // MINIMO OBBLIGATORIO anche col multicollo a zone (prima lo guardava solo noloMulticollo, senza fasce a zone):
+  // un livello che ha le fasce multicollo ma non il minimo per collo (ne' la voce unica ne' quello della sua
+  // zona) vendeva senza minimo, mentre il pannello dice "finche' il campo e' vuoto il multicollo non si vende".
+  // UPS Italia 2 colli da 0,5 kg: costo 16,10 (il minimo), venduto alla fascia di 1 kg + quota a collo.
+  if (p.regola?.minimoObbligatorio) {
+    const nomeZona = (fasceZona.find((f: any) => (f.zone as any)?.nome)?.zone as any)?.nome
+    if (!(((nomeZona && supplementi?.minimoPerZona?.[nomeZona]) || minimoACollo(p.suppl)) > 0)) return { esito: null }
+  }
   const nomiMitt = await nomiZoneMittente(supabase, p.fasceTutte, p.mitt, p.dest, [p.corriereId])
   const zonaMitt = nomiMitt.find(n => supplementi?.partenza?.[n]) ?? nomiMitt[0] ?? null
-  const base = { fasceZona, zonaId: zonaId!, T: pesoMulticolloFornitore(p.packages, p.divisore), colli: p.packages.length, minimoCollo: minimoACollo(p.suppl), supplementi, zonaMitt }
+  const base = { fasceZona, zonaId: zonaId!, T: pesoMulticolloFornitore(p.packages, p.divisore, p.regola?.arrotondamentoKg), colli: p.packages.length, minimoCollo: minimoACollo(p.suppl), supplementi, zonaMitt }
   if (!p.soloMulticollo) return { esito: noloMulticolloDaFasce({ ...base, zonaDest: p.zonaDest }) }
   // Solo multicollo. Zona esclusiva della destinazione (isola, disagiata, CAP elencato) senza supplemento
   // multicollo prezzato: non si vende, come col contratto unico una zona esclusiva senza fascia escludeva il

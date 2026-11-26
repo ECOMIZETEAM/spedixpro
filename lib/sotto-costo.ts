@@ -271,15 +271,34 @@ export async function rilevaSottoCosto(admin: any, masterId: string): Promise<Ri
     // corregge dall'editor, scheda Multicollo.
     {
       const sC = leggiSupplementiMulticollo(costo), sV = leggiSupplementiMulticollo(cli)
+      // La voce unica 'minimo a collo' del listino di vendita vale dove non c'e' un minimo per zona.
+      const minimoV = Math.max(0, ...cli.filter((x: any) => x.tipo === 'minimo_collo').map((x: any) => Number(x.valore) || 0))
+      const minimoC = Math.max(0, ...costo.filter((x: any) => x.tipo === 'minimo_collo').map((x: any) => Number(x.valore) || 0))
       // Solo dove il multicollo si vende a zone (fasce multicollo) o i supplementi sono scritti.
-      const sotto = vendeMulticollo.has(k) || sV ? supplementiSottoCosto(sV, sC) : []
+      const sotto = vendeMulticollo.has(k) || sV ? supplementiSottoCosto(sV, sC, minimoV, minimoC) : []
       if (sotto.length) {
         let peggio: { d: number; v: number; c: number; dove: string; manca: boolean } | null = null
         for (const k of sotto) {
-          const [tipo, zona] = k.split('|') as ['remota' | 'partenza', string]
+          const [tipo, zona] = k.split('|') as ['remota' | 'partenza' | 'regola', string]
+          if (tipo === 'regola') {
+            // Voci della regola (UPS Italia), non di una zona remota: minimo fisso per spedizione, euro per
+            // ogni collo, minimo per collo di una zona multicollo.
+            if (zona.startsWith('minimo_zona:')) {
+              const z = zona.slice('minimo_zona:'.length)
+              const v = sV?.minimoPerZona?.[z] || minimoV, c = sC?.minimoPerZona?.[z] || minimoC
+              if (!peggio || v - c < peggio.d) peggio = { d: v - c, v, c, dove: `minimo per collo, zona ${z}`, manca: !v }
+              continue
+            }
+            const campo = zona === 'minimo_fisso' ? 'minimoFisso' : 'perCollo'
+            const v = sV?.[campo] || 0, c = sC?.[campo] || 0
+            if (!peggio || v - c < peggio.d) peggio = { d: v - c, v, c, dove: zona === 'minimo_fisso' ? 'minimo fisso per spedizione' : 'euro per ogni collo', manca: !v }
+            continue
+          }
           const riga = sV?.[tipo]?.[zona]
           const v = riga?.minimo || 0, c = sC?.[tipo]?.[zona]?.minimo || 0
-          if (!peggio || v - c < peggio.d) peggio = { d: v - c, v, c, dove: `${tipo === 'remota' ? 'località remota' : 'partenza remota'} ${zona}`, manca: !riga }
+          // "sempre" al costo e non in vendita: stesso minimo, ma sul minimo per collo non si incassa.
+          const d = riga && sC?.[tipo]?.[zona]?.sempre && !riga.sempre ? Math.min(v - c, -0.01) : v - c
+          if (!peggio || d < peggio.d) peggio = { d, v, c, dove: `${tipo === 'remota' ? 'località remota' : 'partenza remota'} ${zona}`, manca: !riga }
         }
         const sRow = cli.find((x: any) => x.tipo === TIPO_MULTICOLLO_SUPPLEMENTI)
         righe.push({

@@ -454,7 +454,7 @@ export default function ListinoCorrierePage() {
       {tab==='multicollo' && (
         <div>
           <div style={{margin:'12px 16px 0',padding:'10px 14px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'8px',fontSize:'12.5px',color:'#4b5563',lineHeight:1.5}}>
-            Con <b>due o più colli</b> il prezzo è il più alto fra <b>colli × minimo per collo</b> e la fascia della <b>zona multicollo</b> sul <b>peso totale</b> della spedizione, più località remota e partenza remota. Il peso totale si conta collo per collo: misure al centimetro in su, volume, il più alto fra peso e volume arrotondato a mezzo chilo in su, poi la somma. Il collo singolo resta su <b>Pesi / Zone</b>.
+            Con <b>due o più colli</b> il prezzo è il più alto fra <b>colli × minimo per collo</b> e la fascia della <b>zona multicollo</b> sul <b>peso totale</b> della spedizione, più località remota e partenza remota. Il peso totale si conta collo per collo: misure al centimetro in su, volume, il più alto fra peso e volume arrotondato in su come fa il corriere (mezzo chilo per UPS Europa, un chilo per UPS Italia), poi la somma. Il collo singolo resta su <b>Pesi / Zone</b>.
           </div>
           {grigliaPesi(fasceMC, setFasceMC, zoneMC,
             <>Nessuna zona multicollo su questo corriere. In <b>Gestione Zone</b> crea le zone col segno <b>multicollo</b>: compariranno qui come colonne prezzo.</>,
@@ -463,7 +463,7 @@ export default function ListinoCorrierePage() {
             <div style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a',margin:'22px 0 4px'}}>Minimo per collo</div>
             <div style={{fontSize:'12px',color:'#666',marginBottom:'10px'}}>Con due o più colli la spedizione costa almeno <b>numero di colli × minimo</b>.</div>
             <input type="number" step="0.001" value={minimoCollo||''} onChange={e=>setMinimoCollo(parseFloat(e.target.value)||0)} disabled={soloLetturaCorriere} style={{...inp,width:'120px',textAlign:'right' as const}} placeholder="0"/>
-            <SupplementiMulticollo chi="corriere" valore={supplMC} onChange={setSupplMC} sola={soloLetturaCorriere}
+            <SupplementiMulticollo chi="corriere" valore={supplMC} onChange={setSupplMC} sola={soloLetturaCorriere} zoneMulticollo={zoneMC.map((z:any)=>z.nome)}
               zoneRemote={zoneMono.filter((z:any)=>!z.su_mittente).map((z:any)=>z.nome)} zonePartenza={zoneMono.filter((z:any)=>z.su_mittente).map((z:any)=>z.nome)} />
           </div>
         </div>

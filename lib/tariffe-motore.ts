@@ -628,8 +628,8 @@ export async function calcolaTariffeCliente(
       // NON addebita — il supplemento lo fattura il corriere (rientra post-fattura). Solo un cartello.
       avviso_fuori_sagoma: avvisoFuoriSagoma(settsC, tuttiColli),
       listino_fascia: esitoTab
-        ? (esitoTab.minimo >= esitoTab.nolo
-          ? `${tuttiColli.length} colli × ${(minimoCollo.get(corriereId) || 0).toFixed(2).replace('.', ',')} € (minimo a collo)`
+        ? (esitoTab.vinceMinimo
+          ? `${tuttiColli.length} colli: minimo ${esitoTab.minimo.toFixed(2).replace('.', ',')} €`
           : `multicollo ${String(esitoTab.pesoTotale).replace('.', ',')} kg in tutto (fino a ${esitoTab.fasciaFinoA} kg)`)
         : minimoVince
         ? `${tuttiColli.length} colli × ${(minimoCollo.get(corriereId) || 0).toFixed(2).replace('.', ',')} € (minimo a collo)`
