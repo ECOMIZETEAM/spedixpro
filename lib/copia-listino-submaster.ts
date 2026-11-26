@@ -79,7 +79,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   const fasceSrc = await fetchAllStretto(() => admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel').eq('listino_id', parentListinoId).order('id', { ascending: true }))
   if (!fasceSrc.length) return { ok: false, reason: 'listino assegnato vuoto' }
   const supplSrc = await fetchAllStretto(() => admin.from('listini_clienti_supplementi').select('corriere_id,tipo,nome,valore,tipo_calcolo,descrizione').eq('listino_id', parentListinoId).order('id', { ascending: true }))
-  const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', parentListinoId).single()
+  const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale,agevolazione_isole').eq('id', parentListinoId).single()
 
   const corriereIds = [...new Set(fasceSrc.map((f: any) => f.corriere_id).filter(Boolean))]
 
@@ -295,6 +295,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       nome: (co as any)?.nome_contratto || listinoSrc?.nome || 'Listino Corrieri',
       fattore_volume: listinoSrc?.fattore_volume || 5000,
       solo_peso_reale: !!listinoSrc?.solo_peso_reale, attivo: true,
+      agevolazione_isole: !!listinoSrc?.agevolazione_isole,
     }).select('id').single()
     if (nl?.id) listinoPerCorriere.set(subCid, nl.id)
   }
@@ -341,6 +342,9 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   // I corrieri con lo STESSO fattore si aggiornano in UNA query (prima: una query per corriere,
   // con 121 contratti in cascata erano centinaia di round-trip inutili).
   const soloPesoR = !!listinoSrc?.solo_peso_reale
+  // L'agevolazione isole maggiori che il padre ha acceso sul listino vale per il COSTO di questo master
+  // su tutti i contratti del listino: il motore la applica solo dove il contratto la prevede.
+  const agevIsole = !!listinoSrc?.agevolazione_isole
   const perFattore = new Map<number, string[]>()
   for (const cid of subCorrIds) {
     const f = fattoreSub(cid)
@@ -353,7 +357,7 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
       daAggiornare.length
         ? admin.from('listini_corrieri_corrieri').update({ fattore_volume: f }).eq('listino_id', subListinoId).in('corriere_id', daAggiornare)
         : Promise.resolve(),
-      admin.from('listini_corrieri').update({ fattore_volume: f, solo_peso_reale: soloPesoR }).eq('master_id', subMasterId).in('corriere_id', cids),
+      admin.from('listini_corrieri').update({ fattore_volume: f, solo_peso_reale: soloPesoR, agevolazione_isole: agevIsole }).eq('master_id', subMasterId).in('corriere_id', cids),
     ]
   }))
 

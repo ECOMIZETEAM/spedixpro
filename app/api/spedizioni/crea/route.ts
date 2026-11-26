@@ -415,6 +415,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     if (codReq > 0 || assReq > 0) {
       if (isProprio) {
         const dett = await calcolaPrezzoCorriereDettaglio(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages, contrassegno: codReq, assicurazione: assReq,
@@ -605,7 +606,11 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
   // totale), si tiene anche la zona.
   let zonaProprio: string | undefined
   if (isProprio) {
+    // Il mittente per l'agevolazione isole maggiori (lib/agevolazione-isole): chi spedisce per se' dentro
+    // l'area paga come la catena sopra di lui, che il mittente lo conosce. Solo quello: il supplemento di
+    // partenza qui non c'era e non si aggiunge.
     const dettProprio = await calcolaPrezzoCorriereDettaglio(adminCrea, {
+      mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
       corriereId: corriereRecord.id, masterId,
       provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
       pesoReale, packages,
@@ -1972,6 +1977,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     let costoInterno = costoMaster
     if (!isProprio) {
       costoInterno = (await calcolaPrezzoCorriere(adminCrea, {
+        mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
         corriereId: corriereRecord.id, masterId,
         provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
         pesoReale, packages,
@@ -2123,6 +2129,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
@@ -2375,6 +2382,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
@@ -2591,6 +2599,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
@@ -2773,6 +2782,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
@@ -2931,6 +2941,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
@@ -3109,6 +3120,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         const costoInpost = await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
@@ -3256,6 +3268,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: body.shipTo.country || 'IT', citta: body.shipTo.city,
           pesoReale, packages,
@@ -3413,6 +3426,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
       let costoCorrente = costoMaster
       if (!isProprio) {
         costoCorrente = (await calcolaPrezzoCorriere(adminCrea, {
+          mittAgevolazione: { cap: body.shipFrom.postalCode, provincia: body.shipFrom.state, paese: 'IT' },
           corriereId: corriereRecord.id, masterId,
           provincia: body.shipTo.state, cap: body.shipTo.postalCode, paese: paeseSp, citta: body.shipTo.city,
           pesoReale, packages,

@@ -707,7 +707,7 @@ export async function POST(req: NextRequest) {
     nProcessate++
     // Ricerca SENZA filtro master: decide la catena (solo discesa)
     const { data: spedizione } = await adminDb.from('spedizioni')
-      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,stato,contrassegno,assicurazione,valore_merce,servizi_accessori')
+      .select('id,cliente_id,master_id,peso_reale,peso_fatturato,peso_volume,costo_totale,costo_spedizione,numero,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,stato,contrassegno,assicurazione,valore_merce,servizi_accessori,mitt_cap,mitt_provincia,mitt_paese')
       .or(`numero.ilike.%${ldv}%,tracking_number.ilike.%${ldv}%`)
       .limit(1).single()
     if (!spedizione) { nScartati++; motivi.nonTrovate++; continue }
@@ -746,6 +746,9 @@ export async function POST(req: NextRequest) {
           provincia: spedizione.dest_provincia || '', cap: spedizione.dest_cap || '',
           paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
           packages: [{ weight: pesoReale }],   // il peso vero del corriere, senza misure: nessun volumetrico
+          // Stessa zona dell'andata: se la spedizione era agevolata (isole maggiori) lo resta, altrimenti la
+          // differenza di zona finirebbe nella rettifica come se fosse peso.
+          mittAgevolazione: { cap: spedizione.mitt_cap, provincia: spedizione.mitt_provincia, paese: spedizione.mitt_paese || 'IT' },
         })
         // Nessun prezzo = quel contratto non copre quella destinazione (zona esclusiva non
         // prezzata al cliente). Non si inventa una tariffa: si lascia il costo com'e'.
@@ -804,11 +807,13 @@ export async function POST(req: NextRequest) {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
         cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
         packages: [{ weight: pesoIniziale || 1 }], corriereId: spedizione.corriere_id,
+        mittAgevolazione: { cap: spedizione.mitt_cap, provincia: spedizione.mitt_provincia, paese: spedizione.mitt_paese || 'IT' },
       })
       const prezzoFin = await calcolaPrezzoListino(adminDb, {
         listinoId: tm.parent_listino_id, provincia: spedizione.dest_provincia || '',
         cap: spedizione.dest_cap || '', paese: spedizione.dest_paese || 'IT', citta: spedizione.dest_citta || '',
         packages: [{ weight: pesoRicalcolo }], corriereId: spedizione.corriere_id,
+        mittAgevolazione: { cap: spedizione.mitt_cap, provincia: spedizione.mitt_provincia, paese: spedizione.mitt_paese || 'IT' },
       })
       if (!prezzoIni || !prezzoFin) { nScartati++; motivi.nonCalcolabili++; continue }
       const costoIniziale = prezzoIni.prezzo

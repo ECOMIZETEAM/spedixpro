@@ -19,6 +19,7 @@ import { EMAIL_PER_CORRIERE,
   kgToGrams, cmToMm, euroToCents, centsToEuro
 } from '@/lib/spediamopro'
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster } from '@/lib/zone-match'
+import { corrieriConAgevolazioneIsole } from '@/lib/agevolazione-isole'
 import { normalizzaPaese } from '@/lib/paesi'
 import { motivoGlsNonServe, servizioGls } from '@/lib/gls'
 import { motivoSpringNonServe } from '@/lib/spring'
@@ -283,7 +284,7 @@ export async function calcolaTariffeCliente(
 
   // ─── LISTINO CLIENTE → prezzo da DB + corriere reale da fascia ───────────
   const { data: listino } = await supabase
-    .from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', cliente.listino_cliente_id).single()
+    .from('listini_clienti').select('fattore_volume,solo_peso_reale,agevolazione_isole').eq('id', cliente.listino_cliente_id).single()
   const fattore = parseFloat(listino?.fattore_volume) || 5000
   // Fattore volume PER-CORRIERE (override del default): il peso fatturato va calcolato col fattore
   // del singolo corriere (come nel listino corriere), altrimenti il cliente paga su un peso diverso
@@ -407,12 +408,19 @@ export async function calcolaTariffeCliente(
     ...fasce.filter((f: any) => !(f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean),
     ...esclMaster.map((z) => z.id),
   ]))
+  // Agevolazione isole maggiori: stessa regola del prezzo che si addebita (lib/agevolazione-isole).
+  const corrAgevolati = corrieriConAgevolazioneIsole(
+    fasce.map((f: any) => f.corrieri as any), !!listino?.agevolazione_isole,
+    { cap: body.shipFrom?.postalCode, provincia: body.shipFrom?.state, paese: 'IT' },
+    { cap: capDest, provincia, paese: paeseDest },
+  )
   const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: paeseDest, provincia, cap: capDest, citta: (body.shipTo?.city || '') },
     candidateZonaIds,
     zonaCorr,
-    esclCorr
+    esclCorr,
+    corrAgevolati
   )
 
   // Risoluzione zona PER CORRIERE (RIGIDA): ogni corriere trova la SUA zona per questa destinazione,

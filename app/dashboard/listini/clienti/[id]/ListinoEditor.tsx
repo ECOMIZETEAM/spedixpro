@@ -32,7 +32,7 @@ function NumInput({ value, onChange, style, placeholder }: { value: number; onCh
 }
 
 interface Zona { id: string; nome: string }
-interface Corriere { id: string; nome_contratto: string; tipo?: string; pausa?: boolean; pausaMotivo?: string | null; codice?: string | null }
+interface Corriere { id: string; nome_contratto: string; tipo?: string; pausa?: boolean; pausaMotivo?: string | null; codice?: string | null; agevolazioneIsole?: boolean }
 type TipoFascia = 'fino_a' | 'oltre' | 'piccola' | 'media' | 'grande'
 // Fasce a TAGLIA (locker InPost & simili): il prezzo va alla taglia del box, non al peso.
 const TAGLIE: TipoFascia[] = ['piccola', 'media', 'grande']
@@ -81,7 +81,7 @@ const fattori = [
 // dall'editor (aumento in percentuale, Adegua, duplicazioni, un altro salvataggio).
 function improntaListino(listino: any, fasce: any[], supplementi: any[] | undefined, fattore: number | undefined): string {
   const righe = [
-    `l|${listino?.nome ?? ''}|${listino?.fattore_volume ?? ''}|${listino?.solo_peso_reale ? 1 : 0}|${fattore ?? ''}`,
+    `l|${listino?.nome ?? ''}|${listino?.fattore_volume ?? ''}|${listino?.solo_peso_reale ? 1 : 0}|${fattore ?? ''}|${listino?.agevolazione_isole ? 1 : 0}`,
     ...(fasce || []).map((f: any) => `f|${f.zona_id}|${f.tipo}|${Number(f.peso_min) || 0}|${Number(f.peso_max)}|${Number(f.prezzo)}|${Number(f.fuel) || 0}`).sort(),
     ...(supplementi || []).map((x: any) => `s|${x.tipo}|${x.nome ?? ''}|${x.valore ?? ''}|${x.tipo_calcolo ?? ''}|${x.descrizione ?? ''}`).sort(),
   ].join('\n')
@@ -236,6 +236,8 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
   const [nome, setNome] = useState<string>(bozza?.nome ?? (listino.nome ?? ''))
   const [fattore, setFattore] = useState<number>(bozza?.fattore ?? (Number(fattoreCorriere ?? listino.fattore_volume) || 5000))
   const [soloPesoReale, setSoloPesoReale] = useState<boolean>(bozza?.soloPesoReale ?? !!(listino as any).solo_peso_reale)
+  // Agevolazione isole maggiori (lib/agevolazione-isole): e' del LISTINO, come "solo peso reale".
+  const [agevIsole, setAgevIsole] = useState<boolean>(bozza?.agevIsole ?? !!(listino as any).agevolazione_isole)
   const [fasce, setFasce] = useState<Fascia[]>(() => bozza?.fasce ?? buildFasceInit((fasceEsistenti || []).filter((f: any) => !idsZoneMC.has(f.zona_id))))
   // Fasce MULTICOLLO: se il listino non ne ha ancora, si parte dalle fasce del mio costo (stesse soglie).
   const [fasceMC, setFasceMC] = useState<Fascia[]>(() => {
@@ -466,10 +468,10 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
     primoGiro.current = false
     if (cambiata && !modificata) setModificata(true)
     try {
-      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, fasceMC, supplMC }))
+      sessionStorage.setItem(bozzaKey, JSON.stringify({ impronta, modificata: cambiata, nome, fattore, soloPesoReale, agevIsole, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, fasceMC, supplMC }))
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, fasceMC, supplMC])
+  }, [bozzaKey, impronta, nome, fattore, soloPesoReale, agevIsole, fasce, righeAssic, righeContr, serviziAccessori, giacenzeServizi, supplementiCorriere, aperturaGiacenza, ritiroPrezzo, ritiroPercNolo, spondaSoglia, spondaPrezzoKg, minimoCollo, fasceMC, supplMC])
 
   // Le stesse operazioni per le due griglie (Pesi / Zone e Multicollo): cambia solo l'elenco su cui lavorano.
   type SetFasce = (f: (prev: Fascia[]) => Fascia[]) => void
@@ -491,7 +493,7 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
       const res = await fetch(`/api/listini/cliente/${listino.id}`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
-          nome, corriere_id: corriereId, fattore_volume: fattore, solo_peso_reale: soloPesoReale,
+          nome, corriere_id: corriereId, fattore_volume: fattore, solo_peso_reale: soloPesoReale, agevolazione_isole: agevIsole,
           fasce: [...fasce, ...(zoneMC.length ? fasceMC : [])].map(f => ({...f, prezzi: Object.fromEntries(Object.entries(f.prezzi).map(([k,v]) => [k, parseFloat(v)||0]))})),
           supplementi: {
             assicurazione: righeAssic,
@@ -705,6 +707,15 @@ export default function ListinoEditor({ listino, corrieri, zone, fasceEsistenti,
           {fattori.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}
         </select>
         {soloPesoReale && <span style={{fontSize:'11px',color:'#f97316'}}>Il cliente paga sempre sul peso reale.</span>}
+        {/* Solo sui contratti dove il fornitore concede l'agevolazione: altrove la casella non cambierebbe niente. */}
+        {!isCorriere && corrieri.find(c => c.id === corriereId)?.agevolazioneIsole && (
+          <label title="Vale per tutti i contratti di questo listino che la prevedono. Le isole minori e le zone disagiate restano come sono."
+            style={{display:'flex',alignItems:'center',gap:'7px',fontSize:'12px',fontWeight:600,color:'#1a1a1a',cursor:'pointer'}}>
+            <input type="checkbox" checked={agevIsole} onChange={e => setAgevIsole(e.target.checked)} />
+            Agevolazione isole maggiori
+            <span style={{fontWeight:400,color:'#6b7280'}}>— dentro Sicilia e Calabria, e dentro la Sardegna, si paga il prezzo Italia al posto della SCS</span>
+          </label>
+        )}
         {conIva && corriereId && <SceltaIvaCorriere iva={iva} corriereId={corriereId} nomeCorriere={corrieri.find(c => c.id === corriereId)?.nome_contratto || 'questo contratto'} />}
         <button onClick={salva} disabled={saving} style={{marginLeft:'auto',padding:'9px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:saving?0.7:1}}>
           {saving?'Salvo...':'Salva'}

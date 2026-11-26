@@ -146,7 +146,10 @@ export async function trovaZoneMatchDett(
   // Mappa zona_id -> corriere_id delle zone ESCLUSIVE (Isole/Disagiate/Sardegna/…). L'esclusione
   // dal jolly "Italia" è PER-CORRIERE: un CAP esclusivo per BRT NON deve toccare Poste. `capEsclusivo`
   // resta come flag globale di compatibilità (true se almeno un corriere risulta escluso).
-  esclCorr?: Map<string, string>
+  esclCorr?: Map<string, string>,
+  // Contratti per cui su QUESTA spedizione vale l'agevolazione isole maggiori (lib/agevolazione-isole):
+  // la loro zona regionale non rivendica la destinazione. Assente o vuoto = comportamento di sempre.
+  corrieriAgevolati?: Set<string>
 ): Promise<{ ids: string[]; capEsclusivo: boolean; corrieriEsclusi: Set<string> }> {
   const paese = (dest.paese || 'IT').toUpperCase().trim()
   const provincia = provinciaPerZona(paese, dest.provincia)
@@ -187,10 +190,21 @@ export async function trovaZoneMatchDett(
   // a volte su quella SBAGLIATA (SCS/OT a La Maddalena): un primo tentativo "rispetta la provincia"
   // alzava certi CAP ma ne ABBASSAVA altri (Isole Minori->SCS) — verificato prima/dopo in produzione.
   // Questa regola guarda la NATURA della zona, non la sigla, ed e' corretta per tutti i contratti.
-  const { data: zNomi } = await supabase.from('zone').select('id,nome').in('id', ids)
+  const { data: zNomi } = await supabase.from('zone').select('id,nome,corriere_id').in('id', ids)
   const nomeZona = new Map<string, string>((zNomi || []).map((z: any) => [z.id, String(z.nome || '')]))
   const isPuntoSpeciale = (zid: string) => { const n = nomeZona.get(zid) || ''; return /isole?\s*minori/i.test(n) || isZonaDisagiata(n) }
-  const isRegionale = (zid: string) => /\b(sardegna|sicilia|calabria|scs)\b/i.test(nomeZona.get(zid) || '')
+  const isRegionale = (zid: string) => isZonaRegionale(nomeZona.get(zid))
+
+  // AGEVOLAZIONE ISOLE MAGGIORI: per questi contratti la zona regionale (SCS) non rivendica la
+  // destinazione, perche' partenza e arrivo stanno nella stessa area e il fornitore li fa pagare come
+  // l'Italia. Le sue righe si tolgono PRIMA di tutto il resto: cosi' il contratto non risulta escluso
+  // dal jolly per colpa della regionale, e l'Italia torna a valere. Le zone piu' precise (Isole Minori,
+  // Disagiate) non si toccano: Palermo→Lipari resta un'isola minore. Sulle P2TAB/P2UP la SCS e' fatta di
+  // 692 CAP, sul PDBX di 23 province: per questo si guarda la zona, non il livello della riga.
+  if (corrieriAgevolati && corrieriAgevolati.size) {
+    const corriereZona = new Map<string, string>((zNomi || []).map((z: any) => [z.id, String(z.corriere_id || '')]))
+    righe = righe.filter((r: any) => !(isRegionale(r.zona_id) && corrieriAgevolati.has(corriereZona.get(r.zona_id) || '')))
+  }
   // Da applicare SEMPRE a righe cap-esatto di UN SOLO corriere (come piuSpecifica): un "punto" di un
   // corriere non deve sopprimere la "regionale" di un ALTRO corriere (stesso danno del comune scritto).
   const isolaBatteRegione = (capRows: any[]): any[] =>
@@ -335,6 +349,12 @@ export async function trovaZoneMatch(
 export function isZonaEsclusiva(nome: string | null | undefined): boolean {
   const n = String(nome || '')
   return /isole?\s*minori/i.test(n) || isZonaDisagiata(n) || /\b(sardegna|sicilia|calabria|livigno|scs|venezia|laguna)\b/i.test(n)
+}
+
+// Zona REGIONALE a supplemento (SCS, Sardegna, Sicilia, Calabria): copre tutta un'area, non un punto.
+// La stessa regola decide "isola batte regione" e l'agevolazione isole maggiori.
+export function isZonaRegionale(nome: string | null | undefined): boolean {
+  return /\b(sardegna|sicilia|calabria|scs)\b/i.test(String(nome || ''))
 }
 
 // Nomi di zona "disagiata/periferica": zone speciali a supplemento (es. "Zone Disagiate",

@@ -39,7 +39,12 @@ export default async function ModificaListinoPage({
     }
   }
 
-  const { data: tuttiICorrieri } = await supabase.from('corrieri').select('id,nome_contratto,attivo').eq('master_id', utente?.master_id)
+  const { data: tuttiICorrieriLetti } = await supabase.from('corrieri').select('id,nome_contratto,attivo,settings').eq('master_id', utente?.master_id)
+  // Delle impostazioni del contratto all'editor serve solo se il fornitore concede l'agevolazione isole
+  // maggiori (lib/agevolazione-isole): il resto non esce dalla pagina.
+  const { contrattoConAgevolazioneIsole } = await import('@/lib/agevolazione-isole')
+  const agevolazioneById = new Map<string, boolean>((tuttiICorrieriLetti||[]).map((c:any) => [c.id, contrattoConAgevolazioneIsole(c)]))
+  const tuttiICorrieri = (tuttiICorrieriLetti||[]).map(({ settings: _s, ...c }: any) => c)
   // Mostra solo i corrieri POSSEDUTI dal master (no residui estranei da duplicazioni).
   const posseduti = new Set((tuttiICorrieri||[]).map((c:any) => c.id))
   corrieri = corrieri.filter((c:any) => posseduti.has(c.id))
@@ -60,7 +65,7 @@ export default async function ModificaListinoPage({
   const codici = gestisceLaRete(utente as any)
     ? await (await import('@/lib/codice-contratto')).codiciContratti((await import('@/lib/supabase-admin')).createAdminSupabase(), utente?.master_id)
     : new Map<string, string>()
-  corrieri = corrieri.map((c:any) => ({ ...c, codice: codici.get(c.id) || null, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null) }))
+  corrieri = corrieri.map((c:any) => ({ ...c, codice: codici.get(c.id) || null, pausa: !usabile(c), pausaMotivo: pausaCatena(c) ? 'catena' : (attivoById.get(c.id) === false ? 'propria' : null), agevolazioneIsole: agevolazioneById.get(c.id) === true }))
     .sort((a:any,b:any) => (a.pausa?1:0) - (b.pausa?1:0))
   // Da AGGIUNGERE al listino: ANCHE i contratti in pausa. Il master deve poter CREARE/preparare i prezzi
   // di un contratto sospeso; il CLIENTE non lo vedrà comunque (lo filtra /api/cliente/listino-prezzi).

@@ -7,7 +7,9 @@ import { prezzoClienteDaListino } from '@/lib/prezzo-cliente'
 
 // API pubblica MoovExpress — tariffa per il contratto della API key.
 // Auth: Authorization: Bearer <api_key>
-// Body: { packages:[{weight,length,width,height}], shipTo:{postalCode,state,country}, codValue?, insuranceValue?, accessoryServices? }
+// Body: { packages:[{weight,length,width,height}], shipTo:{postalCode,state,country}, shipFrom?:{postalCode,state}, codValue?, insuranceValue?, accessoryServices? }
+// shipFrom e' facoltativo: serve solo all'agevolazione isole maggiori (stessa area = prezzo Italia, se il listino
+// la prevede). Senza, il preventivo e' quello di sempre, e alla creazione (dove il mittente c'e') puo' scendere.
 export async function POST(req: NextRequest) {
   const ctx = await autenticaApiKey(req)
   if (!ctx) return NextResponse.json({ error: 'API key non valida o mancante' }, { status: 401 })
@@ -56,9 +58,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Collo non accettato da questo contratto: ${_motivoLimite}.` }, { status: 400 })
   }
 
+  const shipFrom = body.shipFrom || {}
+  const mittAgevolazione = {
+    cap: (shipFrom.postalCode || shipFrom.cap || '').toString().trim(),
+    provincia: (shipFrom.state || shipFrom.provincia || '').toString().toUpperCase().trim(), paese: 'IT',
+  }
   const ris = await calcolaPrezzoListino(admin, {
     listinoId: cliente.listino_cliente_id, provincia, cap, paese, packages, corriereId: ctx.corriereId,
     citta: (shipTo.city || shipTo.citta || '').toString().trim(),   // CAP condivisi tra più comuni
+    mittAgevolazione,
   })
   if (!ris) return NextResponse.json({ error: 'Nessuna tariffa disponibile per questa destinazione/peso' }, { status: 400 })
 

@@ -43,11 +43,12 @@ export async function propagaCosto(admin: any, p: { corriereVenditore: string; c
     .select('corriere_id,tipo,nome,valore,tipo_calcolo,descrizione')
     .eq('listino_id', listinoIngrosso).eq('corriere_id', corriereVenditore).order('id', { ascending: true }))
 
-  const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', listinoIngrosso).single()
+  const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale,agevolazione_isole').eq('id', listinoIngrosso).single()
   // Fattore volume per-corriere del venditore (se impostato): va copiato o il costo stimato diverge.
   const { data: pcSrc } = await admin.from('listini_clienti_corrieri').select('fattore_volume').eq('listino_id', listinoIngrosso).eq('corriere_id', corriereVenditore).maybeSingle()
   const fattore = Number((pcSrc as any)?.fattore_volume) || Number(listinoSrc?.fattore_volume) || 5000
   const soloPesoR = !!listinoSrc?.solo_peso_reale
+  const agevIsole = !!listinoSrc?.agevolazione_isole   // come nella copia al sotto-master
 
   // ── ZONE: le tiene il DATABASE (scripts/zone-catena-trigger.sql, 26/11/2026). Il ponte del compratore compra dal
   // corriere del venditore (fornitore_corriere_id = corriereVenditore, 24 su 24 il 26/11): nasce con le sue zone e
@@ -75,12 +76,12 @@ export async function propagaCosto(admin: any, p: { corriereVenditore: string; c
     const { data: nl, error: eNl } = await admin.from('listini_corrieri').insert({
       master_id: masterAcquirente, corriere_id: corriereAcquirente,
       nome: (co as any)?.nome_contratto || listinoSrc?.nome || 'Listino Corrieri',
-      fattore_volume: fattore, solo_peso_reale: soloPesoR, attivo: true,
+      fattore_volume: fattore, solo_peso_reale: soloPesoR, agevolazione_isole: agevIsole, attivo: true,
     }).select('id').single()
     if (eNl) return { ok: false, reason: 'creazione listino: ' + eNl.message }
     listino = nl
   } else {
-    await admin.from('listini_corrieri').update({ fattore_volume: fattore, solo_peso_reale: soloPesoR }).eq('id', listino.id)
+    await admin.from('listini_corrieri').update({ fattore_volume: fattore, solo_peso_reale: soloPesoR, agevolazione_isole: agevIsole }).eq('id', listino.id)
   }
   const listinoId = listino!.id as string
 

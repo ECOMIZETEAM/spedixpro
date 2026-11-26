@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminSupabase()
   // Listino sorgente e corriere devono appartenere al master
-  const { data: src } = await admin.from('listini_clienti').select('id,fattore_volume,solo_peso_reale')
+  const { data: src } = await admin.from('listini_clienti').select('id,fattore_volume,solo_peso_reale,agevolazione_isole')
     .eq('id', sourceListinoId).eq('master_id', utente.master_id).maybeSingle()
   if (!src) return NextResponse.json({ error: 'Listino di origine non trovato' }, { status: 404 })
   const { data: corr } = await admin.from('corrieri').select('id,nome_contratto')
@@ -50,6 +50,7 @@ export async function POST(req: NextRequest) {
     const { data: nuovo, error: e1 } = await admin.from('listini_clienti').insert({
       master_id: utente.master_id, nome: String(nuovoNome).trim(), attivo: true,
       fattore_volume: src.fattore_volume, solo_peso_reale: src.solo_peso_reale,
+      agevolazione_isole: !!src.agevolazione_isole,
     }).select('id').single()
     if (e1 || !nuovo) return NextResponse.json({ error: e1?.message || 'Errore creazione listino' }, { status: 400 })
     targetId = nuovo.id; creato = true

@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
   const { data: nuovo, error: e1 } = await admin.from('listini_clienti').insert({
     master_id: utente.master_id, nome: nuovoNome, attivo: src.attivo ?? true,
     fattore_volume: src.fattore_volume, solo_peso_reale: src.solo_peso_reale,
+    agevolazione_isole: !!src.agevolazione_isole,   // la copia e' lo stesso listino: anche l'agevolazione isole
   }).select('id').single()
   if (e1 || !nuovo) return NextResponse.json({ error: e1?.message || 'Errore creazione listino' }, { status: 400 })
   const nid = nuovo.id

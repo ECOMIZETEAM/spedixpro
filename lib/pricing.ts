@@ -9,11 +9,12 @@
 // Usato dal ledger a cascata (STEP 4.5) per sapere quanto paga ogni master
 // della catena col proprio listino ereditato.
 
-import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona, provinciaPerZona } from '@/lib/zone-match'
+import { trovaZoneMatchDett, isZonaEsclusiva, isZonaRegionale, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona, provinciaPerZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
 import { perId, type ArchivioCoppia, type ArchivioCosto } from '@/lib/prezzi-archivio'
 import { leggiZoneCap } from '@/lib/zone-cap'
 import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
+import { corrieriConAgevolazioneIsole, contrattoConAgevolazioneIsole, stessaAreaIsole } from '@/lib/agevolazione-isole'
 import { leggiSupplementiMulticollo, noloMulticolloDaFasce, pesoMulticolloFornitore, zonaMulticolloDi, TIPO_MULTICOLLO_SUPPLEMENTI, type EsitoMulticollo } from '@/lib/multicollo-zone'
 
 const ZONE_MAP: Record<string, string> = {
@@ -780,6 +781,10 @@ export async function calcolaPrezzoListino(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
+    // Da dove parte il pacco AI SOLI FINI dell'agevolazione isole maggiori. Serve alle porte che il mittente
+    // non lo passano (resi, rettifiche, spedizione propria del master): passandolo come mittCap/mittProvincia
+    // accenderebbero anche il supplemento di partenza, che li' oggi non si paga. Assente = il mittente sopra.
+    mittAgevolazione?: { cap?: string | null; provincia?: string | null; paese?: string | null }
     // SOLO eventi DOPO LA PARTENZA (reso, giacenza, rettifica): le righe archiviate di `corriereId` in
     // questo listino, gia' scelte da lib/prezzi-archivio.ts (fontiCliente), che decide quando valgono. Il
     // motore non le cerca da solo: la creazione, i preventivi e ogni porta che vende non le passano mai,
@@ -793,7 +798,7 @@ export async function calcolaPrezzoListino(
   const zonaNome = zonaDaProvincia(provincia)
 
   const { data: listino } = await supabase
-    .from('listini_clienti').select('fattore_volume,solo_peso_reale,master_id').eq('id', listinoId).single()
+    .from('listini_clienti').select('fattore_volume,solo_peso_reale,master_id,agevolazione_isole').eq('id', listinoId).single()
   let fattore = parseFloat(listino?.fattore_volume) || 5000
   const arch = params.corriereId ? (params.archivio ?? null) : null
   // Con i prezzi archiviati serve la riga del listino: divisore e "solo peso reale" stanno li', e non sono
@@ -875,12 +880,20 @@ export async function calcolaPrezzoListino(
   const esclCorr = new Map<string, string>()
   for (const f of fasce) { const zid = (f.zone as any)?.id, cid = (f.corrieri as any)?.id; if (zid && cid && !(f.zone as any)?.su_mittente && isZonaEsclusiva((f.zone as any)?.nome)) esclCorr.set(zid, cid) }
   for (const z of esclMaster) esclCorr.set(z.id, z.corriere_id)
+  // Agevolazione isole maggiori: flag del listino + contratto che la concede + partenza e arrivo nella
+  // stessa area (lib/agevolazione-isole). Altrimenti l'insieme e' vuoto e non cambia niente.
+  const corrAgevolati = corrieriConAgevolazioneIsole(
+    fasce.map((f: any) => f.corrieri as any), !!listino?.agevolazione_isole,
+    params.mittAgevolazione ?? { provincia: params.mittProvincia, cap: params.mittCap, paese: params.mittPaese },
+    { provincia, cap: params.cap, paese: params.paese },
+  )
   const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
     candidateZonaIds,
     zonaCorr,
-    esclCorr
+    esclCorr,
+    corrAgevolati
   )
   // 2) Raggruppa per corriere; per OGNI corriere: match via zone_cap, poi fallback per nome "Italia"
   //    SOLO se la dest NON è esclusiva PER QUESTO corriere (per-corriere) e non è estero.
@@ -1126,6 +1139,8 @@ export async function calcolaPrezzoCorriereDettaglio(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
+    // Da dove parte il pacco ai soli fini dell'agevolazione isole maggiori (vedi calcolaPrezzoListino).
+    mittAgevolazione?: { cap?: string | null; provincia?: string | null; paese?: string | null }
     // SOLO eventi DOPO LA PARTENZA (rettifica, reso, giacenza): i prezzi di costo archiviati del contratto,
     // gia' scelti da lib/prezzi-archivio.ts (archivioCostoPerPacco), che decide quando valgono. La creazione
     // e i preventivi non li passano mai: per loro un contratto senza prezzi resta senza prezzi.
@@ -1151,7 +1166,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // quindi in TUTTI i listini del master, filtrando per corriere_id.
   const { data: listiniLetti } = await supabase
     .from('listini_corrieri')
-    .select('id,corriere_id,fattore_volume,solo_peso_reale')
+    .select('id,corriere_id,fattore_volume,solo_peso_reale,agevolazione_isole')
     .eq('master_id', masterId)
   // Dopo la partenza, prezzi di costo cancellati: quelli archiviati (che valgono solo se il loro listino
   // esiste ancora: lo controlla archivioCostoPerPacco).
@@ -1260,10 +1275,17 @@ export async function calcolaPrezzoCorriereDettaglio(
   const zonaCorr = new Map<string, string>()
   const candidateZonaIds = Array.from(new Set<string>([...fasce.filter((f: any) => !(f.zone as any)?.su_mittente).map((f: any) => (f.zone as any)?.id).filter(Boolean), ...esclZone.map((z) => z.id)]))
   for (const f of fasce) { const zid = (f.zone as any)?.id; if (zid && !(f.zone as any)?.su_mittente) zonaCorr.set(zid, corriereId) }
+  // Agevolazione isole maggiori sul COSTO di questo livello: il flag sta sulla riga di QUESTO contratto
+  // (come solo_peso_reale), copiato dal listino che il padre gli ha assegnato; sul detentore dice che il
+  // fornitore la concede. Serve anche il contratto che la prevede e la partenza nella stessa area.
+  const agevolatoQui = listini.some((l: any) => l.corriere_id === corriereId && l.agevolazione_isole)
+    && contrattoConAgevolazioneIsole(corrRec)
+    && stessaAreaIsole(params.mittAgevolazione ?? { provincia: params.mittProvincia, cap: params.mittCap, paese: params.mittPaese }, { provincia, cap: params.cap, paese: params.paese })
   const { ids: zoneMatchIds, corrieriEsclusi } = await trovaZoneMatchDett(
     supabase,
     { paese: params.paese, provincia, cap: params.cap, citta: (params as any).citta },
-    candidateZonaIds, zonaCorr, esclCorr
+    candidateZonaIds, zonaCorr, esclCorr,
+    agevolatoQui ? new Set([corriereId]) : undefined
   )
   let fasceZona: any[]
   if (params.zonaForzata) {
@@ -1439,6 +1461,8 @@ export async function calcolaPrezzoCorriere(
     citta?: string
     // Mittente: serve alla copertura in partenza dei corrieri a copertura-CAP (InPost).
     mittCap?: string; mittProvincia?: string; mittPaese?: string
+    // Solo per l'agevolazione isole maggiori (vedi calcolaPrezzoListino).
+    mittAgevolazione?: { cap?: string | null; provincia?: string | null; paese?: string | null }
   }
 ): Promise<number | null> {
   const d = await calcolaPrezzoCorriereDettaglio(supabase, params)
@@ -1500,7 +1524,7 @@ async function creaCalcolatoreCorriereBase(
   capDaPrezzare?: string[] | null
 ): Promise<(s: any) => DettaglioPrezzo | null> {
   const { data: listini } = await supabase
-    .from('listini_corrieri').select('id,corriere_id,fattore_volume')
+    .from('listini_corrieri').select('id,corriere_id,fattore_volume,agevolazione_isole')
     .eq('master_id', masterId).eq('attivo', true)
   const listinoIds: string[] = (listini || []).map((l: any) => l.id)
   // IN PARALLELO: override del fattore volume (listini_corrieri_corrieri), fasce e supplementi
@@ -1527,6 +1551,16 @@ async function creaCalcolatoreCorriereBase(
   for (const l of listini || []) {
     const fattore = overridePerCorr.get(l.corriere_id) || parseFloat(l.fattore_volume) || 5000
     listinoPerCorriere.set(l.corriere_id, { id: l.id, fattore })
+  }
+  // Agevolazione isole maggiori (lib/agevolazione-isole), come nel costo che si addebita: flag sulla riga
+  // del contratto + contratto che la prevede. Si leggono i contratti solo se qualche riga ha il flag.
+  const corrAgevolabili = new Set<string>()
+  {
+    const conFlag = (listini || []).filter((l: any) => l.agevolazione_isole).map((l: any) => l.corriere_id)
+    if (conFlag.length) {
+      const { data: cs } = await supabase.from('corrieri').select('id,settings').in('id', conFlag)
+      for (const c of cs || []) if (contrattoConAgevolazioneIsole(c)) corrAgevolabili.add((c as any).id)
+    }
   }
 
   // FASCE E SUPPLEMENTI SI PRENDONO PER CONTRATTO, NON PER LISTINO — come fa l'addebito
@@ -1598,7 +1632,10 @@ async function creaCalcolatoreCorriereBase(
     const provincia = provinciaPerZona(s.dest_paese || 'IT', s.dest_provincia)
     const cap = (s.dest_cap || '').trim()
     const paese = (s.dest_paese || 'IT').toUpperCase().trim()
-    const cand = fasceList.map((f: any) => f.zone?.id).filter(Boolean)
+    // Agevolazione isole maggiori: la zona regionale non rivendica una spedizione che resta nell'area.
+    const agevolata = corrAgevolabili.has(s.corriere_id)
+      && stessaAreaIsole({ cap: s.mitt_cap, provincia: s.mitt_provincia, paese: s.mitt_paese || 'IT' }, { cap, provincia, paese })
+    const cand = fasceList.filter((f: any) => !(agevolata && isZonaRegionale(f.zone?.nome))).map((f: any) => f.zone?.id).filter(Boolean)
     const ids = matchZona(paese, provincia, cap, cand, s.dest_citta)
     const zonaNome = zonaDaProvincia(provincia)
     let fz = ids.length ? fasceList.filter((f: any) => ids.includes(f.zone?.id)) : []
@@ -1652,7 +1689,7 @@ async function creaCalcolatoreListinoClienteBase(
   // IN PARALLELO: il listino, l'override per-corriere del fattore volume e le fasce dipendono solo
   // da listinoId. Prima erano tre attese in fila.
   const [listinoRes, aggCorrRes, fasce] = await Promise.all([
-    supabase.from('listini_clienti').select('fattore_volume,solo_peso_reale').eq('id', listinoId).single(),
+    supabase.from('listini_clienti').select('fattore_volume,solo_peso_reale,agevolazione_isole').eq('id', listinoId).single(),
     supabase.from('listini_clienti_corrieri').select('corriere_id,fattore_volume').eq('listino_id', listinoId),
     // fetchAll: oltre 1000 fasce venivano TRONCATE (limite PostgREST) → prezzi fallback incompleti.
     fetchAll(() => supabase
@@ -1770,7 +1807,10 @@ async function creaCalcolatoreListinoClienteBase(
     const provincia = provinciaPerZona(s.dest_paese || 'IT', s.dest_provincia)
     const cap = (s.dest_cap || '').trim()
     const paese = (s.dest_paese || 'IT').toUpperCase().trim()
-    const cand = fasceList.map((f: any) => f.zone?.id).filter(Boolean)
+    // Agevolazione isole maggiori: come nel prezzo che si addebita (flag del listino + contratto che la prevede).
+    const agevolata = !!listino?.agevolazione_isole && contrattoConAgevolazioneIsole({ settings: settC })
+      && stessaAreaIsole({ cap: s.mitt_cap, provincia: s.mitt_provincia, paese: s.mitt_paese || 'IT' }, { cap, provincia, paese })
+    const cand = fasceList.filter((f: any) => !(agevolata && isZonaRegionale(f.zone?.nome))).map((f: any) => f.zone?.id).filter(Boolean)
     const ids = matchZona(paese, provincia, cap, cand, s.dest_citta)
     const zonaNome = zonaDaProvincia(provincia)
     let fz = ids.length ? fasceList.filter((f: any) => ids.includes(f.zone?.id)) : []

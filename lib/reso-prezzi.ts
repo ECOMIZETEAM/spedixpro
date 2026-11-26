@@ -1,5 +1,20 @@
 import { calcolaPrezzoListino, calcolaPrezzoCorriereDettaglio } from '@/lib/pricing'
 import { fontiCliente, archivioCostoPerPacco, partenzaDi, type ArchivioCoppia, type FonteCliente } from '@/lib/prezzi-archivio'
+import { areaIsole } from '@/lib/agevolazione-isole'
+
+// Da dove e' partito il pacco, SOLO per l'agevolazione isole maggiori: il ritorno di una Palermo→Catania
+// agevolata resta dentro l'area e va prezzato come l'andata. Non si passa come mittente vero perche'
+// accenderebbe il supplemento di partenza, che sul reso non si e' mai pagato. Si legge solo se la
+// destinazione sta in un'area delle isole (altrimenti l'agevolazione non puo' valere) e se chi chiama
+// non l'ha gia' nella spedizione: una lettura per chiave.
+async function mittentePerAgevolazione(admin: any, sped: any, spedizioneId?: string) {
+  if (!areaIsole({ provincia: sped?.dest_provincia, cap: sped?.dest_cap, paese: sped?.dest_paese })) return undefined
+  if (sped?.mitt_cap || sped?.mitt_provincia) return { cap: sped.mitt_cap, provincia: sped.mitt_provincia, paese: sped.mitt_paese || 'IT' }
+  const id = spedizioneId || sped?.id
+  if (!id) return undefined
+  const { data } = await admin.from('spedizioni').select('mitt_cap,mitt_provincia,mitt_paese').eq('id', id).maybeSingle()
+  return data ? { cap: data.mitt_cap, provincia: data.mitt_provincia, paese: data.mitt_paese || 'IT' } : undefined
+}
 
 // QUANTO COSTA UN RESO — una regola sola, per tutti e due i modi in cui un reso nasce.
 //
@@ -88,9 +103,10 @@ export async function pacchiVeri(admin: any, sped: any): Promise<any[]> {
 // assicurare o da scaricare con la sponda — quei supplementi il cliente li ha già pagati all'andata.
 // null se non calcolabile. `archivio`: le righe archiviate di quel listino, quando il contratto e' stato
 // tolto (le sceglie lib/prezzi-archivio.ts, fontiCliente); senza, si prezza dal listino vivo.
-export async function noloCliente(admin: any, sped: any, listinoId: string | null | undefined, archivio?: ArchivioCoppia | null): Promise<number | null> {
+export async function noloCliente(admin: any, sped: any, listinoId: string | null | undefined, archivio?: ArchivioCoppia | null, spedizioneId?: string): Promise<number | null> {
   if (!listinoId) return null
   const ris = await calcolaPrezzoListino(admin, {
+    mittAgevolazione: await mittentePerAgevolazione(admin, sped, spedizioneId),
     listinoId,
     provincia: sped?.dest_provincia || '',
     cap: sped?.dest_cap || '',
@@ -133,7 +149,7 @@ export async function noloClienteDopoPartenzaCon(
 ): Promise<{ nolo: number | null; listinoId: string | null; fonte: FonteCliente | null }> {
   const fonti = await fontiCliente(admin, opz?.spedizioneId ? { ...sped, id: opz.spedizioneId } : sped, listinoOggi)
   for (const f of fonti) {
-    const n = await noloCliente(admin, sped, f.listinoId, f.archivio)
+    const n = await noloCliente(admin, sped, f.listinoId, f.archivio, opz?.spedizioneId)
     if (n != null) return { nolo: n, listinoId: f.listinoId, fonte: f }
   }
   return { nolo: null, listinoId: null, fonte: null }
@@ -154,6 +170,7 @@ export async function noloMaster(admin: any, masterId: string, corriereId: strin
   const pesoReale = pacchi.reduce((s: number, p: any) => s + (Number(p?.weight) || 0), 0) || 1
   const d = await calcolaPrezzoCorriereDettaglio(admin, {
     corriereId, masterId,
+    mittAgevolazione: await mittentePerAgevolazione(admin, sped, opz?.spedizioneId),
     provincia: sped?.dest_provincia || '',
     cap: sped?.dest_cap || '',
     paese: sped?.dest_paese || 'IT',

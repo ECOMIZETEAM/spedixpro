@@ -19,14 +19,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{id:s
   const _bloccoAg = bloccaAgente(utenteAg); if (_bloccoAg) return _bloccoAg   // agente = sola lettura
   const { id } = await params
   const body = await req.json()
-  const { nome, corriere_id, fattore_volume, fasce, supplementi, solo_peso_reale } = body
+  const { nome, corriere_id, fattore_volume, fasce, supplementi, solo_peso_reale, agevolazione_isole } = body
 
   // Aggiorna nome + flag "solo peso reale". Il fattore volume del DEFAULT del listino si tocca
   // SOLO quando NON stiamo salvando un corriere specifico (altrimenti settando un corriere si
   // sballa il default di tutti gli altri). Il valore per-corriere va solo sulla riga di aggancio.
+  // L'agevolazione isole maggiori si scrive solo se arriva: chi chiama senza conoscerla non la spegne.
   await supabase.from('listini_clienti').update({
     nome, solo_peso_reale: !!solo_peso_reale,
     ...(!corriere_id && fattore_volume !== undefined ? { fattore_volume } : {}),
+    ...(agevolazione_isole !== undefined ? { agevolazione_isole: !!agevolazione_isole } : {}),
   }).eq('id', id)
   // Fattore volume per-corriere: salvato sulla riga di aggancio listino+corriere (upsert per sicurezza)
   if (corriere_id && fattore_volume !== undefined) {
