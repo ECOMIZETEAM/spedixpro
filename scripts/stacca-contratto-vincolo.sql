@@ -8,11 +8,11 @@
 -- contratti, anche una che nascerà domani.
 --
 -- Il confronto è quello di lib/contratto-per-nome.ts: spazi ai lati tolti e minuscole.
--- CONCURRENTLY: l'indice si costruisce senza fermare le scritture sui contratti. Per questo non sta in una
--- transazione (il SQL Editor esegue comunque le istruzioni una per una). Se fallisce perché un doppione è comparso
--- nel frattempo, l'indice resta "non valido": la seconda istruzione lo dice, e va cancellato e rifatto dopo aver
--- sistemato il doppione.
-create unique index concurrently if not exists corrieri_un_attivo_per_nome
+-- APPLICATO il 26/11/2026 dal SQL Editor, verificato valido. Senza CONCURRENTLY: incollato insieme alla verifica qui
+-- sotto, il SQL Editor rispondeva "25001 CREATE INDEX CONCURRENTLY cannot run inside a transaction block". Su ~1.000
+-- righe l'indice normale si costruisce in millisecondi, il blocco delle scritture non si vede. Se fallisce per un
+-- doppione comparso nel frattempo non resta niente a metà: si sistema il doppione e si rilancia.
+create unique index if not exists corrieri_un_attivo_per_nome
   on public.corrieri (master_id, lower(btrim(nome_contratto)))
   where staccato_il is null;
 
