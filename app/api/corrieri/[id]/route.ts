@@ -49,7 +49,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.attivo !== undefined) campi.attivo = body.attivo
   if (body.multicollo !== undefined) campi.multicollo = body.multicollo
   if (body.inserimento_ritiri !== undefined) campi.inserimento_ritiri = body.inserimento_ritiri
-  if (body.settings !== undefined) campi.settings = body.settings
+  // LE IMPOSTAZIONI SI UNISCONO A QUELLE DI ADESSO, NON LE SOSTITUISCONO. Il popup manda le sue chiavi sopra le
+  // impostazioni lette quando la pagina e' stata aperta: una regola scritta nel frattempo (da un altro master, da
+  // uno script: colli_min/colli_max di UPS Italia Multicollo il 26/11) spariva al primo Salva. Qui si rilegge il
+  // blocco al momento del salvataggio e si sovrappongono solo le chiavi arrivate (null compreso: un campo svuotato
+  // resta svuotato). Lettura fallita: non si salva, invece di riscrivere tutto con un blocco vecchio.
+  if (body.settings !== undefined) {
+    if (!body.settings || typeof body.settings !== 'object' || Array.isArray(body.settings)) {
+      return NextResponse.json({ error: 'Impostazioni non valide' }, { status: 400 })
+    }
+    const { data: attuale, error: errAtt } = await supabase.from('corrieri').select('settings')
+      .eq('id', id).eq('master_id', utente.master_id).maybeSingle()
+    if (errAtt) return NextResponse.json({ error: 'Impostazioni attuali non lette: riprova. ' + errAtt.message }, { status: 500 })
+    if (!attuale) return NextResponse.json({ error: 'Contratto non trovato' }, { status: 404 })
+    campi.settings = { ...((attuale as any).settings || {}), ...body.settings }
+  }
   const { error } = await supabase
     .from('corrieri')
     .update(campi)

@@ -166,18 +166,26 @@ export default function CorrieriPage() {
       peso_max_collo: popup.peso_max_collo !== '' ? Number(popup.peso_max_collo) : null,
       colli_max: popup.colli_max !== '' ? Number(popup.colli_max) : null,
       colli_min: popup.colli_min !== '' && popup.colli_min != null ? Number(popup.colli_min) : null })
-    await fetch('/api/corrieri/'+popup.id, {
+    const risposta = await fetch('/api/corrieri/'+popup.id, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         multicollo: popup.multicollo,
         inserimento_ritiri: popup.inserimento_ritiri,
-        // Si parte dalle impostazioni ATTUALI del contratto, non da zero: la PATCH le salva al posto
-        // dell'intero blocco, e ogni salvataggio di questo popup cancellava le chiavi che non sono
-        // sue — tipo_spedizione (un GLS Europa tornava nazionale senza avviso), tipo_collo,
-        // flex_delivery, tipo_servizio FedEx, consegna InPost. L'elenco le carica tutte.
-        settings: nuoviSettings(corrieri.find(x => x.id === popup.id)?.settings),
+        // SOLO LE CHIAVI DI QUESTO POPUP: la PATCH le unisce alle impostazioni che il contratto ha in quel momento.
+        // Prima si mandava l'intero blocco, letto all'apertura della pagina: le chiavi non sue si salvavano
+        // (tipo_spedizione, tipo_collo, flex_delivery, consegna InPost), ma col valore di allora, e una regola
+        // scritta nel frattempo tornava indietro.
+        settings: nuoviSettings({}),
       })
-    })
+    }).catch(() => null)
+    // Salvataggio rifiutato o rete caduta: il popup resta aperto e lo dice. Prima si chiudeva comunque e l'elenco
+    // mostrava le impostazioni nuove come salvate.
+    if (!risposta || !risposta.ok) {
+      const d = risposta ? await risposta.json().catch(() => null) : null
+      setPopup({ ...popup, errore: d?.error || 'Impostazioni non salvate: riprova.' })
+      setSalvandoPopup(false)
+      return
+    }
     setCorrieri(prev => prev.map(c => c.id === popup.id ? { ...c, multicollo: popup.multicollo, inserimento_ritiri: popup.inserimento_ritiri, settings: nuoviSettings(c.settings) } : c))
     setSalvandoPopup(false)
     setPopup(null)
@@ -355,6 +363,7 @@ export default function CorrieriPage() {
             {popup.tipo === 'spedisci' && (
               <div style={{padding:'0 22px 4px'}}><WebhookSecretsPanel provider="spedisci" contrattoNome={popup.nome_contratto} /></div>
             )}
+            {popup.errore && <div style={{margin:'0 22px 8px',background:'#fef2f2',color:'#b91c1c',padding:'10px 12px',borderRadius:'8px',fontSize:'13px'}}>{popup.errore}</div>}
             <div style={{display:'flex',justifyContent:'space-between',padding:'16px 22px',borderTop:'1px solid #f0f0f0',position:'sticky',bottom:0,background:'#fff',zIndex:2}}>
               <button onClick={()=>setPopup(null)} style={{padding:'9px 20px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>Chiudi</button>
               <button onClick={salvaImpostazioni} disabled={salvandoPopup} style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:salvandoPopup?0.7:1}}>{salvandoPopup?'Salvataggio...':'Salva'}</button>

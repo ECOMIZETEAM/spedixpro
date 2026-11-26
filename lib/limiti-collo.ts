@@ -79,7 +79,11 @@ export function motivoLimiteCollo(settings: any, pesoReale: number, colli: any[]
   const pesoMin = pesoMinimoNonRaggiunto(settings, arr)
   if (pesoMin !== null) return `questo contratto si usa oltre i ${pesoMin} kg fatturati (conta il maggiore fra il peso e l'ingombro dei colli): per spedizioni più leggere scegli un altro contratto`
   const colliMax = Number(settings?.colli_max) || 0
-  if (colliMax > 0 && arr.length > colliMax) return `questo contratto accetta al massimo ${colliMax} colli per spedizione`
+  // Un collo solo: UPS Europa e UPS Italia (monocollo dal 26/11), Poste PDB Internazionale, PuntoPoste. «Al massimo 1
+  // colli» era sgrammaticato. Niente consiglio di un contratto multicollo: per Poste e PuntoPoste non c'e'.
+  if (colliMax > 0 && arr.length > colliMax) return colliMax === 1
+    ? 'questo contratto accetta un collo solo per spedizione'
+    : `questo contratto accetta al massimo ${colliMax} colli per spedizione`
   const colliMin = Number(settings?.colli_min) || 0
   if (colliMin > 1 && arr.length < colliMin) return `questo contratto si usa da ${colliMin} colli in su: per un collo solo scegli il contratto monocollo`
   const pesoMaxCollo = Number(settings?.peso_max_collo) || 0

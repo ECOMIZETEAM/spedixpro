@@ -72,9 +72,13 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
 
   // fetchAll: oltre 1000 fasce PostgREST tronca in SILENZIO → il sotto-master riceveva un Listino
   // Corrieri PARZIALE (alcuni corrieri/zone senza prezzi). La lettura zone_cap più sotto lo faceva già.
-  const fasceSrc = await fetchAll(() => admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel').eq('listino_id', parentListinoId).order('id', { ascending: true }))
+  // STRETTO: fetchAll chiude l'elenco alla prima pagina che non legge, senza dirlo. Qui da quell'elenco si cancella e
+  // si riscrive il listino del sotto-master: una lettura persa deve fermare la copia, non valere "il padre ha meno
+  // prezzi" (fasce) o "non ha supplementi" (sotto: si cancellavano tutti e non se ne reinseriva nessuno — minimo,
+  // contrassegno, multicollo).
+  const fasceSrc = await fetchAllStretto(() => admin.from('listini_clienti_fasce').select('corriere_id,zona_id,peso_max,prezzo,tipo,fuel').eq('listino_id', parentListinoId).order('id', { ascending: true }))
   if (!fasceSrc.length) return { ok: false, reason: 'listino assegnato vuoto' }
-  const supplSrc = await fetchAll(() => admin.from('listini_clienti_supplementi').select('corriere_id,tipo,nome,valore,tipo_calcolo,descrizione').eq('listino_id', parentListinoId).order('id', { ascending: true }))
+  const supplSrc = await fetchAllStretto(() => admin.from('listini_clienti_supplementi').select('corriere_id,tipo,nome,valore,tipo_calcolo,descrizione').eq('listino_id', parentListinoId).order('id', { ascending: true }))
   const { data: listinoSrc } = await admin.from('listini_clienti').select('nome,fattore_volume,solo_peso_reale').eq('id', parentListinoId).single()
 
   const corriereIds = [...new Set(fasceSrc.map((f: any) => f.corriere_id).filter(Boolean))]
@@ -385,8 +389,16 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
 
   // 6) SUPPLEMENTI (assicurazione, contrassegno, giacenze, ritiro, accessori) — IDEMPOTENTE come le fasce.
   const supplIns = (supplSrc || []).map((s: any) => ({ listino_id: listinoDi(mapCorr.get(s.corriere_id) || ''), corriere_id: mapCorr.get(s.corriere_id) || null, tipo: s.tipo, nome: s.nome, valore: s.valore, tipo_calcolo: s.tipo_calcolo, descrizione: s.descrizione })).filter((s: any) => s.corriere_id)
-  if (subCorrIds.length) await admin.from('listini_corrieri_supplementi').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
-  if (supplIns.length) await admin.from('listini_corrieri_supplementi').insert(supplIns)
+  // L'esito si controlla, come per le fasce: cancellazione fallita = i nuovi si sarebbero sommati ai vecchi;
+  // inserimento fallito dopo la cancellazione = sotto-master senza supplementi, e la copia rispondeva ok.
+  if (subCorrIds.length) {
+    const { error: eDel } = await admin.from('listini_corrieri_supplementi').delete().eq('listino_id', subListinoId).in('corriere_id', subCorrIds)
+    if (eDel) throw new Error('cancellazione supplementi sub ' + subMasterId + ': ' + (eDel.message || eDel))
+  }
+  if (supplIns.length) {
+    const { error: eIns } = await admin.from('listini_corrieri_supplementi').insert(supplIns)
+    if (eIns) throw new Error('insert supplementi sub ' + subMasterId + ': ' + (eIns.message || eIns))
+  }
 
   // I contratti saltati si dicono anche a chi chiama (non solo nel log): il listino di quel contratto non è aggiornato.
   return {
