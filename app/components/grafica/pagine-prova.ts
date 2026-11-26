@@ -33,6 +33,8 @@ export const PAGINE_PROVA = new Set([
   // 26/11 notte, la Logistica: il vestito le sta già bene così
   '/dashboard/logistica/addebiti', '/dashboard/logistica/carico', '/dashboard/logistica/da-preparare',
   '/dashboard/logistica/listino', '/dashboard/logistica/posti', '/dashboard/logistica/stock',
+  // 26/11 notte, Ritiri e Resi
+  '/dashboard/ritiri', '/dashboard/ritiri/nuovo', '/dashboard/resi/analisi', '/dashboard/resi/scansiona',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

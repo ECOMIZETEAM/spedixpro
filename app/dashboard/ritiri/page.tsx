@@ -1,5 +1,7 @@
 ﻿'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import SelectCercabile from '@/app/components/SelectCercabile'
 import DateRangePicker from '@/app/components/DateRangePicker'
 import { filtriToccati, stileFiltro } from '@/app/components/filtri-attivi'
@@ -21,6 +23,8 @@ function filtriDefault() {
 }
 
 export default function RitiriPage() {
+  // con la grafica nuova icona a linea al posto del 🚚 (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const [ritiri, setRitiri] = useState<any[]>([])
   const [clienti, setClienti] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -122,7 +126,7 @@ export default function RitiriPage() {
       {/* Tabella */}
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',overflow:'hidden'}}>
         <div style={{padding:'12px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Ritiri</span>
+          <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>Ritiri</span>
         </div>
         <div style={{padding:'8px 16px',borderBottom:'1px solid #d1d5db',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
@@ -143,7 +147,7 @@ export default function RitiriPage() {
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a'}}>Caricamento...</div>
         ) : !paginati.length ? (
           <div style={{padding:'40px',textAlign:'center' as const,color:'#1a1a1a',fontSize:'13px'}}>
-            <div style={{fontSize:'32px',marginBottom:'8px'}}>🚚</div>
+            <div style={{fontSize:'32px',marginBottom:'8px'}}>{nuova ? <Icona id="i-camion" className="vs-ico vs-ico--grande" /> : '🚚'}</div>
             Nessun ritiro trovato
           </div>
         ) : (
@@ -191,7 +195,7 @@ export default function RitiriPage() {
                       {r.data_ritiro ? new Date(r.data_ritiro).toLocaleDateString('it-IT') : '—'}
                     </td>
                     <td style={{padding:'9px 12px'}}><StatoRitiro stato={r.stato}/></td>
-                    <td style={{padding:'9px 12px',fontWeight:'600',color:'#1a1a1a'}}>€ {Number(r.totale||0).toFixed(2)}</td>
+                    <td style={{padding:'9px 12px',fontWeight:'600',color:'#1a1a1a'}}>€{'\u00a0'}{Number(r.totale||0).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>

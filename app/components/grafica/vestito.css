@@ -223,3 +223,7 @@
 /* il fondo grigio che alcune pagine vecchie si danno da sole, alto quanto lo schermo (Gestione permessi): trasparente,
    il fondo è quello della cornice. Scritta dopo la regola dei fondi grigi qui sopra: a pari peso vince questa */
 .gx .gx-vestito div:is([style*="min-height: 100vh"], [style*="min-height:100vh"]):is([style*="background"]) { background: transparent !important; }
+
+/* i tasti neri pieni scritti a mano (#1a1a1a / #111, «Fotocamera» in Scansiona resi): pillole nere come gli altri */
+.gx .gx-vestito :is(button, a):is([style*="background: rgb(26, 26, 26)"], [style*="background:#1a1a1a"], [style*="background: rgb(17, 17, 17)"], [style*="background:#111"]):not(:disabled):not([style*="position: fixed"] *, [style*="position:fixed"] *) {
+  background: var(--vs-nero) !important; color: #fff !important; border: 0 !important; border-radius: 999px !important; box-shadow: 0 3px 9px rgba(0,0,0,.18); }
