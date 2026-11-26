@@ -11,6 +11,10 @@ export const PAGINE_PROVA = new Set([
   '/dashboard/contrassegni', '/dashboard/ritiri/elenco', '/dashboard/distinte/elenco', '/dashboard/distinte/crea',
   '/dashboard/resi/distinte', '/dashboard/network', '/dashboard/listini', '/dashboard/clienti', '/dashboard/movimenti',
   '/dashboard/reports/spedizioni', '/dashboard/statistiche/profitto', '/dashboard/impostazioni', '/dashboard/costi-gestione',
+  // 26/11 pomeriggio, i report: col calendario delle date e la tendina con la ricerca vestiti come gli altri campi
+  '/dashboard/reports/agenti', '/dashboard/reports/consumabili', '/dashboard/reports/contrassegni', '/dashboard/reports/distinte',
+  '/dashboard/reports/fatture', '/dashboard/reports/giacenze', '/dashboard/reports/resi', '/dashboard/reports/rettifiche',
+  '/dashboard/reports/ricariche', '/dashboard/reports/ritiri', '/dashboard/reports/sms-clienti', '/dashboard/reports/storico-sms',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

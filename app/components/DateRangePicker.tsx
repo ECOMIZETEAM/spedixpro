@@ -1,7 +1,8 @@
 'use client'
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useContext } from 'react'
 import { createPortal } from 'react-dom'
 import { Icona } from './grafica/icone'
+import { GraficaNuova } from './grafica/contesto'
 
 // `attivo`: la data e' stata cambiata rispetto al default della pagina -> il pulsante si accende
 // come le altre caselle filtro (vedi app/components/filtri-attivi.ts).
@@ -32,7 +33,10 @@ function inRange(d: Date, s: Date | null, e: Date | null) {
   return t > Math.min(s.getTime(),e.getTime()) && t < Math.max(s.getTime(),e.getTime())
 }
 
-export default function DateRangePicker({ dal, al, onChange, attivo, vestito = false }: Props) {
+export default function DateRangePicker({ dal, al, onChange, attivo, vestito: chiesto = false }: Props) {
+  // sulle pagine col vestito comune si veste da solo: niente 📅, il pannello coi colori del tema anche di notte
+  const sulVestito = !!useContext(GraficaNuova).vestito
+  const vestito = chiesto || sulVestito
   const k = (c: string) => vestito ? c : undefined
   const oggi = new Date()
   const [open, setOpen] = useState(false)

@@ -388,7 +388,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
         {/* il vestito comune (vestito.css) sulle pagine di oggi che non hanno ancora un disegno loro */}
         <main className={'gx-pagina' + (PAGINE_DISEGNATE.has(path) ? '' : ' gx-vestito')}>
           <FlashBanner />
-          <GraficaNuova.Provider value={{ attiva: true, ruolo: (user?.ruolo || '').toLowerCase(), luce, tema, chi: `${user?.brandNome || ''}|${user?.nome || ''}`, entrata: !!user?.graficaEntrata, proposta: user?.graficaProposta || '' }}>{children}</GraficaNuova.Provider>
+          <GraficaNuova.Provider value={{ attiva: true, ruolo: (user?.ruolo || '').toLowerCase(), luce, tema, chi: `${user?.brandNome || ''}|${user?.nome || ''}`, entrata: !!user?.graficaEntrata, proposta: user?.graficaProposta || '' , vestito: !PAGINE_DISEGNATE.has(path)}}>{children}</GraficaNuova.Provider>
         </main>
       </div>
       <Moovy senzaPulsante aspetto="nuova" />

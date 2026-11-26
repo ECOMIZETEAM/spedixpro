@@ -1,5 +1,6 @@
 'use client'
-import { Children, isValidElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Children, isValidElement, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { GraficaNuova } from './grafica/contesto'
 import { createPortal } from 'react-dom'
 
 // UNA TENDINA CHE SI PUO' CERCARE.
@@ -51,6 +52,10 @@ type Props = {
 }
 
 export default function SelectCercabile({ value, onChange, children, style, disabled, className, cercaSempre, ...resto }: Props) {
+  // sulle pagine col vestito comune la tendina si veste da sola (classe sc-tasto, colorata da vestito.css): senza, il
+  // tasto restava bianco col bordo in mezzo ai campi grigi e il pannello bianco anche di notte
+  const sulVestito = !!useContext(GraficaNuova).vestito
+  const classe = className || (sulVestito ? 'sc-tasto' : undefined)
   const opzioni = useMemo(() => raccogli(children), [children])
   const [aperto, setAperto] = useState(false)
   const [q, setQ] = useState('')
@@ -121,13 +126,13 @@ export default function SelectCercabile({ value, onChange, children, style, disa
   // illeggibile (Lorenzo, «Spedisci per»). Uno stile in linea batte qualunque regola che non sia !important, e indovinarlo
   // dal CSS col selettore sull'attributo style e' fragile: cosi' la tendina vestita porta solo classi (sc-voce,
   // sc-voce--su, …) e il CSS le colora di giorno e di notte. Senza className il ramo di sotto e' quello di sempre.
-  const vestita = !!className
+  const vestita = !!classe
 
   return (
     <div ref={box} style={{ position: 'relative', ...(style?.width ? { width: style.width } : {}) }}>
       {/* className arriva solo dalla grafica nuova (Nuova spedizione su una pagina): veste il tasto e il pannello; senza,
           la tendina resta identica a oggi */}
-      <button type="button" disabled={disabled} className={className} onClick={() => { if (!disabled) { setAperto(a => !a); setQ('') } }}
+      <button type="button" disabled={disabled} className={classe} onClick={() => { if (!disabled) { setAperto(a => !a); setQ('') } }}
         aria-haspopup="listbox" aria-expanded={aperto}
         style={{ ...style, textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', opacity: disabled ? 0.6 : 1 }}>
         {vestita ? <>

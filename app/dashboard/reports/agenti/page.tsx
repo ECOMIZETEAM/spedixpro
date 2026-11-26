@@ -126,7 +126,7 @@ export default function ReportAgentiPage() {
 
       {/* Card filtri + genera — come Report Spedizioni */}
       <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #d1d5db', padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>🔍 Nuovo report {loading && d && <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>· aggiorno…</span>}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>Nuovo report {loading && d && <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>· aggiorno…</span>}</div>
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
           <div><label style={lbl}>Agente</label>
             <SelectCercabile value={filtri.agenteId} onChange={e => setFiltri(f => ({ ...f, agenteId: (e.target as any).value }))} style={sel} cercaSempre>

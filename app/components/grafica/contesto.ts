@@ -5,4 +5,6 @@ import { createContext } from 'react'
 // la cornice nuova c'è (con la grafica di oggi questo contesto resta spento e le pagine non cambiano di un pixel).
 // luce (mattina, giorno, tramonto, notte) e tema (giorno o notte) arrivano dalla cornice, decisi già sul server; chi
 // è: per tenere le copie in sessione di un utente separate da quelle di un altro nella stessa scheda.
-export const GraficaNuova = createContext<{ attiva: boolean; ruolo: string; luce: string; tema: string; chi: string; entrata: boolean; proposta: string }>({ attiva: false, ruolo: '', luce: 'argilla', tema: 'giorno', chi: '', entrata: false, proposta: '' })
+// vestito: la pagina non ha un disegno suo e porta il vestito comune (vestito.css): i componenti condivisi (tendina con
+// la ricerca, calendario delle date) si vestono da soli, senza che ogni pagina lo chieda.
+export const GraficaNuova = createContext<{ attiva: boolean; ruolo: string; luce: string; tema: string; chi: string; entrata: boolean; proposta: string; vestito?: boolean }>({ attiva: false, ruolo: '', luce: 'argilla', tema: 'giorno', chi: '', entrata: false, proposta: '' })
