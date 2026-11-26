@@ -723,7 +723,7 @@ async function creaSpedizioneApi(req: NextRequest, t0: number, reg: RegistroPont
     // può essere a sua volta compratore). È questa stessa porta a essere chiamata dal venditore un livello sotto.
     // CONDIVISIONE: chiave di dispatch dal PRIMO detentore-CODICE (via corrieri_condivisi), non dalla copia
     // colata nel ponte dell'originante. Invariante sui dati veri per i ponti attivi; chiude la fuga.
-    const credMv = await risolviChiaveDispatch(admin, masterId, corriere.nome_contratto)
+    const credMv = await risolviChiaveDispatch(admin, masterId, corriere.nome_contratto, (corriere as any).id ?? null)
     if (!credMv?.api_key) return errore('Contratto non configurato correttamente')
     try {
       const { creaSpedizioneMoovexpress, etichettaMoovexpress } = await import('@/lib/moovexpress')

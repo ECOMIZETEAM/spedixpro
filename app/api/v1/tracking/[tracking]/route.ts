@@ -123,7 +123,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ trac
       // a quello sotto. Se il venditore non risponde, il catch sotto ripiega sulla cronologia salvata.
       // CONDIVISIONE (fuga credenziale): la chiave NON si legge dal ponte locale (può essere una copia colata
       // o azzerata), ma si risale al PRIMO detentore-codice — lo stesso risolutore del dispatch in creazione.
-      const credMv = await risolviChiaveDispatch(admin, sped.master_id, corriere.nome_contratto)
+      const credMv = await risolviChiaveDispatch(admin, sped.master_id, corriere.nome_contratto, sped.corriere_id)
       if (!credMv?.api_key) return NextResponse.json({ ...base, events: await eventiSalvati() })
       const { trackingMoovexpress } = await import('@/lib/moovexpress')
       const tr = await trackingMoovexpress(credMv as any, String(sped.tracking_number || sped.numero || ''))

@@ -40,7 +40,12 @@ export async function sincronizzaZonaAiDiscendenti(admin: any, ownerZonaId: stri
   // esista la zona con lo stesso nome: se NON esiste la CREO (era il bug — la propagazione
   // aggiornava solo le zone già presenti, quindi i figli senza "Isole Minori"/"Zone Disagiate"
   // non le ricevevano MAI e prezzavano quelle destinazioni come "Italia").
+  // Le righe STACCATE (26/11/2026) restano con le zone di quando i loro pacchi sono partiti: i resi e le rettifiche
+  // di quei pacchi si prezzano su quelle zone. E una riga omonima comprata via CODICE da un altro venditore
+  // (collegamento_id) ha le zone del SUO venditore, che gliele porta lui (lib/condivisione-propaga.ts): il nome
+  // uguale non la fa diventare una copia di questo contratto.
   const { data: corrSub } = await admin.from('corrieri').select('id,master_id').eq('nome_contratto', corrNome).in('master_id', discendenti)
+    .is('staccato_il', null).is('collegamento_id', null)
   if (!corrSub?.length) return
 
   for (const cs of corrSub) {

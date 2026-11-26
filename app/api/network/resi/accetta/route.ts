@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
     for (const s of arr) {
       await admin.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', s.id)
       // Il prezzo lo decide il SUO listino corrieri, quindi serve la SUA copia del contratto.
-      const suoCorriere = await corriereDiMasterPerNome(admin, flId, (s as any).corrieri?.nome_contratto || null)
+      const suoCorriere = await corriereDiMasterPerNome(admin, flId, (s as any).corrieri?.nome_contratto || null, { corrierePacco: s.corriere_id })
       righe.push({
         spedizione_id: s.id, master_target_id: flId, master_owner_id: mio, corriere_id: suoCorriere,
         nolo: (suoCorriere ? await noloMaster(admin, flId, suoCorriere, s) : null) || 0,

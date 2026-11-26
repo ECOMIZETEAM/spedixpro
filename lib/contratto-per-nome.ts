@@ -19,18 +19,66 @@ export function nomeContrattoNormalizzato(v: string | null | undefined): string 
   return String(v || '').trim().toLowerCase()
 }
 
+// DUE RIGHE CON LO STESSO NOME (26/11/2026). Fino a ieri un master aveva una riga per nome, e trovarla per nome
+// bastava. Da quando un master puo' STACCARSI da un fornitore e ricomprare lo stesso contratto da un altro
+// (scripts/stacca-contratto.sql), ne puo' avere due: quella staccata, che resta per i pacchi gia' partiti, e quella
+// nuova. La scelta allora dipende da cosa si sta facendo:
+//   - una spedizione NUOVA usa la riga attiva: fra le omonime vince quella non staccata, poi la piu' vecchia,
+//     sempre la stessa (prima la query non aveva ordine: vinceva quella che il database restituiva per prima);
+//   - un evento su un pacco GIA' PARTITO (reso, giacenza, rettifica) usa la riga della SUA catena, letta dai
+//     puntatori a partire dalla riga della spedizione (`corrierePacco`): la catena di allora, mai il fornitore
+//     di oggi. Per nome si ripiega solo se quel master non sta sulla catena del pacco.
+export type OpzioniRiga = { corrierePacco?: string | null }
+
+type RigaOmonima = { id: string; staccato_il?: string | null; created_at?: string | null }
+export function ordinaOmonime<T extends RigaOmonima>(righe: T[]): T[] {
+  return [...righe].sort((a, b) =>
+    (a.staccato_il ? 1 : 0) - (b.staccato_il ? 1 : 0)
+    || String(a.created_at || '').localeCompare(String(b.created_at || ''))
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+}
+
+// La catena dei fornitori di un pacco, dalla riga della spedizione in su (RPC catena_contratto): master → la sua
+// riga. Tenuta mezzo minuto: la catena di un pacco gia' partito non cambia, e un evento la chiede una volta per
+// livello. Lettura fallita = nessuna catena (si ripiega sul nome, e lo si scrive nel log).
+const cacheFile = new Map<string, { at: number; righe: Promise<Map<string, { id: string; nome: string }>> }>()
+async function righeDellaFila(adminDb: any, corriereId: string): Promise<Map<string, { id: string; nome: string }>> {
+  const c = cacheFile.get(corriereId)
+  if (c && Date.now() - c.at < 30_000) return c.righe
+  const righe = (async () => {
+    const out = new Map<string, { id: string; nome: string }>()
+    const { data, error } = await adminDb.rpc('catena_contratto', { p_corriere_id: corriereId })
+    if (error || !data?.length) {
+      if (error) console.error('[contratto-per-nome] catena del pacco non leggibile, ripiego sul nome:', corriereId, error.message)
+      return out
+    }
+    const ids = (data as any[]).map(r => r.corriere_id)
+    const { data: nomi } = await adminDb.from('corrieri').select('id,nome_contratto').in('id', ids)
+    const nomeDi = new Map((nomi || []).map((r: any) => [r.id, r.nome_contratto]))
+    for (const r of data as any[]) if (!out.has(r.master_id)) out.set(r.master_id, { id: r.corriere_id, nome: String(nomeDi.get(r.corriere_id) || '') })
+    return out
+  })()
+  cacheFile.set(corriereId, { at: Date.now(), righe })
+  if (cacheFile.size > 500) for (const k of Array.from(cacheFile.keys()).slice(0, 250)) cacheFile.delete(k)
+  return righe
+}
+
 // Id della riga `corrieri` di quel master per quel nome contratto, oppure null.
 // `adminDb` deve essere il client amministrativo: si leggono righe di master diversi dal chiamante.
+// `opz.corrierePacco`: la riga della spedizione, per gli eventi dopo la partenza (vedi sopra).
 export async function corriereDiMasterPerNome(
-  adminDb: any, masterId: string | null | undefined, nomeContratto: string | null | undefined
+  adminDb: any, masterId: string | null | undefined, nomeContratto: string | null | undefined, opz?: OpzioniRiga,
 ): Promise<string | null> {
   const cercato = nomeContrattoNormalizzato(nomeContratto)
   if (!masterId || !cercato) return null
-  const { data } = await adminDb.from('corrieri').select('id,nome_contratto').eq('master_id', masterId)
-  for (const c of (data || [])) {
-    if (nomeContrattoNormalizzato((c as any).nome_contratto) === cercato) return (c as any).id
+  if (opz?.corrierePacco) {
+    // Sulla catena del pacco, e con lo stesso nome: se il nome non torna (una rinomina a meta') non si rischia.
+    const diFila = (await righeDellaFila(adminDb, opz.corrierePacco)).get(masterId)
+    if (diFila && nomeContrattoNormalizzato(diFila.nome) === cercato) return diFila.id
   }
-  return null
+  const { data } = await adminDb.from('corrieri').select('id,nome_contratto,staccato_il,created_at').eq('master_id', masterId)
+  const omonime = ordinaOmonime(((data || []) as any[]).filter(c => nomeContrattoNormalizzato(c.nome_contratto) === cercato))
+  return omonime[0]?.id ?? null
 }
 
 // DETENTORE di un contratto: chi lo ha col corriere, e quindi chi riceve dal corriere i soldi
@@ -73,14 +121,14 @@ export async function detentoreContrattoCon(
 }
 
 // Sorgente "una riga alla volta": per una spedizione sola (es. la guardia dell'anticipo).
-export function sorgenteDaDatabase(adminDb: any): SorgenteCatena {
+export function sorgenteDaDatabase(adminDb: any, opz?: OpzioniRiga): SorgenteCatena {
   return {
     padreDi: async (id) => {
       const { data }: any = await adminDb.from('masters').select('parent_master_id').eq('id', id).maybeSingle()
       return data?.parent_master_id || null
     },
     copiaDi: async (id, nome) => {
-      const cid = await corriereDiMasterPerNome(adminDb, id, nome)
+      const cid = await corriereDiMasterPerNome(adminDb, id, nome, opz)
       if (!cid) return null
       const { data }: any = await adminDb.from('corrieri').select('proprio').eq('id', cid).maybeSingle()
       return { proprio: !!data?.proprio }
@@ -89,9 +137,9 @@ export function sorgenteDaDatabase(adminDb: any): SorgenteCatena {
 }
 
 export async function detentoreContratto(
-  adminDb: any, corriereOwnerId: string, nomeContratto: string | null | undefined
+  adminDb: any, corriereOwnerId: string, nomeContratto: string | null | undefined, opz?: OpzioniRiga,
 ): Promise<{ detentore: string; dichiaratoProprio: boolean }> {
-  return detentoreContrattoCon(sorgenteDaDatabase(adminDb), corriereOwnerId, nomeContratto)
+  return detentoreContrattoCon(sorgenteDaDatabase(adminDb, opz), corriereOwnerId, nomeContratto)
 }
 
 // Sorgente "tutto in memoria": due letture (masters + corrieri) e poi nessun altro viaggio.
@@ -114,15 +162,17 @@ export async function caricaSorgenteCatena(adminDb: any): Promise<SorgenteCatena
 async function costruisciSorgenteCatena(adminDb: any): Promise<SorgenteCatena> {
   const [mRes, cRes]: any = await Promise.all([
     adminDb.from('masters').select('id,parent_master_id'),
-    adminDb.from('corrieri').select('master_id,nome_contratto,proprio'),
+    adminDb.from('corrieri').select('master_id,nome_contratto,proprio,staccato_il'),
   ])
   const padri = new Map<string, string | null>()
   for (const m of (mRes.data || [])) padri.set(m.id, m.parent_master_id || null)
-  const copie = new Map<string, { proprio: boolean }>()
+  const copie = new Map<string, { proprio: boolean; staccata?: boolean }>()
   for (const c of (cRes.data || [])) {
     const k = c.master_id + '|' + nomeContrattoNormalizzato(c.nome_contratto)
-    // Fra due copie collo stesso nome vince quella dichiarata propria: è la dichiarazione che conta.
-    if (!copie.get(k)?.proprio) copie.set(k, { proprio: !!c.proprio })
+    // Fra due copie collo stesso nome vince quella dichiarata propria: è la dichiarazione che conta. Poi quella
+    // non staccata (26/11/2026): una riga staccata resta solo per i pacchi gia' partiti.
+    const gia = copie.get(k)
+    if (!gia || (!gia.proprio && (c.proprio || (gia.staccata && !c.staccato_il)))) copie.set(k, { proprio: !!c.proprio, staccata: !!c.staccato_il })
   }
   return {
     padreDi: (id) => padri.get(id) ?? null,

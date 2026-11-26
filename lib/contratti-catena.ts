@@ -81,8 +81,8 @@ export async function contrattiRimossiConMotivo(masterId: string | null | undefi
     if ((eM && opts?.stretto) || !padre || visti.has(padre)) { livelli.push({ eM }); break }
     visti.add(padre)
     const letture = Promise.all([
-      admin.from('corrieri').select('id,nome_contratto,attivo,tipo').eq('master_id', padre),
-      admin.from('corrieri').select('nome_contratto,proprio,tipo').eq('master_id', corrente),
+      admin.from('corrieri').select('id,nome_contratto,attivo,tipo,staccato_il').eq('master_id', padre),
+      admin.from('corrieri').select('nome_contratto,proprio,tipo,staccato_il').eq('master_id', corrente),
       admin.from('masters_corrieri_abilitati').select('corriere_id').eq('master_id', corrente).eq('abilitato', false),
     ])
     letture.catch(() => {})
@@ -117,7 +117,9 @@ export async function contrattiRimossiConMotivo(masterId: string | null | undefi
     const offerti = new Set<string>()
     const nonDisabilitati = new Set<string>()
     for (const c of (cPadre || [])) {
-      if ((c as any).tipo === 'moovexpress' || disabIds.has((c as any).id)) continue
+      // Una riga STACCATA del padre (26/11/2026) non offre più niente e non torna: per il figlio vale come tolta,
+      // non come "in pausa".
+      if ((c as any).tipo === 'moovexpress' || disabIds.has((c as any).id) || (c as any).staccato_il) continue
       const n = norm((c as any).nome_contratto)
       nonDisabilitati.add(n)
       if ((c as any).attivo !== false) offerti.add(n)
@@ -126,6 +128,9 @@ export async function contrattiRimossiConMotivo(masterId: string | null | undefi
     // I contratti EREDITATI dal figlio (proprio!=true) che il padre non offre piu' -> nascosti.
     for (const c of (cFiglio || [])) {
       if ((c as any).proprio === true) continue
+      // Una riga STACCATA del figlio resta solo per i suoi pacchi già partiti: quello che il padre fa di quel
+      // contratto non la riguarda più, e non deve nascondere la riga omonima che il figlio ha comprato altrove.
+      if ((c as any).staccato_il) continue
       // CONDIVISIONE: un PONTE (tipo='moovexpress') NON è un contratto ereditato dall'ALBERO: è un contratto
       // CODICE che il master detiene via `corrieri_condivisi` (non dal padre-albero). La sua disponibilità la
       // governa il legame-codice / il suo `attivo`, non ciò che offre il padre-albero. Trattarlo come ereditato

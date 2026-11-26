@@ -1,6 +1,6 @@
 import { registraMovimentoMaster, registraMovimento } from '@/lib/movimenti'
 import { createAdminSupabase } from '@/lib/supabase-admin'
-import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { corriereDiMasterPerNome, type OpzioniRiga } from '@/lib/contratto-per-nome'
 import { noloMaster, noloCliente, noloClienteDopoPartenzaCon, applicaServizio, addebitaResi, resoPagato, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
 import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
@@ -85,11 +85,17 @@ export async function addebitaGiacenzaCatena(
   // questo stop la gamba di LOGIXIA su SDA EXPRESS L (contratto suo, proprio=true) saliva fino al ponte
   // omonimo di MULTIEXPRESS, suo padre d'albero, e lo addebitava da falso detentore. Sui contratti normali
   // non cambia niente: l'unica riga propria con un omonimo nel padre è quella di LOGIXIA (14/10).
+  // La riga del contratto di ogni livello si legge dalla catena del PACCO (26/11/2026): un master staccato da un
+  // fornitore puo' avere due righe con lo stesso nome, e la giacenza di un pacco vecchio va prezzata su quella
+  // con cui e' partito (lib/contratto-per-nome.ts, corriereDiMasterPerNome).
+  const pacco: OpzioniRiga = { corrierePacco: params.spedizioneId
+    ? ((await admin.from('spedizioni').select('corriere_id').eq('id', params.spedizioneId).maybeSingle()).data as any)?.corriere_id ?? null
+    : null }
   let ownerReale = params.corriereOwnerId
   {
     let cur: string | null = params.corriereOwnerId
     for (let i = 0; i < 20 && cur; i++) {
-      const curCid = await corriereDiMasterPerNome(admin, cur, params.corriereNome)
+      const curCid = await corriereDiMasterPerNome(admin, cur, params.corriereNome, pacco)
       if (curCid) {
         const { data: cc }: any = await admin.from('corrieri').select('proprio').eq('id', curCid).maybeSingle()
         if (cc?.proprio) { ownerReale = cur; break }
@@ -98,7 +104,7 @@ export async function addebitaGiacenzaCatena(
       const parent: string | null = mm?.parent_master_id || null
       if (!parent) break
       // Confronto NORMALIZZATO, come nella cascata delle spedizioni (lib/contratto-per-nome.ts).
-      const pcId = await corriereDiMasterPerNome(admin, parent, params.corriereNome)
+      const pcId = await corriereDiMasterPerNome(admin, parent, params.corriereNome, pacco)
       if (pcId) { ownerReale = parent; cur = parent } else break
     }
   }
@@ -121,7 +127,7 @@ export async function addebitaGiacenzaCatena(
     if (!m) break
 
     // Corriere (copia) di questo master per lo stesso contratto -> per leggerne il prezzo giacenza.
-    const mCorrId = await corriereDiMasterPerNome(admin, m.id, params.corriereNome)
+    const mCorrId = await corriereDiMasterPerNome(admin, m.id, params.corriereNome, pacco)
     if (mCorrId) {
       const mCorr = { id: mCorrId }
       const pr = await prezzoGiacenzaMaster(admin, mCorr.id, params.operazione, sped?.created_at ?? null)
@@ -210,7 +216,7 @@ export async function addebitaResoCondivisione(admin: any, spedizioneId: string,
       // Livello-CODICE: prezzato come in creazione — listino del cliente-ledger, corriere del VENDITORE.
       // L'addebito scala il LEDGER (clienti.credito del "(ingrosso)"), non masters.credito.
       const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
-      const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto)
+      const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, nomeContratto, { corrierePacco: full.corriere_id })
       // Dopo la partenza si paga sempre anche sul ledger: il suo listino di oggi, vivo o archiviato (il ledger
       // non ha un "listino di partenza" sul pacco: listino_cliente_id della gamba e' del cliente finale).
       const n = ((lc as any)?.listino_cliente_id && corrVend)
@@ -303,7 +309,7 @@ async function addebitaResoGiacenza(admin: any, sped: SpedGiac, corriereNome: st
   // La catena: dal master della spedizione fino a chi possiede davvero il contratto. Ogni livello
   // paga il SUO nolo, letto dalla SUA copia del contratto.
   if (corriereNome && corriereOwnerId) {
-    for (const liv of await catenaContratto(admin, full.master_id, corriereOwnerId, corriereNome)) {
+    for (const liv of await catenaContratto(admin, full.master_id, corriereOwnerId, corriereNome, { corrierePacco: full.corriere_id })) {
       righe.push({
         spedizione_id: full.id, master_target_id: liv.masterId, master_owner_id: liv.masterId,
         corriere_id: liv.corriereId,
@@ -415,8 +421,10 @@ async function resoAddebitatoPerOrigine(
  * Il confronto sui nomi e' normalizzato: in archivio c'e' un contratto salvato con lo spazio
  * finale su un livello e senza sull'altro, ed e' gia' costato un detentore non riconosciuto.
  */
+// `opz.corrierePacco`: la riga della spedizione. Con due righe omonime sullo stesso master (una staccata, 26/11/2026)
+// ogni livello prende quella della catena del pacco, non una a caso.
 export async function catenaContratto(
-  admin: any, masterDirettoId: string, corriereOwnerId: string, corriereNome: string,
+  admin: any, masterDirettoId: string, corriereOwnerId: string, corriereNome: string, opz?: OpzioniRiga,
 ): Promise<{ masterId: string; corriereId: string }[]> {
   let ownerReale = corriereOwnerId
   let cur: string | null = corriereOwnerId
@@ -428,7 +436,7 @@ export async function catenaContratto(
     // addebiterebbe roba che non e' sua — senza un errore e senza che nessuno se ne accorga.
     // Il segno `proprio` chiude la questione: se questo contratto e' dichiarato suo, la catena
     // finisce qui e chi sta sopra non viene nemmeno guardato.
-    const curCid = await corriereDiMasterPerNome(admin, cur, corriereNome)
+    const curCid = await corriereDiMasterPerNome(admin, cur, corriereNome, opz)
     if (curCid) {
       const { data: cc }: any = await admin.from('corrieri').select('proprio').eq('id', curCid).maybeSingle()
       if (cc?.proprio) { ownerReale = cur; break }
@@ -436,7 +444,7 @@ export async function catenaContratto(
     const { data: mm }: any = await admin.from('masters').select('parent_master_id').eq('id', cur).maybeSingle()
     const parent: string | null = mm?.parent_master_id || null
     if (!parent) break
-    const pcId = await corriereDiMasterPerNome(admin, parent, corriereNome)
+    const pcId = await corriereDiMasterPerNome(admin, parent, corriereNome, opz)
     if (pcId) { ownerReale = parent; cur = parent } else break
   }
 
@@ -445,7 +453,7 @@ export async function catenaContratto(
   for (let i = 0; i < 20 && id; i++) {
     const { data: m }: any = await admin.from('masters').select('id,parent_master_id').eq('id', id).maybeSingle()
     if (!m) break
-    const cId = await corriereDiMasterPerNome(admin, m.id, corriereNome)
+    const cId = await corriereDiMasterPerNome(admin, m.id, corriereNome, opz)
     if (cId) out.push({ masterId: m.id, corriereId: cId })
     if (m.id === ownerReale) break
     id = m.parent_master_id

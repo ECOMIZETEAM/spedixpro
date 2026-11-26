@@ -108,12 +108,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
     for (const r of data || []) senzaEtichetta.add((r as any).id)
   }
 
-  // CONTRATTI CONDIVISI: la chiave del venditore dipende solo da master e contratto, e prima si risaliva la
-  // catena a ogni spedizione (19.506 attive di questo tipo il 04/11). Una volta per giro basta.
+  // CONTRATTI CONDIVISI: la chiave del venditore dipende dalla riga del contratto del pacco, e prima si risaliva
+  // la catena a ogni spedizione (19.506 attive di questo tipo il 04/11). Una volta per giro e per riga basta.
+  // Per RIGA e non per master e nome (26/11/2026): un master staccato da un fornitore che ha ricomprato lo stesso
+  // contratto da un altro ha due righe omonime, e i pacchi vecchi vanno chiesti al fornitore di prima.
   const chiaviDispatch = new Map<string, Promise<ChiaveDispatch | null>>()
-  const chiaveDispatch = (masterId: string, nomeContratto: string) => {
-    const kk = masterId + '|' + nomeContratto
-    if (!chiaviDispatch.has(kk)) chiaviDispatch.set(kk, risolviChiaveDispatch(admin, masterId, nomeContratto))
+  const chiaveDispatch = (masterId: string, nomeContratto: string, corriereId?: string | null) => {
+    const kk = corriereId || (masterId + '|' + nomeContratto)
+    if (!chiaviDispatch.has(kk)) chiaviDispatch.set(kk, risolviChiaveDispatch(admin, masterId, nomeContratto, corriereId))
     return chiaviDispatch.get(kk)!
   }
   const memoVenditore = { accessi: new Map<string, Promise<any>>(), chiaveDi: chiaveDispatch }
@@ -540,7 +542,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ part
         // CONDIVISIONE (fuga credenziale): la chiave NON si legge dal ponte locale (può essere una copia
         // colata o azzerata), ma si risale al PRIMO detentore-codice — lo stesso risolutore del dispatch in
         // creazione. Così il tracking di un sub propagato dopo la copy-guard non resta cieco.
-        const credMv = await chiaveDispatch(s.master_id, corr.nome_contratto)
+        const credMv = await chiaveDispatch(s.master_id, corr.nome_contratto, s.corriere_id)
         if (!s.tracking_number || !credMv?.api_key) return
         const { trackingMoovexpress, venditoreSuQuestoPortale, trackingMoovexpressLocale } = await import('@/lib/moovexpress')
         // Il venditore sta su questo stesso portale (nessun base_url: tutti i contratti condivisi al 04/11):

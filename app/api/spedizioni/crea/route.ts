@@ -3386,7 +3386,7 @@ async function creaSpedizioneInterna(req: NextRequest, t0: number): Promise<Resp
     // giù per l'albero = fuga credenziale), ma quella del PRIMO detentore-CODICE risalendo la catena
     // (risolviChiaveDispatch, via corrieri_condivisi). Verificato sui dati: per i ponti attivi è la STESSA
     // chiave di oggi, ma non dipende più dalla copia → le copie dei sub si possono bonificare.
-    const credMv = await risolviChiaveDispatch(adminCrea, masterId, corriereRecord.nome_contratto)
+    const credMv = await risolviChiaveDispatch(adminCrea, masterId, corriereRecord.nome_contratto, corriereRecord.id)
     if (!credMv?.api_key) {
       await stornaPrenotazione()
       return NextResponse.json({ error: 'Contratto non configurato correttamente. Contatta l\'assistenza.' }, { status: 400 })

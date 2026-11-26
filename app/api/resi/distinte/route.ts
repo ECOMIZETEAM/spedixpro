@@ -85,8 +85,10 @@ async function righeCatenaPropria(adminDb: any, mioMasterId: string, voci: any[]
     // Il reso del condiviso va fatto gamba-per-gamba sulla catena-fornitore (feature deferita); il costo
     // reale resta sulla gamba dell'owner (corriere reale, non-moovexpress). Qui si salta.
     if ((sp as any)?.corrieri?.tipo === 'moovexpress') continue
-    if (!cache.has(nome)) cache.set(nome, await catenaContratto(adminDb, mioMasterId, owner, nome))
-    for (const liv of cache.get(nome)!) {
+    // Per riga del contratto del pacco, non solo per nome: con due righe omonime (una staccata) la catena cambia.
+    const kc = nome + '|' + (sp as any).corriere_id
+    if (!cache.has(kc)) cache.set(kc, await catenaContratto(adminDb, mioMasterId, owner, nome, { corrierePacco: (sp as any).corriere_id }))
+    for (const liv of cache.get(kc)!) {
       righe.push({
         spedizione_id: sp.id, master_target_id: liv.masterId, master_owner_id: liv.masterId,
         corriere_id: liv.corriereId,
@@ -246,10 +248,10 @@ export async function POST(req: NextRequest) {
     for (const v of (voci || [])) {
       await adminDb.from('spedizioni').update({ stato: 'reso_mittente' }).eq('id', v.id)
       const { data: spD } = await adminDb.from('spedizioni')
-        .select('colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corrieri(nome_contratto)')
+        .select('colli,peso_reale,lunghezza,larghezza,altezza,colli_dettaglio,dest_provincia,dest_cap,dest_paese,dest_citta,corriere_id,corrieri(nome_contratto)')
         .eq('id', v.id).maybeSingle()
       const nomeContratto = (spD as any)?.corrieri?.nome_contratto || null
-      const suoCorriere = await corriereDiMasterPerNome(adminDb, targetMasterId, nomeContratto)
+      const suoCorriere = await corriereDiMasterPerNome(adminDb, targetMasterId, nomeContratto, { corrierePacco: (spD as any)?.corriere_id })
       righe.push({
         spedizione_id: v.id,
         master_target_id: targetMasterId,

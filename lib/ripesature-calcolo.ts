@@ -442,6 +442,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           // Il pacco e' partito: un livello a cui hanno cancellato i prezzi di costo DOPO la partenza paga
           // quelli archiviati (lib/prezzi-archivio.ts, archivioCostoPerPacco).
           partenza: s.created_at || null,
+          corrierePacco: s.corriere_id || null,
         })
         if (errore) { motivo = errore; bloccato = true }
         // Una catena interrotta non e' una catena: i livelli sopra il punto di rottura non ci sono.
@@ -525,7 +526,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           // pagato = quanto risulta scalato al ledger alla creazione. (L'addebito vero in conferma scala
           // il ledger — vedi rettifiche/route.ts; qui si calcola solo la differenza.)
           const { data: lc } = await admin.from('clienti').select('listino_cliente_id').eq('id', liv.ledgerClienteId).maybeSingle()
-          const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto)
+          const corrVend = liv.corriereFornitoreId || await corriereDiMasterPerNome(admin, liv.fornitore, corr!.nome_contratto, { corrierePacco: s.corriere_id })
           pag = arrotonda(pagatoPerCliente.get(liv.ledgerClienteId) || 0)
           if ((lc as any)?.listino_cliente_id && corrVend) {
             // Il ledger e' un cliente del venditore: a contratto tolto dal suo listino, prezzi archiviati.

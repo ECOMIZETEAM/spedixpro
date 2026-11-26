@@ -5,6 +5,7 @@ import { bloccaAgente, isAgente, clientiAgente, nomeAgente } from '@/lib/agente'
 import { contoNatoDaShopify } from '@/lib/conti-shopify'
 import { COLONNE_DATI_NEGOZIO, fondiImpostazioniNegozio, versioneDatiNegozio, type ClienteNegozio } from '@/lib/dati-negozio'
 import { generaPassword } from '@/lib/password'
+import { ordinaOmonime } from '@/lib/contratto-per-nome'
 
 // Assegnazione listino a un cliente/sotto-master: puo' innescare la propagazione a cascata.
 export const maxDuration = 300
@@ -359,12 +360,19 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     // Rimappa le spedizioni sul corriere gemello del genitore; i corrieri del sotto-master
     // senza gemello passano al genitore (per non lasciare le spedizioni senza corriere).
-    const { data: subCorr } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', subId)
-    const { data: parCorr } = await admin.from('corrieri').select('id,nome_contratto').eq('master_id', parentId)
-    const parByNome = new Map((parCorr || []).map((c: any) => [c.nome_contratto, c.id]))
+    // Il gemello è la riga del padre da cui la copia compra (il puntatore): con due righe omonime nel padre (una
+    // staccata, 26/11/2026) il nome da solo poteva spostare lo storico sulla riga sbagliata. Senza puntatore, per
+    // nome come prima, preferendo la riga non staccata.
+    const { data: subCorr } = await admin.from('corrieri').select('id,nome_contratto,fornitore_corriere_id').eq('master_id', subId)
+    const { data: parCorr } = await admin.from('corrieri').select('id,nome_contratto,staccato_il,created_at').eq('master_id', parentId)
+    const parIds = new Set((parCorr || []).map((c: any) => c.id))
+    const gemelloDi = (c: any): string | undefined => {
+      if (c.fornitore_corriere_id && parIds.has(c.fornitore_corriere_id)) return c.fornitore_corriere_id
+      return ordinaOmonime((parCorr || []).filter((p: any) => p.nome_contratto === c.nome_contratto))[0]?.id
+    }
     const corrGemelli: string[] = []  // corrieri del sotto-master rimpiazzati (eliminabili in cascade)
     for (const c of (subCorr || [])) {
-      const twin = parByNome.get((c as any).nome_contratto)
+      const twin = gemelloDi(c)
       if (twin) {
         try { await admin.from('spedizioni').update({ corriere_id: twin }).eq('corriere_id', (c as any).id) } catch {}
         corrGemelli.push((c as any).id)

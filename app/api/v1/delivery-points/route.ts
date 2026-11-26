@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   if (corriere.tipo === 'moovexpress') {
     const { data: cliente } = await admin.from('clienti').select('master_id').eq('id', ctx.clienteId).maybeSingle()
     const { risolviChiaveDispatch } = await import('@/lib/condivisione-catena')
-    const credMv = await risolviChiaveDispatch(admin, (cliente as any)?.master_id, corriere.nome_contratto)
+    const credMv = await risolviChiaveDispatch(admin, (cliente as any)?.master_id, corriere.nome_contratto, corriere.id)
     if (!credMv?.api_key) return NextResponse.json({ error: 'Contratto non configurato correttamente' }, { status: 400 })
     const { puntiMoovexpress } = await import('@/lib/moovexpress')
     const q = new URLSearchParams()

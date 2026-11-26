@@ -59,6 +59,8 @@ export default function CorrieriPage() {
   const [corrieri, setCorrieri] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [confermaElimina, setConfermaElimina] = useState<string | null>(null)
+  // STACCA (26/11/2026): il contratto scelto, l'anteprima coi numeri, e com'è andata.
+  const [stacca, setStacca] = useState<{ c: any; dati?: any; errore?: string; eseguendo?: boolean } | null>(null)
   const [eliminando, setEliminando] = useState(false)
   const [popup, setPopup] = useState<any>(null)
   const [salvandoPopup, setSalvandoPopup] = useState(false)
@@ -80,6 +82,30 @@ export default function CorrieriPage() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ attivo: !attivoAttuale })
     })
+  }
+
+  async function apriStacca(c: any) {
+    setStacca({ c })
+    try {
+      const r = await fetch('/api/corrieri/' + c.id + '/stacca')
+      const d = await r.json()
+      setStacca(r.ok ? { c, dati: d } : { c, errore: d?.error || 'Non sono riuscito a leggere il contratto.' })
+    } catch { setStacca({ c, errore: 'Non sono riuscito a leggere il contratto.' }) }
+  }
+
+  async function confermaStacca() {
+    if (!stacca?.c) return
+    setStacca({ ...stacca, eseguendo: true, errore: undefined })
+    try {
+      const r = await fetch('/api/corrieri/' + stacca.c.id + '/stacca', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conferma: true }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setStacca({ ...stacca, eseguendo: false, errore: d?.error || 'Non è stato staccato: riprova.' }); return }
+      const quando = d?.staccato_il || new Date().toISOString()
+      setCorrieri(prev => prev.map(x => x.id === stacca.c.id ? { ...x, attivo: false, staccato_il: quando, staccabile: false } : x))
+      setStacca(null)
+    } catch { setStacca({ ...stacca, eseguendo: false, errore: 'Non è stato staccato: riprova.' }) }
   }
 
   async function confermaEliminazione() {
@@ -169,7 +195,7 @@ export default function CorrieriPage() {
             <div style={{padding:'30px',textAlign:'center',color:'#1a1a1a',fontSize:'13px'}}>Caricamento...</div>
           ) : !corrieri.length ? (
             <div style={{padding:'30px',textAlign:'center',color:'#1a1a1a',fontSize:'13px'}}>Nessun contratto — aggiungine uno</div>
-          ) : corrieri.map(c => (
+          ) : [...corrieri].sort((a, b) => (a.staccato_il ? 1 : 0) - (b.staccato_il ? 1 : 0)).map(c => (
             <div key={c.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 18px',borderBottom:'1px solid #f5f5f5',gap:'10px'}}>
               <div style={{display:'flex',alignItems:'center',gap:'12px',flex:1,minWidth:0}}>
                 {iconaCorriere(c.nome_contratto) ? (
@@ -180,7 +206,9 @@ export default function CorrieriPage() {
                 <div style={{minWidth:0}}>
                   <div style={{fontSize:'13px',fontWeight:'600',color:'#1a1a1a'}}>{c.nome_contratto}</div>
                   <div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'4px'}}>
-                    {c.sospeso_sopra
+                    {c.staccato_il
+                      ? <span title="Staccato: non si vende e non si spedisce più. Resta per i pacchi già partiti, che seguono il fornitore di prima." style={{background:'#f3f4f6',color:'#4b5563',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>Staccato il {new Date(c.staccato_il).toLocaleDateString('it-IT')}</span>
+                      : c.sospeso_sopra
                       ? <span title="Un master superiore lo ha messo in pausa: lo sblocco tocca a lui. Il cliente non lo vede; il tuo listino resta salvato." style={{background:'#fef3c7',color:'#b45309',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>⏸ In pausa (livello superiore)</span>
                       : <span style={{background:c.attivo?'#f0fdf4':'#fef2f2',color:c.attivo?'#16a34a':'#dc2626',padding:'2px 9px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>{c.attivo?'Attivo':'In pausa'}</span>}
                     <span style={{background:'#fff7ed',color:'#f97316',padding:'2px 8px',borderRadius:'20px',fontSize:'11px',fontWeight:'700'}}>L{c.livello}</span>
@@ -188,6 +216,9 @@ export default function CorrieriPage() {
                   </div>
                 </div>
               </div>
+              {c.staccato_il ? (
+                <div style={{fontSize:'11px',color:'#6b7280',maxWidth:'220px',textAlign:'right',flexShrink:0}}>Resta per i pacchi già partiti</div>
+              ) : (
               <div style={{display:'flex',alignItems:'center',gap:'6px',flexShrink:0}}>
                 {c.sospeso_sopra ? (
                   <span title="Riattivabile solo dal master che lo ha messo in pausa (segue la gerarchia)." style={{padding:'5px 10px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',background:'#f3f4f6',color:'#9ca3af',cursor:'not-allowed'}}>🔒 In pausa a monte</span>
@@ -203,9 +234,14 @@ export default function CorrieriPage() {
                 )}
                 <button onClick={() => apriImpostazioni(c)} title="Impostazioni"
                   style={{padding:'5px 10px',background:'#fff7ed',color:'#f97316',borderRadius:'6px',fontSize:'11px',border:'1px solid #fed7aa',cursor:'pointer'}}>⚙ Impostazioni</button>
+                {c.staccabile && (
+                  <button onClick={() => apriStacca(c)} title="Smetti di comprare questo contratto da questo fornitore, per comprarlo da un altro"
+                    style={{padding:'5px 9px',background:'#fff',color:'#374151',borderRadius:'6px',fontSize:'11px',border:'1px solid #d1d5db',cursor:'pointer'}}>Stacca</button>
+                )}
                 <button onClick={() => setConfermaElimina(c.id)} title="Elimina"
                   style={{padding:'5px 9px',background:'#fef2f2',color:'#dc2626',borderRadius:'6px',fontSize:'11px',border:'1px solid #fecaca',cursor:'pointer'}}>Elimina</button>
               </div>
+              )}
             </div>
           ))}
         </div>
@@ -317,6 +353,39 @@ export default function CorrieriPage() {
             <div style={{display:'flex',justifyContent:'space-between',padding:'16px 22px',borderTop:'1px solid #f0f0f0',position:'sticky',bottom:0,background:'#fff',zIndex:2}}>
               <button onClick={()=>setPopup(null)} style={{padding:'9px 20px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'8px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>Chiudi</button>
               <button onClick={salvaImpostazioni} disabled={salvandoPopup} style={{padding:'9px 22px',background:'#f97316',color:'#fff',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'700',cursor:'pointer',opacity:salvandoPopup?0.7:1}}>{salvandoPopup?'Salvataggio...':'Salva'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stacca && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'16px'}}>
+          <div style={{background:'#fff',borderRadius:'10px',padding:'24px',maxWidth:'520px',width:'100%',maxHeight:'90vh',overflowY:'auto'}}>
+            <div style={{fontSize:'16px',fontWeight:'700',color:'#1a1a1a',marginBottom:'6px'}}>Staccare «{stacca.c.nome_contratto}»?</div>
+            {!stacca.dati && !stacca.errore && <div style={{fontSize:'13px',color:'#666',padding:'12px 0'}}>Controllo il contratto…</div>}
+            {stacca.dati && (() => { const d = stacca.dati; return (
+              <div style={{fontSize:'13px',color:'#374151',lineHeight:1.55}}>
+                {d.fornitore && <div style={{marginBottom:'12px',color:'#6b7280'}}>Oggi lo compri da <b>{d.fornitore}</b>{d.viaCodice ? ' (via codice)' : ''}. Negli ultimi 30 giorni: {d.spedizioni30} spedizioni.</div>}
+                {!d.puoStaccare ? (
+                  <div style={{background:'#fef3c7',color:'#92400e',padding:'10px 12px',borderRadius:'8px'}}>{d.motivo}</div>
+                ) : (
+                  <ul style={{margin:'0 0 4px',paddingLeft:'18px'}}>
+                    <li style={{marginBottom:'6px'}}>Da subito <b>non si vende e non si spedisce più</b>, da nessuna parte: portale, API, import e negozi.</li>
+                    <li style={{marginBottom:'6px'}}>I pacchi già partiti continuano come sempre{d.pacchiAperti ? <> (<b>{d.pacchiAperti}</b> ancora in viaggio)</> : null}: tracking, giacenze, resi, rettifiche e contrassegni seguono il fornitore di prima, che continuerà ad addebitarteli finché ce ne saranno, e tu ai tuoi clienti.</li>
+                    {d.listiniClienti > 0 && <li style={{marginBottom:'6px'}}>È in <b>{d.listiniClienti}</b> tuoi listini clienti ({d.clientiSuQueiListini} clienti): da subito non lo vedono più. Quando compri il contratto nuovo, mettilo nei loro listini.</li>}
+                    {d.restanoDalloStessoFornitore?.length > 0 && <li style={{marginBottom:'6px'}}>Gli altri contratti che compri da {d.fornitore || 'questo fornitore'} restano come sono ({d.restanoDalloStessoFornitore.join(', ')}).</li>}
+                    <li style={{marginBottom:'6px'}}>Dopo puoi comprare lo stesso contratto da un altro fornitore.</li>
+                    <li><b>Non si annulla</b>: per riaverlo da questo fornitore dovrai ricomprarlo.</li>
+                  </ul>
+                )}
+              </div>
+            ) })()}
+            {stacca.errore && <div style={{background:'#fef2f2',color:'#b91c1c',padding:'10px 12px',borderRadius:'8px',fontSize:'13px',marginTop:'10px'}}>{stacca.errore}</div>}
+            <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'20px'}}>
+              <button onClick={() => setStacca(null)} disabled={stacca.eseguendo} style={{padding:'9px 18px',background:'#f5f5f5',border:'1px solid #e8e8e8',borderRadius:'6px',fontSize:'13px',fontWeight:'600',color:'#1a1a1a',cursor:'pointer'}}>{stacca.dati?.puoStaccare ? 'Annulla' : 'Chiudi'}</button>
+              {stacca.dati?.puoStaccare && (
+                <button onClick={confermaStacca} disabled={stacca.eseguendo} style={{padding:'9px 18px',background:'#1f2937',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',color:'#fff',cursor:'pointer',opacity:stacca.eseguendo?0.7:1}}>{stacca.eseguendo ? 'Stacco…' : 'Sì, stacca'}</button>
+              )}
             </div>
           </div>
         </div>

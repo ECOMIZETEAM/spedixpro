@@ -345,7 +345,8 @@ export function venditoreSuQuestoPortale(cred: MoovexpressCred): boolean {
 // `memo`: una verifica per chiave e una risoluzione per contratto a giro, non una per pacco.
 export type MemoTrackingLocale = {
   accessi: Map<string, Promise<any>>
-  chiaveDi: (masterId: string, nomeContratto: string) => Promise<MoovexpressCred | null>
+  // `corriereId`: la riga del contratto del pacco, per leggere la catena dai puntatori (lib/condivisione-catena.ts).
+  chiaveDi: (masterId: string, nomeContratto: string, corriereId?: string | null) => Promise<MoovexpressCred | null>
 }
 export async function trackingMoovexpressLocale(
   admin: any, cred: MoovexpressCred, tracking: string, memo: MemoTrackingLocale, salto = 1,
@@ -364,7 +365,7 @@ export async function trackingMoovexpressLocale(
   const trk = String(tracking).trim().replace(/[^A-Za-z0-9._-]/g, '')
   if (!trk) throw new Error('Numero di tracking mancante o non valido')
   const { data: sped } = await admin.from('spedizioni')
-    .select('id,stato,numero,tracking_number,master_id,giacenza_data,giacenza_stato,giacenza_motivo,corrieri(tipo,nome_contratto)')
+    .select('id,stato,numero,tracking_number,master_id,corriere_id,giacenza_data,giacenza_stato,giacenza_motivo,corrieri(tipo,nome_contratto)')
     .eq('cliente_id', ctx.clienteId)
     .or(`tracking_number.eq.${trk},numero.eq.${trk}`)
     .limit(1).maybeSingle()
@@ -393,7 +394,7 @@ export async function trackingMoovexpressLocale(
   // Un salto in piu' (il tetto evita di girare per sempre su una catena chiusa ad anello).
   if (sped.corrieri?.tipo === 'moovexpress' && salto < 6) {
     try {
-      const credSu = await memo.chiaveDi(sped.master_id, sped.corrieri.nome_contratto)
+      const credSu = await memo.chiaveDi(sped.master_id, sped.corrieri.nome_contratto, sped.corriere_id)
       if (credSu?.api_key) {
         const trkSu = String(sped.tracking_number || sped.numero || '')
         const su = venditoreSuQuestoPortale(credSu)

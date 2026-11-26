@@ -62,7 +62,7 @@ export type ContestoCompratore = {
 }
 
 // Del JSON delle credenziali servono solo fornitore e contratto d'origine dei ponti: la chiave non si legge.
-const RIGA_CORRIERE = 'id,master_id,nome_contratto,tipo,proprio,attivo,settings,fornitore:credenziali->>fornitore_master_id,origine:credenziali->>corriere_origine_id'
+const RIGA_CORRIERE = 'id,master_id,nome_contratto,tipo,proprio,attivo,settings,staccato_il,fornitore:credenziali->>fornitore_master_id,origine:credenziali->>corriere_origine_id'
 
 // I master sotto `rootId`, letti in modo stretto (lib/rete-masters.ts ingoia gli errori, e qui un elenco
 // vuoto per errore lascerebbe in piedi copie che spediscono sull'account di chi le ha tolte).
@@ -143,7 +143,15 @@ export async function valutaContrattoPerCompratore(
   const nome = nomeContrattoNormalizzato(corr.nome_contratto)
   if (venditore.rimossi.has(nome)) return salta('il contratto è in pausa o tolto sopra di te: adesso non lo puoi vendere')
 
-  const sue = ctx.righe.filter((r: any) => nomeContrattoNormalizzato(r.nome_contratto) === nome)
+  // STACCATO DAL COLLEGATO (26/11/2026, scripts/stacca-contratto.sql). Il collegato ha smesso di comprare questo
+  // contratto da questo venditore: la sua riga resta per i pacchi gia' partiti, ma il contratto non si ricrea e
+  // non si riaccende, nemmeno se resta nel listino d'ingrosso. Senza questo, il salvataggio successivo del listino
+  // del venditore glielo avrebbe ridato.
+  if (ctx.righe.some((r: any) => r.staccato_il && r.fornitore === seller && r.origine === corr.id)) {
+    return salta('il collegato si è staccato da questo contratto', 'riga staccata dal compratore')
+  }
+  // Le righe staccate non contano come "ce l'ha già": il collegato puo' ricomprare il contratto da un altro.
+  const sue = ctx.righe.filter((r: any) => nomeContrattoNormalizzato(r.nome_contratto) === nome && !r.staccato_il)
   if (!sue.length) return { stato: 'da_creare' }
 
   const ponte = sue.find((r: any) => ctx.ponti.has(r.id) && r.fornitore === seller && r.origine === corr.id)
@@ -167,7 +175,7 @@ export async function valutaContrattoPerCompratore(
   // suo master. Se ne spunta una che non risulta tolta, qualcosa non torna: non si tocca niente. E non si
   // tocca mai una riga del venditore stesso (può stare nella rete del compratore, come Wave sotto MULTI).
   const candidati = ctx.righeSotto.filter((r: any) =>
-    nomeContrattoNormalizzato(r.nome_contratto) === nome && r.tipo !== 'moovexpress' && r.proprio !== true)
+    nomeContrattoNormalizzato(r.nome_contratto) === nome && r.tipo !== 'moovexpress' && r.proprio !== true && !r.staccato_il)
   if (candidati.some((r: any) => r.master_id === seller)) return salta(NON_SOSTITUIBILE, 'il venditore ha una copia con lo stesso nome nella rete del compratore')
   for (const masterId of Array.from(new Set(candidati.map((r: any) => r.master_id as string)))) {
     const m = await contrattiRimossiConMotivo(masterId, admin, { stretto: true })
@@ -241,10 +249,15 @@ async function materializzaContratto(
 
   // Il ponte del compratore per QUESTO contratto venduto da QUESTO venditore.
   const { data: corrBuyers, error: eB } = await admin.from('corrieri')
-    .select('id,attivo,settings,fornitore:credenziali->>fornitore_master_id,origine:credenziali->>corriere_origine_id')
+    .select('id,attivo,settings,staccato_il,fornitore:credenziali->>fornitore_master_id,origine:credenziali->>corriere_origine_id')
     .eq('master_id', buyer).eq('tipo', 'moovexpress')
   if (eB) return { ok: false, reason: 'lettura dei contratti del collegato non riuscita' }
-  const esistente = (corrBuyers || []).find((c: any) => c.origine === corriereId && c.fornitore === seller) as any
+  // Mai una riga staccata (26/11/2026): non le si propaga il costo (sono i prezzi dei suoi pacchi gia' partiti) e
+  // non la si riaccende. La valutazione la esclude gia'; qui e' la seconda serratura.
+  if ((corrBuyers || []).some((c: any) => c.staccato_il && c.origine === corriereId && c.fornitore === seller)) {
+    return { ok: false, reason: 'il collegato si è staccato da questo contratto' }
+  }
+  const esistente = (corrBuyers || []).find((c: any) => c.origine === corriereId && c.fornitore === seller && !c.staccato_il) as any
   let buyerCorrId = esistente?.id as string | undefined
   if (opt.soloCosto && !buyerCorrId) return { ok: false, reason: 'il contratto non è più sul portale del collegato' }
 
@@ -299,7 +312,7 @@ async function materializzaContratto(
     // storico, niente prezzi), insieme alla chiave se l'ha emessa lui, e aggiorna i prezzi su quello che
     // resta: il secondo salvataggio aggiorna, come il terzo e i successivi.
     const { data: gemelli, error: eG } = await admin.from('corrieri').select('id,created_at')
-      .eq('master_id', buyer).eq('tipo', 'moovexpress')
+      .eq('master_id', buyer).eq('tipo', 'moovexpress').is('staccato_il', null)
       .eq('credenziali->>fornitore_master_id', seller).eq('credenziali->>corriere_origine_id', corriereId)
     if (!eG && (gemelli || []).length > 1) {
       const primo = [...(gemelli as any[])].sort((a, b) =>

@@ -39,6 +39,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // master_id, che ce l'hanno anche cliente/agente/autista. Solo chi gestisce la rete.
   if (!utente?.master_id || !gestisceLaRete(utente)) return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
   const body = await req.json()
+  // Un contratto STACCATO non si riaccende (26/11/2026): il database lo terrebbe comunque spento, ma qui lo si dice
+  // invece di rispondere "fatto" a un Riattiva che non cambia niente.
+  if (body.attivo === true) {
+    const { data: st } = await supabase.from('corrieri').select('staccato_il').eq('id', id).eq('master_id', utente.master_id).maybeSingle()
+    if (st?.staccato_il) return NextResponse.json({ error: 'Questo contratto è stato staccato: non si riattiva. Se ti serve di nuovo, ricompralo.' }, { status: 400 })
+  }
   const campi: any = {}
   if (body.attivo !== undefined) campi.attivo = body.attivo
   if (body.multicollo !== undefined) campi.multicollo = body.multicollo

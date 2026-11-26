@@ -100,8 +100,11 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
   //    Le IMPOSTAZIONI DI CONTRATTO (agevolazione peso, misure/volume massimo, scaglioni,
   //    peso reale soglia) si PROPAGANO dal padre; il MITTENTE resta del sotto-master.
   const { data: corrSrc } = corriereIds.length ? await admin.from('corrieri').select('*').in('id', corriereIds) : { data: [] }
-  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings,proprio,tipo').eq('master_id', subMasterId)
-  const mappaCorrMio = new Map((corrMiei || []).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c]))
+  const { data: corrMiei } = await admin.from('corrieri').select('id,nome_contratto,settings,proprio,tipo,staccato_il,fornitore_corriere_id').eq('master_id', subMasterId)
+  // Le righe STACCATE del sotto-master (26/11/2026) non si agganciano: restano per i suoi pacchi già partiti, coi
+  // prezzi e le zone di allora. E un contratto del padre da cui il sotto-master si è staccato non gli si ricrea.
+  const mappaCorrMio = new Map((corrMiei || []).filter((c: any) => !c.staccato_il).map((c: any) => [(c.nome_contratto || '').trim().toLowerCase(), c]))
+  const staccatiDalPadre = new Set((corrMiei || []).filter((c: any) => c.staccato_il && c.fornitore_corriere_id).map((c: any) => c.fornitore_corriere_id))
   const mapCorr = new Map<string, string>()
   // Contratti DISABILITATI dal padre per questo sotto-master (masters_corrieri_abilitati.abilitato=false):
   // NON vanno materializzati. Il flag è la fonte di verità della visibilità. Senza questo controllo la
@@ -131,9 +134,14 @@ export async function copiaListinoAlSottoMaster(admin: any, subMasterId: string,
     try { ponti = await pontiCodiceDi(admin, subMasterId) }
     catch (e: any) { console.error('[copia-listino]', subMasterId, e?.message); return { ok: false, reason: 'ponti codice non leggibili: sotto-master non toccato' } }
   }
+  // I nomi dei ponti codice VIVI: un ponte staccato non governa più il nome (la riga omonima che il sotto-master
+  // compra adesso dal padre deve ricevere i suoi prezzi).
+  const nomiPontiVivi = new Set((corrMiei || []).filter((c: any) => ponti.ids.has(c.id) && !c.staccato_il)
+    .map((c: any) => (c.nome_contratto || '').trim().toLowerCase()))
   for (const c of (corrSrc || [])) {
     const key = (c.nome_contratto || '').trim().toLowerCase()
-    if (ponti.nomi.has(key)) continue
+    if (nomiPontiVivi.has(key)) continue
+    if (!mappaCorrMio.has(key) && staccatiDalPadre.has(c.id)) continue
     if (disabilitati.has(c.id)) {
       // Disabilitato dal padre: salto la materializzazione e, se esisteva già, lo rimuovo più sotto.
       const d: any = mappaCorrMio.get(key)

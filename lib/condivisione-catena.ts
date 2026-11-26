@@ -2,7 +2,7 @@ import { calcolaPrezzoCorriereDettaglio, calcolaPrezzoListino } from '@/lib/pric
 import { registraMovimentoMaster, descrizioneSpedizione } from '@/lib/movimenti'
 import { ricordaNellaRichiesta, chiaveDi } from '@/lib/memo-richiesta'
 import { accessoriDelLivello } from '@/lib/cascata'
-import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
+import { corriereDiMasterPerNome, ordinaOmonime } from '@/lib/contratto-per-nome'
 import { pesoSuReale } from '@/lib/agevolazione-misure'
 
 /* CATENA DEL FORNITORE DIRETTO per i contratti CONDIVISI (corrieri `tipo='moovexpress'`).
@@ -40,11 +40,14 @@ export interface LivelloCondivisione {
 
 const normNome = (s: any) => String(s || '').trim().toLowerCase()
 
-// Corrieri di un master per quel contratto (confronto normalizzato, come lib/contratto-per-nome.ts).
+// Corrieri di un master per quel contratto (confronto normalizzato, come lib/contratto-per-nome.ts), in un ordine
+// fisso: prima le righe non staccate, poi le piu' vecchie (ordinaOmonime). Un master che si e' staccato da un
+// fornitore e ha ricomprato lo stesso contratto da un altro ha due righe omonime: la catena per nome serve le
+// spedizioni nuove e deve prendere quella attiva. Prima l'ordine era quello in cui il database le restituiva.
 async function corrieriPerNome(admin: any, masterId: string, nome: string): Promise<any[]> {
   const { data } = await admin.from('corrieri')
-    .select('id,tipo,proprio,credenziali,nome_contratto').eq('master_id', masterId)
-  return (data || []).filter((c: any) => normNome(c.nome_contratto) === normNome(nome))
+    .select('id,tipo,proprio,credenziali,nome_contratto,staccato_il,created_at').eq('master_id', masterId)
+  return ordinaOmonime((data || []).filter((c: any) => normNome(c.nome_contratto) === normNome(nome)))
 }
 
 // Vertice = attaccato alla piattaforma (nonno null), identico alla condizione di fn_conto_di.
@@ -65,8 +68,13 @@ export async function risolviCatenaCondivisione(
 
   for (let i = 0; i < 20 && cur && !visti.has(cur); i++) {
     visti.add(cur)
-    const corrieri = await corrieriPerNome(admin, cur, nomeContratto)
-    if (!corrieri.length) break
+    const omonime = await corrieriPerNome(admin, cur, nomeContratto)
+    if (!omonime.length) break
+    // Le righe staccate (26/11/2026) restano per i pacchi gia' partiti: se il master ha anche una riga attiva con
+    // quel nome, la catena delle spedizioni nuove passa da quella. Senza il filtro, una copia vera staccata
+    // veniva presa per "detentore" (la ricerca qui sotto guarda il tipo, non l'ordine) e la catena si fermava.
+    const vive = omonime.filter((c: any) => !c.staccato_il)
+    const corrieri = vive.length ? vive : omonime
 
     // OWNER REALE: ha un corriere NON ponte per questo contratto → paga il corriere vero.
     const reale = corrieri.find((c: any) => c.tipo !== 'moovexpress')
@@ -288,10 +296,17 @@ function ordinaGambe(legs: GambaSpedizione[]): GambaSpedizione[] {
  * salto codice (misconfig): il chiamante allora NON dispaccia. SOLA LETTURA. */
 export interface ChiaveDispatch { api_key: string; base_url?: string; fornitore_master_id?: string; corriere_origine_id?: string }
 
+// `corriereId`: la riga del contratto (quella della spedizione nuova, o quella del pacco per tracking ed
+// etichette). Con la riga la catena si legge dai puntatori, cioe' da chi quella riga compra davvero: con due righe
+// omonime (una staccata, una ricomprata da un altro fornitore, 26/11/2026) la catena per nome poteva mandare la
+// spedizione nuova al fornitore di prima, o chiedere il tracking di un pacco vecchio a quello nuovo. Senza riga,
+// la catena per nome come prima.
 export async function risolviChiaveDispatch(
-  admin: any, masterOriginante: string, nomeContratto: string,
+  admin: any, masterOriginante: string, nomeContratto: string, corriereId?: string | null,
 ): Promise<ChiaveDispatch | null> {
-  const catena = await risolviCatenaCondivisione(admin, masterOriginante, nomeContratto)
+  const catena = corriereId
+    ? await catenaDaCorriere(admin, corriereId, { master: masterOriginante, nomeContratto })
+    : await risolviCatenaCondivisione(admin, masterOriginante, nomeContratto)
   const primoCodice = catena.find(l => l.ruolo === 'codice')
   if (!primoCodice) return null
   const { data: c }: any = await admin.from('corrieri').select('credenziali').eq('id', primoCodice.corriereId).maybeSingle()

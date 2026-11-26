@@ -424,7 +424,7 @@ export async function recuperaEtichettaMancante(
       if (corr?.tipo !== 'moovexpress') return attuale
       // La chiave e' quella con cui la riga e' stata creata (app/api/spedizioni/crea, ramo moovexpress).
       const { risolviChiaveDispatch } = await import('@/lib/condivisione-catena')
-      const cred = await risolviChiaveDispatch(admin, masterId, corr.nome_contratto)
+      const cred = await risolviChiaveDispatch(admin, masterId, corr.nome_contratto, sped.corriere_id)
       if (!cred) return attuale
       const { etichettaMoovexpress } = await import('@/lib/moovexpress')
       const lab = await etichettaMoovexpress(cred as any, String(raw.label_url))

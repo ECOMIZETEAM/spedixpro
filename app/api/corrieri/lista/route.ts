@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase'
-import { vedeLaRete } from '@/lib/ruoli'
+import { vedeLaRete, eTitolareOAdmin } from '@/lib/ruoli'
 import { isAgente } from '@/lib/agente'
 import { siglaContratto } from '@/lib/corriere-logo'
 import { createAdminSupabase } from '@/lib/supabase-admin'
@@ -20,7 +20,7 @@ export async function GET() {
   // perche' la pagina Corrieri ci apre le credenziali delle sue integrazioni.
   const sigla = isAgente(utente)
   const { data } = await supabase.from('corrieri')
-    .select('id,nome_contratto,tipo,multicollo,inserimento_ritiri,settings,attivo,livello,proprio')
+    .select('id,nome_contratto,tipo,multicollo,inserimento_ritiri,settings,attivo,livello,proprio,staccato_il')
     .eq('master_id', utente?.master_id)
     .order('nome_contratto')
   // Contratti messi in pausa da un master SOPRA: il master li VEDE comunque qui, marcati
@@ -30,12 +30,24 @@ export async function GET() {
   const sospesi = await contrattiSospesiSopra(utente?.master_id)
   // Il codice del contratto (CT-…) allo staff del master, non all'agente: lib/codice-contratto.
   const codici = sigla ? new Map<string, string>() : await codiciContratti(createAdminSupabase(), utente?.master_id)
+  // DA CHI LO COMPRA (26/11/2026): serve al pulsante "Stacca", che c'è solo sui contratti comprati da un altro
+  // master. Il puntatore non è leggibile dal portale (permessi per colonna): lo si legge col client di servizio,
+  // per le sole righe di questo master già lette sopra.
+  const comprati = new Set<string>()
+  const ids = (data || []).map((c: any) => c.id)
+  if (ids.length && !sigla) {
+    const { data: pt } = await createAdminSupabase().from('corrieri').select('id,fornitore_corriere_id').in('id', ids).eq('master_id', utente?.master_id)
+    for (const r of (pt || []) as any[]) if (r.fornitore_corriere_id) comprati.add(r.id)
+  }
+  const puoStaccare = eTitolareOAdmin(utente)
   const _ms = Date.now() - _t0
   if (_ms > 300) console.log('[CORRIERI][TEMPI]', _ms + 'ms', 'istanza=' + Math.round(process.uptime()) + 's', 'contratti=' + (data || []).length)
   return NextResponse.json((data || []).map((c: any) => ({
     ...c,
     ...(sigla ? { tipo: siglaContratto(c.tipo) } : {}),
     ...(codici.has(c.id) ? { codice: codici.get(c.id) } : {}),
-    sospeso_sopra: sospesoDallaCatena(c.nome_contratto, sospesi),
+    sospeso_sopra: !c.staccato_il && sospesoDallaCatena(c.nome_contratto, sospesi),
+    comprato: comprati.has(c.id),
+    staccabile: puoStaccare && comprati.has(c.id) && !c.proprio && !c.staccato_il,
   })))
 }
