@@ -30,6 +30,9 @@ export const PAGINE_PROVA = new Set([
   // 26/11 notte, le Impostazioni. La Filiale no: il suo «Salva» non salva niente (pagina finta, da decidere con Lorenzo)
   '/dashboard/impostazioni/logo', '/dashboard/impostazioni/permessi', '/dashboard/impostazioni/staff',
   '/dashboard/impostazioni/staff/crea',
+  // 26/11 notte, la Logistica: il vestito le sta già bene così
+  '/dashboard/logistica/addebiti', '/dashboard/logistica/carico', '/dashboard/logistica/da-preparare',
+  '/dashboard/logistica/listino', '/dashboard/logistica/posti', '/dashboard/logistica/stock',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro
