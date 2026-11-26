@@ -63,3 +63,54 @@ export function listiniDopoPartenza(listinoOggi: string | null | undefined, sped
   for (const l of [listinoOggi, sped?.listino_cliente_id]) if (l && !out.includes(l)) out.push(l)
   return out
 }
+
+// ── IL COSTO DI UN MASTER (Listino Corrieri) ───────────────────────────────────────────────────────
+//
+// Stessa regola, un livello sopra: dopo la partenza il master paga il SUO costo anche se le fasce del suo
+// Listino Corrieri sono state cancellate ("Disattiva per sotto-master" del padre, listino svuotato o
+// eliminato). Il database le copia in `listini_corrieri_archivio` (scripts/archivio-prezzi-costo-master.sql).
+// Prima il reso del master ripiegava su quanto aveva pagato all'andata, contrassegno compreso, e la
+// rettifica sul listino del padre o si fermava "non calcolabile".
+//
+// L'unita' qui e' la RIGA DEL CONTRATTO, non la coppia listino × contratto: il costo di un master si legge
+// da tutte le fasce della sua riga, in qualunque suo listino stiano (calcolaPrezzoCorriereDettaglio), e le
+// fasce stanno sempre sulla riga dello stesso master del listino.
+
+export type ArchivioCosto = { fasce: any[]; supplementi: any[]; agganci: any[] }
+
+// Il contratto ha ancora fasce di costo? Se si', il costo si legge da li', come sempre.
+export async function haFasceCostoVive(db: any, corriereId: string): Promise<boolean> {
+  const { data, error } = await db.from('listini_corrieri_fasce').select('id').eq('corriere_id', corriereId).limit(1)
+  // Lettura fallita = "ci sono": l'archivio non deve prendere il posto di prezzi che ci sono.
+  if (error) return true
+  return (data || []).length > 0
+}
+
+// Se e solo se il contratto non ha piu' nessuna fascia di costo, le sue righe archiviate. Altrimenti null.
+// Col client di SERVIZIO: l'archivio non e' leggibile da nessun utente.
+export async function archivioCostoSeTolto(db: any, corriereId: string): Promise<ArchivioCosto | null> {
+  if (!corriereId || await haFasceCostoVive(db, corriereId)) return null
+  const { data, error } = await db.from('listini_corrieri_archivio').select('tabella,riga').eq('corriere_id', corriereId)
+  if (error || !data?.length) return null
+  const di = (t: string) => (data as any[]).filter(r => r.tabella === t).map(r => r.riga).sort(perId)
+  const fasce = di('listini_corrieri_fasce')
+  if (!fasce.length) return null
+  return { fasce, supplementi: di('listini_corrieri_supplementi'), agganci: di('listini_corrieri_corrieri') }
+}
+
+// Ordine per id come `.order('id')` del database: con righe doppie vince la stessa che vinceva nel listino.
+// Confronto semplice e non localeCompare: gli id sono uuid in minuscolo, e il database li confronta byte
+// per byte.
+export function perId(a: any, b: any): number {
+  const x = String(a?.id ?? ''), y = String(b?.id ?? '')
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+// Le righe giacenza (apertura e servizi) del Listino Corrieri di un contratto i cui prezzi di costo sono
+// stati cancellati, in ordine di id come le legge il listino. null = il contratto ha ancora fasce di
+// costo, e le righe si leggono dal listino come sempre. La usano sia il prezzo ADDEBITATO
+// (lib/giacenza-cascata.ts) sia quello MOSTRATO nel dettaglio giacenza: devono restare uguali.
+export async function giacenzaCostoArchiviata(db: any, corriereId: string): Promise<any[] | null> {
+  const arch = await archivioCostoSeTolto(db, corriereId)
+  return arch ? arch.supplementi.filter((s: any) => s.tipo === 'giacenza' || s.tipo === 'giacenza_apertura') : null
+}

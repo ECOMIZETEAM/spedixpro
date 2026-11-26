@@ -10,6 +10,7 @@ import { gambePerTracking } from '@/lib/condivisione-catena'
 // che prima registrava le richieste con costo zero.
 import { chiaveServizio, prezziVuoti, leggiPrezzi, leggiPrezziDaListino, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
 import { noloCliente, noloMaster } from '@/lib/reso-prezzi'
+import { giacenzaCostoArchiviata } from '@/lib/prezzi-archivio'
 
 // Gestione di una singola giacenza (dettaglio "Gestisci").
 // Flusso a due attori: il cliente sceglie l'operazione (riconsegna / riconsegna a
@@ -33,13 +34,18 @@ async function leggiPrezziMaster(admin: any, corriereId: string | null) {
   // Come lib/giacenza-cascata: SOLO i listini del master proprietario del contratto, cosi' il
   // prezzo mostrato e' esattamente quello impostato nel suo Listino Corrieri (niente righe
   // "fantasma" appartenenti al listino di un altro master).
-  const { data: corrOwner } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
-  const { data: listiniOwner } = await admin.from('listini_corrieri').select('id').eq('master_id', (corrOwner as any)?.master_id || '')
-  const idsOwner = (listiniOwner || []).map((l: any) => l.id)
-  if (!idsOwner.length) return out
-  const { data: suppl } = await admin.from('listini_corrieri_supplementi')
-    .select('tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('listino_id', idsOwner).in('tipo', ['giacenza', 'giacenza_apertura'])
-    .order('id', { ascending: true })
+  // Prezzi di costo cancellati: quelli archiviati, come li addebita lib/giacenza-cascata.
+  let suppl: any[] | null = await giacenzaCostoArchiviata(admin, corriereId)
+  if (!suppl) {
+    const { data: corrOwner } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
+    const { data: listiniOwner } = await admin.from('listini_corrieri').select('id').eq('master_id', (corrOwner as any)?.master_id || '')
+    const idsOwner = (listiniOwner || []).map((l: any) => l.id)
+    if (!idsOwner.length) return out
+    const { data } = await admin.from('listini_corrieri_supplementi')
+      .select('tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('listino_id', idsOwner).in('tipo', ['giacenza', 'giacenza_apertura'])
+      .order('id', { ascending: true })
+    suppl = data
+  }
   let aperturaSet = false
   const servizioSet: Record<string, boolean> = {}
   for (const s of (suppl || [])) {

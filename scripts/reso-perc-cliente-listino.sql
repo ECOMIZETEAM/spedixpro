@@ -1,6 +1,7 @@
 -- LA PERCENTUALE DEL RESO DEL CLIENTE DALLO STESSO LISTINO DEL SUO NOLO (25/11/2026).
 --
--- Va DOPO scripts/archivio-prezzi-clienti.sql, e subito PRIMA del rilascio del codice "si paga sempre".
+-- Va DOPO scripts/archivio-prezzi-clienti.sql e scripts/archivio-prezzi-costo-master.sql, e subito PRIMA
+-- del rilascio del codice "si paga sempre".
 --
 -- Il reso del cliente = fisso + percentuale × nolo. Il nolo lo calcola il codice (lib/reso-prezzi.ts),
 -- la percentuale la legge qui il database. Fino a oggi la percentuale veniva SEMPRE dal listino che il
@@ -48,6 +49,9 @@ language sql stable security definer set search_path = public as $$
        and a.riga->>'tipo' = 'giacenza'
        and lower(coalesce(a.riga->>'nome', '')) like '%reso%' and lower(coalesce(a.riga->>'nome', '')) not like '%nuovo%'
        and not exists (select 1 from public.listini_clienti_fasce f where f.listino_id = l.id and f.corriere_id = p_corriere_id)
+       -- una descrizione che non e' JSON farebbe fallire la conversione qui sotto, e con lei tutto l'addebito
+       -- dei resi della chiamata: la riga archiviata si salta (le vive si leggono come prima)
+       and (btrim(coalesce(a.riga->>'descrizione', '')) = '' or pg_input_is_valid(btrim(a.riga->>'descrizione'), 'jsonb'))
   ), scelta as (
     (select * from vive order by ordine limit 1)
     union all
@@ -210,5 +214,55 @@ begin
     raise exception 'fn_addebita_resi nuova diversa da quella di prima oltre la riga voluta: annullo';
   end if;
 end $$;
+
+-- ── IL RESO DEL MASTER (26/11/2026) ─────────────────────────────────────────────────────────────
+-- Va dopo scripts/archivio-prezzi-costo-master.sql. La percentuale del reso del master si legge dal suo
+-- Listino Corrieri, come prima. Se il contratto non ha piu' nessuna fascia di costo (prezzi cancellati),
+-- anche dalle righe archiviate: prima non trovava niente e il reso del master valeva quanto aveva pagato
+-- all'andata, contrassegno compreso. Il nolo su cui si applica lo calcola il codice, anche lui
+-- dall'archivio (noloMaster). Se il contratto ha ancora le sue fasce, non cambia niente: stesse righe,
+-- stesso ordine (per id) di prima.
+do $$
+begin
+  if md5(pg_get_functiondef('public.fn_reso_perc_master(uuid)'::regprocedure)) <> '90ef7dabe752bb8dc4d776c3a9bdfc5d' then
+    raise exception 'fn_reso_perc_master e'' cambiata dal 26/11: non la sovrascrivo. Rileggerla e rifare lo script.';
+  end if;
+end $$;
+
+create or replace function public.fn_reso_perc_master(p_corriere_id uuid)
+returns table(valore numeric, perc numeric)
+language sql stable security definer set search_path = public as $$
+  select x.valore, x.perc from (
+    select coalesce(s.valore, 0)::numeric valore,
+           coalesce(nullif(btrim(coalesce(s.descrizione, '')), '')::jsonb ->> 'perc', '0')::numeric perc,
+           1 fonte, s.id ordine
+      from public.corrieri co
+      join public.listini_corrieri l on l.master_id = co.master_id
+      join public.listini_corrieri_supplementi s
+        on s.listino_id = l.id
+       and s.corriere_id = co.id
+       and s.tipo = 'giacenza'
+       and lower(s.nome) like '%reso%'
+       and lower(s.nome) not like '%nuovo%'
+     where co.id = p_corriere_id
+    union all
+    select coalesce((a.riga ->> 'valore')::numeric, 0),
+           coalesce(nullif(btrim(coalesce(a.riga ->> 'descrizione', '')), '')::jsonb ->> 'perc', '0')::numeric,
+           2, (a.riga ->> 'id')::uuid
+      from public.listini_corrieri_archivio a
+     where a.corriere_id = p_corriere_id
+       and a.tabella = 'listini_corrieri_supplementi'
+       and a.riga ->> 'tipo' = 'giacenza'
+       and lower(a.riga ->> 'nome') like '%reso%'
+       and lower(a.riga ->> 'nome') not like '%nuovo%'
+       and not exists (select 1 from public.listini_corrieri_fasce f where f.corriere_id = p_corriere_id)
+       -- descrizione non JSON: la riga archiviata si salta invece di far fallire tutto l'addebito dei resi
+       and (btrim(coalesce(a.riga ->> 'descrizione', '')) = '' or pg_input_is_valid(btrim(a.riga ->> 'descrizione'), 'jsonb'))
+  ) x
+  order by x.fonte, x.ordine
+  limit 1;
+$$;
+revoke all on function public.fn_reso_perc_master(uuid) from public, anon, authenticated;
+grant execute on function public.fn_reso_perc_master(uuid) to service_role;
 
 commit;

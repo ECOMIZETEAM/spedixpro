@@ -143,6 +143,9 @@ async function costruisciCatenaGrezza(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
+    // SOLO ricalcolo RETTIFICHE (pacco già partito): il costo di un livello i cui prezzi sono stati
+    // cancellati si legge da quelli archiviati (lib/prezzi-archivio.ts). La creazione non lo passa mai.
+    dopoPartenza?: boolean
   }
 ): Promise<{ catena: LivelloCatena[]; errore?: string; dipendeDalCosto?: boolean }> {
   const catena: LivelloCatena[] = []
@@ -232,6 +235,7 @@ async function costruisciCatenaGrezza(
           zonaForzata: params.zonaForzata,
           pesoSuRealeCost,
           mittCap: params.mittCap, mittProvincia: params.mittProvincia, mittPaese: params.mittPaese,
+          dopoPartenza: params.dopoPartenza,
         })
         if (pz != null) {
           prezzo = pz.totale; zonaLivello = pz.zona; calcolato = true

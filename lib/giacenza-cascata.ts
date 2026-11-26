@@ -4,7 +4,7 @@ import { corriereDiMasterPerNome } from '@/lib/contratto-per-nome'
 import { noloMaster, noloCliente, noloClienteDopoPartenzaCon, applicaServizio, addebitaResi, resoPagato, pagatoDaMaster, type RigaReso } from '@/lib/reso-prezzi'
 import { catenaDaCorriere, risolviGambeSpedizione, gambePerTracking, type GambaSpedizione } from '@/lib/condivisione-catena'
 import { leggiPrezzi, calcolaCosti, noloClienteSpedizione } from '@/lib/giacenza-prezzi'
-import { archivioCoppia, haFasceVive, listiniDopoPartenza, listinoDiPartenza } from '@/lib/prezzi-archivio'
+import { archivioCoppia, haFasceVive, listiniDopoPartenza, listinoDiPartenza, giacenzaCostoArchiviata } from '@/lib/prezzi-archivio'
 
 // Mappa il "nome" di un supplemento giacenza (sia lato cliente sia lato master) sull'operazione.
 // Es. "Riconsegna al nuovo destinatario" -> riconsegna_nuovo, "Reso al mittente" -> reso.
@@ -28,13 +28,19 @@ async function prezzoGiacenzaMaster(admin: any, corriereId: string, operazione: 
   // listino di un ALTRO master ma puntano a questo corriere (39 in archivio). Leggendo per solo
   // corriere_id quelle righe SCAVALCAVANO il listino configurato: nell'editor "Riconsegna 0" ma
   // in addebito 0,70. Ora vale ciò che è impostato nel listino del master, punto.
-  const { data: corr } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
-  const { data: listini } = await admin.from('listini_corrieri').select('id').eq('master_id', (corr as any)?.master_id || '')
-  const listinoIds = (listini || []).map((l: any) => l.id)
-  if (!listinoIds.length) return { apertura: 0, servizio: 0, perc: 0 }
-  const { data: suppl } = await admin.from('listini_corrieri_supplementi')
-    .select('id,tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('listino_id', listinoIds).in('tipo', ['giacenza', 'giacenza_apertura'])
-    .order('id', { ascending: true })   // DETERMINISTICO: con supplementi duplicati prende sempre il primo (id più basso)
+  // Dopo la partenza si paga sempre (26/11/2026): se i prezzi di costo del contratto sono stati
+  // cancellati, valgono quelli archiviati (lib/prezzi-archivio.ts). Prima il master non pagava niente.
+  let suppl: any[] | null = await giacenzaCostoArchiviata(admin, corriereId)
+  if (!suppl) {
+    const { data: corr } = await admin.from('corrieri').select('master_id').eq('id', corriereId).maybeSingle()
+    const { data: listini } = await admin.from('listini_corrieri').select('id').eq('master_id', (corr as any)?.master_id || '')
+    const listinoIds = (listini || []).map((l: any) => l.id)
+    if (!listinoIds.length) return { apertura: 0, servizio: 0, perc: 0 }
+    const { data } = await admin.from('listini_corrieri_supplementi')
+      .select('id,tipo,nome,valore,descrizione').eq('corriere_id', corriereId).in('listino_id', listinoIds).in('tipo', ['giacenza', 'giacenza_apertura'])
+      .order('id', { ascending: true })   // DETERMINISTICO: con supplementi duplicati prende sempre il primo (id più basso)
+    suppl = data
+  }
   let apertura = 0, servizio = 0, perc = 0
   let aperturaSet = false, servizioSet = false
   for (const s of (suppl || [])) {

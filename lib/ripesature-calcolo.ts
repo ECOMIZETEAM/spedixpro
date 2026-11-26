@@ -440,6 +440,8 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
           contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0),
           mittCap: s.mitt_cap || '', mittProvincia: s.mitt_provincia || '', mittPaese: 'IT',
           zonaForzata,
+          // Il pacco e' partito: un livello a cui hanno cancellato i prezzi di costo paga quelli archiviati.
+          dopoPartenza: true,
         })
         if (errore) { motivo = errore; bloccato = true }
         // Una catena interrotta non e' una catena: i livelli sopra il punto di rottura non ci sono.
@@ -538,7 +540,7 @@ export async function calcolaRipesature(admin: any, righe: Ripesatura[]): Promis
         } else {
           // ALBERO / OWNER: dal listino del livello per il suo corriere (reale per l'owner).
           pag = arrotonda(pagatoMaster.get(liv.master) || 0)
-          const d = await calcolaPrezzoCorriereDettaglio(admin, { corriereId: liv.corriereId, masterId: liv.master, provincia: dest.provincia, cap: dest.cap, citta: dest.citta, paese: dest.paese, pesoReale: pesoRip, packages: pk, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), mittCap: dest.mittCap, mittProvincia: dest.mittProvincia, mittPaese: dest.mittPaese })
+          const d = await calcolaPrezzoCorriereDettaglio(admin, { corriereId: liv.corriereId, masterId: liv.master, provincia: dest.provincia, cap: dest.cap, citta: dest.citta, paese: dest.paese, pesoReale: pesoRip, packages: pk, contrassegno: Number(s.contrassegno || 0), assicurazione: Number(s.assicurazione || 0), mittCap: dest.mittCap, mittProvincia: dest.mittProvincia, mittPaese: dest.mittPaese, dopoPartenza: true })
           if (d && (d as any).totale != null && isFinite((d as any).totale)) {
             dovuto = arrotonda((d as any).totale)
             volume = arrotonda(Number((d as any).peso_volume) || 0)

@@ -146,6 +146,9 @@ export async function noloClienteDopoPartenza(admin: any, sped: any, listinoOggi
 // NOLO di un MASTER per quella spedizione, dal SUO listino corrieri: fascia + fuel, e nient'altro.
 // Stessa regola del cliente — sul ritorno non si paga ne' contrassegno ne' assicurazione ne'
 // sponda. null se non calcolabile.
+// Dopo la partenza si paga sempre (25-26/11/2026): se i prezzi di costo del contratto sono stati
+// cancellati, si prezza con quelli archiviati. Prima usciva null e il reso del master ripiegava su
+// quanto aveva pagato all'andata, contrassegno compreso.
 export async function noloMaster(admin: any, masterId: string, corriereId: string, sped: any): Promise<number | null> {
   const pacchi = await pacchiVeri(admin, sped)
   const pesoReale = pacchi.reduce((s: number, p: any) => s + (Number(p?.weight) || 0), 0) || 1
@@ -156,6 +159,7 @@ export async function noloMaster(admin: any, masterId: string, corriereId: strin
     paese: sped?.dest_paese || 'IT',
     citta: sped?.dest_citta || '',
     pesoReale, packages: pacchi,
+    dopoPartenza: true,
   })
   if (!d) return null
   const nolo = r2((Number(d.nolo) || 0) + (Number(d.fuel) || 0))   // niente sponda, niente commissioni

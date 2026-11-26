@@ -11,7 +11,7 @@
 
 import { trovaZoneMatchDett, isZonaEsclusiva, zoneEsclusiveMaster, filtraCapCondiviso, rigaValePerCitta, righeConPrefissoZona } from '@/lib/zone-match'
 import { fetchAll } from '@/lib/fetch-all'
-import { archivioSeTolto } from '@/lib/prezzi-archivio'
+import { archivioSeTolto, archivioCostoSeTolto, perId } from '@/lib/prezzi-archivio'
 import { leggiZoneCap } from '@/lib/zone-cap'
 import { entroMisureAgevolate, pesoSuReale } from '@/lib/agevolazione-misure'
 import { leggiSupplementiMulticollo, noloMulticolloDaFasce, pesoMulticolloFornitore, zonaMulticolloDi, TIPO_MULTICOLLO_SUPPLEMENTI, type EsitoMulticollo } from '@/lib/multicollo-zone'
@@ -605,6 +605,17 @@ export async function attaccaCorrieri(db: any, fasce: any[], colonne: string): P
   return true
 }
 
+// Fasce ARCHIVIATE (lib/prezzi-archivio.ts) con la loro zona, come le restituisce la lettura con
+// `zone(id,nome,su_mittente,multicollo)`: l'archivio ha solo zona_id.
+async function conZone(db: any, fasce: any[]): Promise<any[]> {
+  const zonaIds = Array.from(new Set(fasce.map((f: any) => f.zona_id).filter(Boolean)))
+  const { data: zoneA } = zonaIds.length
+    ? await db.from('zone').select('id,nome,su_mittente,multicollo').in('id', zonaIds)
+    : { data: [] as any[] }
+  const perZona = new Map((zoneA || []).map((z: any) => [z.id, z]))
+  return fasce.map((f: any) => ({ ...f, zone: perZona.get(f.zona_id) ?? null }))
+}
+
 export async function calcolaPrezzoListino(
   supabase: any,
   params: {
@@ -676,13 +687,8 @@ export async function calcolaPrezzoListino(
   // insieme a quelle vive degli altri contratti (servono uguali per le zone esclusive e il match).
   // Le zone si attaccano a mano: l'archivio non ha il legame con `zone` che la lettura incorpora.
   if (arch) {
-    const zonaIds = Array.from(new Set(arch.fasce.map((f: any) => f.zona_id).filter(Boolean)))
-    const { data: zoneA } = zonaIds.length
-      ? await supabase.from('zone').select('id,nome,su_mittente,multicollo').in('id', zonaIds)
-      : { data: [] as any[] }
-    const perZona = new Map((zoneA || []).map((z: any) => [z.id, z]))
-    for (const f of arch.fasce) fasceLette.push({ ...f, zone: perZona.get(f.zona_id) ?? null })
-    fasceLette.sort((a: any, b: any) => (Number(a.peso_max) - Number(b.peso_max)) || String(a.id).localeCompare(String(b.id)))
+    fasceLette.push(...(await conZone(supabase, arch.fasce)))
+    fasceLette.sort((a: any, b: any) => (Number(a.peso_max) - Number(b.peso_max)) || perId(a, b))
   }
 
   if (!fasceLette?.length) return null
@@ -944,6 +950,11 @@ export async function calcolaPrezzoCorriereDettaglio(
     mittCap?: string
     mittProvincia?: string
     mittPaese?: string
+    // SOLO eventi DOPO LA PARTENZA (rettifica, reso, giacenza), col client di servizio: se il contratto non
+    // ha piu' nessuna fascia di costo (prezzi cancellati), il costo si legge dalle sue righe archiviate
+    // (lib/prezzi-archivio.ts). La creazione e i preventivi non lo passano mai: per loro un contratto
+    // senza prezzi resta senza prezzi.
+    dopoPartenza?: boolean
   }
 ): Promise<DettaglioCorriere | null> {
   const { corriereId, masterId, provincia } = params
@@ -963,11 +974,15 @@ export async function calcolaPrezzoCorriereDettaglio(
   // Le fasce del listino corriere possono essere salvate sotto uno qualsiasi dei
   // listini del master (l'editor usa un listino unico + corriere_id). Cerchiamo
   // quindi in TUTTI i listini del master, filtrando per corriere_id.
-  const { data: listini } = await supabase
+  const { data: listiniLetti } = await supabase
     .from('listini_corrieri')
     .select('id,corriere_id,fattore_volume,solo_peso_reale')
     .eq('master_id', masterId)
-  if (!listini?.length) return null
+  // Dopo la partenza, prezzi di costo cancellati: quelli archiviati. Anche se il master non ha piu'
+  // nessun listino (eliminato), il pacco partito con quel costo lo paga lo stesso.
+  const arch = params.dopoPartenza ? await archivioCostoSeTolto(supabase, corriereId) : null
+  if (!listiniLetti?.length && !arch) return null
+  const listini: any[] = listiniLetti || []
   const listinoIds = listini.map((l: any) => l.id)
   // Fattore volume PER-CORRIERE: l'editor lo salva in listini_corrieri_corrieri (per corriere),
   // NON nel default del listino. Va letto da lì, altrimenti si conteggia 5000 anche se hai messo 4000.
@@ -977,7 +992,15 @@ export async function calcolaPrezzoCorriereDettaglio(
   // garantito: il divisore di un contratto senza listino proprio usciva a caso fra quelli. Se non
   // c'e' niente di suo, si usa 5000, che e' il valore dichiarato di default — mai quello di un altro.
   // Un solo posto decide il divisore, con l'eredita' dalla catena (vedi fattoreVolumeCorriere).
-  const fattore = await fattoreVolumeCorriere(supabase, masterId, corriereId)
+  // Con i prezzi archiviati, il divisore e' quello dell'aggancio archiviato con loro (stessa scelta di
+  // fattoreDiUnMaster: l'aggancio del listino legato a questo contratto, altrimenti il primo per listino);
+  // se non ne aveva uno, la regola di sempre.
+  const aggArch = (arch?.agganci || [])
+    .filter((a: any) => parseFloat(a?.fattore_volume) > 0)
+    .sort((a: any, b: any) => perId({ id: a.listino_id }, { id: b.listino_id }))
+  const propArch = listini.find((l: any) => l.corriere_id === corriereId)
+  const fvArch = parseFloat((aggArch.find((a: any) => a.listino_id === propArch?.id) || aggArch[0])?.fattore_volume)
+  const fattore = fvArch > 0 ? fvArch : await fattoreVolumeCorriere(supabase, masterId, corriereId)
 
   // "TASSA SOLO SUL PESO REALE" E' DI QUESTO CONTRATTO, NON DEL MASTER.
   //
@@ -1022,12 +1045,16 @@ export async function calcolaPrezzoCorriereDettaglio(
     if (pesoSuReale(_sett, packages, pesoReale, soloPesoReale)) pesoFatturato = pesoReale
   }
 
-  const { data: fasceLette } = await supabase
-    .from('listini_corrieri_fasce')
-    .select('*, zone(id,nome,su_mittente,multicollo)')
-    .in('listino_id', listinoIds)
-    .eq('corriere_id', corriereId)
-    .order('peso_max', { ascending: true })
+  // Con l'archivio le fasce vive del contratto non ci sono (e' la condizione per usarlo): si leggono quelle
+  // archiviate, con le zone attaccate a mano come le attacca la lettura qui sotto.
+  const { data: fasceLette } = arch
+    ? { data: (await conZone(supabase, arch.fasce)).sort((a: any, b: any) => (Number(a.peso_max) - Number(b.peso_max)) || perId(a, b)) }
+    : await supabase
+      .from('listini_corrieri_fasce')
+      .select('*, zone(id,nome,su_mittente,multicollo)')
+      .in('listino_id', listinoIds)
+      .eq('corriere_id', corriereId)
+      .order('peso_max', { ascending: true })
   // Le fasce delle ZONE MULTICOLLO non sono prezzi del collo singolo: fuori da tutto il match qui sotto.
   // Le usa solo il multicollo (noloMulticolloZone).
   const fasce = ((fasceLette || []) as any[]).filter((f: any) => !(f.zone as any)?.multicollo)
@@ -1077,7 +1104,7 @@ export async function calcolaPrezzoCorriereDettaglio(
   // contrassegno/assicurazione poteva cambiare tra una chiamata e l'altra. Ora la scelta e' stabile.
   // Col multicollo si leggono PRIMA della fascia (servono al multicollo); col collo singolo nello stesso
   // punto di sempre, dopo la fascia: se la fascia manca non si fa nemmeno questa lettura.
-  const leggiSuppl = async () => (await supabase
+  const leggiSuppl = async () => arch ? arch.supplementi : (await supabase
     .from('listini_corrieri_supplementi')
     .select('tipo,valore,tipo_calcolo,descrizione')
     .in('listino_id', listinoIds)
