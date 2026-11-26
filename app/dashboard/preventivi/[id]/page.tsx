@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { createPortal } from 'react-dom'
 import { useParams } from 'next/navigation'
 
@@ -16,6 +18,9 @@ const uid = () => (globalThis.crypto?.randomUUID?.() || String(Math.random()).sl
 type Sezione = { id: string; titolo: string; testo: string }
 
 export default function EditorPreventivo() {
+  // con la grafica nuova niente emoji: icone a linea sui tasti (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
+  const e = (x: string) => nuova ? x.replace(/^\S+\s+/, '') : x
   const { id } = useParams()
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -234,7 +239,7 @@ export default function EditorPreventivo() {
     </div>
   ) : (
     <div ref={pickRef} style={{ position: 'relative' }}>
-      <input value={cercaCli} onChange={e => setCercaCli(e.target.value)} onFocus={() => { setPickFocus(true); caricaEntita() }} onBlur={() => setTimeout(() => setPickFocus(false), 150)} placeholder={entitaLoad ? 'Carico…' : (destKind === 'master' ? '🔍  Cerca un sotto-master…' : '🔍  Cerca cliente per nome, codice o email…')} style={inp} />
+      <input value={cercaCli} onChange={e => setCercaCli(e.target.value)} onFocus={() => { setPickFocus(true); caricaEntita() }} onBlur={() => setTimeout(() => setPickFocus(false), 150)} placeholder={entitaLoad ? 'Carico…' : e(destKind === 'master' ? '🔍  Cerca un sotto-master…' : '🔍  Cerca cliente per nome, codice o email…')} style={inp} />
       {pickFocus && montato && pickPos && createPortal(
         <div style={{ position: 'fixed', top: pickPos.top, left: pickPos.left, width: pickPos.width, zIndex: 1000000, background: '#fff', border: '1px solid #d5d5d5', borderRadius: '8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 8px 22px rgba(0,0,0,0.12)' }}>
           {entitaFiltrate.length === 0 ? <div style={{ padding: '10px 12px', fontSize: '12.5px', color: '#999' }}>{entitaLoad ? 'Carico…' : 'Nessun risultato.'}</div> : entitaFiltrate.slice(0, 50).map((c: any) => (
@@ -257,9 +262,9 @@ export default function EditorPreventivo() {
           <h1 style={{ fontSize: '19px', fontWeight: 700, color: '#1a1a1a', margin: '4px 0 0' }}>Modifica preventivo</h1>
         </div>
         <div style={{ display: 'inline-flex', gap: '10px', alignItems: 'center' }}>
-          {stato === 'accettato' && <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '12px', fontWeight: 700, padding: '5px 12px', borderRadius: '20px' }}>✅ Accettato</span>}
-          <button onClick={() => salva()} disabled={salvando || stato === 'accettato'} style={{ background: '#fff', color: '#1a1a1a', border: '1px solid #ddd', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.6 : 1 }}>{salvando ? 'Salvo…' : '💾 Salva'}</button>
-          <button onClick={invia} disabled={salvando || stato === 'accettato' || corrieri.length === 0} title={corrieri.length === 0 ? 'Compila prima i prezzi' : 'Invia via email al cliente'} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (salvando || stato === 'accettato' || corrieri.length === 0) ? 0.5 : 1 }}>📤 Invia al cliente</button>
+          {stato === 'accettato' && <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '12px', fontWeight: 700, padding: '5px 12px', borderRadius: '20px' }}>{e('✅ Accettato')}</span>}
+          <button onClick={() => salva()} disabled={salvando || stato === 'accettato'} style={{ background: '#fff', color: '#1a1a1a', border: '1px solid #ddd', borderRadius: '8px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.6 : 1 }}>{salvando ? 'Salvo…' : e('💾 Salva')}</button>
+          <button onClick={invia} disabled={salvando || stato === 'accettato' || corrieri.length === 0} title={corrieri.length === 0 ? 'Compila prima i prezzi' : 'Invia via email al cliente'} style={{ background: '#f97316', color: '#fff', border: 'none', borderRadius: '8px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: (salvando || stato === 'accettato' || corrieri.length === 0) ? 0.5 : 1 }}>{e('📤 Invia al cliente')}</button>
         </div>
       </div>
       {msg && <div style={{ background: msg.t === 'ok' ? '#f0fdf4' : '#fef2f2', border: `1px solid ${msg.t === 'ok' ? '#bbf7d0' : '#fecaca'}`, color: msg.t === 'ok' ? '#15803d' : '#b91c1c', borderRadius: '8px', padding: '10px 14px', fontSize: '13px', marginBottom: '14px' }}>{msg.x}</div>}
@@ -374,7 +379,7 @@ export default function EditorPreventivo() {
                       <input value={s.titolo} onChange={e => setSez(i, { titolo: e.target.value })} placeholder="Titolo sezione" style={{ ...inp, fontWeight: 700 }} />
                       <button onClick={() => muoviSez(i, -1)} title="Su" style={miniBtn}>↑</button>
                       <button onClick={() => muoviSez(i, 1)} title="Giù" style={miniBtn}>↓</button>
-                      <button onClick={() => togliSez(i)} title="Togli" style={{ ...miniBtn, color: '#b91c1c' }}>🗑</button>
+                      <button onClick={() => togliSez(i)} title="Togli" style={{ ...miniBtn, color: '#b91c1c' }}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑'}</button>
                     </div>
                     <textarea value={s.testo} onChange={e => setSez(i, { testo: e.target.value })} placeholder="Testo…" rows={3} style={{ ...inp, resize: 'vertical', fontFamily: 'inherit' }} />
                   </div>

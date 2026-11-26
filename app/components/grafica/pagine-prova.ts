@@ -50,6 +50,26 @@ export const PAGINE_PROVA = new Set([
   '/dashboard/demo', '/dashboard/grafica-voti',
 ])
 
+// LE SCHEDE DELLA PROVA, con l'id nell'indirizzo (26/11): [id] vale per qualunque id, ma solo nella forma di un uuid, così
+// una pagina fissa sorella («nuovo», «crea») non entra nella prova per sbaglio. Listino cliente no: la pagina, quando si
+// apre, aggiunge al listino i corrieri che mancano (scrive).
+export const SCHEDE_PROVA = [
+  '/dashboard/clienti/[id]', '/dashboard/clienti/[id]/impostazioni', '/dashboard/clienti/[id]/modifica',
+  '/dashboard/clienti/master/[id]', '/dashboard/distinte/[id]', '/dashboard/impostazioni/staff/[id]',
+  '/dashboard/preventivi/[id]', '/dashboard/resi/distinte/[id]', '/dashboard/spedizioni/giacenze/[id]',
+]
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Una pagina è nella prova se è nell'elenco o se è una delle schede con un id vero. Lo usano il proxy e la cornice.
+export function eInProva(percorso: string): boolean {
+  if (PAGINE_PROVA.has(percorso)) return true
+  const pezzi = percorso.split('/')
+  return SCHEDE_PROVA.some(m => {
+    const q = m.split('/')
+    return q.length === pezzi.length && q.every((x, i) => (x === '[id]' ? UUID.test(pezzi[i]) : x === pezzi[i]))
+  })
+}
+
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro
 // la cornice nuova, prendono il vestito comune (grafica/vestito.css, classe gx-vestito sulla pagina). Un elenco a parte
 // da quello della prova: una pagina si apre nella prova quando il vestito le sta bene, ma il disegno resta quello comune.

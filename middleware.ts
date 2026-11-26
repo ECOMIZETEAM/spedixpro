@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { PARAM_ERRORE, PARAM_COLLEGATO } from '@/lib/esiti-collegamento'
 // le pagine che si possono provare con la grafica nuova (vedi x-grafica-prova più sotto): un elenco solo, col menu
-import { PAGINE_PROVA } from '@/app/components/grafica/pagine-prova'
+import { eInProva } from '@/app/components/grafica/pagine-prova'
 import { API_SENZA_VERIFICA, CODICE_CAMBIO_PASSWORD, CODICE_VERIFICA, PAGINA_CAMBIO_PASSWORD, PAGINA_VERIFICA, bloccataDallaVerifica, statoSessione } from '@/lib/verifica-due-passaggi'
 
 // SCRITTURE CONSENTITE ALL'AGENTE.
@@ -243,7 +243,7 @@ export async function middleware(req: NextRequest) {
   // decide chi può provarla (dà solo l'aspetto, nessun permesso).
   const intestazioni = new Headers(req.headers)
   intestazioni.delete('x-grafica-prova')
-  if (req.nextUrl.searchParams.get('nuova') === '1' && PAGINE_PROVA.has(pathname)) intestazioni.set('x-grafica-prova', '1')
+  if (req.nextUrl.searchParams.get('nuova') === '1' && eInProva(pathname)) intestazioni.set('x-grafica-prova', '1')
   // «?versione=oggi»: la Nuova spedizione su una pagina rimanda al modulo di oggi, e quella pagina si apre TUTTA nella
   // versione di oggi, cornice compresa. Il modulo di oggi dentro la cornice nuova, di notte, era scritto scuro su scuro.
   intestazioni.delete('x-grafica-oggi')

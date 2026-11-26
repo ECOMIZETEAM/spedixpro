@@ -294,7 +294,7 @@ export default function ImpostazioniClientePage() {
         <div style={card}>
           <div style={cardHead}>Circuito interno</div>
           <div style={{...rowFull,borderBottom:'none'}}>
-            <span style={lblStrong}>Interno esclusivo<br/><span style={{fontSize:'11px',fontWeight:400,color:'#888'}}>ON: quando la destinazione è coperta dal circuito interno, al cliente esce SOLO il circuito interno (niente BRT/Poste/DVA ecc.). Sui comuni non coperti restano tutti i corrieri.</span></span>
+            <span style={lblStrong}>Interno esclusivo<br/><span style={{fontSize:'11px',fontWeight:400,color:'#888'}}>ON: quando la destinazione è coperta dal circuito interno, al cliente esce SOLO il circuito interno (niente BRT, Poste o altri corrieri). Sui comuni non coperti restano tutti i corrieri.</span></span>
             <Toggle on={imp('interno_esclusivo')===true} onToggle={()=>setImp('interno_esclusivo', !(imp('interno_esclusivo')===true))} />
           </div>
         </div>

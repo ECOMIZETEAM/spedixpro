@@ -1,9 +1,13 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useParams, useRouter } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 
 export default function DettaglioDistinta() {
+  // con la grafica nuova la stampante a linea al posto di 🖨 (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const params = useParams()
   const router = useRouter()
   const dialog = useDialog()
@@ -128,7 +132,7 @@ export default function DettaglioDistinta() {
                   <td style={td}><span style={{ background: '#eef2f7', color: '#475569', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600', textTransform: 'capitalize' }}>{String(v.stato || '').replace(/_/g, ' ') || '-'}</span></td>
                   {mista && <td style={td}>{v.corrieri?.nome_contratto || '—'}</td>}
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    <button style={{ ...bAz, background: '#2563eb' }} onClick={() => stampaEtichetta(v.id)} title="Stampa etichetta">{'🖨'}</button>
+                    <button style={{ ...bAz, background: '#2563eb' }} onClick={() => stampaEtichetta(v.id)} title="Stampa etichetta">{nuova ? <Icona id="i-stampa" className="vs-ico-tasto" /> : '🖨'}</button>
                     <button style={{ ...bAz, background: '#f59e0b', opacity: busy === v.id ? 0.5 : 1 }} disabled={busy === v.id} onClick={() => togli(v)} title="Togli dalla distinta">{'↩'}</button>
                   </td>
                 </tr>

@@ -1,5 +1,7 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useParams } from 'next/navigation'
 import { useDialog } from '@/app/components/DialogProvider'
 import PagamentoRicarica, { PAGAMENTO_INIZIALE, erroreMetodo, type ValorePagamento } from '@/app/components/PagamentoRicarica'
@@ -27,6 +29,7 @@ function fmtData(iso: string) {
 // condiviso, da attivare, da sostituire (serve una conferma, coi numeri) o non condiviso, e perché.
 // Niente riapprovazione: il consenso il collegato l'ha dato al collegamento.
 function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [data, setData] = useState<any>(null)
   const [busy, setBusy] = useState('')
@@ -134,7 +137,7 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
   return (
     <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e8e8e8', overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontSize: '13px', fontWeight: 700, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        🔗 Contratti condivisi con {data.link.compratore}
+        {nuova ? '' : '🔗 '}Contratti condivisi con {data.link.compratore}
         {corrente && <button onClick={aggiorna} disabled={busy === 'sync'} title="Dopo aver ritoccato il listino, aggiorna il costo sul portale del collegato e attiva i contratti aggiunti" style={{ marginLeft: 'auto', background: '#fff', border: '1px solid #ddd', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', color: '#4f46e5' }}>{busy === 'sync' ? '…' : '↻ Aggiorna'}</button>}
       </div>
       <div style={{ padding: '12px 16px' }}>
@@ -183,6 +186,9 @@ function ContrattiCondivisi({ clienteId }: { clienteId: string }) {
 }
 
 export default function ClienteProfiloPage() {
+  // con la grafica nuova niente emoji: icone a linea sui tasti (il foglio delle icone lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
+  const e = (x: string) => nuova ? x.replace(/^\S+\s+/, '') : x
   const { id: idUrl } = useParams()
   // L'indirizzo di un sotto-master è /dashboard/clienti/m:<id> e il browser codifica i due punti:
   // il valore va decodificato, altrimenti alle API arriva "m%3A<id>", il prefisso "m:" non viene
@@ -360,13 +366,13 @@ export default function ClienteProfiloPage() {
           {successo}
         </div>
       )}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
+      <div className="cli-testa" style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'20px'}}>
         <div>
           <a href="/dashboard/clienti" style={{fontSize:'12px',color:'#f97316',textDecoration:'none'}}>← Clienti</a>
           <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:'4px 0 0'}}>{cliente.ragione_sociale}</h1>
           <p style={{color:'#1a1a1a',fontSize:'13px',margin:'2px 0 0'}}>{cliente.codice_cliente} · {cliente.email}</p>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+        <div className="cli-testa-tasti" style={{display:'flex',alignItems:'center',gap:'12px'}}>
           <span style={{background:cliente.attivo?'#f0fdf4':'#fef2f2',color:cliente.attivo?'#16a34a':'#dc2626',padding:'4px 12px',borderRadius:'20px',fontSize:'12px',fontWeight:'600'}}>
             {cliente.attivo?'Attivo':'Inattivo'}
           </span>
@@ -378,8 +384,8 @@ export default function ClienteProfiloPage() {
             <span style={{padding:'6px 12px',background:'#ecfdf5',color:'#059669',borderRadius:'20px',fontSize:'12px',fontWeight:700}}>Master collegato · sola lettura</span>
           ) : (
             <>
-              <a href={cliente.is_master ? `/dashboard/clienti/master/${String(id).slice(2)}` : `/dashboard/clienti/${id}/modifica`} style={{padding:'8px 16px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>✏️ Modifica Anagrafica</a>
-              <a href={`/dashboard/clienti/${id}/impostazioni`} style={{padding:'8px 16px',background:'#1a1a1a',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>⚙️ Impostazioni</a>
+              <a href={cliente.is_master ? `/dashboard/clienti/master/${String(id).slice(2)}` : `/dashboard/clienti/${id}/modifica`} style={{padding:'8px 16px',background:'#f97316',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>{nuova ? <Icona id="i-matita" className="vs-ico-tasto" /> : '✏️'} Modifica Anagrafica</a>
+              <a href={`/dashboard/clienti/${id}/impostazioni`} style={{padding:'8px 16px',background:'#1a1a1a',color:'#fff',borderRadius:'6px',fontSize:'13px',fontWeight:'600',textDecoration:'none'}}>{nuova ? <Icona id="i-ingranaggio" className="vs-ico-tasto" /> : '⚙️'} Impostazioni</a>
             </>
           )}
         </div>
@@ -406,7 +412,7 @@ export default function ClienteProfiloPage() {
           {/* NOTE PRIVATE del master su questo cliente: mai visibili al cliente. */}
           <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
             <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px'}}>
-              <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📝 Note</span>
+              <span style={{fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{e('📝 Note')}</span>
               <span style={{fontSize:'11px',fontWeight:400,color:'#9ca3af'}}>private · visibili solo a te, non al cliente</span>
             </div>
             <div style={{padding:'16px'}}>
@@ -425,14 +431,14 @@ export default function ClienteProfiloPage() {
 
           {(cliente.sl_indirizzo||cliente.sl_citta)&&(
             <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
-              <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📋 Sede Legale (Dati Fatturazione)</div>
+              <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{e('📋 Sede Legale (Dati Fatturazione)')}</div>
               <div style={{padding:'16px',fontSize:'13px',color:'#1a1a1a',lineHeight:1.7}}>{cliente.sl_indirizzo}<br/>{cliente.sl_citta} {cliente.sl_provincia&&`(${cliente.sl_provincia})`} {cliente.sl_cap}<br/>{cliente.sl_paese}</div>
             </div>
           )}
 
           {(cliente.so_indirizzo||cliente.so_citta)&&(
             <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #e8e8e8',overflow:'hidden'}}>
-              <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>📍 Sede Operativa (Dati mittente)</div>
+              <div style={{padding:'12px 16px',borderBottom:'1px solid #f0f0f0',fontSize:'13px',fontWeight:'700',color:'#1a1a1a'}}>{e('📍 Sede Operativa (Dati mittente)')}</div>
               <div style={{padding:'16px',fontSize:'13px',color:'#1a1a1a',lineHeight:1.7}}>{cliente.so_indirizzo}<br/>{cliente.so_citta} {cliente.so_provincia&&`(${cliente.so_provincia})`} {cliente.so_cap}<br/>{cliente.so_paese}</div>
             </div>
           )}
@@ -445,12 +451,12 @@ export default function ClienteProfiloPage() {
             </div>
             {errMov ? (
               <div style={{padding:'32px 24px',textAlign:'center',color:'#b45309',background:'#fffbeb'}}>
-                <div style={{fontSize:'28px',marginBottom:'8px'}}>🔒</div>
+                <div style={{fontSize:'28px',marginBottom:'8px'}}>{nuova ? <Icona id="i-lucchetto" className="vs-ico vs-ico--grande" /> : '🔒'}</div>
                 <div style={{fontSize:'13px',fontWeight:600,maxWidth:'520px',margin:'0 auto'}}>{errMov}</div>
               </div>
             ) : !movimenti.length ? (
               <div style={{padding:'40px',textAlign:'center',color:'#1a1a1a'}}>
-                <div style={{fontSize:'32px',marginBottom:'8px'}}>📊</div>
+                <div style={{fontSize:'32px',marginBottom:'8px'}}>{nuova ? <Icona id="i-report" className="vs-ico vs-ico--grande" /> : '📊'}</div>
                 <div style={{fontSize:'13px'}}>Nessun movimento</div>
               </div>
             ) : (

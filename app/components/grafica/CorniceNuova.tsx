@@ -15,7 +15,7 @@ import { FoglioIcone, Icona, ICONA_VOCE } from './icone'
 import { GraficaNuova } from './contesto'
 import { useAppNativa } from '@/lib/app-nativa'
 import Sondaggio from './Sondaggio'
-import { PAGINE_PROVA, PAGINE_DISEGNATE } from './pagine-prova'
+import { eInProva, PAGINE_DISEGNATE } from './pagine-prova'
 import './grafica.css'
 import './vestito.css'
 
@@ -101,7 +101,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
   // ── la prova per tutti (Lorenzo 19/11): si provano solo Dashboard ed Elenco spedizioni, con «?nuova=1» nell'indirizzo.
   // Le altre voci si vedono (anche i sottomenu) ma non si cliccano: «arrivano presto».
   const prova = !!user?.graficaProva
-  const inProva = (href?: string) => !!href && PAGINE_PROVA.has(href)
+  const inProva = (href?: string) => !!href && eInProva(href)
   const vai = (href?: string) => (prova && inProva(href) ? href + '?nuova=1' : href)
   const spenta = (href?: string) => prova && !inProva(href)
   const [voto, setVoto] = useState<null | 'voto' | 'esci'>(null)
@@ -112,7 +112,7 @@ export default function CorniceNuova({ children, user, path, nav: navDiOggi, por
       const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
       if (!a || a.target === '_blank') return
       const u = new URL(a.href, window.location.href)
-      if (u.origin !== window.location.origin || !PAGINE_PROVA.has(u.pathname) || u.searchParams.get('nuova') === '1') return
+      if (u.origin !== window.location.origin || !eInProva(u.pathname) || u.searchParams.get('nuova') === '1') return
       u.searchParams.set('nuova', '1'); a.href = u.toString()
     }
     document.addEventListener('click', clic, true)

@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useContext } from 'react'
+import { GraficaNuova } from '@/app/components/grafica/contesto'
+import { Icona } from '@/app/components/grafica/icone'
 import { useDialog } from '@/app/components/DialogProvider'
 
 const OPERAZIONI = [
@@ -23,6 +25,8 @@ const td = { padding: '10px 12px', fontSize: '12.5px', color: '#1a1a1a', borderB
 const eur = (n: any) => '€ ' + (Number(n) || 0).toFixed(2)
 
 export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; tornaHref: string }) {
+  // con la grafica nuova niente emoji (il foglio delle icone a linea lo carica solo la cornice nuova)
+  const nuova = useContext(GraficaNuova).attiva
   const dialog = useDialog()
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -123,9 +127,9 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
           <div style={card}>
             <div style={cardHead}>Info Giacenza</div>
             <div style={{ padding: '16px 18px', fontSize: '13px', color: '#1a1a1a', lineHeight: 1.9 }}>
-              <div>👤 <b>Destinatario:</b> {sped.dest_nome}</div>
-              <div>📍 <b>Indirizzo:</b> {sped.dest_indirizzo}, {sped.dest_cap} {sped.dest_citta} {sped.dest_provincia ? '(' + sped.dest_provincia + ')' : ''}</div>
-              {sped.dest_telefono && <div>📱 <b>Telefono:</b> {sped.dest_telefono}</div>}
+              <div>{nuova ? '' : '👤 '}<b>Destinatario:</b> {sped.dest_nome}</div>
+              <div>{nuova ? '' : '📍 '}<b>Indirizzo:</b> {sped.dest_indirizzo}, {sped.dest_cap} {sped.dest_citta} {sped.dest_provincia ? '(' + sped.dest_provincia + ')' : ''}</div>
+              {sped.dest_telefono && <div>{nuova ? '' : '📱 '}<b>Telefono:</b> {sped.dest_telefono}</div>}
               {ultimoNuovoDest && (
                 <div style={{ marginTop: '8px', padding: '8px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', lineHeight: 1.5 }}>
                   <b style={{ color: '#1d4ed8' }}>Nuovo destinatario</b>
@@ -206,7 +210,7 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
                     setSalvando(false); await carica()
                   }
                 } catch { setSalvando(false); setMsg({ t: 'err', x: 'Errore di rete' }) }
-              }} style={{ padding: '10px 22px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Attendi…' : '✅ Svincola subito'}</button>
+              }} style={{ padding: '10px 22px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Attendi…' : (nuova ? 'Svincola subito' : '✅ Svincola subito')}</button>
             </div>
           </div>
         </div>
@@ -304,7 +308,7 @@ export default function GiacenzaDettaglio({ id, tornaHref }: { id: string; torna
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>{new Date(c.created_at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                       <td style={td}>{c.nota || '—'}</td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{eur(c.importo)}</td>
-                      <td style={{ ...td, textAlign: 'right' }}>{isMaster && <button onClick={() => azione({ azione: 'rimuovi_costo', costoId: c.id })} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '5px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px' }}>🗑</button>}</td>
+                      <td style={{ ...td, textAlign: 'right' }}>{isMaster && <button onClick={() => azione({ azione: 'rimuovi_costo', costoId: c.id })} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '5px', padding: '4px 8px', cursor: 'pointer', fontSize: '12px' }}>{nuova ? <Icona id="i-cestino" className="vs-ico-tasto" /> : '🗑'}</button>}</td>
                     </tr>
                   ))}
                 </tbody>
