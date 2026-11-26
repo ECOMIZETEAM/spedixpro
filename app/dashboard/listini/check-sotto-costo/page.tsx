@@ -33,7 +33,8 @@ export default function CheckSottoCosto() {
   }
   useEffect(() => { carica() }, [])
 
-  const eur = (n: number) => '€ ' + Number(n).toFixed(2).replace('.', ',')
+  // spazio che non va a capo: nelle colonne strette Paghi/Perdi il «€» restava su una riga e la cifra sotto
+  const eur = (n: number) => '€\u00a0' + Number(n).toFixed(2).replace('.', ',')
   const mv = Math.max(0, parseFloat(margine.replace(',', '.')) || 0)
   const filtrate = q.trim()
     ? righe.filter(r => `${r.listino_nome} ${r.clienti.join(' ')} ${r.corriere} ${r.zona} ${r.descrizione}`.toLowerCase().includes(q.trim().toLowerCase()))

@@ -54,7 +54,7 @@ export default function NuovoListinoPage() {
         <h1 style={{fontSize:'20px',fontWeight:'700',color:'#1a1a1a',margin:0}}>Nuovo Listino</h1>
       </div>
       <div style={{background:'#fff',borderRadius:'8px',border:'1px solid #d1d5db',padding:'20px'}}>
-        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'16px'}}>🔍 Listino cliente</div>
+        <div style={{fontSize:'12px',fontWeight:'700',color:'#1a1a1a',marginBottom:'16px'}}>Listino cliente</div>
 
         {errore && <div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'6px',padding:'10px',marginBottom:'16px',fontSize:'13px',color:'#dc2626'}}>{errore}</div>}
 
@@ -183,7 +183,7 @@ function ModificaListino({listino, corriereIds, corrieri, router}: any) {
       <div style={{marginTop:'16px'}}>
         <button onClick={()=>router.push('/dashboard/listini')}
           style={{padding:'9px 24px',background:'#f97316',color:'#fff',border:'none',borderRadius:'6px',fontSize:'13px',fontWeight:'700',cursor:'pointer'}}>
-          ✅ Fine
+          Fine
         </button>
       </div>
     </div>

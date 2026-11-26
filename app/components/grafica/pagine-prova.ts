@@ -20,6 +20,10 @@ export const PAGINE_PROVA = new Set([
   '/dashboard/statistiche/check-ricariche', '/dashboard/statistiche/clienti', '/dashboard/statistiche/contrassegni',
   '/dashboard/statistiche/corrieri', '/dashboard/statistiche/fatturazione', '/dashboard/statistiche/rettifiche-auto',
   '/dashboard/statistiche/salute-conto',
+  // 26/11 sera, i Listini. Il Listino corrieri (corrieri/nuovo) no: visto solo vuoto, la sua lettura può creare un
+  // listino vuoto se il primo contratto non ne ha uno
+  '/dashboard/listini/aumenti', '/dashboard/listini/check-sotto-costo', '/dashboard/listini/check-volumetrici',
+  '/dashboard/listini/clienti/nuovo', '/dashboard/listini/da-adeguare', '/dashboard/listini/mio',
 ])
 
 // LE PAGINE COL LORO DISEGNO nella grafica nuova (Dashboard, Elenco, Nuova spedizione, Calendario): tutte le altre, dentro

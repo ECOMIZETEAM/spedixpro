@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react'
 
 // CHECK VOLUMETRICI — a colpo d'occhio, i contratti dove il divisore peso/volume che metti ai clienti
 // è diverso dal tuo costo. Divisore più ALTO = volume più piccolo = più economico:
-//  🔴 cliente > costo → vendi SOTTO COSTO sul volume (sui pacchi voluminosi incassi meno di quanto paghi)
-//  🟡 cliente < costo → vendi sopra costo (ci guadagni; mostrato per consapevolezza)
+//  in rosso: cliente > costo → vendi SOTTO COSTO sul volume (sui pacchi voluminosi incassi meno di quanto paghi)
+//  in giallo: cliente < costo → vendi sopra costo (ci guadagni; mostrato per consapevolezza)
 // Ogni riga porta al listino: lo aggiusti, salvi, torni a controllare.
 
 type Riga = {
@@ -109,7 +109,7 @@ export default function CheckVolumetrici() {
           {sotto.length > 0 && (
             <div style={{ marginBottom: 22 }}>
               <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px 10px 0 0', padding: '12px 16px' }}>
-                <div style={{ fontSize: 15, fontWeight: 800, color: '#b91c1c' }}>🔴 Venduto sotto costo sul volume — {sotto.length}</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#b91c1c' }}>Venduto sotto costo sul volume — {sotto.length}</div>
                 <div style={{ fontSize: 12.5, color: '#991b1b', marginTop: 2 }}>
                   Il cliente ha il divisore <b>più alto</b> del tuo costo → sui pacchi voluminosi paga meno di quanto paghi tu. Da sistemare.
                 </div>
@@ -122,7 +122,7 @@ export default function CheckVolumetrici() {
           {sopra.length > 0 && (
             <div style={{ marginBottom: 22 }}>
               <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px 10px 0 0', padding: '12px 16px' }}>
-                <div style={{ fontSize: 15, fontWeight: 800, color: '#b45309' }}>🟡 Venduto sopra costo sul volume — {sopra.length}</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#b45309' }}>Venduto sopra costo sul volume — {sopra.length}</div>
                 <div style={{ fontSize: 12.5, color: '#92400e', marginTop: 2 }}>
                   Il cliente ha il divisore <b>più basso</b> del tuo costo → ci guadagni. Nessun problema, te lo mostriamo solo per consapevolezza.
                 </div>

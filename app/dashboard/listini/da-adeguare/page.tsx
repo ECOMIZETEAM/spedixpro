@@ -74,7 +74,7 @@ export default function ListiniDaAdeguare() {
               <div style={{ fontSize: 11, color: '#9a3412', fontWeight: 700, textTransform: 'uppercase' }}>Righe sotto costo</div>
               <div style={{ fontSize: 20, fontWeight: 800, color: '#c2410c' }}>{totRighe.toLocaleString('it-IT')}</div>
             </div>
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Cerca cliente, listino, contratto…"
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cerca cliente, listino, contratto…"
               style={{ flex: '1 1 240px', padding: '9px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }} />
           </div>
 
