@@ -18,6 +18,7 @@ export type EsternoSalvato = { nome: string; formato?: string; il?: string; righ
 type FileCaricato = { nome: string; formato: FormatoEsterno; spedizioni: SpedizioneEsterna[] }
 type Filtro = 'perdita' | 'tutte' | 'rettifica' | 'rientri'
 const PER_PAGINA = 50
+const MOSTRATE = 100   // le righe senza spedizione elencate una per una, ognuna con le sue azioni
 
 // Perché il corriere l'ha tassata così: pesata, misurata, o il volume scritto sulla bolla; poi l'arrotondamento.
 // GLS stampa solo il peso reale e quello di volume, e tassa il maggiore.
@@ -68,6 +69,10 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
   const conSalvati = !esiti.length && abbinateSalvate.size > 0
   const nonAbbinate = esiti.length ? esiti[esiti.length - 1].nonAbbinate : conSalvati ? righe.filter(r => !abbinateSalvate.has(r.segnacollo)) : righe
   const totaleNonAbbinate = r2(nonAbbinate.reduce((s, r) => s + r.totale, 0))
+  // Senza un export si mostrano solo gli arrivi: le partenze aspettano l'export, ma un arrivo fuori da Moove non è in
+  // nessun export, e senza la sua riga «Cosa fare» chiedeva chi l'ha pagato senza un posto dove dirlo.
+  const conExport = esiti.length > 0 || conSalvati
+  const daMostrare = conExport ? nonAbbinate : righe.filter(r => !r.andata)
   // Il mittente delle righe abbinate (WAVESHIP LLC): una riga che non trova la spedizione e ha un mittente diverso, o
   // nessuno, e un riferimento d'altra forma, non viene da quel gestionale. Il 25/11 era la NI665312507 (Riga, 350 kg,
   // 493,86 €, rif. "001", senza mittente) fra 120 col riferimento "009#3" e WAVESHIP: fatta sul sito del corriere.
@@ -81,7 +86,11 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
     const m = new Map<string, number>(); for (const r of righe.filter(r => !nonAbbinate.includes(r) && r.andata)) m.set(formaRif(r.rifAlfabetico), (m.get(formaRif(r.rifAlfabetico)) || 0) + 1)
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
   }, [righe, nonAbbinate])
-  const perche = (r: RigaFatturaBrt) => r.andata && mittenteSolito && (r.mittente || '') !== mittenteSolito && formaRif(r.rifAlfabetico) !== rifSolito
+  // Un arrivo (ritiro o reso verso di te chiesto fuori da Moove) non è in nessun export di spedizioni: dirlo, invece
+  // di far cercare il periodo che il file non copre (Lorenzo, 27/11, i 4 arrivi GLS di ottobre di Wave).
+  const perche = (r: RigaFatturaBrt) => !r.andata
+    ? `Arrivo${r.mittente ? ` da «${r.mittente}»` : ''}: un ritiro o un reso verso di te chiesto fuori da Moove, che nessun export contiene. Chi l'ha pagato?`
+    : mittenteSolito && (r.mittente || '') !== mittenteSolito && formaRif(r.rifAlfabetico) !== rifSolito
     ? `Mittente ${r.mittente ? `«${r.mittente}»` : 'vuoto'} e riferimento «${r.rifAlfabetico || '—'}» diversi da tutte le altre (${mittenteSolito}): non viene da questo gestionale, probabilmente creata sul sito del corriere. Chi l'ha fatta pagare?`
     : 'Non c\'è nell\'export: forse è partita in un periodo che il file non copre, o da un altro gestionale.'
 
@@ -242,14 +251,16 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
         )
       })}
 
-      {(esiti.length > 0 || conSalvati) && nonAbbinate.length > 0 && (
+      {daMostrare.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: 'flex', gap: 8, fontSize: 12.5, color: C.attenuato, background: C.fondoTenue, borderRadius: 9, padding: '9px 11px', marginBottom: 8, lineHeight: 1.45 }}>
             <Icona nome="avviso" size={16} />
-            <span>{nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione né in Moove né {esiti.length > 1 || Object.keys(salvati || {}).length > 1 ? 'negli export' : 'nell\'export'}: qui sotto cosa sono e com'è finita.</span>
+            <span>{conExport
+              ? <>{nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione né in Moove né {esiti.length > 1 || Object.keys(salvati || {}).length > 1 ? 'negli export' : 'nell\'export'}: qui sotto cosa sono e com'è finita.</>
+              : <>{daMostrare.length === 1 ? '1 arrivo' : `${daMostrare.length} arrivi`} ({euro(r2(daMostrare.reduce((t, r) => t + r.totale, 0)))}) fuori da Moove: nessun export li contiene, qui sotto chi li ha pagati. Le partenze si abbinano caricando l'export.</>}</span>
           </div>
           <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
-            {nonAbbinate.slice(0, 30).map(r => (
+            {daMostrare.slice(0, MOSTRATE).map(r => (
               <div key={r.segnacollo + r.numeroSpedizione} style={{ border: `1px solid ${C.filo}`, borderRadius: 9, padding: '8px 10px', fontSize: 12.5, lineHeight: 1.45, overflowWrap: 'anywhere' }}>
                 <b>{r.andata ? 'Andata' : r.tipoBolla === 'Arrivo' ? 'Arrivo' : r.tipoBolla.startsWith('A') ? 'Reso' : 'Bolla accessoria'} {r.segnacollo}</b>
                 <span style={{ color: C.attenuato }}> · {r.dataRitiro ? new Date(r.dataRitiro).toLocaleDateString('it-IT') : '—'} · {r.destinatario || r.mittente} · {r.localita} · {kg(r.pesoTassato)}{r.rifAlfabetico ? ` · rif. ${r.rifAlfabetico}` : ''}</span>
@@ -258,7 +269,7 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
                 {azioniRiga?.(r)}
               </div>
             ))}
-            {nonAbbinate.length > 30 && <div style={{ fontSize: 12, color: C.attenuato }}>…e altre {nonAbbinate.length - 30}.</div>}
+            {daMostrare.length > MOSTRATE && <div style={{ fontSize: 12, color: C.attenuato }}>…e altre {daMostrare.length - MOSTRATE}.</div>}
           </div>
           {esiti.length > 0 && dropzone(true)}
         </div>

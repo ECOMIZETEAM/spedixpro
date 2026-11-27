@@ -7,6 +7,7 @@ import { eGls, type RigaFatturaGls } from '@/lib/fattura-gls'
 import { costruisciCatena } from '@/lib/cascata'
 import { riepilogaFattura, fatturaConAzioni, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
+import { fuoriAltrove } from '@/lib/controllo-fattura-fuori'
 
 // Mille e più righe, ognuna col listino rifatto dalla funzione dell'addebito: serve più del minuto standard.
 export const maxDuration = 300
@@ -47,7 +48,8 @@ type Corpo = {
   chiudi?: boolean
   rifai?: boolean                    // rifare con le regole di oggi una fattura già controllata, tenendo le azioni
   perche?: { id: string; peso: number }[]   // spedizioni da girare rimaste senza rettifica: perché
-  statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome?: string; di?: string } }   // a che punto è una voce di "Cosa fare"
+  statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome?: string; di?: string }
+    cliente?: { id?: string; nome?: string }; incassato?: boolean | null }   // a che punto è una voce di "Cosa fare"
   esterno?: { nome: string; formato?: string; righeFile?: number; abbinate?: string[]; andate?: number; corriereAndate?: number; prezzoClienti?: number; rientri?: number; rettifiche?: number }   // l'export di un altro gestionale abbinato
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
@@ -67,6 +69,33 @@ const pulisciLegenda = (l: any): Record<string, string> | null => {
 // non lo sapeva, risultava "senza azioni" e il 25/11 il caricamento dell'allegato GLS l'ha tolta dallo storico.
 // Per ogni fattura: le rettifiche del detentore, non annullate, sulle spedizioni abbinate. Una lettura non
 // riuscita torna null: chi decide se togliere una fattura, nel dubbio la tiene.
+// IL RIEPILOGO DELLA FATTURA SI CAMBIA SUL VALORE DI ADESSO, E SOLO SE NESSUNO L'HA CAMBIATO NEL FRATTEMPO. Ogni
+// ramo di questa rotta riscriveva tutto il riepilogo da una copia letta all'inizio della richiesta, anche secondi
+// prima (la chiusura legge tutte le righe, il collegamento della Rettifica legge le rettifiche): uno stato salvato in
+// mezzo, per esempio una spedizione fuori da tutto appena segnata «fatta pagare», spariva senza un avviso, e il conto
+// perdeva l'incasso (revisione del 27/11, prima del rilascio). Qui si rilegge, si cambia, e si scrive solo se il
+// contatore `rev` del riepilogo è ancora quello letto; altrimenti si rilegge e si rifà. `cambia` può rispondere con
+// un rifiuto (NextResponse): i controlli sullo stato si fanno sul valore appena letto.
+async function cambiaRiepilogo(admin: any, id: string, cambia: (r: Record<string, any>) => Record<string, any> | null | NextResponse,
+  altreColonne: Record<string, any> = {}): Promise<{ riepilogo: Record<string, any> | null } | { risposta: NextResponse }> {
+  for (let i = 0; i < 6; i++) {
+    const { data, error } = await admin.from('fatture_corriere').select('riepilogo').eq('id', id).maybeSingle()
+    if (error) return { risposta: NextResponse.json({ error: 'Lettura fattura non riuscita: ' + error.message }, { status: 500 }) }
+    const prima = (data?.riepilogo || {}) as Record<string, any>
+    const fatto = cambia(prima)
+    if (fatto instanceof NextResponse) return { risposta: fatto }
+    const rev = Number(prima.rev) || 0
+    const nuovo = fatto == null ? null : { ...fatto, rev: rev + 1 }
+    let q = admin.from('fatture_corriere').update({ ...altreColonne, riepilogo: nuovo }).eq('id', id)
+    q = prima.rev == null ? q.is('riepilogo->>rev', null) : q.eq('riepilogo->>rev', String(prima.rev))
+    const { data: scritte, error: e2 } = await q.select('id')
+    if (e2) return { risposta: NextResponse.json({ error: 'Salvataggio non riuscito: ' + e2.message }, { status: 500 }) }
+    if (scritte?.length) return { riepilogo: nuovo }
+    await new Promise(ok => setTimeout(ok, 60 + Math.random() * 120))
+  }
+  return { risposta: NextResponse.json({ error: 'La fattura è stata cambiata da un\'altra parte mentre salvavo: riprova.' }, { status: 409 }) }
+}
+
 async function rettificheSulleSpedizioni(admin: any, masterId: string, fattureIds: string[]): Promise<Map<string, string[]> | null> {
   const out = new Map<string, string[]>()
   for (const fid of fattureIds) {
@@ -128,8 +157,10 @@ export async function POST(req: NextRequest) {
     // Rimandate (le "non girate" dopo aver sistemato il listino), il file nuovo prende il posto del vecchio: le
     // rettifiche del primo invio restano contate fra quelle sulle spedizioni della fattura.
     const esterne = (await rettificheSulleSpedizioni(admin, u.masterId, [fattura.id]))?.get(fattura.id)
-    await admin.from('fatture_corriere').update({ rettifiche_file_id: f.id,
-      ...(esterne?.length ? { riepilogo: { ...(fattura.riepilogo || {}), rettificheEsterne: { ids: esterne } } } : {}) }).eq('id', fattura.id)
+    if (esterne?.length) {
+      const x = await cambiaRiepilogo(admin, fattura.id, r => ({ ...r, rettificheEsterne: { ids: esterne } }), { rettifiche_file_id: f.id })
+      if ('risposta' in x) return x.risposta
+    } else await admin.from('fatture_corriere').update({ rettifiche_file_id: f.id }).eq('id', fattura.id)
     return NextResponse.json({ ok: true })
   }
 
@@ -149,22 +180,29 @@ export async function POST(req: NextRequest) {
     if (sv.stato != null && !STATI.includes(sv.stato)) return NextResponse.json({ error: 'Stato non valido.' }, { status: 400 })
     const importo = sv.importo == null || (sv.importo as any) === '' ? null : Number(sv.importo)
     if (importo != null && !(Number.isFinite(importo) && importo >= 0 && importo <= 1000000)) return NextResponse.json({ error: 'Importo non valido.' }, { status: 400 })
-    const { data: f2, error: errF2 } = await admin.from('fatture_corriere').select('riepilogo').eq('id', fattura.id).maybeSingle()
-    if (errF2) return NextResponse.json({ error: 'Lettura fattura non riuscita: ' + errF2.message }, { status: 500 })
-    const riepilogo = f2?.riepilogo || {}
-    const stati: Record<string, any> = { ...(riepilogo.stati || {}) }
-    if (sv.stato == null) delete stati[chiave]
-    else {
+    // UNA SPEDIZIONE FUORI DA TUTTO FATTA PAGARE (Lorenzo, 27/11: "non scrivere niente... rimane tutto scritto e
+    // calcolato nel check fatture, semplice lineare e sicuro"). Qui si scrive solo a chi (scelto fra i clienti e
+    // sotto-master di Moove, con l'id, o scritto a mano) e quanto, e poi se ha pagato: nessun movimento, in Moove non
+    // si muove niente. Serve al conto del documento.
+    const idCliente = typeof sv.cliente?.id === 'string' && /^(m:)?[0-9a-f-]{36}$/i.test(sv.cliente.id) ? sv.cliente.id : null
+    const nomeCliente = String(sv.cliente?.nome ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
+    const esito = await cambiaRiepilogo(admin, fattura.id, riepilogo => {
+      const stati: Record<string, any> = { ...(riepilogo.stati || {}) }
       const prima = stati[chiave]
-      const storia = [...(prima?.storia || []), ...(prima ? [{ stato: prima.stato, il: prima.il }] : [])].slice(-10)
-      const nota = String(sv.nota ?? '').trim().slice(0, 500), numero = String(sv.numero ?? '').trim().slice(0, 60)
-      stati[chiave] = { stato: sv.stato, il: new Date().toISOString(), da: u.userId,
-        ...(nota ? { nota } : {}), ...(importo != null ? { importo: Math.round(importo * 100) / 100 } : {}), ...(numero ? { numero } : {}), ...(storia.length ? { storia } : {}),
-        ...(sv.listino && typeof sv.listino.id === 'string' && /^[0-9a-f-]{36}$/.test(sv.listino.id) ? { listino: { id: sv.listino.id, nome: String(sv.listino.nome || '').slice(0, 80), di: String(sv.listino.di || '').slice(0, 80) } } : {}) }
-    }
-    const { error } = await admin.from('fatture_corriere').update({ riepilogo: { ...riepilogo, stati } }).eq('id', fattura.id)
-    if (error) return NextResponse.json({ error: 'Stato non salvato: ' + error.message }, { status: 500 })
-    return NextResponse.json({ ok: true, stati })
+      if (sv.stato == null) delete stati[chiave]
+      else {
+        const storia = [...(prima?.storia || []), ...(prima ? [{ stato: prima.stato, il: prima.il }] : [])].slice(-10)
+        const nota = String(sv.nota ?? '').trim().slice(0, 500), numero = String(sv.numero ?? '').trim().slice(0, 60)
+        stati[chiave] = { stato: sv.stato, il: new Date().toISOString(), da: u.userId,
+          ...(nota ? { nota } : {}), ...(importo != null ? { importo: Math.round(importo * 100) / 100 } : {}), ...(numero ? { numero } : {}), ...(storia.length ? { storia } : {}),
+          ...(sv.listino && typeof sv.listino.id === 'string' && /^[0-9a-f-]{36}$/.test(sv.listino.id) ? { listino: { id: sv.listino.id, nome: String(sv.listino.nome || '').slice(0, 80), di: String(sv.listino.di || '').slice(0, 80) } } : {}),
+          ...(nomeCliente ? { cliente: { ...(idCliente ? { id: idCliente } : {}), nome: nomeCliente } } : {}),
+          ...(typeof sv.incassato === 'boolean' ? { incassato: sv.incassato } : {}) }
+      }
+      return { ...riepilogo, stati }
+    })
+    if ('risposta' in esito) return esito.risposta
+    return NextResponse.json({ ok: true, stati: esito.riepilogo?.stati || {} })
   }
 
   // ── L'EXPORT DI UN ALTRO GESTIONALE, ABBINATO ──
@@ -179,13 +217,9 @@ export async function POST(req: NextRequest) {
     const voce = { nome, formato: String(x.formato || '').slice(0, 60), il: new Date().toISOString(), righeFile: Math.max(0, Math.round(n(x.righeFile))),
       abbinate: (Array.isArray(x.abbinate) ? x.abbinate : []).map(t => String(t).slice(0, 40)).slice(0, 20000),
       andate: Math.max(0, Math.round(n(x.andate))), corriereAndate: n(x.corriereAndate), prezzoClienti: n(x.prezzoClienti), rientri: n(x.rientri), rettifiche: Math.max(0, Math.round(n(x.rettifiche))) }
-    const { data: f2, error: errF2 } = await admin.from('fatture_corriere').select('riepilogo').eq('id', fattura.id).maybeSingle()
-    if (errF2) return NextResponse.json({ error: 'Lettura fattura non riuscita: ' + errF2.message }, { status: 500 })
-    const riepilogo = f2?.riepilogo || {}
-    const esterni = { ...(riepilogo.esterni || {}), [nome]: voce }
-    const { error } = await admin.from('fatture_corriere').update({ riepilogo: { ...riepilogo, esterni } }).eq('id', fattura.id)
-    if (error) return NextResponse.json({ error: 'Export non salvato: ' + error.message }, { status: 500 })
-    return NextResponse.json({ ok: true, esterni })
+    const salvato = await cambiaRiepilogo(admin, fattura.id, r => ({ ...r, esterni: { ...(r.esterni || {}), [nome]: voce } }))
+    if ('risposta' in salvato) return salvato.risposta
+    return NextResponse.json({ ok: true, esterni: salvato.riepilogo?.esterni || {} })
   }
 
   // ── PERCHÉ NON È DIVENTATA UNA RETTIFICA ──
@@ -251,9 +285,8 @@ export async function POST(req: NextRequest) {
   // ── FILE DI RETTIFICHE SCARICATO PER UN ALTRO GESTIONALE: è un'azione, la fattura resta nello storico ──
   if (corpo.fileEsterno && fattura) {
     const voce = { nome: String(corpo.fileEsterno.nome || '').slice(0, 200), righe: Math.max(0, Math.round(Number(corpo.fileEsterno.righe) || 0)), il: new Date().toISOString() }
-    const riepilogo = { ...(fattura.riepilogo || {}), fileEsterni: [...(fattura.riepilogo?.fileEsterni || []), voce] }
-    const { error } = await admin.from('fatture_corriere').update({ riepilogo }).eq('id', fattura.id)
-    if (error) return NextResponse.json({ error: 'Non riesco a segnare il file scaricato: ' + error.message }, { status: 500 })
+    const x = await cambiaRiepilogo(admin, fattura.id, r => ({ ...r, fileEsterni: [...(r.fileEsterni || []), voce] }))
+    if ('risposta' in x) return x.risposta
     return NextResponse.json({ ok: true })
   }
 
@@ -261,8 +294,8 @@ export async function POST(req: NextRequest) {
   if (corpo.legenda && fattura && !corpo.righe) {
     const legenda = pulisciLegenda(corpo.legenda)
     if (!legenda) return NextResponse.json({ error: 'Legenda vuota.' }, { status: 400 })
-    const { error } = await admin.from('fatture_corriere').update({ riepilogo: { ...(fattura.riepilogo || {}), legenda } }).eq('id', fattura.id)
-    if (error) return NextResponse.json({ error: 'Legenda non salvata: ' + error.message }, { status: 500 })
+    const x = await cambiaRiepilogo(admin, fattura.id, r => ({ ...r, legenda }))
+    if ('risposta' in x) return x.risposta
     return NextResponse.json({ ok: true })
   }
 
@@ -278,15 +311,21 @@ export async function POST(req: NextRequest) {
     // Spedizioni già rettificate da un file della pagina Rettifica (la fattura ricaricata dopo averle girate):
     // l'azione c'è già, e lo storico la conta fra il girato.
     const esterne = (await rettificheSulleSpedizioni(admin, u.masterId, [fattura.id]))?.get(fattura.id)
-    await admin.from('fatture_corriere').update({
-      stato: 'completa', completata_at: new Date().toISOString(),
-      righe: t.righe, andate: t.andate, rientri: t.rientri,
-      totale_corriere: t.totaleCorriere, totale_trovate: t.totaleTrovate, costo_moove: t.costoMoove, differenza: t.differenza,
-      non_trovate: t.nonTrovate, totale_non_trovate: t.totaleNonTrovate, da_girare: t.daGirare, euro_da_girare: t.euroDaGirare,
-      riepilogo: { ...(fattura.riepilogo || {}), perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri, ...(esterne?.length ? { rettificheEsterne: { ids: esterne } } : {}) },
-    }).eq('id', fattura.id)
+    const x = await cambiaRiepilogo(admin, fattura.id,
+      r => ({ ...r, perMotivo: t.perMotivo, perVoce: t.perVoce, totaleRientri: t.totaleRientri, ...(esterne?.length ? { rettificheEsterne: { ids: esterne } } : {}) }), {
+        stato: 'completa', completata_at: new Date().toISOString(),
+        righe: t.righe, andate: t.andate, rientri: t.rientri,
+        totale_corriere: t.totaleCorriere, totale_trovate: t.totaleTrovate, costo_moove: t.costoMoove, differenza: t.differenza,
+        non_trovate: t.nonTrovate, totale_non_trovate: t.totaleNonTrovate, da_girare: t.daGirare, euro_da_girare: t.euroDaGirare,
+      })
+    if ('risposta' in x) return x.risposta
+    // Le spedizioni fuori da tutto già gestite negli altri documenti (borderò cumulativi, allegato del mese): la pagina
+    // le mostra come fatte e non le propone di nuovo. Se la lettura non riesce, la pagina le propone come da fare:
+    // al più si segna due volte, in Moove non si muove niente.
+    const altrove = await fuoriAltrove(admin, u.masterId, fattura.id).catch(() => null)
     // La pagina deve sapere se le differenze sono già nella Rettifica (fattura rifatta, o già girate da un file).
-    return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length, stati: fattura.riepilogo?.stati || {}, esterni: fattura.riepilogo?.esterni || {} })
+    return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length, stati: x.riepilogo?.stati || {}, esterni: x.riepilogo?.esterni || {},
+      ...(altrove ? { fuoriAltrove: altrove } : {}) })
   }
 
   // ── UN PACCHETTO DI RIGHE ──
@@ -321,11 +360,14 @@ export async function POST(req: NextRequest) {
     const esterne = candidate.length ? await rettificheSulleSpedizioni(admin, u.masterId, candidate.map((f: any) => f.id)) : new Map<string, string[]>()
     if (esterne) {
       for (const [fid, ids] of esterne) {
-        const f = candidate.find((x: any) => x.id === fid)
-        await admin.from('fatture_corriere').update({ riepilogo: { ...(f?.riepilogo || {}), rettificheEsterne: { ids } } }).eq('id', fid)
+        await cambiaRiepilogo(admin, fid, r => ({ ...r, rettificheEsterne: { ids } }))
       }
       const daTogliere = candidate.filter((f: any) => !esterne.has(f.id)).map((f: any) => f.id)
-      if (daTogliere.length) await admin.from('fatture_corriere').delete().in('id', daTogliere)
+      // Si cancellano solo se sono ANCORA senza azioni: la decisione viene da una lettura di qualche secondo fa, e nel
+      // frattempo in un'altra scheda ci si può essere segnato uno stato. Il controllo sta
+      // nella stessa istruzione della cancellazione.
+      if (daTogliere.length) await admin.from('fatture_corriere').delete().in('id', daTogliere).is('rettifiche_file_id', null)
+        .is('riepilogo->stati', null).is('riepilogo->esterni', null).is('riepilogo->fileEsterni', null).is('riepilogo->rettificheEsterne', null)
     }
     const esistente = (sue || []).find((f: any) => f.numero_fattura === numero && f.corriere_id === contratto.id)
     // RIFATTA CON LE REGOLE DI OGGI (`rifai`, chiesto dalla pagina dopo "già controllata"): una fattura su cui si
@@ -338,11 +380,15 @@ export async function POST(req: NextRequest) {
     if (esistente) {
       // Le azioni restano sempre, anche se il rifacimento si era interrotto a metà e si riprende senza `rifai`.
       const conAzioni = fatturaConAzioni(esistente)
-      const tenuti = conAzioni ? Object.fromEntries(['fileEsterni', 'rettificheEsterne', 'stati', 'esterni'].filter(k => esistente.riepilogo?.[k]).map(k => [k, esistente.riepilogo[k]])) : {}
-      const riepilogo = riepilogoIniziale || Object.keys(tenuti).length ? { ...(riepilogoIniziale || {}), ...tenuti } : null
       await admin.from('fatture_corriere_righe').delete().eq('fattura_id', esistente.id)
-      await admin.from('fatture_corriere').update({ stato: 'in_corso', riepilogo, etichetta: conAzioni ? esistente.etichetta ?? null : null, completata_at: null,
-        nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId, created_at: new Date().toISOString() }).eq('id', esistente.id)
+      // Le azioni che restano si prendono dal riepilogo di adesso, non da quello letto sopra.
+      const x = await cambiaRiepilogo(admin, esistente.id, r => {
+        const conAzioniOra = conAzioni || fatturaConAzioni({ rettifiche_file_id: esistente.rettifiche_file_id, riepilogo: r })
+        const tenuti = conAzioniOra ? Object.fromEntries(['fileEsterni', 'rettificheEsterne', 'stati', 'esterni'].filter(k => r[k]).map(k => [k, r[k]])) : {}
+        return riepilogoIniziale || Object.keys(tenuti).length ? { ...(riepilogoIniziale || {}), ...tenuti } : null
+      }, { stato: 'in_corso', etichetta: conAzioni ? esistente.etichetta ?? null : null, completata_at: null,
+        nome_file: corpo.testata?.nomeFile || null, caricata_da: u.userId, created_at: new Date().toISOString() })
+      if ('risposta' in x) return x.risposta
       fattura = { id: esistente.id, stato: 'in_corso' }
     } else {
       const { data: nuova, error } = await admin.from('fatture_corriere').insert({

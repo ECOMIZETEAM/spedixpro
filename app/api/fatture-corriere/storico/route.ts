@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { utenteDetentore } from '@/lib/controllo-fattura-accesso'
 import { fatturaConAzioni } from '@/lib/controllo-fattura-riepilogo'
+import { fuoriAltrove } from '@/lib/controllo-fattura-fuori'
 
 // LO STORICO DELLE FATTURE DEL CORRIERE, mese per mese, solo quelle del master che chiede.
 //   GET            → l'elenco, con quanto è stato girato ai clienti con la Rettifica e quanto resta a suo carico
@@ -20,7 +21,10 @@ export async function GET(req: NextRequest) {
       if (error) return NextResponse.json({ error: 'Lettura righe non riuscita: ' + error.message }, { status: 500 })
       esiti.push(...(data || []).map((r: any) => r.esito)); if ((data || []).length < 1000) break
     }
-    return NextResponse.json({ fattura: f, esiti })
+    // Le spedizioni fuori da tutto già gestite negli altri documenti (il borderò è cumulativo): la pagina non le propone
+    // di nuovo. Se la lettura non riesce, la rotta analizza rifiuta comunque un secondo addebito.
+    const altrove = await fuoriAltrove(admin, u.masterId, f.id).catch(() => null)
+    return NextResponse.json({ fattura: f, esiti, ...(altrove ? { fuoriAltrove: altrove } : {}) })
   }
 
   const { data: fatture, error } = await admin.from('fatture_corriere')
