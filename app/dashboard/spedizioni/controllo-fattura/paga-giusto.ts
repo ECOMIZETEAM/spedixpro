@@ -33,18 +33,28 @@ export function noloDellePartenze(righe: RigaFatturaBrt[]): (peso: number) => nu
   }
 }
 
-// IL SUPPLEMENTO DEGLI ARRIVI. Il 25/11 gli arrivi a 4,00 € contro i 3,50 delle partenze sembravano pagati troppo, e
-// finivano nella contestazione. Il 27/11 Lorenzo ha chiesto di verificare (pensava alle partenze fuori da Napoli): nel
-// borderò del 23/11 127 arrivi su 133 costano esattamente 0,50 € più delle partenze dello stesso peso, da qualunque
-// posto, Napoli compresa (23 arrivi da Napoli e Campania, tutti +0,50), e così i 9 del contratto 4724 e i 3 di ottobre.
-// È la tariffa degli arrivi, non un errore. Il supplemento si legge dal documento, per tipo di rientro (Arrivo,
-// Addebito…): lo scarto più frequente dal nolo delle partenze dello stesso peso (a pari merito il più basso, così
-// in dubbio si segnala). Si segnala solo il rientro che va oltre. Il supplemento è scritto a schermo: se il
-// contratto dice un'altra cifra, si vede e si contesta.
-export type RiferimentoRientro = { partenze: number; supplemento: number; tipo: string; n: number; su: number }
-export function riferimentoRientri(righe: RigaFatturaBrt[], nolo: (peso: number) => number | null): (r: RigaFatturaBrt) => RiferimentoRientro | null {
+// LA TARIFFA DEI RESI DEL CONTRATTO (Wave, 27/11: "il reso costa fisso 3,50 € + fuel fino a 3 kg, oltre 3 kg 3,50 € +
+// 0,10 € ogni kilo, + fuel 3% sempre"). Sta nelle impostazioni del contratto GLS (corrieri.settings.tariffa_resi): il
+// listino di Moove il reso lo scrive come percentuale del nolo, e non la può dire. I kg si arrotondano in su: così
+// tornano tutti i 25 «Addebito» (resi al mittente) del borderò del 23/11, 3,4 kg → 3,60 €, 4,9 kg → 3,70 €.
+export type TariffaResi = { base: number; finoKg: number; perKg: number }
+export const tariffaReso = (kg: number, t: TariffaResi) => r2(t.base + t.perKg * Math.max(0, Math.ceil(kg - 1e-9) - t.finoKg))
+export const descriviTariffaResi = (t: TariffaResi) => `${euro(t.base)} fino a ${t.finoKg.toLocaleString('it-IT')} kg, poi +${euro(t.perKg)} al kg`
+
+// IL NOLO GIUSTO DI UN RIENTRO (arrivo = il reso che il destinatario rimanda; addebito = il pacco non consegnato che
+// torna). Con la tariffa dei resi del contratto, quella. Senza, si legge dal documento: il 25/11 gli arrivi a 4,00 €
+// contro i 3,50 delle partenze finivano nella contestazione, poi nel borderò del 23/11 127 arrivi su 133 risultavano
+// esattamente 0,50 € più delle partenze dello stesso peso, da qualunque posto: lo scarto più frequente per tipo di
+// rientro (almeno 5 confronti, a pari merito il più basso) fa da supplemento, e si segnala solo quello che va oltre.
+// Wave poi ha detto la tariffa vera dei resi (sopra): con quella, gli arrivi a 4,00 € sono pagati troppo.
+export type RiferimentoRientro = { riferimento: number; come: string; tipo: string; daContratto: boolean; supplemento?: number; n?: number; su?: number }
+export function riferimentoRientri(righe: RigaFatturaBrt[], nolo: (peso: number) => number | null, tariffa?: TariffaResi | null): (r: RigaFatturaBrt) => RiferimentoRientro | null {
   const tipoDi = (r: RigaFatturaBrt) => String(r.tipoBolla || '').trim() || 'Rientro'
-  const valuta = (r: RigaFatturaBrt) => !r.andata && !eEstero(r) && r.nolo > 0 ? nolo(r.pesoTassato) : null
+  const rientro = (r: RigaFatturaBrt) => !r.andata && !eEstero(r) && r.nolo > 0
+  if (tariffa) return (r: RigaFatturaBrt) => rientro(r)
+    ? { riferimento: tariffaReso(r.pesoTassato, tariffa), come: `tariffa resi del contratto: ${descriviTariffaResi(tariffa)}`, tipo: tipoDi(r), daContratto: true }
+    : null
+  const valuta = (r: RigaFatturaBrt) => rientro(r) ? nolo(r.pesoTassato) : null
   const scarti = new Map<string, Map<number, number>>()
   for (const r of righe) {
     const p = valuta(r); if (p == null) continue
@@ -61,7 +71,9 @@ export function riferimentoRientri(righe: RigaFatturaBrt[], nolo: (peso: number)
   }
   return (r: RigaFatturaBrt) => {
     const p = valuta(r); const s = supp.get(tipoDi(r))
-    return p == null || !s ? null : { partenze: p, supplemento: s.euro, tipo: tipoDi(r), n: s.n, su: s.su }
+    if (p == null || !s) return null
+    return { riferimento: r2(p + s.euro), tipo: tipoDi(r), daContratto: false, supplemento: s.euro, n: s.n, su: s.su,
+      come: Math.abs(s.euro) >= 0.005 ? `${euro(p)} delle partenze dello stesso peso + ${euro(s.euro)} dei rientri` : 'il nolo delle partenze dello stesso peso' }
   }
 }
 
@@ -84,15 +96,13 @@ export function controllaFuori(r: RigaFatturaBrt, c: {
   // Senza la percentuale della riga o quella del listino il carburante non si è controllato: non è «giusto».
   const carbControllato = perc != null && listinoPct != null
   const carbInPiu = carbControllato && perc > listinoPct + 0.25 ? r2(r.nolo * (perc - listinoPct) / 100) : 0
-  // Un rientro (arrivo, reso) si confronta con la partenza dello stesso peso più il suo supplemento; una partenza con le
-  // partenze dello stesso peso.
+  // Un rientro (arrivo, reso) si confronta con la tariffa dei resi del contratto (o, senza, con la partenza dello stesso
+  // peso più il supplemento dei rientri); una partenza con le partenze dello stesso peso.
   const rientro = r.andata ? null : c.rientri(r)
   // Il nolo si confronta solo su GLS: per gli altri corrieri le regole di qui non valgono.
-  const rif = !eGls(r) || eEstero(r) || !(r.nolo > 0) ? null : r.andata ? c.noloPartenze(r.pesoTassato) : rientro ? r2(rientro.partenze + rientro.supplemento) : null
+  const rif = !eGls(r) || eEstero(r) || !(r.nolo > 0) ? null : r.andata ? c.noloPartenze(r.pesoTassato) : rientro ? rientro.riferimento : null
   const noloInPiu = rif != null && r.nolo > rif + 0.005 ? r2(r.nolo - rif) : 0
-  const comeSi = rientro && Math.abs(rientro.supplemento) >= 0.005
-    ? `${euro(rientro.partenze)} delle partenze dello stesso peso + ${euro(rientro.supplemento)} degli arrivi`
-    : 'il nolo delle partenze dello stesso peso'
+  const comeSi = rientro ? rientro.come : 'il nolo delle partenze dello stesso peso'
   const nolo = {
     euro: r.nolo, riferimento: rif, inPiu: noloInPiu,
     perche: !eGls(r) ? `il nolo di ${c.corriere} qui non si confronta`

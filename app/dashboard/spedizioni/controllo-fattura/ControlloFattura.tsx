@@ -9,7 +9,7 @@ import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera,
 import AltriGestionali, { type EsternoIniziale, type EsternoSalvato } from './AltriGestionali'
 import FattaPagare, { type ClienteScelto } from './FattaPagare'
 import type { FuoriAltrove } from '@/lib/controllo-fattura-fuori'
-import { controllaFuori, eEstero as eEsteroR, noloDellePartenze, riferimentoRientri } from './paga-giusto'
+import { controllaFuori, descriviTariffaResi, eEstero as eEsteroR, noloDellePartenze, riferimentoRientri, type TariffaResi } from './paga-giusto'
 
 /* CONTROLLO FATTURA CORRIERE. Il detentore carica la fattura di BRT (il file TIVAF) o il PDF di GLS (borderò
  * settimanale o allegato della fattura, lib/fattura-gls) e vede spedizione per
@@ -21,7 +21,7 @@ import { controllaFuori, eEstero as eEsteroR, noloDellePartenze, riferimentoRien
  * "solo pesi", e lì si confermano come ogni altra rettifica. Una porta sola per i soldi dei pesi. */
 
 export type EsitoControllo = EsitoPagina
-type Contratto = { id: string; nome: string; attivo: boolean; tipo?: 'brt' | 'gls' }
+type Contratto = { id: string; nome: string; attivo: boolean; tipo?: 'brt' | 'gls'; tariffaResi?: TariffaResi | null }
 // Quello che il PDF di GLS dice oltre alle righe: tracciato, periodo, carburante per contratto e quello del
 // listino. Si salva con la fattura (riepilogo.gls), così l'avviso sul carburante resta anche riaprendola.
 type InfoGls = {
@@ -485,21 +485,27 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // Il nolo delle partenze lo usa anche il "paga giusto?" delle spedizioni fuori da tutto (FattaPagare): la stessa
   // funzione, così l'«in più» della singola spedizione è quello che c'è nella contestazione.
   const noloPartenze = useMemo(() => noloDellePartenze(gls ? esiti.map(e => e.riga) : []), [esiti, gls])
-  const rientri = useMemo(() => riferimentoRientri(gls ? esiti.map(e => e.riga) : [], noloPartenze), [esiti, gls, noloPartenze])
+  // La tariffa dei resi del contratto del documento (impostazioni del contratto GLS, dalla rotta): se c'è, è quella.
+  const tariffaResi = contratti?.find(c => c.id === contrattoId)?.tariffaResi ?? null
+  const rientri = useMemo(() => riferimentoRientri(gls ? esiti.map(e => e.riga) : [], noloPartenze, tariffaResi), [esiti, gls, noloPartenze, tariffaResi])
   const arriviSopra = useMemo(() => {
     if (!gls) return null
-    const righe: { e: EsitoControllo; riferimento: number; inPiu: number; supplemento: number }[] = []
-    // Il supplemento di ogni tipo di rientro, per dirlo a schermo ("Arrivo: +0,50 € su 3 di 3").
+    const righe: { e: EsitoControllo; riferimento: number; inPiu: number; come: string }[] = []
+    // Il supplemento di ogni tipo di rientro, per dirlo a schermo ("Arrivo: +0,50 € su 3 di 3"), o quanti rispettano
+    // la tariffa dei resi del contratto.
     const supplementi = new Map<string, { euro: number; n: number; su: number }>()
+    const perTipo = new Map<string, { giusti: number; tutti: number }>()
     let nonConfrontati = 0
     for (const e of esiti) {
       const x = rientri(e.riga)
       if (!x) { if (!e.riga.andata && !eEsteroR(e.riga) && e.riga.nolo > 0) nonConfrontati++; continue }
-      supplementi.set(x.tipo, { euro: x.supplemento, n: x.n, su: x.su })
-      const rif = r2(x.partenze + x.supplemento)
-      if (e.riga.nolo > rif + 0.005) righe.push({ e, riferimento: rif, inPiu: r2(e.riga.nolo - rif), supplemento: x.supplemento })
+      if (!x.daContratto && x.supplemento != null) supplementi.set(x.tipo, { euro: x.supplemento, n: x.n || 0, su: x.su || 0 })
+      const t = perTipo.get(x.tipo) || { giusti: 0, tutti: 0 }; t.tutti++
+      if (e.riga.nolo > x.riferimento + 0.005) righe.push({ e, riferimento: x.riferimento, inPiu: r2(e.riga.nolo - x.riferimento), come: x.come })
+      else t.giusti++
+      perTipo.set(x.tipo, t)
     }
-    return { righe, supplementi, nonConfrontati, euro: r2(righe.reduce((t, x) => t + x.inPiu, 0)), noli: Array.from(new Set(righe.map(x => x.e.riga.nolo))), riferimenti: Array.from(new Set(righe.map(x => x.riferimento))) }
+    return { righe, supplementi, perTipo, nonConfrontati, euro: r2(righe.reduce((t, x) => t + x.inPiu, 0)), noli: Array.from(new Set(righe.map(x => x.e.riga.nolo))), riferimenti: Array.from(new Set(righe.map(x => x.riferimento))) }
   }, [esiti, gls, rientri])
   // Solo quelli da contestare: senza, la voce non c'è.
   const arriviDaContestare = arriviSopra && arriviSopra.righe.length ? arriviSopra : null
@@ -888,7 +894,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       totale += c.inPiu
     }
     if (arriviDaContestare) {
-      punti.push(`Arrivi e resi fatturati con un nolo più alto della loro tariffa, cioè le partenze dello stesso peso più il supplemento dei rientri (${arriviDaContestare.noli.map(n => euro(n)).join(' / ')} invece di ${arriviDaContestare.riferimenti.map(n => euro(n)).join(' / ')}): ${arriviDaContestare.righe.map(x => x.e.riga.segnacollo).join(', ')}. Da accreditare ${euro(arriviDaContestare.euro)} di nolo.`)
+      punti.push(tariffaResi
+        ? `Arrivi e resi fatturati con un nolo più alto della tariffa resi del contratto (${descriviTariffaResi(tariffaResi)}): ${arriviDaContestare.righe.map(x => `${x.e.riga.segnacollo} ${euro(x.e.riga.nolo)} invece di ${euro(x.riferimento)}`).join(', ')}. Da accreditare ${euro(arriviDaContestare.euro)} di nolo.`
+        : `Arrivi e resi fatturati con un nolo più alto della loro tariffa, cioè le partenze dello stesso peso più il supplemento dei rientri (${arriviDaContestare.noli.map(n => euro(n)).join(' / ')} invece di ${arriviDaContestare.riferimenti.map(n => euro(n)).join(' / ')}): ${arriviDaContestare.righe.map(x => x.e.riga.segnacollo).join(', ')}. Da accreditare ${euro(arriviDaContestare.euro)} di nolo.`)
       totale += arriviDaContestare.euro
     }
     const righe = esiti.flatMap(e => e.motivi.filter(m => m.gruppo === 'contestare' && !(docSopra && m.tipo === 'carburante')).map(m => ({ e, m })))
@@ -903,7 +911,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     utils.book_append_sheet(wb, utils.json_to_sheet(testo.split('\n').map(r => ({ Contestazione: r }))), 'Contestazione')
     const foglio = [
       ...righe.map(({ e, m }) => ({ e, importo: m.importo, motivo: m.testo })),
-      ...(arriviDaContestare?.righe || []).map(x => ({ e: x.e, importo: x.inPiu, motivo: `${x.e.riga.tipoBolla}: nolo ${euro(x.e.riga.nolo)}, tariffa ${euro(x.riferimento)} (partenze dello stesso peso + ${euro(x.supplemento)})` })),
+      ...(arriviDaContestare?.righe || []).map(x => ({ e: x.e, importo: x.inPiu, motivo: `${x.e.riga.tipoBolla}: nolo ${euro(x.e.riga.nolo)}, tariffa ${euro(x.riferimento)} (${x.come})` })),
     ]
     if (foglio.length) utils.book_append_sheet(wb, utils.json_to_sheet(foglio.map(({ e, importo, motivo }) => ({
       [gls ? 'Tracking GLS' : 'Segnacollo']: e.riga.segnacollo, 'Data': e.riga.dataRitiro || '', 'Destinatario': e.riga.destinatario, 'Località': e.riga.localita,
@@ -1343,9 +1351,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                           {rigaStato('contestare', `carburante-doc:${c.codice}`, c.inPiu)}
                         </div>
                       ))}
-                      {gr.k === 'contestare' && arriviSopra && (arriviSopra.supplementi.size > 0 || arriviSopra.nonConfrontati > 0) && (
+                      {gr.k === 'contestare' && arriviSopra && (tariffaResi || arriviSopra.supplementi.size > 0 || arriviSopra.nonConfrontati > 0) && (
                         <div style={{ fontSize: 11.5, color: C.attenuato, lineHeight: 1.4 }}>
-                          {arriviSopra.supplementi.size > 0 && <>
+                          {tariffaResi && arriviSopra.perTipo.size > 0 && <>
+                            Tariffa resi del contratto: {descriviTariffaResi(tariffaResi)}, più il carburante.{' '}
+                            {Array.from(arriviSopra.perTipo.entries()).map(([tipo, x]) => `${tipo}: ${x.giusti} su ${x.tutti} giust${x.tutti === 1 ? 'o' : 'i'}`).join(' · ')} (gli arrivi sono i resi dei destinatari, gli addebiti i pacchi tornati indietro).
+                          </>}
+                          {!tariffaResi && arriviSopra.supplementi.size > 0 && <>
                             {Array.from(arriviSopra.supplementi.entries()).map(([tipo, x]) => `${tipo}: ${x.euro >= 0 ? '+' : '−'}${euro(Math.abs(x.euro))} sulle partenze dello stesso peso (${x.n} su ${x.su})`).join(' · ')}.
                             {' '}È la tariffa dei rientri di questo documento (gli arrivi sono i resi dei destinatari): si contesta solo quello che va oltre. Se il contratto dice un'altra cifra, contestala.
                           </>}
@@ -1364,12 +1376,12 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                       {arrivi && (
                         <div style={{ background: '#fff', borderRadius: 9, padding: '8px 10px', border: `1px solid ${C.filo}` }}>
                           <div style={{ display: 'flex', gap: 8, fontSize: 13 }}>
-                            <span style={{ flex: 1, fontWeight: 600 }}>Arrivi e resi pagati più delle partenze</span>
+                            <span style={{ flex: 1, fontWeight: 600 }}>{tariffaResi ? 'Arrivi e resi pagati più della tariffa resi' : 'Arrivi e resi pagati più delle partenze'}</span>
                             <span style={{ color: C.attenuato, ...cifre }}>{arrivi.righe.length}</span>
                             <span style={{ fontWeight: 700, minWidth: 70, textAlign: 'right', ...cifre }}>{conSegno(arrivi.euro)}</span>
                           </div>
                           <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 2, lineHeight: 1.4 }}>
-                            {cr} chiede {arrivi.noli.map(n => euro(n)).join(' / ')} di nolo, la loro tariffa è {arrivi.riferimenti.map(n => euro(n)).join(' / ')} (le partenze dello stesso peso più il supplemento dei rientri): {arrivi.righe.map(x => `${x.e.riga.segnacollo} ${kg(x.e.riga.pesoTassato)}`).join(', ')}.
+                            {cr} chiede {arrivi.noli.map(n => euro(n)).join(' / ')} di nolo, la tariffa è {arrivi.riferimenti.map(n => euro(n)).join(' / ')} ({tariffaResi ? `resi del contratto: ${descriviTariffaResi(tariffaResi)}` : 'le partenze dello stesso peso più il supplemento dei rientri'}): {arrivi.righe.slice(0, 40).map(x => `${x.e.riga.segnacollo} ${kg(x.e.riga.pesoTassato)}`).join(', ')}{arrivi.righe.length > 40 ? ` e altri ${arrivi.righe.length - 40}` : ''}.
                           </div>
                           {rigaStato('contestare', 'arrivi-sopra', arrivi.euro)}
                         </div>

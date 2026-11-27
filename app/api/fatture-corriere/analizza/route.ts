@@ -34,10 +34,31 @@ async function contrattiControllabili(admin: any, masterId: string) {
   return [...brt, ...gls]
 }
 
+// LA TARIFFA DEI RESI DEL CONTRATTO (Wave, 27/11: 3,50 € fino a 3 kg, poi +0,10 € al kg, più il carburante): nelle
+// impostazioni del contratto (corrieri.settings.tariffa_resi), perché il listino di Moove il reso lo dice solo come
+// percentuale del nolo. Per un gruppo GLS vale la prima che c'è fra i suoi contratti. Una tariffa scritta male non
+// vale: meglio nessuna (il controllo la ricava dal documento) che un numero sbagliato.
+function tariffaResiValida(x: any): { base: number; finoKg: number; perKg: number } | null {
+  const n = (v: any) => (v === '' || v == null ? NaN : Number(v))
+  const t = { base: n(x?.base), finoKg: n(x?.fino_kg ?? x?.finoKg), perKg: n(x?.per_kg ?? x?.perKg) }
+  return t.base > 0 && t.base < 1000 && t.finoKg >= 0 && t.finoKg < 1000 && t.perKg >= 0 && t.perKg < 100 ? t : null
+}
+
 export async function GET() {
   const u = await utenteDetentore(); if (u.errore) return u.errore
-  const contratti = await contrattiControllabili(createAdminSupabase(), u.masterId)
-  return NextResponse.json({ contratti: contratti.map(c => ({ id: c.id, nome: c.nome, attivo: c.attivo, tipo: c.tipo })) })
+  const admin = createAdminSupabase()
+  const contratti = await contrattiControllabili(admin, u.masterId)
+  const ids = contratti.filter(c => c.tipo === 'gls').flatMap(c => c.ids)
+  const tariffe = new Map<string, any>()
+  if (ids.length) {
+    const { data, error } = await admin.from('corrieri').select('id,tariffa:settings->tariffa_resi').in('id', ids)
+    if (error) console.warn('[controllo-fattura] tariffa resi non letta', error.message)
+    for (const c of data || []) if ((c as any).tariffa) tariffe.set(c.id, (c as any).tariffa)
+  }
+  return NextResponse.json({ contratti: contratti.map(c => {
+    const t = c.ids.map((id: string) => tariffaResiValida(tariffe.get(id))).find(Boolean) || null
+    return { id: c.id, nome: c.nome, attivo: c.attivo, tipo: c.tipo, ...(t ? { tariffaResi: t } : {}) }
+  }) })
 }
 
 type Corpo = {
