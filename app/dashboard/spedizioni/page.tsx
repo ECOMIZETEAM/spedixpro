@@ -749,6 +749,16 @@ async function apriTracking(s: any) {
                         <span style={{fontSize:'11px',marginLeft:'4px',color:Number(s.rettifica.margine)<0?'#dc2626':'#16a34a'}}>(margine € {fe(Number(s.rettifica.margine))})</span>
                       </span>
                     ) }] : []),
+                    // Con una rettifica il guadagno vero della spedizione è la somma dei due margini: il master se la
+                    // faceva a mano (Lorenzo, 27/11, NI665520237 di Wave: margine 1,38 + rettifica 13,54 = 14,92).
+                    // Margine e rettifica restano separati qui sopra (vedi la rotta dell'elenco); il totale si
+                    // aggiunge e basta. Senza il margine della spedizione (in calcolo, agente senza costo) non c'è.
+                    ...(s.rettifica && s.margine != null && !s.costo_in_calcolo ? (() => {
+                      const tot = Math.round((Number(s.margine) + Number(s.rettifica.margine)) * 100) / 100
+                      return [{ soldi: true, l: 'Margine totale', v: (
+                        <b title={`Spedizione € ${fe(Number(s.margine))} + rettifica € ${fe(Number(s.rettifica.margine))}`} style={{color:tot<0?'#dc2626':'#16a34a'}}>€ {fe(tot)}</b>
+                      ) }]
+                    })() : []),
                   ]
                   return (
                     <Fragment key={s.id}>
