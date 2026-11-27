@@ -250,6 +250,21 @@ export async function POST(req: NextRequest) {
   for (const field of Object.keys(ALIAS)) M[field] = pick(headers, ALIAS[field])
   const A: Record<string, string | null> = {}
   for (const k of Object.keys(AUX)) A[k] = pick(headers, AUX[k])
+  // Le stesse colonne, TUTTE quelle presenti nel file, nell'ordine di preferenza: un valore si prende
+  // dalla prima che su QUELLA riga non e' vuota. Shopify ha sempre la colonna «Lineitem sku», spesso
+  // vuota: prendendo solo la prima colonna presente l'articolo restava senza nome e l'ordine entrava
+  // senza prodotti (27/11/2026, in 48 ore: shop italy 414 su 414, PAOLINO FRANCESCO 66 su 66, FAMA 17 su 17).
+  const AA: Record<string, string[]> = {}
+  for (const k of Object.keys(AUX)) AA[k] = AUX[k].filter(a => headers.has(a))
+  const colonneContenuto = ALIAS.contenuto.filter(a => headers.has(a))
+  const primo = (r: any, colonne: string[]) => {
+    for (const c of colonne) { const v = String(r[c] ?? '').trim(); if (v) return v }
+    return ''
+  }
+
+  // EXPORT SHOPIFY: la colonna «Id» e' l'id dell'ordine, unico fra tutti i negozi (il numero «Name»
+  // no: due negozi dello stesso cliente usano gli stessi numeri). Serve all'anti-doppione, sotto.
+  const eShopify = headers.has('id') && headers.has('name') && headers.has('financial_status') && headers.has('lineitem_name')
 
   const missing = REQUIRED.filter(f => !M[f])
   if (missing.length) {
@@ -298,7 +313,8 @@ export async function POST(req: NextRequest) {
   // Attivo il raggruppamento solo quando c'è la colonna line item + un identificativo ordine.
   const lineMode = !!A.lineitem_name && !!M.order_id
   // `riga`: posizione nel file della prima riga dell'ordine (0 = prima riga dopo l'intestazione).
-  type Gruppo = { oid: string; riga: number; header: any; items: string[]; articoli: any[]; totaleSum: number | null }
+  // `idShopify`: l'Id dell'ordine negli export Shopify (sta sulla prima riga dell'ordine).
+  type Gruppo = { oid: string; riga: number; header: any; items: string[]; articoli: any[]; totaleSum: number | null; idShopify?: string }
   const gruppi: Gruppo[] = []
   if (lineMode) {
     // Raggruppo per order_id usando una MAPPA, non solo il confronto con la riga precedente: cosi'
@@ -331,6 +347,7 @@ export async function POST(req: NextRequest) {
         // Riga di continuazione (id ordine vuoto) che porta il destinatario: promuovila a header.
         cur.header = r
       }
+      if (eShopify && !cur.idShopify) cur.idShopify = String(r.id ?? '').trim() || undefined
       // TOTALE ordine SOMMATO su tutte le righe del gruppo: Shopify mette il "Total" solo sulla 1a riga
       // (le altre vuote = +0), Amazon mette "item-price" PER RIGA -> la somma = totale ordine. Prima si
       // leggeva SOLO la riga header: con Amazon multi-articolo il totale (e il COD dedotto) era il prezzo
@@ -338,19 +355,22 @@ export async function POST(req: NextRequest) {
       const tRiga = M.totale_ordine ? toNum(r[M.totale_ordine!]) : null
       if (tRiga != null) cur.totaleSum = (cur.totaleSum || 0) + tRiga
       // Accumulo il prodotto di questa riga (stringa contenuto + articolo strutturato per il riepilogo)
-      const li = A.lineitem_name ? String(r[A.lineitem_name] ?? '').trim() : ''
+      const li = primo(r, AA.lineitem_name)
       if (li) {
         const q = A.lineitem_qty ? (toNum(r[A.lineitem_qty]) ?? 1) : 1
-        const nome = (A.lineitem_prodotto ? String(r[A.lineitem_prodotto] ?? '').trim() : '') || li
-        const skuItem = A.sku ? String(r[A.sku] ?? '').trim() : ''
-        const variante = A.lineitem_variante ? String(r[A.lineitem_variante] ?? '').trim() : ''
-        const orderItemId = A.lineitem_orderitemid ? String(r[A.lineitem_orderitemid] ?? '').trim() : ''
+        const nome = primo(r, AA.lineitem_prodotto) || li
+        const skuItem = primo(r, AA.sku)
+        const variante = primo(r, AA.lineitem_variante)
+        const orderItemId = primo(r, AA.lineitem_orderitemid)
         cur.items.push(`${q}× ${li}`)
         cur.articoli.push({ quantita: q, nome, sku: skuItem || null, variante: variante || null, order_item_id: orderItemId || null })
       }
     }
   } else {
-    rows.forEach((r, n) => gruppi.push({ oid: g(r, 'order_id'), riga: n, header: r, items: [], articoli: [], totaleSum: null }))
+    rows.forEach((r, n) => gruppi.push({
+      oid: g(r, 'order_id'), riga: n, header: r, items: [], articoli: [], totaleSum: null,
+      idShopify: (eShopify && String(r.id ?? '').trim()) || undefined,
+    }))
   }
 
   const records: any[] = []
@@ -360,6 +380,8 @@ export async function POST(req: NextRequest) {
   const errori: { riga: number | null; ordine: string | null; motivo: string }[] = [...saltatiEcwid]
   // Riga del file per numero d'ordine: serve a dire "riga 42" anche per quelli saltati dal dedup.
   const rigaPerOrdine = new Map<string, number>()
+  // Id Shopify per numero d'ordine (solo export Shopify): l'anti-doppione distingue i negozi.
+  const idShopifyPerOrdine = new Map<string, string>()
   // Solo le righe MALFORMATE: `scartati` non deve gonfiarsi con i "gia' importati", che sono un'altra cosa.
   let malformati = 0
 
@@ -421,7 +443,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Contenuto = elenco prodotti dell'ordine (o colonna contenuto del nostro template)
-    const contenuto = grp.items.length ? grp.items.join(', ') : (g(r, 'contenuto') || null)
+    const contenuto = grp.items.length ? grp.items.join(', ') : (primo(r, colonneContenuto) || null)
 
     // Contrassegno: dal nostro template, oppure dedotto per gli ordini in contrassegno.
     // Regola: se il pagamento non è ancora incassato (pending/unpaid/authorized) o il metodo è
@@ -441,6 +463,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (grp.oid) rigaPerOrdine.set(String(grp.oid), rigaFile)
+    if (grp.oid && grp.idShopify) idShopifyPerOrdine.set(String(grp.oid), grp.idShopify)
     records.push({
       master_id: masterId,
       cliente_id: clienteId,
@@ -462,7 +485,7 @@ export async function POST(req: NextRequest) {
       order_id: grp.oid || null,
       totale_ordine: totale,
       articoli: grp.articoli.length ? grp.articoli : null,   // righe prodotto strutturate per il riepilogo ordine
-      sku: (A.sku ? String(r[A.sku] ?? '').trim() : '') || null,   // SKU per il match automatico col catalogo pacchi
+      sku: primo(r, AA.sku) || null,   // SKU per il match automatico col catalogo pacchi
       fonte: 'csv',
       // ORDINE DELL'ELENCO. Le righe di un file entrano tutte nello stesso istante: per metterle in
       // ordine di tempo serve la data dell'ordine scritta nel file, e a parita' la riga del file.
@@ -500,7 +523,7 @@ export async function POST(req: NextRequest) {
       // vedi lib/ordini-gia-importati.ts.
       const { ordiniGiaImportati } = await import('@/lib/ordini-gia-importati')
       let esistenti: Map<string, string>
-      try { esistenti = await ordiniGiaImportati(supabase, clienteId, ids as string[]) }
+      try { esistenti = await ordiniGiaImportati(supabase, clienteId, ids as string[], idShopifyPerOrdine) }
       catch (e: any) {
         console.error('[IMPORTA] controllo doppioni non riuscito', clienteId, e?.message || e)
         return NextResponse.json({ error: 'Non sono riuscito a controllare gli ordini già importati: riprova tra poco.' }, { status: 503 })
