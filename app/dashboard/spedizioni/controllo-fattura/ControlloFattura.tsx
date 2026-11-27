@@ -620,6 +620,30 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const pagine = Math.max(1, Math.ceil(filtrate.length / perPagina))
   const pag = Math.min(pagina, pagine)
   const visibili = filtrate.slice((pag - 1) * perPagina, pag * perPagina)
+  const barraPagine = (inCima: boolean) => (
+    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', padding: '10px 16px', [inCima ? 'borderBottom' : 'borderTop']: `1px solid ${C.filo}`, fontSize: 13, color: C.attenuato }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span>{((pag - 1) * perPagina + 1).toLocaleString('it-IT')}–{Math.min(pag * perPagina, filtrate.length).toLocaleString('it-IT')} di {filtrate.length.toLocaleString('it-IT')}</span>
+        {inCima && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            Righe per pagina
+            <span style={{ display: 'inline-flex', background: C.fondoTenue, border: `1px solid ${C.filo}`, borderRadius: 9, padding: 2 }}>
+              {[10, 25, 50, 100].map(n => (
+                <button key={n} onClick={() => { setPerPagina(n); setPagina(1) }}
+                  style={{ padding: '4px 9px', borderRadius: 7, border: 'none', background: perPagina === n ? '#fff' : 'transparent', boxShadow: perPagina === n ? '0 1px 2px rgba(16,24,40,.1)' : 'none', fontSize: 12.5, fontWeight: perPagina === n ? 700 : 500, color: perPagina === n ? C.testo : C.attenuato, cursor: 'pointer', ...cifre }}>{n}</button>
+              ))}
+            </span>
+          </span>
+        )}
+      </div>
+      {pagine > 1 && <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pag <= 1} style={{ padding: '7px 12px', border: `1px solid ${C.filo}`, borderRadius: 9, background: '#fff', fontWeight: 600, color: pag <= 1 ? '#98a2b3' : C.testo, cursor: pag <= 1 ? 'default' : 'pointer' }}>Precedente</button>
+        <span style={{ alignSelf: 'center', ...cifre }}>Pagina {pag} di {pagine}</span>
+        <button onClick={() => setPagina(p => Math.min(pagine, p + 1))} disabled={pag >= pagine} style={{ padding: '7px 12px', border: `1px solid ${C.filo}`, borderRadius: 9, background: '#fff', fontWeight: 600, color: pag >= pagine ? '#98a2b3' : C.testo, cursor: pag >= pagine ? 'default' : 'pointer' }}>Successiva</button>
+      </div>}
+    </div>
+  )
+
   // CON UN FILTRO, LA RIGA PARLA SOLO DI QUELLO (Lorenzo, 27/11: "su carburante ci deve stare solo carburante e non
   // anche la voce entro le 12"). Sotto "Carburante" la NI665518064 mostrava +42,31 € e il motivo "Entro ore 12" da
   // 42 €: il carburante era 0,31. Si mostrano i motivi del filtro (o della voce scelta in "Cosa fare") e la loro
@@ -1776,6 +1800,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             </button>
           </div>
 
+          {/* RIGHE PER PAGINA IN CIMA (Lorenzo, 27/11: «hai messo l'impaginazione in fondo alla tabella»): quante righe vedere
+              si sceglie prima di scorrere, non dopo. In fondo restano le pagine. */}
+          {filtrate.length > 10 && barraPagine(true)}
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -1873,27 +1900,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             </table>
           </div>
 
-          {filtrate.length > 10 && (
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', padding: '12px 16px', borderTop: `1px solid ${C.filo}`, fontSize: 13, color: C.attenuato }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span>{((pag - 1) * perPagina + 1).toLocaleString('it-IT')}–{Math.min(pag * perPagina, filtrate.length).toLocaleString('it-IT')} di {filtrate.length.toLocaleString('it-IT')}</span>
-                {/* Righe per pagina (Lorenzo, 27/11): 10, 25, 50, 100. */}
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  Righe per pagina
-                  <span style={{ display: 'inline-flex', background: C.fondoTenue, border: `1px solid ${C.filo}`, borderRadius: 9, padding: 2 }}>
-                    {[10, 25, 50, 100].map(n => (
-                      <button key={n} onClick={() => { setPerPagina(n); setPagina(1) }}
-                        style={{ padding: '4px 9px', borderRadius: 7, border: 'none', background: perPagina === n ? '#fff' : 'transparent', boxShadow: perPagina === n ? '0 1px 2px rgba(16,24,40,.1)' : 'none', fontSize: 12.5, fontWeight: perPagina === n ? 700 : 500, color: perPagina === n ? C.testo : C.attenuato, cursor: 'pointer', ...cifre }}>{n}</button>
-                    ))}
-                  </span>
-                </span>
-              </div>
-              {pagine > 1 && <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pag <= 1} style={{ padding: '7px 12px', border: `1px solid ${C.filo}`, borderRadius: 9, background: '#fff', fontWeight: 600, color: pag <= 1 ? '#98a2b3' : C.testo, cursor: pag <= 1 ? 'default' : 'pointer' }}>Precedente</button>
-                <button onClick={() => setPagina(p => Math.min(pagine, p + 1))} disabled={pag >= pagine} style={{ padding: '7px 12px', border: `1px solid ${C.filo}`, borderRadius: 9, background: '#fff', fontWeight: 600, color: pag >= pagine ? '#98a2b3' : C.testo, cursor: pag >= pagine ? 'default' : 'pointer' }}>Successiva</button>
-              </div>}
-            </div>
-          )}
+          {/* In fondo solo dove si è e le pagine: quante righe vedere si sceglie in cima, prima di scorrere. */}
+          {pagine > 1 && barraPagine(false)}
         </div>
       </>)}
     </div>
