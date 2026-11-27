@@ -742,12 +742,19 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // la nota di credito e via dicendo... devi andare avanti con il pensiero"). Si segna qui, lo salva la rotta con la
   // fattura (riepilogo.stati) e lo storico lo ricorda: le note di credito ricevute e le voci che aspettano GLS.
   type ExtraStato = { nota?: string; importo?: number; numero?: string; listino?: { id: string; nome: string; di: string }
-    cliente?: { id?: string; nome: string }; addebito?: 'in_corso' | 'fatto' | 'stornato'; incassato?: boolean; avviso?: string; daMovimento?: boolean }
+    cliente?: { id?: string; nome: string }; addebito?: 'in_corso' | 'fatto' | 'stornato'; incassato?: boolean; avviso?: string; daMovimento?: boolean
+    confermaDopoPagata?: boolean }
   // Salva e dice l'errore, senza mostrarlo: lo usa la finestra «L'ho fatta pagare», che l'errore lo scrive al suo interno.
   async function salvaStato(chiave: string, stato: StatoSalvato['stato'] | null, extra: ExtraStato = {}): Promise<string | null> {
     if (!fatturaId) return 'Fattura non salvata.'
     const d: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fatturaId, statoVoce: { chiave, stato, ...extra } }) }).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
+    // La rotta chiede conferma (un addebito su una spedizione che era stata segnata pagata e poi annullata): si chiede a
+    // chi sta facendo, e se conferma si rifà la stessa richiesta con la conferma.
+    if (d.chiediConferma && !extra.confermaDopoPagata) {
+      const ok = await dialog.confirm({ title: 'Era segnata già pagata', message: String(d.error), confirmText: 'Sì, addebitala', danger: true })
+      return ok ? salvaStato(chiave, stato, { ...extra, confermaDopoPagata: true }) : 'Addebito non fatto.'
+    }
     if (d.error) return String(d.error)
     setStati(d.stati || {}); caricaStorico()
     return null

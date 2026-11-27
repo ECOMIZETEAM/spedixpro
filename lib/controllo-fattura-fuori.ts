@@ -41,7 +41,9 @@ export async function addebitiFuoriPortale(admin: any, masterId: string, numero:
   const { data, error } = await admin.from('movimenti').select('created_at,importo,descrizione,cliente_id,master_target_id')
     .eq('master_id', masterId).eq('voce', 'fuori_portale').ilike('descrizione', `%${numero}%`).order('created_at', { ascending: false }).limit(10)
   if (error) throw new Error('lettura dei movimenti non riuscita: ' + error.message)
-  const righe = (data || []) as any[]
+  // Il numero intero, non dentro un altro: «NI26031819» non deve trovare il movimento della NI260318194.
+  const intero = new RegExp(`(^|[^A-Z0-9])${numero}([^A-Z0-9]|$)`, 'i')
+  const righe = ((data || []) as any[]).filter(m => intero.test(String(m.descrizione || '')))
   const idCli = Array.from(new Set(righe.map(m => m.cliente_id).filter(Boolean)))
   const idMas = Array.from(new Set(righe.filter(m => !m.cliente_id && m.master_target_id && m.master_target_id !== masterId).map(m => m.master_target_id)))
   const nomi = new Map<string, string>()
@@ -59,9 +61,16 @@ export async function addebitiFuoriPortale(admin: any, masterId: string, numero:
 // Risponde il motivo del rifiuto, o null se il passaggio va bene.
 // `trovato`: la rotta ha appena trovato fra i movimenti l'addebito di quella spedizione (fatto da un'altra porta, o
 // rifatto dalla scheda dopo uno storno): si può segnare 'fatto' senza prenotazione, perché il movimento c'è.
-export function rifiutoStatoFuori(prima: { addebito?: string; cliente?: { nome?: string }; nota?: string } | undefined,
+export function rifiutoStatoFuori(prima: { stato?: string; addebito?: string; cliente?: { nome?: string }; nota?: string; importo?: number; incassato?: boolean } | undefined,
   nuovo: { stato: string | null; addebito: 'in_corso' | 'fatto' | 'stornato' | null; trovato?: boolean }): string | null {
   if (nuovo.trovato && nuovo.stato === 'fatturato' && nuovo.addebito === 'fatto') return null
+  // Una voce già decisa senza addebito («Già incassati», «Da incassare», «Assorbo io»): un addebito in Moove sopra la
+  // sovrascriverebbe, e il cliente che ha pagato fuori da Moove pagherebbe due volte (terza revisione, 27/11). Prima si
+  // annulla quella voce, apposta.
+  if (nuovo.addebito === 'in_corso' && prima?.stato && !prima.addebito) {
+    const com = prima.stato !== 'fatturato' ? 'assorbita da te' : prima.incassato === true ? `incassata da ${prima.cliente?.nome || prima.nota || '?'}` : `fatta pagare a ${prima.cliente?.nome || prima.nota || '?'}, da incassare`
+    return `Questa spedizione è già segnata ${com}: se va addebitata in Moove, prima annulla quella voce.`
+  }
   if (prima?.addebito === 'fatto' && !(nuovo.stato === 'fatturato' && (nuovo.addebito === 'fatto' || nuovo.addebito === 'stornato')))
     return `Questa spedizione è già addebitata a ${prima.cliente?.nome || prima.nota || 'un cliente'}: per correggerla fai uno storno dalla sua scheda, poi segna «L'ho stornata».`
   if (nuovo.addebito === 'in_corso' && (prima?.addebito === 'in_corso' || prima?.addebito === 'fatto'))

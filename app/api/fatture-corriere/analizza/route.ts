@@ -71,7 +71,8 @@ type Corpo = {
   perche?: { id: string; peso: number }[]   // spedizioni da girare rimaste senza rettifica: perché
   statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome?: string; di?: string }
     cliente?: { id?: string; nome?: string }; addebito?: 'in_corso' | 'fatto' | 'stornato'; incassato?: boolean | null; avviso?: string
-    daMovimento?: boolean }   // 'fatto' perché l'addebito c'è già fra i movimenti (lo cerca e lo legge la rotta)
+    daMovimento?: boolean      // 'fatto' perché l'addebito c'è già fra i movimenti (lo cerca e lo legge la rotta)
+    confermaDopoPagata?: boolean }   // addebito di una spedizione che era stata segnata pagata e poi annullata: confermato
   esterno?: { nome: string; formato?: string; righeFile?: number; abbinate?: string[]; andate?: number; corriereAndate?: number; prezzoClienti?: number; rientri?: number; rettifiche?: number }   // l'export di un altro gestionale abbinato
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
@@ -222,7 +223,13 @@ export async function POST(req: NextRequest) {
       let mov: Awaited<ReturnType<typeof addebitiFuoriPortale>> = []
       try { mov = await addebitiFuoriPortale(admin, u.masterId, fuoriTrov) }
       catch (e: any) { return NextResponse.json({ error: 'Non riesco a leggere i movimenti: ' + String(e?.message || e) + '. Riprova.' }, { status: 500 }) }
-      const m = mov.find(x => x.importo < 0 && x.chi)
+      // Dopo uno storno conta solo un addebito fatto DOPO lo storno: quello vecchio resta negativo anche se restituito
+      // (lo storno ha un'altra voce), e la voce tornava «addebitata» a un cliente rimborsato (terza revisione, 27/11).
+      const { data: fNow } = await admin.from('fatture_corriere').select('riepilogo').eq('id', fattura.id).maybeSingle()
+      const primaOra = (fNow?.riepilogo?.stati || {})[chiave]
+      const dal = primaOra?.addebito === 'stornato' ? String(primaOra.il || '') : ''
+      const m = mov.find(x => x.importo < 0 && x.chi && (!dal || x.il > dal))
+      if (!m && dal) return NextResponse.json({ error: `Dopo lo storno del ${new Date(dal).toLocaleDateString('it-IT')} fra i tuoi movimenti non c'è un nuovo addebito «Spedizione fatta fuori dal portale ${fuoriTrov}»: fallo dalla scheda del cliente, poi riprova.` }, { status: 409 })
       if (!m) return NextResponse.json({ error: `Fra i tuoi movimenti non c'è nessuna «Spedizione fatta fuori dal portale ${fuoriTrov}» addebitata a un cliente: falla pagare da qui.` }, { status: 409 })
       idCliente = m.chi; nomeCliente = (m.nome || 'cliente').slice(0, 120); importoTrovato = Math.abs(m.importo); trovato = true
     }
@@ -235,11 +242,22 @@ export async function POST(req: NextRequest) {
       try {
         const mov = await addebitiFuoriPortale(admin, u.masterId, fuori)
         if (mov.length) return NextResponse.json({ error: `La ${fuori} è già stata fatta pagare: «${mov[0].descrizione}», ${Math.abs(mov[0].importo).toFixed(2).replace('.', ',')} € il ${new Date(mov[0].il).toLocaleDateString('it-IT')}. Se va rifatta, falla dalla scheda del cliente.` }, { status: 409 })
+        // Decisa in un altro documento in qualunque modo (addebitata, incassata fuori da Moove, assorbita): si decide là.
         const altrove = (await fuoriAltrove(admin, u.masterId, fattura.id))[fuori]
-        if (altrove && (altrove.addebito === 'fatto' || altrove.addebito === 'in_corso'))
-          return NextResponse.json({ error: `La ${fuori} è già fatta pagare a ${altrove.cliente?.nome || altrove.nota || 'un cliente'} nel documento «${altrove.documento}».` }, { status: 409 })
+        if (altrove && altrove.addebito !== 'stornato')
+          return NextResponse.json({ error: `La ${fuori} è già decisa nel documento «${altrove.documento}» (${altrove.stato === 'fatturato' ? `fatta pagare a ${altrove.cliente?.nome || altrove.nota || 'un cliente'}` : 'assorbita'}): aprila là.` }, { status: 409 })
       } catch (e: any) {
         return NextResponse.json({ error: 'Non riesco a controllare se è già stata fatta pagare: ' + String(e?.message || e) + '. Riprova.' }, { status: 500 })
+      }
+    }
+    // «Già incassati» o «Da incassare» su una spedizione che in Moove è già addebitata (dalla scheda cliente): la voce
+    // direbbe «pagata fuori da Moove» con un movimento in Moove, e un doppio pagamento non si vedrebbe.
+    if (fuori && sv.stato === 'fatturato' && !addebito && !trovato) {
+      try {
+        const mov = (await addebitiFuoriPortale(admin, u.masterId, fuori)).filter(x => x.importo < 0)
+        if (mov.length) return NextResponse.json({ error: `In Moove la ${fuori} è già addebitata: «${mov[0].descrizione}», ${Math.abs(mov[0].importo).toFixed(2).replace('.', ',')} € il ${new Date(mov[0].il).toLocaleDateString('it-IT')}. Usa «È già addebitata».` }, { status: 409 })
+      } catch (e: any) {
+        return NextResponse.json({ error: 'Non riesco a controllare se è già addebitata in Moove: ' + String(e?.message || e) + '. Riprova.' }, { status: 500 })
       }
     }
     const avviso = String(sv.avviso ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)
@@ -251,7 +269,15 @@ export async function POST(req: NextRequest) {
         // passa solo se nel frattempo nessuno ha cambiato il riepilogo).
         const no = rifiutoStatoFuori(prima, { stato: sv.stato, addebito, trovato })
         if (no) return NextResponse.json({ error: no }, { status: 409 })
+        // Segnata pagata fuori da Moove, annullata, e ora addebitata in Moove: due gesti voluti, ma il cliente potrebbe
+        // pagarla due volte. Si chiede di confermarlo, dicendo cosa c'era (terza revisione, 27/11).
+        const pagataPrima = addebito === 'in_corso' && !prima ? (riepilogo.annullati?.[chiave] || []).filter((x: any) => x?.stato === 'fatturato' && !x.addebito).pop() : null
+        if (pagataPrima && sv.confermaDopoPagata !== true)
+          return NextResponse.json({ chiediConferma: true, error: `Il ${new Date(pagataPrima.il).toLocaleDateString('it-IT')} questa spedizione era segnata ${pagataPrima.incassato === true ? 'incassata' : 'fatta pagare'} da ${pagataPrima.cliente?.nome || pagataPrima.nota || '?'} (${Number(pagataPrima.importo || 0).toFixed(2).replace('.', ',')} €), poi annullata. Se te l'ha già pagata fuori da Moove, addebitandola la paga due volte. La addebito lo stesso?` }, { status: 409 })
       }
+      // Una voce tolta non sparisce: resta fra le annullate, così un addebito dopo sa cosa c'era.
+      const annullati: Record<string, any[]> = { ...(riepilogo.annullati || {}) }
+      if (sv.stato == null && fuori && prima) annullati[chiave] = [...(annullati[chiave] || []), { ...prima, storia: undefined, annullata_il: new Date().toISOString(), annullata_da: u.userId }].slice(-5)
       if (sv.stato == null) delete stati[chiave]
       else {
         const storia = [...(prima?.storia || []), ...(prima ? [{ stato: prima.stato, il: prima.il, ...(prima.addebito ? { addebito: prima.addebito } : {}) }] : [])].slice(-10)
@@ -269,7 +295,7 @@ export async function POST(req: NextRequest) {
           ...(avviso ? { avviso } : addebito === 'fatto' && prima?.addebito === 'fatto' && prima?.avviso ? { avviso: prima.avviso } : {}),
           ...(trovato ? { daMovimento: true } : {}) }
       }
-      return { ...riepilogo, stati }
+      return { ...riepilogo, stati, ...(Object.keys(annullati).length ? { annullati } : {}) }
     })
     if ('risposta' in esito) return esito.risposta
     return NextResponse.json({ ok: true, stati: esito.riepilogo?.stati || {} })
