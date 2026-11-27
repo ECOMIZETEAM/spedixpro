@@ -4,12 +4,13 @@ import { C, cifre, euro, r2 } from './ui'
 
 /* UNA SPEDIZIONE FUORI DA TUTTO, FATTA PAGARE A QUALCUNO (Lorenzo, 27/11). Sono le righe della fattura che non
  * sono né in Moove né nell'export dell'altro gestionale: a ottobre per Wave 4 arrivi (spedizioni che partono da fuori e
- * arrivano a Wave: 3 da 4,48 €, uno da 94,63 €) e la partenza per Riga da 493,86 €. Prima si scriveva il nome a mano in un prompt.
- * Ora: il cliente si sceglie fra quelli di Moove (o si scrive, se non c'è), si scrive quanto gli si è fatto pagare, e
- * più tardi se ha pagato. Si scrive SOLO nel controllo fattura, per il conto del documento: in Moove non si muove
- * niente (Lorenzo: "non scrivere niente... rimane tutto scritto e calcolato nel check fatture... semplice lineare e
- * sicuro"). Prima di tutto la finestra dice se GLS l'ha fatta pagare giusta (Lorenzo: "Wave deve sempre sapere se
- * paga giusto"): le stesse regole della contestazione, così l'«in più» di qui è quello che c'è nella contestazione. */
+ * arrivano a Wave: 3 da 4,48 €, uno da 94,63 €) e la partenza per Riga da 493,86 €.
+ * Il cliente si sceglie fra quelli di Moove (o si scrive, se non c'è) e si scrive quanto gli si è fatto pagare. Poi:
+ *  - a un cliente di Moove si può ADDEBITARE in Moove (dalla porta dei movimenti a mano, nel ControlloFattura), oppure
+ *    dire che l'ha GIÀ PAGATA fuori da Moove (Lorenzo: «magari l'ha pagata fuori da Moove»);
+ *  - a uno che non è in Moove non si addebita niente: già incassati, o da incassare e si dirà dopo.
+ * Prima di tutto la finestra dice se GLS l'ha fatta pagare giusta (Lorenzo: "Wave deve sempre sapere se paga
+ * giusto"): le stesse regole della contestazione, così l'«in più» di qui è quello che c'è nella contestazione. */
 
 export type ControlloFuori = {
   carburante: { euro: number; percentuale: number | null; listino: number | null; inPiu: number; controllato: boolean } | null
@@ -21,12 +22,15 @@ export type ControlloFuori = {
 }
 
 export type ClienteScelto = { id?: string; nome: string }
+// Come l'ha fatta pagare: addebito in Moove (solo a un cliente o sotto-master di Moove), già incassati fuori da Moove,
+// o da incassare (si dirà dopo se ha pagato).
+export type ComeFattaPagare = 'addebita' | 'incassati' | 'da_incassare'
 type VoceElenco = { id: string; ragione_sociale: string; is_master?: boolean }
 
 export default function FattaPagare({ titolo, sottotitolo, gls, controllo, corriere, onChiudi, onConferma }: {
   titolo: string; sottotitolo: string; gls: number; controllo: ControlloFuori; corriere: string
   onChiudi: () => void
-  onConferma: (x: { cliente: ClienteScelto; importo: number }) => Promise<string | null>   // null = fatto, altrimenti l'errore da mostrare
+  onConferma: (x: { cliente: ClienteScelto; importo: number; come: ComeFattaPagare }) => Promise<string | null>   // null = fatto, altrimenti l'errore da mostrare
 }) {
   const [modo, setModo] = useState<'moove' | 'fuori'>('moove')
   const [elenco, setElenco] = useState<VoceElenco[] | null>(null)
@@ -61,11 +65,11 @@ export default function FattaPagare({ titolo, sottotitolo, gls, controllo, corri
   const cliente: ClienteScelto | null = modo === 'moove' ? (scelto ? { id: scelto.id, nome: scelto.ragione_sociale } : null) : (nomeLibero.trim() ? { nome: nomeLibero.trim().slice(0, 120) } : null)
   const pronto = !!cliente && importo > 0 && importo < 1_000_000 && !invio
 
-  async function conferma() {
+  async function conferma(come: ComeFattaPagare) {
     if (!cliente) { setErrore(modo === 'moove' ? 'Scegli il cliente.' : 'Scrivi il nome del cliente.'); return }
     if (!(importo > 0)) { setErrore('Scrivi quanto gli fai pagare, per esempio 6,50.'); return }
     setErrore(null); setInvio(true)
-    const e = await onConferma({ cliente, importo: r2(importo) })
+    const e = await onConferma({ cliente, importo: r2(importo), come })
     setInvio(false)
     if (e) setErrore(e)
   }
@@ -157,8 +161,8 @@ export default function FattaPagare({ titolo, sottotitolo, gls, controllo, corri
             </span>}
             <div style={{ fontSize: 12, color: C.attenuato, marginTop: 8, lineHeight: 1.45 }}>
               {modo === 'moove'
-                ? <>Resta scritto qui, nel conto di questo documento: in Moove non si muove niente, e a {scelto?.ragione_sociale || 'lui'} lo fai pagare tu come sempre. Quando ti paga, segna «Incassati».</>
-                : <>Resta scritto qui, nel conto di questo documento: in Moove non si muove niente. Quando ti paga, segna «Incassati»; se non ti paga, «Non incassati» e resta a tuo carico.</>}
+                ? <><b>Addebita in Moove</b>: l&apos;importo si scala dal suo credito come «Spedizione fatta fuori dal portale», con questo numero, e lo vede fra i suoi movimenti; i {euro(gls)} pagati a {corriere} restano il tuo costo (lui non li vede). <b>Già incassati</b>: te l&apos;ha già pagata fuori da Moove, si segna solo qui.</>
+                : <>In Moove non si muove niente: resta scritto qui, nel conto di questo documento. Se te l&apos;ha già pagata, <b>Già incassati</b>; se no, <b>Da incassare</b> e poi segni «Incassati» o «Non incassati».</>}
             </div>
           </div>
 
@@ -167,8 +171,11 @@ export default function FattaPagare({ titolo, sottotitolo, gls, controllo, corri
 
         <div style={{ padding: '12px 20px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: `1px solid ${C.filo}` }}>
           <button onClick={onChiudi} disabled={invio} style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid ${C.filo}`, background: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Annulla</button>
-          <button onClick={conferma} disabled={!pronto} style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: pronto ? C.arancio : '#fdba8c', color: '#fff', fontSize: 13, fontWeight: 700, cursor: pronto ? 'pointer' : 'default' }}>
-            {invio ? 'Un momento…' : 'Salva'}
+          <button onClick={() => conferma('incassati')} disabled={!pronto} style={{ padding: '8px 14px', borderRadius: 8, border: `1px solid ${pronto ? C.arancio : C.filo}`, background: '#fff', color: pronto ? C.arancioScuro : C.attenuato, fontSize: 13, fontWeight: 700, cursor: pronto ? 'pointer' : 'default' }}>
+            Già incassati
+          </button>
+          <button onClick={() => conferma(modo === 'moove' ? 'addebita' : 'da_incassare')} disabled={!pronto} style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: pronto ? C.arancio : '#fdba8c', color: '#fff', fontSize: 13, fontWeight: 700, cursor: pronto ? 'pointer' : 'default' }}>
+            {invio ? 'Un momento…' : modo === 'moove' ? `Addebita${importo > 0 ? ' ' + euro(importo) : ''} in Moove` : 'Da incassare'}
           </button>
         </div>
       </div>

@@ -7,7 +7,7 @@ import { riepilogaFattura, daGirare, type EsitoPagina } from '@/lib/controllo-fa
 import { eGls, espandiRigaGls, righeControlloGls, ricalcolaCarburanteGls, type ParteAllinea, type RigaFatturaGls } from '@/lib/fattura-gls'
 import { C, carta, cifre, euro, conSegno, kg, r2, coloreImporto, Icona, Tessera, Pillola } from './ui'
 import AltriGestionali, { type EsternoIniziale, type EsternoSalvato } from './AltriGestionali'
-import FattaPagare, { type ClienteScelto } from './FattaPagare'
+import FattaPagare, { type ClienteScelto, type ComeFattaPagare } from './FattaPagare'
 import type { FuoriAltrove } from '@/lib/controllo-fattura-fuori'
 import { controllaFuori, descriviTariffaResi, eEstero as eEsteroR, noloDellePartenze, riferimentoRientri, type TariffaResi } from './paga-giusto'
 
@@ -33,9 +33,9 @@ type GruppoGls = 'contestare' | 'clienti' | 'chiarire' | 'listino'
 // A che punto è una voce di "Cosa fare" (riepilogo.stati della fattura, rotta analizza).
 // 'tentato': mandata alla Rettifica ma non creata (nota = perché, listino = quello da correggere, se è quello).
 type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato' | 'assorbito' | 'fatturato' | 'tentato'; il: string; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome: string; di: string }; storia?: { stato: string; il: string }[]
-  // Solo le spedizioni fuori da tutto ('fatturato'): a chi (con l'id se è un cliente o sotto-master di Moove) e se ha
-  // pagato. In Moove non si muove niente (Lorenzo, 27/11): è il conto del documento.
-  cliente?: { id?: string; nome: string }; incassato?: boolean }
+  // Solo le spedizioni fuori da tutto ('fatturato'): a chi (con l'id se è un cliente o sotto-master di Moove), se
+  // l'addebito in Moove è partito, da verificare o stornato, e se ha pagato fuori da Moove.
+  cliente?: { id?: string; nome: string }; addebito?: 'in_corso' | 'fatto' | 'stornato'; incassato?: boolean; avviso?: string }
 type FatturaStorico = {
   id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; etichetta: string | null; data_fattura: string | null; nome_file: string | null
   righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
@@ -74,7 +74,7 @@ const GRUPPI_GLS: { k: GruppoGls; titolo: string; sotto: string; icona: string; 
 ]
 const pct = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%'
 // Una spedizione fuori da tutto fatta pagare, e incassata (vedi il conto del documento).
-const incassataFuori = (x: StatoSalvato) => x.stato === 'fatturato' && x.incassato === true
+const incassataFuori = (x: StatoSalvato) => x.stato === 'fatturato' && (x.addebito === 'fatto' || (!x.addebito && x.incassato === true))
 // Cosa vuol dire, in una riga, ogni motivo che non è una voce di GLS (quelle hanno la loro nota).
 const NOTE_GLS: Record<string, string> = {
   'peso:clienti': 'Con «Manda alla Rettifica», qui sotto, diventano rettifiche da confermare.',
@@ -545,9 +545,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     const segFuori = new Set(esiti.filter(e => !e.spedizione).map(e => e.riga.segnacollo))
     const daAltrove = r2(Object.entries(altrove).filter(([seg, x]) => segFuori.has(seg) && !stati[`fuori:${seg}`] && incassataFuori(x as StatoSalvato)).reduce((t, [, x]) => t + (x.importo || 0), 0))
     // Una riga segnata «incassati» e poi trovata in un export caricato dopo: il suo incasso è già nell'export, non si
-    // conta due volte.
+    // conta due volte. Un addebito vero in Moove resta: sono soldi mossi davvero.
     const nellExport = new Set(Object.values(esterniSalvati).flatMap(x => x.abbinate || []))
-    const aMano = r2(daAltrove + Object.entries(stati).filter(([k, x]) => k.startsWith('fuori:') && incassataFuori(x) && !nellExport.has(k.slice(6)))
+    const aMano = r2(daAltrove + Object.entries(stati).filter(([k, x]) => k.startsWith('fuori:') && incassataFuori(x) && !(nellExport.has(k.slice(6)) && x.addebito !== 'fatto'))
       .reduce((t, [, x]) => t + (x.importo || 0), 0))
     const incassato = r2(moove + altro + aMano)
     const speso = r2(pagato - note)
@@ -586,7 +586,9 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     for (const [k, x] of Object.entries(stati)) {
       if (!k.startsWith('fuori:') || x.stato !== 'fatturato') continue
       const chi = x.cliente?.nome || x.nota || '?'
-      if (x.incassato == null) daFare.push({ testo: `Dire se ${chi} ha pagato la ${k.slice(6)}`, euro: x.importo })
+      if (x.addebito === 'in_corso') daFare.push({ testo: `Verificare nei movimenti di ${chi} se l'addebito della ${k.slice(6)} è partito`, euro: x.importo })
+      else if (x.addebito === 'stornato') daFare.push({ testo: `Decidere cosa fare della ${k.slice(6)}: l'addebito a ${chi} è stato stornato` })
+      else if (!x.addebito && x.incassato == null) daFare.push({ testo: `Dire se ${chi} ha pagato la ${k.slice(6)}`, euro: x.importo })
     }
     for (const x of Object.values(esterniSalvati)) if (x.rettifiche > 0 && st(`esterno:${x.nome}`) !== 'fatto') daFare.push({ testo: `Caricare nel gestionale le ${x.rettifiche} rettifiche di «${x.nome}»` })
     return { pagato, note, speso, moove, altro, aMano, incassato, guadagno: r2(incassato - speso), daFare, senzaExport: senzaExport && fuori.length > 0 }
@@ -740,7 +742,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // la nota di credito e via dicendo... devi andare avanti con il pensiero"). Si segna qui, lo salva la rotta con la
   // fattura (riepilogo.stati) e lo storico lo ricorda: le note di credito ricevute e le voci che aspettano GLS.
   type ExtraStato = { nota?: string; importo?: number; numero?: string; listino?: { id: string; nome: string; di: string }
-    cliente?: { id?: string; nome: string }; incassato?: boolean }
+    cliente?: { id?: string; nome: string }; addebito?: 'in_corso' | 'fatto' | 'stornato'; incassato?: boolean; avviso?: string; daMovimento?: boolean }
   // Salva e dice l'errore, senza mostrarlo: lo usa la finestra «L'ho fatta pagare», che l'errore lo scrive al suo interno.
   async function salvaStato(chiave: string, stato: StatoSalvato['stato'] | null, extra: ExtraStato = {}): Promise<string | null> {
     if (!fatturaId) return 'Fattura non salvata.'
@@ -755,9 +757,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     if (e) await dialog.alert({ title: 'Non salvato', message: e })
   }
 
-  // LA SPEDIZIONE FUORI DA TUTTO FATTA PAGARE (FattaPagare): a chi e quanto, poi se ha pagato. Si scrive solo qui,
-  // nel controllo fattura: in Moove non si muove niente (Lorenzo, 27/11: "non scrivere niente... rimane tutto scritto
-  // e calcolato nel check fatture... semplice lineare e sicuro").
+  // LA SPEDIZIONE FUORI DA TUTTO FATTA PAGARE (FattaPagare). A un cliente o sotto-master di Moove si addebita dalla
+  // porta dei movimenti a mano (/api/movimenti/crea, voce «Spedizione fatta fuori dal portale», col costo del corriere
+  // come costo del master, che il guadagno legge da costi_fuori_portale: il conto di Wave non si tocca, Lorenzo 27/11
+  // «non scrivere niente» sul −4,48/+5,50), oppure si dice che l'ha già pagata fuori da Moove. Prima si PRENOTA sulla
+  // fattura (la rotta rifiuta una seconda prenotazione, un addebito già fatto da un'altra porta o in un altro documento),
+  // poi si addebita, poi si segna fatto. Se la risposta non arriva o è un 500, resta «da verificare»: rifarlo alla cieca
+  // potrebbe addebitare due volte.
   const [fattaPagare, setFattaPagare] = useState<RigaFatturaBrt | null>(null)
   const descriviFuori = (r: RigaFatturaBrt) => {
     const giorno = r.dataRitiro ? r.dataRitiro.split('-').reverse().join('/') : ''
@@ -781,10 +787,48 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         : `${cr} ti ha chiesto ${euro(r.totale)}: giusta col tuo contratto.`}
     </div>
   }
-  async function registraFuori(r: RigaFatturaBrt, x: { cliente: ClienteScelto; importo: number }): Promise<string | null> {
-    const e = await salvaStato(`fuori:${r.segnacollo}`, 'fatturato', { nota: x.cliente.nome, importo: x.importo, cliente: x.cliente.id ? { id: x.cliente.id, nome: x.cliente.nome } : { nome: x.cliente.nome } })
+  // Come l'ha fatta pagare (Lorenzo, 27/11: «ci deve stare la possibilità di addebitare oppure di dire già incassati
+  // tutto ok, perché magari l'ha pagata fuori da Moove»): addebito in Moove (solo a un cliente o sotto-master di Moove),
+  // già incassati fuori da Moove, o da incassare (si dirà dopo).
+  async function registraFuori(r: RigaFatturaBrt, x: { cliente: ClienteScelto; importo: number; come: ComeFattaPagare }): Promise<string | null> {
+    if (x.come === 'addebita') return addebitaFuori(r, x)
+    const e = await salvaStato(`fuori:${r.segnacollo}`, 'fatturato', { nota: x.cliente.nome, importo: x.importo,
+      cliente: x.cliente.id ? { id: x.cliente.id, nome: x.cliente.nome } : { nome: x.cliente.nome }, ...(x.come === 'incassati' ? { incassato: true } : {}) })
     if (!e) setFattaPagare(null)
     return e
+  }
+  async function addebitaFuori(r: RigaFatturaBrt, x: { cliente: ClienteScelto; importo: number }): Promise<string | null> {
+    const chiave = `fuori:${r.segnacollo}`
+    if (!x.cliente.id) return 'Per addebitarla serve un cliente di Moove.'
+    const base = { nota: x.cliente.nome, importo: x.importo, cliente: { id: x.cliente.id, nome: x.cliente.nome } }
+    const prenotata = await salvaStato(chiave, 'fatturato', { ...base, addebito: 'in_corso' })
+    if (prenotata) return prenotata
+    // Un 500 della porta dei movimenti non vuol dire «non scritto»: l'errore può arrivare dopo che il database ha già
+    // registrato il movimento (connessione caduta sulla risposta). Come una risposta persa, resta da verificare. Solo
+    // un rifiuto (400, 403, 503 «riprova») è sicuramente prima di scrivere.
+    const risposta: { ok: boolean; error?: string; avviso?: string | null; persa?: boolean } = await fetch('/api/movimenti/crea', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clienteId: x.cliente.id, voce: 'fuori_portale', importo: -x.importo, numero: r.segnacollo, testo: descriviFuori(r), costo: String(r2(r.totale)) }),
+    }).then(async res => ({ ok: res.ok, ...(await res.json().catch(() => ({ persa: true }))), ...(res.status >= 500 && res.status !== 503 ? { persa: true } : {}) }))
+      .catch(() => ({ ok: false, persa: true }))
+    if (risposta.persa) {
+      setFattaPagare(null)
+      await dialog.alert({ title: 'Addebito da verificare', message: `Non è arrivata la risposta: non so se l'addebito a ${x.cliente.nome} è partito. Guarda i suoi movimenti: se c'è, premi «L'addebito c'è»; se non c'è, «Non c'è» e rifallo.` })
+      return null
+    }
+    if (!risposta.ok) {
+      // Rifiutato prima di scrivere (cliente non suo, numero che è sul portale…): la prenotazione si toglie.
+      await salvaStato(chiave, null)
+      return risposta.error || 'Addebito non riuscito.'
+    }
+    // L'avviso della porta (il costo pagato al corriere non salvato: il guadagno conterebbe l'addebito per intero) resta
+    // scritto sulla voce, non solo in una finestra che si chiude.
+    const avviso = risposta.avviso ? String(risposta.avviso) : ''
+    const segnata = await salvaStato(chiave, 'fatturato', { ...base, addebito: 'fatto', ...(avviso ? { avviso } : {}) })
+    setFattaPagare(null)
+    if (segnata) await dialog.alert({ title: 'Addebitata, ma non segnata qui', message: `L'addebito a ${x.cliente.nome} è partito, ma qui è rimasto «da verificare» (${segnata}). Premi «L'addebito c'è»: non rifarlo.${avviso ? ' ' + avviso : ''}` })
+    else if (avviso) await dialog.alert({ title: 'Addebitata, con un avviso', message: avviso })
+    return null
   }
   // L'importo come lo scrive una persona: "185,24", "1.234,56" o "185.24".
   const leggiEuro = (x: string) => { const t = String(x).trim().replace(/\s|€/g, ''); const n = Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t); return Number.isFinite(n) ? n : NaN }
@@ -829,25 +873,55 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       tasto('Riprova', riprova, true), tasto('Assorbo io', assorbo), annulla,
       ...(st?.nota ? [<div key="perche" style={{ flexBasis: '100%', fontSize: 11.5, color: '#475467', lineHeight: 1.4 }}>{st.nota}</div>] : []),
     ]
-    // Una spedizione fuori da tutto: fatta pagare a qualcuno (poi incassati sì o no), assorbita, o già decisa in un altro
-    // documento (il borderò è cumulativo). In Moove non si muove niente: è il conto del documento.
+    // Una spedizione fuori da tutto: addebitata in Moove (partito, da verificare, stornato), fatta pagare fuori da Moove
+    // (incassati sì o no), assorbita, o già decisa in un altro documento (il borderò è cumulativo). Un addebito in Moove
+    // non si annulla da qui: è un movimento vero, si corregge con uno storno dalla scheda del cliente.
     const partiFuori = () => {
       const riga = esiti.find(e => e.riga.segnacollo === chiave.slice(6))?.riga
       const altra = !st ? altrove[chiave.slice(6)] : null
       if (altra) {
-        // Già decisa in un altro documento: si dice com'è finita e si rimanda lì, senza pulsanti (si segnerebbe due volte).
+        // Già gestita in un altro documento: si dice com'è finita e si rimanda lì, senza pulsanti (si rifarebbe due volte).
         const chiA = altra.cliente?.nome || altra.nota || '?'
         const com = altra.stato !== 'fatturato' ? `assorbita da te (${euro(altra.importo ?? proposto)})`
+          : altra.addebito === 'fatto' ? `addebitata a ${chiA} in Moove: ${euro(altra.importo || 0)}`
+          : altra.addebito === 'in_corso' ? `addebito a ${chiA} da verificare`
+          : altra.addebito === 'stornato' ? `addebito a ${chiA} stornato`
           : altra.incassato === true ? `incassati da ${chiA}: ${euro(altra.importo || 0)}`
           : altra.incassato === false ? `non incassati da ${chiA}` : `fatta pagare a ${chiA}: ${euro(altra.importo || 0)}, da incassare`
         return [grigio(`Nel documento «${altra.documento}»: ${com}`),
           <a key="doc" href={`/dashboard/spedizioni/controllo-fattura?fattura=${altra.fatturaId}`} onClick={e => e.stopPropagation()}
             style={{ fontSize: 11.5, fontWeight: 600, color: C.arancioScuro }}>Apri quel documento</a>]
       }
-      if (!st) return [tasto('L\'ho fatta pagare', () => { if (riga) setFattaPagare(riga) }, true), tasto('Assorbo io', assorbo)]
+      // Già fatta pagare da un'altra porta (la scheda cliente) o rifatta lì dopo uno storno: chi e quanto li legge la rotta
+      // dal movimento. Senza questo, la voce restava aperta e l'unico modo di chiuderla era «Assorbo io», falso.
+      const gia = async () => {
+        const e = await salvaStato(chiave, 'fatturato', { addebito: 'fatto', daMovimento: true })
+        if (e) await dialog.alert({ title: 'Non segnata', message: e })
+      }
+      if (!st) return [tasto('L\'ho fatta pagare', () => { if (riga) setFattaPagare(riga) }, true), tasto('Assorbo io', assorbo), tasto('È già addebitata', gia)]
       if (st.stato !== 'fatturato') return [grigio(`Assorbita da te (${euro(st.importo ?? proposto)})`), annulla]
       const chi = st.cliente?.nome || st.nota || '?'
       const base: ExtraStato = { nota: st.nota, importo: st.importo, ...(st.cliente ? { cliente: st.cliente } : {}) }
+      const scheda = st.cliente?.id ? (st.cliente.id.startsWith('m:') ? `/dashboard/clienti/master/${st.cliente.id.slice(2)}` : `/dashboard/clienti/${st.cliente.id}`) : null
+      const apriScheda = scheda ? <a key="sk" href={scheda} target="_blank" rel="noopener" onClick={e => e.stopPropagation()}
+        style={{ fontSize: 11.5, fontWeight: 600, color: C.arancioScuro }}>Apri la scheda di {chi}</a> : null
+      const avvisoCosto = st.avviso ? <div key="av" style={{ flexBasis: '100%', fontSize: 11.5, color: C.rosso, lineHeight: 1.4 }}>{st.avviso}</div> : null
+      if (st.addebito === 'fatto') {
+        // Corretta dalla scheda del cliente con uno storno: si segna qui, così il conto smette di contarla incassata.
+        const stornata = async () => {
+          const ok = await dialog.confirm({ title: 'Addebito stornato?', message: `Segnalo solo se hai già restituito a ${chi} i ${euro(st.importo || 0)} dalla sua scheda (movimento di storno). Da qui non si muove niente: il conto del documento smette di contarli incassati.`, confirmText: 'Sì, l\'ho stornato' })
+          if (ok) await segnaStato(chiave, 'fatturato', { ...base, addebito: 'stornato' })
+        }
+        return [verde(`Addebitata a ${chi} in Moove: ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), apriScheda, tasto('L\'ho stornata', stornata), avvisoCosto]
+      }
+      if (st.addebito === 'stornato') return [grigio(`Addebito a ${chi} stornato il ${dataBreve(st.il)}: non conta come incassato`), tasto('Rifatta dalla scheda', gia), tasto('Assorbo io', assorbo), apriScheda]
+      if (st.addebito === 'in_corso') {
+        const nonCe = async () => {
+          const ok = await dialog.confirm({ title: 'L\'addebito non c\'è?', message: `Prima guarda fra i movimenti di ${chi} se c'è «Spedizione fatta fuori dal portale ${chiave.slice(6)}». Se c'è e lo rifai, la paga due volte.`, confirmText: 'Non c\'è', danger: true })
+          if (ok) await segnaStato(chiave, null)
+        }
+        return [giallo(`Addebito a ${chi} da verificare (${euro(st.importo || 0)})`), tasto('L\'addebito c\'è', () => segnaStato(chiave, 'fatturato', { ...base, addebito: 'fatto' }), true), tasto('Non c\'è', nonCe), apriScheda]
+      }
       if (st.incassato === true) return [verde(`Incassati da ${chi}: ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), annulla]
       if (st.incassato === false) return [grigio(`Non incassati da ${chi}: ${euro(st.importo || 0)}, restano a tuo carico`), annulla]
       return [giallo(`Fatta pagare a ${chi}: ${euro(st.importo || 0)}, da incassare`), tasto('Incassati', () => segnaStato(chiave, 'fatturato', { ...base, incassato: true }), true),

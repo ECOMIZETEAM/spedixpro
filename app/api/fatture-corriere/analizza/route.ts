@@ -7,7 +7,7 @@ import { eGls, type RigaFatturaGls } from '@/lib/fattura-gls'
 import { costruisciCatena } from '@/lib/cascata'
 import { riepilogaFattura, fatturaConAzioni, type EsitoPagina } from '@/lib/controllo-fattura-riepilogo'
 import type { RigaFatturaBrt } from '@/lib/fattura-brt'
-import { fuoriAltrove } from '@/lib/controllo-fattura-fuori'
+import { addebitiFuoriPortale, fuoriAltrove, rifiutoStatoFuori } from '@/lib/controllo-fattura-fuori'
 
 // Mille e più righe, ognuna col listino rifatto dalla funzione dell'addebito: serve più del minuto standard.
 export const maxDuration = 300
@@ -70,7 +70,8 @@ type Corpo = {
   rifai?: boolean                    // rifare con le regole di oggi una fattura già controllata, tenendo le azioni
   perche?: { id: string; peso: number }[]   // spedizioni da girare rimaste senza rettifica: perché
   statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome?: string; di?: string }
-    cliente?: { id?: string; nome?: string }; incassato?: boolean | null }   // a che punto è una voce di "Cosa fare"
+    cliente?: { id?: string; nome?: string }; addebito?: 'in_corso' | 'fatto' | 'stornato'; incassato?: boolean | null; avviso?: string
+    daMovimento?: boolean }   // 'fatto' perché l'addebito c'è già fra i movimenti (lo cerca e lo legge la rotta)
   esterno?: { nome: string; formato?: string; righeFile?: number; abbinate?: string[]; andate?: number; corriereAndate?: number; prezzoClienti?: number; rientri?: number; rettifiche?: number }   // l'export di un altro gestionale abbinato
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
@@ -93,7 +94,7 @@ const pulisciLegenda = (l: any): Record<string, string> | null => {
 // IL RIEPILOGO DELLA FATTURA SI CAMBIA SUL VALORE DI ADESSO, E SOLO SE NESSUNO L'HA CAMBIATO NEL FRATTEMPO. Ogni
 // ramo di questa rotta riscriveva tutto il riepilogo da una copia letta all'inizio della richiesta, anche secondi
 // prima (la chiusura legge tutte le righe, il collegamento della Rettifica legge le rettifiche): uno stato salvato in
-// mezzo, per esempio una spedizione fuori da tutto appena segnata «fatta pagare», spariva senza un avviso, e il conto
+// mezzo, per esempio l'addebito di una spedizione fuori da tutto appena fatto, spariva senza un avviso, e il conto
 // perdeva l'incasso (revisione del 27/11, prima del rilascio). Qui si rilegge, si cambia, e si scrive solo se il
 // contatore `rev` del riepilogo è ancora quello letto; altrimenti si rilegge e si rifà. `cambia` può rispondere con
 // un rifiuto (NextResponse): i controlli sullo stato si fanno sul valore appena letto.
@@ -201,24 +202,72 @@ export async function POST(req: NextRequest) {
     if (sv.stato != null && !STATI.includes(sv.stato)) return NextResponse.json({ error: 'Stato non valido.' }, { status: 400 })
     const importo = sv.importo == null || (sv.importo as any) === '' ? null : Number(sv.importo)
     if (importo != null && !(Number.isFinite(importo) && importo >= 0 && importo <= 1000000)) return NextResponse.json({ error: 'Importo non valido.' }, { status: 400 })
-    // UNA SPEDIZIONE FUORI DA TUTTO FATTA PAGARE (Lorenzo, 27/11: "non scrivere niente... rimane tutto scritto e
-    // calcolato nel check fatture, semplice lineare e sicuro"). Qui si scrive solo a chi (scelto fra i clienti e
-    // sotto-master di Moove, con l'id, o scritto a mano) e quanto, e poi se ha pagato: nessun movimento, in Moove non
-    // si muove niente. Serve al conto del documento.
-    const idCliente = typeof sv.cliente?.id === 'string' && /^(m:)?[0-9a-f-]{36}$/i.test(sv.cliente.id) ? sv.cliente.id : null
-    const nomeCliente = String(sv.cliente?.nome ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
+    // UNA SPEDIZIONE FUORI DA TUTTO FATTA PAGARE (Lorenzo, 27/11). A un cliente o sotto-master di Moove si può
+    // addebitarla in Moove, oppure dire che l'ha già pagata fuori da Moove («magari l'ha pagata fuori da Moove»); a uno
+    // che non è in Moove si scrive, e poi si dice se ha pagato. Per l'addebito la pagina prenota ('in_corso') prima di
+    // chiamare la porta dei movimenti a mano, e segna 'fatto' dopo. Un addebito partito non si toglie da qui, perché il
+    // movimento resta: si storna dalla scheda del cliente e qui si segna 'stornato'. Da 'in_corso' si passa solo a
+    // 'fatto' o si toglie (l'addebito non è partito).
+    const addebito = sv.addebito === 'in_corso' || sv.addebito === 'fatto' || sv.addebito === 'stornato' ? sv.addebito : null
+    // Il cliente: l'id solo se è un cliente o un sotto-master ('m:…') di Moove; la porta dei movimenti verifica che sia di
+    // chi addebita, qui si conserva per mostrarlo. Un addebito senza un id così non si salva: la guardia qui sotto si
+    // perderebbe in silenzio mentre la pagina addebita lo stesso.
+    let idCliente = typeof sv.cliente?.id === 'string' && /^(m:)?[0-9a-f-]{36}$/i.test(sv.cliente.id) ? sv.cliente.id : null
+    let nomeCliente = String(sv.cliente?.nome ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
+    const fuoriTrov = chiave.startsWith('fuori:') ? chiave.slice(6) : null
+    // GIÀ ADDEBITATA DA UN'ALTRA PORTA (la scheda cliente, o rifatta lì dopo uno storno): la pagina non ha niente da
+    // dire su chi e quanto, lo legge la rotta dal movimento. Senza movimento non si segna niente.
+    let trovato = false, importoTrovato: number | null = null
+    if (sv.daMovimento === true && addebito === 'fatto' && fuoriTrov) {
+      let mov: Awaited<ReturnType<typeof addebitiFuoriPortale>> = []
+      try { mov = await addebitiFuoriPortale(admin, u.masterId, fuoriTrov) }
+      catch (e: any) { return NextResponse.json({ error: 'Non riesco a leggere i movimenti: ' + String(e?.message || e) + '. Riprova.' }, { status: 500 }) }
+      const m = mov.find(x => x.importo < 0 && x.chi)
+      if (!m) return NextResponse.json({ error: `Fra i tuoi movimenti non c'è nessuna «Spedizione fatta fuori dal portale ${fuoriTrov}» addebitata a un cliente: falla pagare da qui.` }, { status: 409 })
+      idCliente = m.chi; nomeCliente = (m.nome || 'cliente').slice(0, 120); importoTrovato = Math.abs(m.importo); trovato = true
+    }
+    if (addebito && !idCliente) return NextResponse.json({ error: 'Per un addebito in Moove serve un cliente di Moove: ricarica la pagina e sceglilo di nuovo.' }, { status: 400 })
+    const fuori = chiave.startsWith('fuori:') ? chiave.slice(6) : null
+    // Prima di prenotare, la stessa spedizione già fatta pagare: con un movimento «Spedizione fatta fuori dal portale»
+    // (da qualunque porta, anche dalla scheda cliente), o in un altro documento (il borderò è cumulativo: lo stesso
+    // arrivo torna in tutti i borderò del mese e nell'allegato).
+    if (fuori && addebito === 'in_corso') {
+      try {
+        const mov = await addebitiFuoriPortale(admin, u.masterId, fuori)
+        if (mov.length) return NextResponse.json({ error: `La ${fuori} è già stata fatta pagare: «${mov[0].descrizione}», ${Math.abs(mov[0].importo).toFixed(2).replace('.', ',')} € il ${new Date(mov[0].il).toLocaleDateString('it-IT')}. Se va rifatta, falla dalla scheda del cliente.` }, { status: 409 })
+        const altrove = (await fuoriAltrove(admin, u.masterId, fattura.id))[fuori]
+        if (altrove && (altrove.addebito === 'fatto' || altrove.addebito === 'in_corso'))
+          return NextResponse.json({ error: `La ${fuori} è già fatta pagare a ${altrove.cliente?.nome || altrove.nota || 'un cliente'} nel documento «${altrove.documento}».` }, { status: 409 })
+      } catch (e: any) {
+        return NextResponse.json({ error: 'Non riesco a controllare se è già stata fatta pagare: ' + String(e?.message || e) + '. Riprova.' }, { status: 500 })
+      }
+    }
+    const avviso = String(sv.avviso ?? '').replace(/\s+/g, ' ').trim().slice(0, 300)
     const esito = await cambiaRiepilogo(admin, fattura.id, riepilogo => {
       const stati: Record<string, any> = { ...(riepilogo.stati || {}) }
       const prima = stati[chiave]
+      if (fuori) {
+        // Due clic o due schede: la seconda prenotazione trova la prima (sul valore appena letto, e la scrittura
+        // passa solo se nel frattempo nessuno ha cambiato il riepilogo).
+        const no = rifiutoStatoFuori(prima, { stato: sv.stato, addebito, trovato })
+        if (no) return NextResponse.json({ error: no }, { status: 409 })
+      }
       if (sv.stato == null) delete stati[chiave]
       else {
-        const storia = [...(prima?.storia || []), ...(prima ? [{ stato: prima.stato, il: prima.il }] : [])].slice(-10)
-        const nota = String(sv.nota ?? '').trim().slice(0, 500), numero = String(sv.numero ?? '').trim().slice(0, 60)
+        const storia = [...(prima?.storia || []), ...(prima ? [{ stato: prima.stato, il: prima.il, ...(prima.addebito ? { addebito: prima.addebito } : {}) }] : [])].slice(-10)
+        const nota = trovato ? nomeCliente : String(sv.nota ?? '').trim().slice(0, 500), numero = String(sv.numero ?? '').trim().slice(0, 60)
+        const imp = trovato ? importoTrovato : importo
         stati[chiave] = { stato: sv.stato, il: new Date().toISOString(), da: u.userId,
-          ...(nota ? { nota } : {}), ...(importo != null ? { importo: Math.round(importo * 100) / 100 } : {}), ...(numero ? { numero } : {}), ...(storia.length ? { storia } : {}),
+          ...(nota ? { nota } : {}), ...(imp != null ? { importo: Math.round(imp * 100) / 100 } : {}), ...(numero ? { numero } : {}), ...(storia.length ? { storia } : {}),
           ...(sv.listino && typeof sv.listino.id === 'string' && /^[0-9a-f-]{36}$/.test(sv.listino.id) ? { listino: { id: sv.listino.id, nome: String(sv.listino.nome || '').slice(0, 80), di: String(sv.listino.di || '').slice(0, 80) } } : {}),
           ...(nomeCliente ? { cliente: { ...(idCliente ? { id: idCliente } : {}), nome: nomeCliente } } : {}),
-          ...(typeof sv.incassato === 'boolean' ? { incassato: sv.incassato } : {}) }
+          ...(addebito ? { addebito } : {}),
+          // «Incassati»: anche un cliente di Moove che ha pagato fuori da Moove (Lorenzo, 27/11); non su un addebito, che si
+          // incassa dal credito.
+          ...(typeof sv.incassato === 'boolean' && !addebito ? { incassato: sv.incassato } : {}),
+          // L'avviso sul costo resta finché la voce resta addebitata: una scheda vecchia che risegna «fatto» non lo cancella.
+          ...(avviso ? { avviso } : addebito === 'fatto' && prima?.addebito === 'fatto' && prima?.avviso ? { avviso: prima.avviso } : {}),
+          ...(trovato ? { daMovimento: true } : {}) }
       }
       return { ...riepilogo, stati }
     })
@@ -341,8 +390,8 @@ export async function POST(req: NextRequest) {
       })
     if ('risposta' in x) return x.risposta
     // Le spedizioni fuori da tutto già gestite negli altri documenti (borderò cumulativi, allegato del mese): la pagina
-    // le mostra come fatte e non le propone di nuovo. Se la lettura non riesce, la pagina le propone come da fare:
-    // al più si segna due volte, in Moove non si muove niente.
+    // le mostra come fatte e non le propone di nuovo. Se la lettura non riesce, la pagina le propone come da fare, e la
+    // rotta rifiuta comunque un secondo addebito (statoVoce).
     const altrove = await fuoriAltrove(admin, u.masterId, fattura.id).catch(() => null)
     // La pagina deve sapere se le differenze sono già nella Rettifica (fattura rifatta, o già girate da un file).
     return NextResponse.json({ ok: true, rettificheInviate: !!fattura.rettifiche_file_id || !!esterne?.length, stati: x.riepilogo?.stati || {}, esterni: x.riepilogo?.esterni || {},
