@@ -28,7 +28,8 @@ type InfoGls = {
 }
 type GruppoGls = 'contestare' | 'clienti' | 'chiarire' | 'listino'
 // A che punto è una voce di "Cosa fare" (riepilogo.stati della fattura, rotta analizza).
-type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato' | 'assorbito' | 'fatturato'; il: string; nota?: string; importo?: number; numero?: string; storia?: { stato: string; il: string }[] }
+// 'tentato': mandata alla Rettifica ma non creata (nota = perché, listino = quello da correggere, se è quello).
+type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato' | 'assorbito' | 'fatturato' | 'tentato'; il: string; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome: string; di: string }; storia?: { stato: string; il: string }[] }
 type FatturaStorico = {
   id: string; corriere_id: string | null; nome_contratto: string; numero_fattura: string; etichetta: string | null; data_fattura: string | null; nome_file: string | null
   righe: number; andate: number; totale_corriere: number; costo_moove: number; differenza: number; non_trovate: number; totale_non_trovate: number
@@ -528,11 +529,13 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         if (!s) daFare.push({ testo: `Contestare a ${cr}: ${nome}`, euro: euroV })
         else if (s === 'contestato') daFare.push({ testo: `Aspettare la risposta di ${cr}: ${nome}`, euro: euroV })
         else if (s === 'respinto') daFare.push({ testo: `${cr} ha respinto «${nome}»: assorbire o girare ai clienti`, euro: euroV })
+        else if (s === 'tentato') daFare.push({ testo: `Girare ai clienti «${nome}»: la Rettifica non l'ha creata, vedi il perché`, euro: euroV })
       } else if (gruppo === 'chiarire') {
         if (!s) daFare.push({ testo: `Chiedere a ${cr}: ${nome}`, euro: euroV })
         else if (s === 'chiesto') daFare.push({ testo: `Aspettare la risposta di ${cr}: ${nome}`, euro: euroV })
       } else if (gruppo === 'listino') { if (!s) daFare.push({ testo: `Sistemare in Moove: ${nome}`, euro: euroV }) }
       else if (!s) daFare.push({ testo: `Girare ai clienti: ${nome}`, euro: euroV })
+      else if (s === 'tentato') daFare.push({ testo: `Girare ai clienti «${nome}»: la Rettifica non l'ha creata, vedi il perché`, euro: euroV })
     }
     for (const c of carburanteGls.filter(c => c.sopra)) voce(`carburante-doc:${c.codice}`, `carburante al ${pct(c.percentuale!)} invece del ${pct(c.listino!)}`, 'contestare', c.inPiu)
     if (arriviSopra) voce('arrivi-sopra', 'arrivi e resi pagati più delle partenze', 'contestare', arriviSopra.euro)
@@ -558,7 +561,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // decimale e un numero lo prende così com'è. Alla fine la fattura ricorda il file (lo storico conta il girato).
   async function inviaAllaRettifica(righe: { ldv: string; peso: number; supplemento?: number; voce?: string }[], nome: string) {
     const quante = 50
-    let da = 0, fileId: string | undefined, creati = 0, gia = 0, nonTrovate = 0, supplementiDopo = 0, errore = ''
+    let da = 0, fileId: string | undefined, creati = 0, gia = 0, nonTrovate = 0, supplementiDopo = 0, fuoriCatena = 0, errore = ''
     const inizio = Date.now()
     setInviando(true)
     setAvanz({ fatti: 0, totale: righe.length, da: inizio, etichetta: 'Creo le rettifiche' })
@@ -570,7 +573,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       const d = await res.json().catch(() => ({ error: 'Risposta non valida' }))
       if (d?.error) { errore = d.error; break }
       if (d?.tipo !== 'ripesature') { errore = 'La Rettifica non ha riconosciuto le righe come file di pesi.'; break }
-      creati += d.creato || 0; gia += d.giaCaricate || 0; nonTrovate += d.totali?.nonTrovate || 0; supplementiDopo += d.supplementiArrivatiDopo || 0
+      creati += d.creato || 0; gia += d.giaCaricate || 0; nonTrovate += d.totali?.nonTrovate || 0; supplementiDopo += d.supplementiArrivatiDopo || 0; fuoriCatena += d.fuoriCatena || 0
       fileId = d.fileId || fileId
       const avanti = (d.da || 0) + (d.quante || 0)
       if (avanti <= da) break
@@ -579,20 +582,29 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       if (d.finito) break
     }
     setAvanz(null); setInviando(false)
-    if (fileId && fatturaId) {
+    // Si collega solo un file che ha creato qualcosa: il 27/11 l'invio dell'Oversize di Wave (0 rettifiche, catena
+    // ferma a 130 kg) ha preso il posto del file con le 9 rettifiche vere di ottobre.
+    if (fileId && fatturaId && creati + supplementiDopo > 0) {
       await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fatturaId, rettificheFileId: fileId }) }).catch(() => null)
       setRettificheInviate(true); caricaStorico()
     }
-    return { fileId, creati, gia, nonTrovate, supplementiDopo, errore }
+    return { fileId, creati, gia, nonTrovate, supplementiDopo, fuoriCatena, errore }
   }
-  const esitoInvio = async (x: Awaited<ReturnType<typeof inviaAllaRettifica>>, totale: number) => dialog.alert({
-    title: x.errore ? 'Invio interrotto' : 'Rettifiche create',
-    message: (x.errore ? x.errore + ' — ' : '') + `Create ${x.creati + x.supplementiDopo} rettifiche su ${totale} spedizioni.`
-      + (x.supplementiDopo ? ` Di queste ${x.supplementiDopo} su spedizioni già rettificate per il peso: si aggiunge solo il supplemento.` : '')
-      + (x.gia > x.supplementiDopo ? ` ${x.gia - x.supplementiDopo} erano già state rettificate e sono state saltate.` : '')
-      + (x.nonTrovate ? ` ${x.nonTrovate} non sono state trovate dalla Rettifica.` : '')
-      + ' Le trovi in Rettifica Costi (il tasto qui sotto la apre in un\'altra scheda, questa resta aperta): controllale e premi Conferma.',
-  })
+  // Quello che la Rettifica ha fatto, detto com'è. "Rettifiche create · Create 0 rettifiche su 1" il 27/11 ha fatto
+  // credere a Wave di aver girato l'Oversize, e la voce ancora da mandare sembrava un errore.
+  const esitoInvio = async (x: Awaited<ReturnType<typeof inviaAllaRettifica>>, totale: number) => {
+    const fatte = x.creati + x.supplementiDopo
+    const fuori = x.fuoriCatena ? ` ${x.fuoriCatena === 1 ? '1 non è diventata una rettifica' : `${x.fuoriCatena} non sono diventate rettifiche`}: a quel peso la catena dei prezzi si ferma, nel listino di chi sta sotto manca la fascia. Il perché e il listino da correggere li trovi sulla voce.` : ''
+    return dialog.alert({
+      title: x.errore ? 'Invio interrotto' : fatte ? 'Rettifiche create' : 'Nessuna rettifica creata',
+      message: (x.errore ? x.errore + ' — ' : '') + (fatte ? `Create ${fatte} rettifich${fatte === 1 ? 'a' : 'e'} su ${totale} spedizion${totale === 1 ? 'e' : 'i'}.` : `Su ${totale} spedizion${totale === 1 ? 'e' : 'i'} la Rettifica non ha creato niente.`)
+        + (x.supplementiDopo ? ` Di queste ${x.supplementiDopo} su spedizioni già rettificate per il peso: si aggiunge solo il supplemento.` : '')
+        + fuori
+        + (x.gia > x.supplementiDopo ? ` ${x.gia - x.supplementiDopo} erano già state mandate e sono state saltate.` : '')
+        + (x.nonTrovate ? ` ${x.nonTrovate} non sono state trovate dalla Rettifica.` : '')
+        + (fatte ? ' Le trovi in Rettifica Costi (il tasto qui sotto la apre in un\'altra scheda, questa resta aperta): controllale e premi Conferma.' : ' In Rettifica Costi non c\'è niente da confermare.'),
+    })
+  }
 
   // `lista`: di solito tutte quelle da girare; "Rimanda le non girate" passa solo quelle rimaste senza rettifica.
   async function mandaAllaRettifica(lista: EsitoControllo[] = daRettificare) {
@@ -634,6 +646,15 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     })
     const x = await inviaAllaRettifica(righe, `${cr} ${esiti[0]?.riga.numeroFattura || ''} - ${nomeVoce}`)
     if (!x.errore && x.creati + x.supplementiDopo > 0) await segnaStato(chiave, 'girato', { nota: `${x.creati + x.supplementiDopo} rettifiche in Rettifica Costi`, importo: totale })
+    else if (!x.errore) {
+      // Niente creato: la voce lo dice, col perché della prima spedizione (la stessa domanda del riquadro "da girare":
+      // la catena dei prezzi a quel peso) e il listino da correggere, se è quello.
+      const d: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fatturaId, perche: valide.slice(0, 5).map(({ e }, i) => ({ id: e.spedizione!.id, peso: righe[i].peso })) }) }).then(r => r.json()).catch(() => ({}))
+      const p = Array.isArray(d.perche) ? d.perche[0] : null
+      await segnaStato(chiave, 'tentato', { importo: totale, nota: p?.motivo || (x.fuoriCatena ? 'a quel peso la catena dei prezzi si ferma: nel listino di chi sta sotto manca la fascia' : 'la Rettifica non ha trovato niente da chiedere'),
+        ...(p?.listinoDaCorreggere ? { listino: p.listinoDaCorreggere } : {}) })
+    }
     await esitoInvio(x, righe.length)
   }
   // Le voci del corriere da girare (gruppo "clienti", non i pesi): una voce, tutte le sue spedizioni.
@@ -671,7 +692,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // A CHE PUNTO È OGNI VOCE DI "COSA FARE" (Lorenzo, 25/11: "un bottone che dice ok contestato, ok GLS mi ha fatto
   // la nota di credito e via dicendo... devi andare avanti con il pensiero"). Si segna qui, lo salva la rotta con la
   // fattura (riepilogo.stati) e lo storico lo ricorda: le note di credito ricevute e le voci che aspettano GLS.
-  async function segnaStato(chiave: string, stato: StatoSalvato['stato'] | null, extra: { nota?: string; importo?: number; numero?: string } = {}) {
+  async function segnaStato(chiave: string, stato: StatoSalvato['stato'] | null, extra: { nota?: string; importo?: number; numero?: string; listino?: { id: string; nome: string; di: string } } = {}) {
     if (!fatturaId) return
     const d: any = await fetch('/api/fatture-corriere/analizza', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fatturaId, statoVoce: { chiave, stato, ...extra } }) }).then(r => r.json()).catch(() => ({ error: 'Errore di connessione' }))
@@ -720,6 +741,16 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       if (!(importo >= 0)) { await dialog.alert({ title: 'Importo non valido', message: 'Scrivi un importo in euro, per esempio 493,86.' }); return }
       await segnaStato(chiave, 'fatturato', { nota: chi, importo })
     }
+    // Mandata alla Rettifica ma non creata: il perché, il listino da correggere (si apre in un'altra scheda), e di
+    // nuovo il tasto per mandarla, o assorbirla.
+    const nonCreata = (riprova: () => void) => [
+      <Pillola key="nc" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Non creata il ${dataBreve(st!.il)}`}</Pillola>,
+      ...(st?.listino ? [<a key="cl" href={`/dashboard/listini/clienti/${st.listino.id}`} target="_blank" rel="noopener" onClick={e => e.stopPropagation()}
+        style={{ padding: '4px 9px', borderRadius: 7, border: `1px solid ${C.arancioOrlo}`, background: C.arancioTenue, color: C.arancioScuro, fontSize: 11.5, fontWeight: 700, textDecoration: 'none' }}>
+        Correggi il listino «{st.listino.nome}» di {st.listino.di}</a>] : []),
+      tasto('Riprova', riprova, true), tasto('Assorbo io', assorbo), annulla,
+      ...(st?.nota ? [<div key="perche" style={{ flexBasis: '100%', fontSize: 11.5, color: '#475467', lineHeight: 1.4 }}>{st.nota}</div>] : []),
+    ]
     // Il carburante oltre il contratto si può girare ai clienti; le altre voci contestate (annullate fatturate,
     // arrivi pagati più delle partenze) non sono spedizioni da ripassare a qualcuno.
     const giroPossibile = chiave.startsWith('carburante-doc:') || chiave === 'contestare|carburante:contestare'
@@ -730,6 +761,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         : st.stato === 'respinto' ? [<Pillola key="r" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Respinta il ${dataBreve(st.il)}${st.nota ? ': ' + st.nota : ''}`}</Pillola>,
             ...(giroPossibile ? [tasto('Giro ai clienti', () => carburanteAiClienti(chiave), true)] : []), tasto('Assorbo io', assorbo, !giroPossibile), annulla]
         : st.stato === 'girato' ? [verde(`Respinta, girata ai clienti il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
+        : st.stato === 'tentato' ? nonCreata(() => carburanteAiClienti(chiave))
         : [grigio(`Respinta, assorbita da te (${euro(st.importo ?? proposto)})`), annulla]
       : gruppo === 'chiarire'
         ? !st ? [tasto(`Chiesta a ${cr}`, () => segnaStato(chiave, 'chiesto'), true)]
@@ -744,6 +776,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             : gruppo === 'esterno'
               ? !st ? [tasto('Fatto: caricato nel gestionale', () => segnaStato(chiave, 'fatto'), true)] : [verde(`Caricato nel gestionale il ${dataBreve(st.il)}`), annulla]
               : !st ? [tasto('Manda alla Rettifica', () => mandaVoceAllaRettifica(chiave, chiave.slice(gruppo.length + 1)), true)]
+                : st.stato === 'tentato' ? nonCreata(() => mandaVoceAllaRettifica(chiave, chiave.slice(gruppo.length + 1)))
+                : st.stato === 'assorbito' ? [grigio(`Assorbita da te (${euro(st.importo ?? proposto)})`), annulla]
                 : [verde(`Mandata alla Rettifica il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
     return <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 7 }}>{parti}</div>
   }

@@ -47,7 +47,7 @@ type Corpo = {
   chiudi?: boolean
   rifai?: boolean                    // rifare con le regole di oggi una fattura già controllata, tenendo le azioni
   perche?: { id: string; peso: number }[]   // spedizioni da girare rimaste senza rettifica: perché
-  statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string }   // a che punto è una voce di "Cosa fare"
+  statoVoce?: { chiave: string; stato: string | null; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome?: string; di?: string } }   // a che punto è una voce di "Cosa fare"
   esterno?: { nome: string; formato?: string; righeFile?: number; abbinate?: string[]; andate?: number; corriereAndate?: number; prezzoClienti?: number; rientri?: number; rettifiche?: number }   // l'export di un altro gestionale abbinato
   rettificheFileId?: string
   fileEsterno?: { nome?: string; righe?: number }
@@ -143,7 +143,8 @@ export async function POST(req: NextRequest) {
     const chiave = String(sv.chiave || '').trim().slice(0, 160)
     // Gli esiti finali: 'assorbito' (resta a te), 'girato' (girato ai clienti con la Rettifica), 'fatturato' (una
     // spedizione fuori da tutto, fatta pagare a qualcuno: importo e a chi).
-    const STATI = ['contestato', 'accreditato', 'respinto', 'chiesto', 'risposto', 'fatto', 'girato', 'assorbito', 'fatturato']
+    // 'tentato': mandata alla Rettifica ma non creata, col perché (e il listino da correggere, se è quello).
+    const STATI = ['contestato', 'accreditato', 'respinto', 'chiesto', 'risposto', 'fatto', 'girato', 'assorbito', 'fatturato', 'tentato']
     if (!chiave) return NextResponse.json({ error: 'Voce mancante.' }, { status: 400 })
     if (sv.stato != null && !STATI.includes(sv.stato)) return NextResponse.json({ error: 'Stato non valido.' }, { status: 400 })
     const importo = sv.importo == null || (sv.importo as any) === '' ? null : Number(sv.importo)
@@ -158,7 +159,8 @@ export async function POST(req: NextRequest) {
       const storia = [...(prima?.storia || []), ...(prima ? [{ stato: prima.stato, il: prima.il }] : [])].slice(-10)
       const nota = String(sv.nota ?? '').trim().slice(0, 500), numero = String(sv.numero ?? '').trim().slice(0, 60)
       stati[chiave] = { stato: sv.stato, il: new Date().toISOString(), da: u.userId,
-        ...(nota ? { nota } : {}), ...(importo != null ? { importo: Math.round(importo * 100) / 100 } : {}), ...(numero ? { numero } : {}), ...(storia.length ? { storia } : {}) }
+        ...(nota ? { nota } : {}), ...(importo != null ? { importo: Math.round(importo * 100) / 100 } : {}), ...(numero ? { numero } : {}), ...(storia.length ? { storia } : {}),
+        ...(sv.listino && typeof sv.listino.id === 'string' && /^[0-9a-f-]{36}$/.test(sv.listino.id) ? { listino: { id: sv.listino.id, nome: String(sv.listino.nome || '').slice(0, 80), di: String(sv.listino.di || '').slice(0, 80) } } : {}) }
     }
     const { error } = await admin.from('fatture_corriere').update({ riepilogo: { ...riepilogo, stati } }).eq('id', fattura.id)
     if (error) return NextResponse.json({ error: 'Stato non salvato: ' + error.message }, { status: 500 })
