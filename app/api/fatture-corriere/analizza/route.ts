@@ -50,14 +50,18 @@ export async function GET() {
   const contratti = await contrattiControllabili(admin, u.masterId)
   const ids = contratti.filter(c => c.tipo === 'gls').flatMap(c => c.ids)
   const tariffe = new Map<string, any>()
+  const nomi = new Map<string, string>()
   if (ids.length) {
-    const { data, error } = await admin.from('corrieri').select('id,tariffa:settings->tariffa_resi').in('id', ids)
+    const { data, error } = await admin.from('corrieri').select('id,nome_contratto,tariffa:settings->tariffa_resi').in('id', ids)
     if (error) console.warn('[controllo-fattura] tariffa resi non letta', error.message)
-    for (const c of data || []) if ((c as any).tariffa) tariffe.set(c.id, (c as any).tariffa)
+    for (const c of data || []) { if ((c as any).tariffa) tariffe.set(c.id, (c as any).tariffa); nomi.set(c.id, String((c as any).nome_contratto || '')) }
   }
+  // I listini dei contratti del gruppo (per GLS più contratti Moove sullo stesso contratto GLS): la pagina apre quello
+  // da correggere col suo nome, come lo scrive «Cosa allineare nel listino».
   return NextResponse.json({ contratti: contratti.map(c => {
     const t = c.ids.map((id: string) => tariffaResiValida(tariffe.get(id))).find(Boolean) || null
-    return { id: c.id, nome: c.nome, attivo: c.attivo, tipo: c.tipo, ...(t ? { tariffaResi: t } : {}) }
+    const listini = c.ids.filter((id: string) => nomi.has(id)).map((id: string) => ({ id, nome: nomi.get(id)! }))
+    return { id: c.id, nome: c.nome, attivo: c.attivo, tipo: c.tipo, ...(t ? { tariffaResi: t } : {}), ...(listini.length ? { listini } : {}) }
   }) })
 }
 

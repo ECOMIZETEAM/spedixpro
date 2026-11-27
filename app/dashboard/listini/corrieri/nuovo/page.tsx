@@ -246,7 +246,10 @@ export default function ListinoCorrierePage() {
   }
 
   useEffect(() => {
-    carica()
+    // Il contratto da aprire può arrivare nell'indirizzo (?corriere=…): il controllo fattura del corriere apre così il
+    // listino da correggere (Lorenzo, 27/11: «quali sono i listini da alzare?»). La rotta controlla che sia del master.
+    const daAprire = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('corriere') : null
+    carica(daAprire && /^[0-9a-f-]{36}$/i.test(daAprire) ? daAprire : undefined)
     fetch('/api/listini/corrieri/ereditato').then(r => r.json()).then(d => setSoloLettura(!!d?.ereditato)).catch(() => {})
     // Logo del master per il circuito interno (vedi masterLogo sopra).
     fetch('/api/master').then(r => r.json()).then(d => setMasterLogo(d?.logo_url || null)).catch(() => {})
