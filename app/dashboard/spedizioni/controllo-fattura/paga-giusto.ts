@@ -36,25 +36,28 @@ export function noloDellePartenze(righe: RigaFatturaBrt[]): (peso: number) => nu
 // LA TARIFFA DEI RESI DEL CONTRATTO (Wave, 27/11: "il reso costa fisso 3,50 € + fuel fino a 3 kg, oltre 3 kg 3,50 € +
 // 0,10 € ogni kilo, + fuel 3% sempre"). Sta nelle impostazioni del contratto GLS (corrieri.settings.tariffa_resi): il
 // listino di Moove il reso lo scrive come percentuale del nolo, e non la può dire. I kg si arrotondano in su: così
-// tornano tutti i 25 «Addebito» (resi al mittente) del borderò del 23/11, 3,4 kg → 3,60 €, 4,9 kg → 3,70 €.
+// tornano tutti i 25 «Addebito» (resi al mittente) del borderò del 23/11, 3,4 kg → 3,60 €, 4,9 kg → 3,70 €. Vale solo per
+// i resi al mittente, non per gli arrivi (sotto).
 export type TariffaResi = { base: number; finoKg: number; perKg: number }
 export const tariffaReso = (kg: number, t: TariffaResi) => r2(t.base + t.perKg * Math.max(0, Math.ceil(kg - 1e-9) - t.finoKg))
 export const descriviTariffaResi = (t: TariffaResi) => `${euro(t.base)} fino a ${t.finoKg.toLocaleString('it-IT')} kg, poi +${euro(t.perKg)} al kg`
 
-// IL NOLO GIUSTO DI UN RIENTRO (arrivo = il reso che il destinatario rimanda; addebito = il pacco non consegnato che
-// torna). Con la tariffa dei resi del contratto, quella. Senza, si legge dal documento: il 25/11 gli arrivi a 4,00 €
-// contro i 3,50 delle partenze finivano nella contestazione, poi nel borderò del 23/11 127 arrivi su 133 risultavano
-// esattamente 0,50 € più delle partenze dello stesso peso, da qualunque posto: lo scarto più frequente per tipo di
+// IL NOLO GIUSTO DI UN RIENTRO. Due tipi, due tariffe (Lorenzo, 27/11):
+//  - ADDEBITO = il pacco di Wave che torna indietro non consegnato (il reso al mittente): la tariffa resi del contratto,
+//    sopra. Borderò del 23/11: 25 su 25 la rispettano.
+//  - ARRIVO = una spedizione vera che parte da fuori e arriva a Wave, che GLS fa pagare a Wave ("sono vere e proprie
+//    spedizioni ma partono da fuori, non sono resi"). Non ha la tariffa resi: per un'ora del 27/11 l'aveva, e gli
+//    arrivi a 4,00 € risultavano tutti pagati troppo (52,30 € a ottobre, quasi tutti sull'arrivo da 303,9 kg).
+// Un rientro senza tariffa dal contratto si confronta col documento: nel borderò del 23/11 127 arrivi su 133 costano
+// esattamente 0,50 € più delle partenze dello stesso peso, da qualunque posto. Lo scarto più frequente per tipo di
 // rientro (almeno 5 confronti, a pari merito il più basso) fa da supplemento, e si segnala solo quello che va oltre.
-// Wave poi ha detto la tariffa vera dei resi (sopra): con quella, gli arrivi a 4,00 € sono pagati troppo.
 export type RiferimentoRientro = { riferimento: number; come: string; tipo: string; daContratto: boolean; supplemento?: number; n?: number; su?: number }
+export const eArrivo = (r: RigaFatturaBrt) => /arriv/i.test(String(r.tipoBolla || ''))
 export function riferimentoRientri(righe: RigaFatturaBrt[], nolo: (peso: number) => number | null, tariffa?: TariffaResi | null): (r: RigaFatturaBrt) => RiferimentoRientro | null {
   const tipoDi = (r: RigaFatturaBrt) => String(r.tipoBolla || '').trim() || 'Rientro'
   const rientro = (r: RigaFatturaBrt) => !r.andata && !eEstero(r) && r.nolo > 0
-  if (tariffa) return (r: RigaFatturaBrt) => rientro(r)
-    ? { riferimento: tariffaReso(r.pesoTassato, tariffa), come: `tariffa resi del contratto: ${descriviTariffaResi(tariffa)}`, tipo: tipoDi(r), daContratto: true }
-    : null
-  const valuta = (r: RigaFatturaBrt) => rientro(r) ? nolo(r.pesoTassato) : null
+  const daContratto = (r: RigaFatturaBrt) => !!tariffa && !eArrivo(r)
+  const valuta = (r: RigaFatturaBrt) => rientro(r) && !daContratto(r) ? nolo(r.pesoTassato) : null
   const scarti = new Map<string, Map<number, number>>()
   for (const r of righe) {
     const p = valuta(r); if (p == null) continue
@@ -70,10 +73,12 @@ export function riferimentoRientri(righe: RigaFatturaBrt[], nolo: (peso: number)
     supp.set(tipo, { euro: c / 100, n, su })
   }
   return (r: RigaFatturaBrt) => {
+    if (!rientro(r)) return null
+    if (daContratto(r)) return { riferimento: tariffaReso(r.pesoTassato, tariffa!), come: `tariffa resi del contratto: ${descriviTariffaResi(tariffa!)}`, tipo: tipoDi(r), daContratto: true }
     const p = valuta(r); const s = supp.get(tipoDi(r))
     if (p == null || !s) return null
     return { riferimento: r2(p + s.euro), tipo: tipoDi(r), daContratto: false, supplemento: s.euro, n: s.n, su: s.su,
-      come: Math.abs(s.euro) >= 0.005 ? `${euro(p)} delle partenze dello stesso peso + ${euro(s.euro)} dei rientri` : 'il nolo delle partenze dello stesso peso' }
+      come: Math.abs(s.euro) >= 0.005 ? `${euro(p)} delle partenze dello stesso peso + ${euro(s.euro)} degli arrivi di questo documento` : 'il nolo delle partenze dello stesso peso' }
   }
 }
 

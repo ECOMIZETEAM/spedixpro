@@ -86,10 +86,10 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
     const m = new Map<string, number>(); for (const r of righe.filter(r => !nonAbbinate.includes(r) && r.andata)) m.set(formaRif(r.rifAlfabetico), (m.get(formaRif(r.rifAlfabetico)) || 0) + 1)
     return Array.from(m.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
   }, [righe, nonAbbinate])
-  // Un arrivo (ritiro o reso verso di te chiesto fuori da Moove) non è in nessun export di spedizioni: dirlo, invece
-  // di far cercare il periodo che il file non copre (Lorenzo, 27/11, i 4 arrivi GLS di ottobre di Wave).
+  // Un arrivo (una spedizione vera che parte da fuori e arriva a te, e che il corriere fa pagare a te: Lorenzo, 27/11)
+  // non è in nessun export di spedizioni: dirlo, invece di far cercare il periodo che il file non copre.
   const perche = (r: RigaFatturaBrt) => !r.andata
-    ? `Arrivo${r.mittente ? ` da «${r.mittente}»` : ''}: un ritiro o un reso verso di te chiesto fuori da Moove, che nessun export contiene. Chi l'ha pagato?`
+    ? `Arrivo${r.mittente ? ` da «${r.mittente}»` : ''}: una spedizione che parte da fuori e arriva a te, fatturata a te; nessun export la contiene. Chi l'ha pagata?`
     : mittenteSolito && (r.mittente || '') !== mittenteSolito && formaRif(r.rifAlfabetico) !== rifSolito
     ? `Mittente ${r.mittente ? `«${r.mittente}»` : 'vuoto'} e riferimento «${r.rifAlfabetico || '—'}» diversi da tutte le altre (${mittenteSolito}): non viene da questo gestionale, probabilmente creata sul sito del corriere. Chi l'ha fatta pagare?`
     : 'Non c\'è nell\'export: forse è partita in un periodo che il file non copre, o da un altro gestionale.'
@@ -257,7 +257,7 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
             <Icona nome="avviso" size={16} />
             <span>{conExport
               ? <>{nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione né in Moove né {esiti.length > 1 || Object.keys(salvati || {}).length > 1 ? 'negli export' : 'nell\'export'}: qui sotto cosa sono e com'è finita.</>
-              : <>{daMostrare.length === 1 ? '1 arrivo' : `${daMostrare.length} arrivi`} ({euro(r2(daMostrare.reduce((t, r) => t + r.totale, 0)))}) fuori da Moove: nessun export li contiene, qui sotto chi li ha pagati. Le partenze si abbinano caricando l'export.</>}</span>
+              : <>{daMostrare.length === 1 ? '1 arrivo' : `${daMostrare.length} arrivi`} ({euro(r2(daMostrare.reduce((t, r) => t + r.totale, 0)))}): spedizioni che partono da fuori e arrivano a te, nessun export li contiene. Qui sotto chi li ha pagati. Le partenze si abbinano caricando l'export.</>}</span>
           </div>
           <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
             {daMostrare.slice(0, MOSTRATE).map(r => (

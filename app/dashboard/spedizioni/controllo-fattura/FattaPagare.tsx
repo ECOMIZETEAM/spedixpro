@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { C, cifre, euro, r2 } from './ui'
 
 /* UNA SPEDIZIONE FUORI DA TUTTO, FATTA PAGARE A QUALCUNO (Lorenzo, 27/11). Sono le righe della fattura che non
- * sono né in Moove né nell'export dell'altro gestionale: a ottobre per Wave 4 arrivi (i resi dei destinatari: 3 da
- * 4,48 €, uno da 94,63 €) e la partenza per Riga da 493,86 €. Prima si scriveva il nome a mano in un prompt.
+ * sono né in Moove né nell'export dell'altro gestionale: a ottobre per Wave 4 arrivi (spedizioni che partono da fuori e
+ * arrivano a Wave: 3 da 4,48 €, uno da 94,63 €) e la partenza per Riga da 493,86 €. Prima si scriveva il nome a mano in un prompt.
  * Ora: il cliente si sceglie fra quelli di Moove (o si scrive, se non c'è), si scrive quanto gli si è fatto pagare, e
  * più tardi se ha pagato. Si scrive SOLO nel controllo fattura, per il conto del documento: in Moove non si muove
  * niente (Lorenzo: "non scrivere niente... rimane tutto scritto e calcolato nel check fatture... semplice lineare e
