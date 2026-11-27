@@ -30,7 +30,13 @@ export type CalcoloProforma = {
   ivaInclusa: { lordo: number; iva: number }
   // Movimenti venduti esenti IVA: righe loro nel riepilogo, fuori dall'imponibile. Totale = imponibile + IVA + esente.
   esente: number
+  // I movimenti che questa proforma prende: alla creazione si legano a lei (fatture_proforma_movimenti).
+  legami: string[]
+  // Le spese del periodo gia' in un'altra proforma: non entrano, e il master vede dove sono.
+  gia: GiaInProforma
 }
+
+export type GiaInProforma = { n: number; importo: number; proforme: { id: string; numero: string; n: number; importo: number }[] }
 
 // Oltre un anno il PDF diventa un libro, e la lettura tiene occupato il database per niente.
 export const GIORNI_MAX = 366
@@ -78,6 +84,23 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
     if (!data || data.length < 1000) break
   }
 
+  // UN MOVIMENTO IN UNA PROFORMA SOLA (27/11/2026). M.C LOGISTICA ha rifatto proforme su periodi gia' coperti
+  // e le stesse spedizioni sono tornate dentro: la N.1/2026 di IN PUNTA DI PIEDI CASORIA (334 movimenti,
+  // 1.573,19 €) era intera anche nella N.3, nella N.5 e nella N.7. Le spese gia' in una proforma restano fuori,
+  // qualunque periodo si scelga; le si conta a parte per dire al master dove sono.
+  const legati = await legamiNelPeriodo(admin, clienteId, inizio, fine)
+  const giaPer = new Map<string, { n: number; importo: number }>()
+  const liberi = grezzi.filter(m => {
+    const p = legati.get(m.id)
+    if (!p) return true
+    const v = giaPer.get(p) || { n: 0, importo: 0 }
+    v.n++; v.importo += -m.importo
+    giaPer.set(p, v)
+    return false
+  })
+  grezzi.splice(0, grezzi.length, ...liberi)
+  const gia = await giaInProforma(admin, giaPer)
+
   // Come il master ha venduto la spedizione di ogni movimento: IVA inclusa, esclusa o esente. Lo decide il
   // database (fn_iva_vendita_regime, stessa regola dei report); i tipi che non seguono il listino: esclusa.
   const regime = await ivaVendite(admin, masterId, grezzi.map(m => m.spedizione_id ? { t: 'cliente' as const, s: clienteId, p: m.spedizione_id, m: m.tipo } : null))
@@ -111,7 +134,38 @@ export async function calcolaProforma(admin: any, masterId: string, clienteId: s
   const { righe, imponibile, esente, inclusa: ivaInclusa } = righeSpesa(contano.map(m => ({ tipo: m.tipo, con_spedizione: m.con_spedizione, n: 1, importo: m.importo, regime: m.regime, aliquota_compresa: m.aliquota_compresa })), true, aliquota)
   ricariche.importo = cent(ricariche.importo)
   contrassegni.importo = cent(contrassegni.importo)
-  return { righe, imponibile, movimenti, aMano, ricariche, contrassegni, ivaInclusa, esente }
+  return { righe, imponibile, movimenti, aMano, ricariche, contrassegni, ivaInclusa, esente, legami: contano.map(m => m.id), gia }
+}
+
+// I movimenti del cliente nel periodo gia' legati a una proforma: id del movimento → id della proforma. Si
+// cerca per cliente e giorno del movimento (indice idx_proforma_mov_cliente), a pagine da 1.000.
+async function legamiNelPeriodo(admin: any, clienteId: string, inizio: string, fine: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await admin.from('fatture_proforma_movimenti')
+      .select('movimento_id,proforma_id')
+      .eq('cliente_id', clienteId)
+      .gte('movimento_creato', inizio)
+      .lte('movimento_creato', fine)
+      .order('movimento_id', { ascending: true })
+      .range(da, da + 999)
+    // Senza sapere cosa e' gia' in proforma non si calcola: si rischierebbe di rimettere dentro le stesse spese.
+    if (error) throw new Error('Proforme precedenti non leggibili: ' + error.message)
+    for (const r of data || []) out.set(r.movimento_id, r.proforma_id)
+    if (!data || data.length < 1000) break
+  }
+  return out
+}
+
+async function giaInProforma(admin: any, per: Map<string, { n: number; importo: number }>): Promise<GiaInProforma> {
+  if (!per.size) return { n: 0, importo: 0, proforme: [] }
+  const { data, error } = await admin.from('fatture_proforma').select('id,numero,anno').in('id', [...per.keys()])
+  if (error) throw new Error('Proforme precedenti non leggibili: ' + error.message)
+  const num = new Map<string, string>((data || []).map((p: any) => [p.id, `${p.numero}/${p.anno}`]))
+  const proforme = [...per.entries()]
+    .map(([id, v]) => ({ id, numero: num.get(id) || '?', n: v.n, importo: cent(v.importo) }))
+    .sort((a, b) => a.numero.localeCompare(b.numero, 'it', { numeric: true }))
+  return { n: proforme.reduce((t, p) => t + p.n, 0), importo: cent(proforme.reduce((t, p) => t + p.importo, 0)), proforme }
 }
 
 // L'aliquota gia' compresa in ogni movimento segnato (scripts/iva-spese-compresa.sql). A blocchi di 200 id

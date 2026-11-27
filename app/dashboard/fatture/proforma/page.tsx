@@ -24,6 +24,21 @@ function meseScorso(): { dal: string; al: string } {
   return { dal: `${anno}-${mm}-01`, al: `${anno}-${mm}-${String(fine).padStart(2, '0')}` }
 }
 
+// Il periodo che viene dopo l'ultima proforma del cliente (27/11/2026: M.C LOGISTICA rifaceva proforme su
+// periodi gia' coperti). Si riparte dal giorno dopo la sua fine; se pero' era stata creata nello stesso giorno
+// in cui finiva, si riparte da quel giorno: le spese arrivate dopo la creazione sono rimaste fuori, e quelle
+// gia' dentro la rotta le toglie da sola.
+function periodoDopo(elenco: any[], clienteId: string): { dal: string; al: string; ultima: any } | null {
+  const sue = elenco.filter(p => p.cliente_id === clienteId)
+  if (!sue.length) return null
+  const ultima = sue.reduce((a, b) => (b.al > a.al ? b : a))
+  const [y, m, d] = String(ultima.al).split('-').map(Number)
+  const dopo = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+  const oggi = giornoRoma()
+  const dal = giornoRoma(new Date(ultima.created_at)) <= ultima.al ? ultima.al : dopo
+  return dal > oggi ? null : { dal, al: oggi, ultima }
+}
+
 const NERO = '#1a1a1a', ARANCIO = '#f97316', GRIGIO = '#6b7280'
 const card = { background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '16px', marginBottom: '16px' }
 const lbl = { fontSize: '11px', fontWeight: 600 as const, color: NERO, display: 'block' as const, marginBottom: '4px' }
@@ -43,6 +58,7 @@ export default function FatturaProformaPage() {
   const [occupato, setOccupato] = useState('')
   const [elenco, setElenco] = useState<any[]>([])
   const [erroreElenco, setErroreElenco] = useState('')
+  const [proposto, setProposto] = useState<any>(null)
 
   useEffect(() => {
     fetch('/api/clienti/lista').then(r => r.json()).then(d => setClienti(Array.isArray(d) ? d.filter((c: any) => c?.id && !String(c.id).startsWith('m:')) : [])).catch(() => {})
@@ -57,7 +73,12 @@ export default function FatturaProformaPage() {
   }
 
   // Cambiare cliente o date rende vecchia l'anteprima: si toglie, cosi' non si crea su cifre di prima.
-  function scegliCliente(v: string) { setClienteId(v); setAnteprima(null); setSpunte([]) }
+  function scegliCliente(v: string) {
+    setClienteId(v); setAnteprima(null); setSpunte([])
+    const p = v ? periodoDopo(elenco, v) : null
+    setProposto(p)
+    if (p) setPeriodo({ dal: p.dal, al: p.al })
+  }
   function scegliPeriodo(dal: string, al: string) { setPeriodo({ dal, al }); setAnteprima(null); setSpunte([]) }
 
   async function chiama(crea: boolean, aMano = spunte) {
@@ -131,6 +152,11 @@ export default function FatturaProformaPage() {
           </div>
           <div><button onClick={() => calcola()} disabled={!!occupato} style={{ ...btnP, opacity: occupato ? 0.6 : 1 }}>{occupato === 'calcolo' ? 'Calcolo…' : 'Calcola'}</button></div>
         </div>
+        {proposto && (
+          <div style={{ marginTop: '10px', fontSize: '12px', color: GRIGIO }}>
+            L&apos;ultima proforma di questo cliente è la {proposto.ultima.numero}, fino al {giorno(proposto.ultima.al)}: il periodo riparte dal {giorno(proposto.dal)}. Le spese già messe in una proforma non entrano di nuovo, qualunque periodo scegli.
+          </div>
+        )}
       </div>
 
       {a && (
@@ -138,8 +164,16 @@ export default function FatturaProformaPage() {
           <div style={{ fontSize: '13px', fontWeight: 700, color: NERO, marginBottom: '10px' }}>
             Anteprima — dal {giorno(periodo.dal)} al {giorno(periodo.al)}
           </div>
+          {a.gia?.n > 0 && (
+            <div style={{ marginBottom: '12px', padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', color: NERO, maxWidth: '616px' }}>
+              <b>Già in proforma, non entrano di nuovo:</b> {a.gia.n} {a.gia.n === 1 ? 'spesa' : 'spese'} del periodo per {eur(a.gia.importo)}
+              {a.gia.proforme.map((p: any) => <div key={p.id} style={{ color: GRIGIO }}>Proforma {p.numero}: {p.n} per {eur(p.importo)}</div>)}
+            </div>
+          )}
           {!a.movimenti && !a.aMano?.length ? (
-            <div style={{ fontSize: '13px', color: GRIGIO }}>Nel periodo il cliente non ha spese: non c&apos;è niente da mettere in proforma.</div>
+            <div style={{ fontSize: '13px', color: GRIGIO }}>{a.gia?.n > 0
+              ? <>Le spese di questo periodo sono già tutte in proforma: non c&apos;è niente di nuovo da metterci.</>
+              : <>Nel periodo il cliente non ha spese: non c&apos;è niente da mettere in proforma.</>}</div>
           ) : (
             <>
               <table style={{ width: '100%', borderCollapse: 'collapse', maxWidth: '640px' }}>

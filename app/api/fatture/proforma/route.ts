@@ -67,11 +67,16 @@ export async function POST(req: NextRequest) {
   const riepilogo = {
     righe: calc.righe, imponibile: calc.imponibile, aliquota, natura: (c as any).natura_iva || null, iva, totale,
     ricariche: calc.ricariche, contrassegni: calc.contrassegni, movimenti: calc.movimenti.length,
-    ivaInclusa: calc.ivaInclusa, esente: calc.esente,
+    ivaInclusa: calc.ivaInclusa, esente: calc.esente, gia: calc.gia,
   }
   if (!body?.crea) return NextResponse.json({ anteprima: true, ...riepilogo, aMano: calc.aMano })
 
-  if (!calc.movimenti.length) return NextResponse.json({ error: 'Nel periodo il cliente non ha spese: non c\'è niente da mettere in proforma' }, { status: 422 })
+  if (!calc.movimenti.length) {
+    const dove = calc.gia.proforme.map(p => p.numero).join(', ')
+    return NextResponse.json({ error: calc.gia.n
+      ? `Le spese del periodo sono già nella proforma ${dove}: non c'è niente di nuovo da mettere in proforma`
+      : 'Nel periodo il cliente non ha spese: non c\'è niente da mettere in proforma' }, { status: 422 })
+  }
 
   const { data: m, error: eM } = await admin.from('masters').select(CAMPI_MASTER).eq('id', acc.masterId).single()
   if (eM || !m) return NextResponse.json({ error: 'Dati del master non leggibili' }, { status: 500 })
@@ -113,6 +118,19 @@ export async function POST(req: NextRequest) {
     // Il PDF senza riga non lo ritroverebbe nessuno: si toglie.
     await admin.storage.from(BUCKET_RISERVATI).remove([path])
     return NextResponse.json({ error: 'Proforma non salvata: ' + (eI?.message || '') }, { status: 500 })
+  }
+
+  // I movimenti si legano alla proforma, tutti o nessuno: da qui in poi non entrano in un'altra. Il database
+  // rifiuta un movimento gia' legato (scripts/fatture-proforma-movimenti.sql). Se non riesce, la proforma
+  // appena nata si toglie con il suo PDF: una proforma i cui movimenti restano liberi verrebbe rifatta doppia.
+  const { error: eL } = await admin.rpc('fatture_proforma_lega_v1', { p_proforma: riga.id, p_movimenti: calc.legami })
+  if (eL) {
+    await admin.from('fatture_proforma').delete().eq('id', riga.id).eq('master_id', acc.masterId)
+    await admin.storage.from(BUCKET_RISERVATI).remove([path])
+    const doppio = eL.code === '23505'
+    return NextResponse.json({ error: doppio
+      ? 'Nel frattempo una parte di queste spese è finita in un\'altra proforma: ricalcola e riprova'
+      : 'Proforma non salvata: ' + eL.message }, { status: doppio ? 409 : 500 })
   }
   return NextResponse.json({ id: riga.id, numero: `${numero}/${anno}`, ...riepilogo })
 }
