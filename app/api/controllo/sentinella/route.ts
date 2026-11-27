@@ -85,6 +85,14 @@ export async function GET(req: NextRequest) {
       righe.push(...(data as any[]))
     }
   }
+  // Le etichette di ieri (27/11/2026): servizi a pagamento stampati dal corriere che nessuno ha chiesto. Dal 2/9 al 30/10
+  // ogni contrassegno GLS partiva con «ENTRO ORE 12» per un codice sbagliato, e Wave l'ha pagato 362 € a GLS: lo si è
+  // visto dopo due mesi. Gira insieme al margine qui sotto, con un tempo suo (lib/controllo-servizi-etichette).
+  const etichette = (async () => {
+    const { controlloServiziEtichette } = await import('@/lib/controllo-servizi-etichette')
+    return controlloServiziEtichette(admin, { tempoMaxMs: 30_000 })
+  })()
+  etichette.catch(() => {})   // se scade prima, un errore arrivato dopo non deve restare senza gestore
   // La sesta e' il margine di MULTIEXPRESS pacco per pacco del giorno prima (26/11/2026): le guardie fermano le
   // destinazioni speciali, ma un rincaro del corriere sulle zone normali (BRT Express isole, 19/11) lo si vedeva
   // solo misurando a mano. Sta nel codice perche' il motivo lo deve dire la stessa catena che fa gli addebiti.
@@ -101,6 +109,15 @@ export async function GET(req: NextRequest) {
   } catch (e: any) {
     console.error('[SENTINELLA] controllo margine MULTIEXPRESS non eseguito:', e?.message)
     righe.push({ area: 'sentinella', controllo: `controllo margine MULTIEXPRESS NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
+  }
+  try {
+    const restano = 110_000 - (Date.now() - inizio)
+    const esito = await Promise.race([etichette, new Promise<null>(r => setTimeout(() => r(null), Math.max(1_000, restano)))])
+    if (esito) righe.push(...esito)
+    else righe.push({ area: 'sentinella', controllo: 'controllo servizi sulle etichette NON completato in tempo', valore: 0, atteso: 'eseguito', allarme: true })
+  } catch (e: any) {
+    console.error('[SENTINELLA] controllo servizi sulle etichette non eseguito:', e?.message)
+    righe.push({ area: 'sentinella', controllo: `controllo servizi sulle etichette NON eseguito (${e?.message || 'errore'})`, valore: 0, atteso: 'eseguito', allarme: true })
   }
   if (righe.every(r => r.area === 'sentinella')) {
     // Se non riesco nemmeno a fare le domande, quello E' l'allarme: si dice, non si tace.
