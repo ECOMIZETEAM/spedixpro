@@ -32,7 +32,7 @@ type InfoGls = {
 type GruppoGls = 'contestare' | 'clienti' | 'chiarire' | 'listino'
 // A che punto è una voce di "Cosa fare" (riepilogo.stati della fattura, rotta analizza).
 // 'tentato': mandata alla Rettifica ma non creata (nota = perché, listino = quello da correggere, se è quello).
-type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato' | 'assorbito' | 'fatturato' | 'tentato'; il: string; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome: string; di: string }; storia?: { stato: string; il: string }[]
+type StatoSalvato = { stato: 'contestato' | 'accreditato' | 'respinto' | 'chiesto' | 'risposto' | 'fatto' | 'girato' | 'assorbito' | 'fatturato' | 'tentato' | 'da_contestare' | 'listino' | 'va_bene'; il: string; nota?: string; importo?: number; numero?: string; listino?: { id: string; nome: string; di: string }; storia?: { stato: string; il: string }[]
   // Solo le spedizioni fuori da tutto ('fatturato'): a chi (con l'id se è un cliente o sotto-master di Moove), se
   // l'addebito in Moove è partito, da verificare o stornato, e se ha pagato fuori da Moove.
   cliente?: { id?: string; nome: string }; addebito?: 'in_corso' | 'fatto' | 'stornato'; incassato?: boolean; avviso?: string }
@@ -86,14 +86,19 @@ const NOTE_GLS: Record<string, string> = {
   'non_calcolabile:listino': 'Il listino non ha un prezzo per quella zona o fascia.',
 }
 // Una riga di "Cosa allineare nel listino" per GLS: le parti uguali (stesso listino, zona, voce e valori) sommate.
-type GruppoAllinea = { chiave: string; listino: string; zona: string; voce: ParteAllinea['voce']; valListino: number; valGls: number; zonaGls?: string; n: number; euro: number; pesoMin: number; pesoMax: number; luoghi: string[] }
+type GruppoAllinea = { chiave: string; listino: string; zona: string; voce: ParteAllinea['voce']; valListino: number; valGls: number; zonaGls?: string; n: number; euro: number; pesoMin: number; pesoMax: number; luoghi: string[]
+  righe: { e: EsitoPagina; euro: number }[] }   // le spedizioni della riga, per contestarla o girarla ai clienti
 // Cosa c'è scritto nel listino e cosa chiede GLS, con le parole di chi lo deve correggere.
-function descriviAllinea(a: GruppoAllinea): string {
+// `carbContratto`: il carburante del contratto letto dal resto del listino (il 3% di Wave). Una zona che non ne ha è
+// un errore del listino per quella parte; quello che il corriere ha messo in più è un'altra cosa, da contestare.
+function descriviAllinea(a: GruppoAllinea, carbContratto?: number | null): string {
   const pesi = a.pesoMin === a.pesoMax ? `a ${kg(a.pesoMin)}` : `da ${kg(a.pesoMin)} a ${kg(a.pesoMax)}`
   // Il prezzo di GLS è quello di un'altra zona del listino: è la zona da allargare, non il prezzo da cambiare.
   if (a.voce === 'nolo' && a.zonaGls) return `Pacchi ${pesi}: GLS chiede il prezzo della tua zona ${a.zonaGls}${Number.isFinite(a.valGls) ? ` (${euro(a.valGls)})` : ''}, per Moove sono zona ${a.zona}. GLS li tassa come ${a.zonaGls}: sono quelle località da aggiungere alla zona ${a.zonaGls}, non il prezzo da cambiare.`
   if (a.voce === 'nolo') return `Nolo ${pesi}: nel listino ${euro(a.valListino)}, GLS chiede ${euro(a.valGls)}.`
   if (a.voce === 'contrassegno') return `Diritto di contrassegno: nel listino ${euro(a.valListino)}, GLS chiede ${euro(a.valGls)}.`
+  if (a.voce === 'carburante' && carbContratto != null && a.valListino === 0)
+    return `Carburante: in questa zona il listino non ne ha. Il tuo contratto è il ${pct(carbContratto)} (lo dice il resto del listino): mettilo anche qui. Il corriere ha messo il ${pct(a.valGls)}: la parte oltre il ${pct(carbContratto)} è nella contestazione del carburante.`
   if (a.voce === 'carburante') return `Carburante: in questa zona il listino non ne ha, GLS lo mette (${pct(a.valGls)} sul nolo).`
   return `Altre differenze ${pesi} (supplementi del listino che GLS non chiede, o il contrario): in media ${euro(r2(a.euro / a.n))} a spedizione.`
 }
@@ -425,7 +430,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       // Una zona vista diversa da GLS è una riga sola per listino, qualunque sia la fascia di peso.
       const valori = p.voce === 'altro' || p.zonaGls ? '' : `${p.listino}|${p.gls}`
       const chiave = [a.listino, a.zona, p.voce, valori, p.zonaGls || ''].join('|')
-      const v = g.get(chiave) || { chiave, listino: a.listino, zona: a.zona, voce: p.voce, valListino: p.listino, valGls: p.gls, zonaGls: p.zonaGls, n: 0, euro: 0, pesoMin: Infinity, pesoMax: 0, luoghi: [] }
+      const v = g.get(chiave) || { chiave, listino: a.listino, zona: a.zona, voce: p.voce, valListino: p.listino, valGls: p.gls, zonaGls: p.zonaGls, n: 0, euro: 0, pesoMin: Infinity, pesoMax: 0, luoghi: [], righe: [] }
+      v.righe.push({ e, euro: p.euro })
       if (p.zonaGls && Math.abs(v.valGls - p.gls) >= 0.005) v.valGls = NaN   // fasce diverse: prezzi diversi
       v.n++; v.euro = r2(v.euro + p.euro); v.pesoMin = Math.min(v.pesoMin, a.peso); v.pesoMax = Math.max(v.pesoMax, a.peso)
       if (a.luogo && v.luoghi.length < 6 && !v.luoghi.includes(a.luogo)) v.luoghi.push(a.luogo)
@@ -434,6 +440,10 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     return Array.from(g.values()).filter(v => Math.abs(v.euro) >= 0.01).sort((a, b) => Math.abs(b.euro) - Math.abs(a.euro))
   }, [trovate, gls])
   const [tuttiAllinea, setTuttiAllinea] = useState(false)
+  const carbContratto = infoGls?.carburanteListino ?? null
+  const soloListino = (a: GruppoAllinea) => a.voce === 'carburante' && a.valListino === 0 && carbContratto != null
+  const euroAllinea = (a: GruppoAllinea) => soloListino(a) && a.valGls > 0 ? r2(a.euro * carbContratto! / a.valGls) : a.euro
+  const decisioneAllinea = (a: GruppoAllinea) => rigaStato('allinea', `allinea|${a.chiave}`, euroAllinea(a), false, { listini: [a.listino], glsPiuAlto: a.euro > 0, soloListino: soloListino(a) })
   // Il listino da correggere si apre col suo nome (quello di «Cosa allineare»), fra i contratti del documento: la pagina
   // Listini › Corrieri lo apre già selezionato (?corriere=), in un'altra scheda per non perdere il controllo.
   const apriListino = (nome: string) => {
@@ -569,21 +579,30 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     const fuori = esiti.filter(e => !e.spedizione && e.riga.andata)
     const senzaExport = !Object.keys(esterniSalvati).length
     const daFare: { testo: string; euro?: number }[] = []
+    // A che punto è la decisione su una differenza (vedi «la differenza decisa da chi paga», rigaStato).
+    const decisione = (k: string, nome: string, euroV: number, o: { conListino?: boolean; glsPiuAlto?: boolean; soloListino?: boolean }) => {
+      const s = st(k)
+      if (o.soloListino) { if (!s) daFare.push({ testo: `Correggere il listino: ${nome}, poi «Rifai con le regole di oggi»`, euro: euroV }); return }
+      if (!s) daFare.push({ testo: !o.conListino ? `Decidere: ${nome} (lo contesti o lo assorbi?)`
+        : o.glsPiuAlto === false ? `Decidere: ${nome} (${cr} chiede meno del tuo listino: correggi il listino o va bene così?)`
+        : `Decidere: ${nome} (il tuo listino è giusto e lo contesti, o ha ragione ${cr} e correggi il listino?)`, euro: euroV })
+      else if (s === 'da_contestare') daFare.push({ testo: `Mandare la contestazione a ${cr}: ${nome}`, euro: euroV })
+      else if (s === 'contestato') daFare.push({ testo: `Aspettare la risposta di ${cr}: ${nome}`, euro: euroV })
+      else if (s === 'respinto') daFare.push({ testo: `${cr} ha respinto «${nome}»: «Assorbo io», e decidi se recuperarlo dai clienti`, euro: euroV })
+      else if (s === 'tentato') daFare.push({ testo: `Girare ai clienti «${nome}»: la Rettifica non l'ha creata, vedi il perché`, euro: euroV })
+      else if (s === 'listino') daFare.push({ testo: `Correggere il listino: ${nome}, poi «Rifai con le regole di oggi»`, euro: euroV })
+    }
     const voce = (k: string, nome: string, gruppo: GruppoGls, euroV: number) => {
       const s = st(k)
-      if (gruppo === 'contestare') {
-        if (!s) daFare.push({ testo: `Contestare a ${cr}: ${nome}`, euro: euroV })
-        else if (s === 'contestato') daFare.push({ testo: `Aspettare la risposta di ${cr}: ${nome}`, euro: euroV })
-        else if (s === 'respinto') daFare.push({ testo: `${cr} ha respinto «${nome}»: assorbire o girare ai clienti`, euro: euroV })
-        else if (s === 'tentato') daFare.push({ testo: `Girare ai clienti «${nome}»: la Rettifica non l'ha creata, vedi il perché`, euro: euroV })
-      } else if (gruppo === 'chiarire') {
+      if (gruppo === 'contestare') decisione(k, nome, euroV, { conListino: /carburante/.test(k), glsPiuAlto: true })
+      else if (gruppo === 'chiarire') {
         if (!s) daFare.push({ testo: `Chiedere a ${cr}: ${nome}`, euro: euroV })
         else if (s === 'chiesto') daFare.push({ testo: `Aspettare la risposta di ${cr}: ${nome}`, euro: euroV })
       } else if (gruppo === 'listino') {
         // «Listino non allineato» e il carburante che il listino non ha: si dice sotto quale listino correggere. Il peso
         // che GLS ha tassato meno di Moove non chiede niente.
         if (VOCI_DA_ALLINEARE.some(x => k === `listino|${x}`) || k === 'listino|peso:listino') { /* sotto */ }
-        else if (eEntro12(nome)) { if (!s) daFare.push({ testo: `Entro ore 12 (errore di Moove fino al 30/10, già corretto): resta a te, segna «Assorbo io» in «Sistemare in Moove»`, euro: euroV }) }
+        else if (eEntro12(nome)) decisione(k, `${nome} (fino al 30/10, già corretto)`, euroV, {})
         else if (!s) daFare.push({ testo: `Sistemare in Moove: ${nome}`, euro: euroV })
       }
       else if (!s) daFare.push({ testo: `Girare ai clienti: ${nome}`, euro: euroV })
@@ -595,11 +614,14 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       if (v.tipo === 'peso') continue   // i pesi hanno le loro righe qui sotto
       voce(`${g}|${k}`, v.nome, g, v.euro)
     }
-    // Un listino da correggere = le righe di «Cosa allineare nel listino» su quel listino (oggi diverso da GLS). Spariscono
-    // da sole quando il listino è corretto e il documento è rifatto.
-    const perListino = new Map<string, { n: number; euro: number }>()
-    for (const a of allineareGls || []) { const v = perListino.get(a.listino || 'listino') || { n: 0, euro: 0 }; v.n++; v.euro = r2(v.euro + a.euro); perListino.set(a.listino || 'listino', v) }
-    for (const [l, v] of perListino) daFare.push({ testo: `Correggere il listino «${l}»: ${v.n === 1 ? '1 voce' : `${v.n} voci`} diverse da ${cr} (in «Cosa allineare nel listino»), poi «Rifai con le regole di oggi»`, euro: v.euro })
+    // Ogni riga di «Cosa allineare nel listino» (il listino di oggi diverso da quello che il corriere ha chiesto) è una
+    // decisione sua. Sparisce da sola quando il listino è corretto e il documento è rifatto.
+    for (const a of allineareGls || []) {
+      const sl = a.voce === 'carburante' && a.valListino === 0 && infoGls?.carburanteListino != null
+      const euroV = sl && a.valGls > 0 ? r2(a.euro * infoGls!.carburanteListino! / a.valGls) : a.euro
+      const breve = a.voce === 'nolo' ? `nolo ${a.pesoMin === a.pesoMax ? kg(a.pesoMin) : `${kg(a.pesoMin)}–${kg(a.pesoMax)}`}` : a.voce === 'contrassegno' ? 'contrassegno' : a.voce === 'carburante' ? 'carburante' : 'altre differenze'
+      decisione(`allinea|${a.chiave}`, `«${a.listino}» ${a.zona}, ${breve}`, euroV, { conListino: true, glsPiuAlto: a.euro > 0, soloListino: sl })
+    }
     if (daRettificare.length && !rettificheInviate) daFare.push({ testo: `Mandare alla Rettifica ${daRettificare.length === 1 ? '1 differenza' : `${daRettificare.length} differenze`} di peso`, euro: r2(daRettificare.reduce((t, e) => t + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0)) })
     if (nonGirate.length) daFare.push({ testo: `${nonGirate.length} differenz${nonGirate.length === 1 ? 'a' : 'e'} di peso non girat${nonGirate.length === 1 ? 'a' : 'e'}: vedi il perché e rimanda`, euro: r2(nonGirate.reduce((t, e) => t + (e.motivi.find(m => m.tipo === 'peso')?.importo || 0), 0)) })
     if (girateAperta && girateAperta.inviate > girateAperta.confermate) daFare.push({ testo: `Confermare ${girateAperta.inviate - girateAperta.confermate} rettifiche in Rettifica Costi`, euro: girateAperta.euroInAttesa })
@@ -767,6 +789,40 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     await mandaSupplementi(chiave, 'Carburante oltre il contratto', lista, `${cr} ha applicato un carburante più alto del contratto e non l'ha accreditato: la parte in più di ogni spedizione.`)
   }
 
+  // CHI PAGA UNA DIFFERENZA CHE SI ASSORBE (Lorenzo, 27/11: «anche su assorbo io sarebbe da chiedere se comunque lo
+  // vuole recuperare sul cliente oppure no», per tutte le voci contestate, anche «Entro ore 12»). Le spedizioni della
+  // voce che sono in Moove si possono girare ai clienti con la Rettifica (mandaSupplementi, una voce per volta); quelle
+  // fuori da Moove no. Qui, per una voce, le righe da girare e col loro importo.
+  const righeDaGirare = (chiave: string): { lista: { e: EsitoControllo; importo: number }[]; nome: string; spiega: string } | null => {
+    if (chiave.startsWith('carburante-doc:') || chiave === 'contestare|carburante:contestare')
+      return { lista: esiti.flatMap(e => e.motivi.filter(m => m.tipo === 'carburante' && m.gruppo === 'contestare').map(m => ({ e, importo: m.importo }))),
+        nome: 'Carburante oltre il contratto', spiega: `${cr} ha applicato un carburante più alto del contratto e non l'ha accreditato: la parte in più di ogni spedizione.` }
+    if (chiave.startsWith('allinea|')) {
+      const a = (allineareGls || []).find(x => `allinea|${x.chiave}` === chiave)
+      return a ? { lista: a.righe.filter(x => x.euro > 0.005).map(x => ({ e: x.e, importo: x.euro })), nome: `${a.listino} · ${a.zona}: ${a.voce}`, spiega: `${cr} ha fatto pagare più del tuo listino (${descriviAllinea(a)}).` } : null
+    }
+    const [g, ...resto] = chiave.split('|'); const k = resto.join('|')
+    if (g === 'contestare' || g === 'listino') {
+      const lista = esiti.flatMap(e => e.motivi.filter(m => m.gruppo === g && (m.voce || `${m.tipo}:${m.gruppo}`) === k).map(m => ({ e, importo: m.importo })))
+      return { lista, nome: lista[0] ? (esiti.flatMap(e => e.motivi).find(m => m.gruppo === g && (m.voce || `${m.tipo}:${m.gruppo}`) === k)?.voce || MOTIVI[k.split(':')[0]]?.nome || k) : k, spiega: `È la voce che ${cr} ha messo sulle spedizioni.` }
+    }
+    return null
+  }
+  const girabile = (chiave: string) => !!righeDaGirare(chiave)?.lista.some(x => x.e.spedizione && x.e.riga.andata && x.e.spedizione.stato !== 'annullata' && x.importo > 0.005)
+  async function assorbiOGira(chiave: string, proposto: number) {
+    const g = righeDaGirare(chiave)
+    if (!g || !girabile(chiave)) {
+      const ok = await dialog.confirm({ title: 'Resta a te', message: `Queste spedizioni non sono in Moove (o sono annullate): non si possono far pagare ai clienti da qui. La segno assorbita da te (${euro(proposto)})?`, confirmText: 'Sì, assorbo io' })
+      if (ok) await segnaStato(chiave, 'assorbito', { importo: proposto })
+      return
+    }
+    const si = await dialog.confirm({ title: 'Lo vuoi recuperare dai clienti?',
+      message: `${euro(proposto)} che ${cr} ti ha fatto pagare. Se lo recuperi, sulle spedizioni in Moove diventa una rettifica «da confermare» in Rettifica Costi per chi le ha spedite; se no, resta a te.`,
+      confirmText: 'Sì, giralo ai clienti', cancelText: 'No, resta a me' })
+    if (si) await mandaSupplementi(chiave, g.nome, g.lista, g.spiega)
+    else await segnaStato(chiave, 'assorbito', { importo: proposto })
+  }
+
   // RIFARE IL DOCUMENTO APERTO CON LE REGOLE DI OGGI, dalle righe già salvate: non serve il file. Il 25/11 Wave
   // riapriva l'allegato GLS di ottobre dallo storico e vedeva sempre la copia di prima delle correzioni: per
   // rifarlo avrebbe dovuto ricaricare il PDF e sapere di doverlo fare. Le righe salvate sono quelle lette dal file
@@ -903,7 +959,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   // credito), girata ai clienti, assorbita, fatta (listino sistemato, file caricato), fatturata (a chi e quanto).
   //   gruppo 'fuori'   → una spedizione della fattura che non è né in Moove né nell'export dell'altro gestionale
   //   gruppo 'esterno' → il file di rettifiche scaricato per l'altro gestionale: caricato là, o no
-  function rigaStato(gruppo: GruppoGls | 'fuori' | 'esterno', chiave: string, proposto: number, peso = false) {
+  function rigaStato(gruppo: GruppoGls | 'fuori' | 'esterno' | 'allinea', chiave: string, proposto: number, peso = false,
+    opz: { listini?: string[]; glsPiuAlto?: boolean; soloListino?: boolean } = {}) {
     // I pesi da girare hanno il loro riquadro (Manda alla Rettifica); quelli tassati di meno non chiedono niente.
     if (!fatturaId || peso) return null
     const st = stati[chiave]
@@ -982,24 +1039,48 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       return [giallo(`Fatta pagare a ${chi}: ${euro(st.importo || 0)}, da incassare`), tasto('Incassati', () => segnaStato(chiave, 'fatturato', { ...base, incassato: true }), true),
         tasto('Non incassati', () => segnaStato(chiave, 'fatturato', { ...base, incassato: false })), annulla]
     }
-    // Il carburante oltre il contratto si può girare ai clienti; le altre voci contestate (annullate fatturate,
-    // arrivi pagati più delle partenze) non sono spedizioni da ripassare a qualcuno.
-    const giroPossibile = chiave.startsWith('carburante-doc:') || chiave === 'contestare|carburante:contestare'
-    const parti = gruppo === 'contestare'
-      ? !st ? [tasto('Prepara la contestazione', () => preparaContestazioneDi(chiave)), tasto('Segna contestata', () => segnaStato(chiave, 'contestato'), true)]
-        : st.stato === 'contestato' ? [giallo(`Contestata il ${dataBreve(st.il)}`), tasto('Nota di credito ricevuta', () => notaDiCredito(chiave, proposto), true), tasto('Respinta', respinta), tasto('Rifai il testo', () => preparaContestazioneDi(chiave)), annulla]
-        : st.stato === 'accreditato' ? [verde(`Recuperata: nota di credito${st.numero ? ' ' + st.numero : ''} ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), annulla]
-        : st.stato === 'respinto' ? [<Pillola key="r" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Respinta il ${dataBreve(st.il)}${st.nota ? ': ' + st.nota : ''}`}</Pillola>,
-            ...(giroPossibile ? [tasto('Giro ai clienti', () => carburanteAiClienti(chiave), true)] : []), tasto('Assorbo io', assorbo, !giroPossibile), annulla]
-        : st.stato === 'girato' ? [verde(`Respinta, girata ai clienti il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
-        : st.stato === 'tentato' ? nonCreata(() => carburanteAiClienti(chiave))
-        : [grigio(`Respinta, assorbita da te (${euro(st.importo ?? proposto)})`), annulla]
+    // LA DIFFERENZA DECISA DA CHI PAGA (Lorenzo, 27/11: «tu devi capire se è un errore di Wave o di GLS... devi chiedere
+    // prima»). Il listino corriere è quello che il detentore ha dichiarato del suo contratto: se il corriere chiede di
+    // più, si chiede chi ha ragione. Listino giusto → si contesta → nota di credito, o respinta → «Assorbo io» →
+    // «Lo vuoi recuperare dai clienti?». Ha ragione il corriere → si corregge il listino. Il corriere chiede meno →
+    // si corregge il listino o va bene così. Una voce senza listino (Entro ore 12, annullate fatturate, arrivi) si
+    // contesta o si assorbe. Il carburante che il listino non ha in una zona, col contratto già scritto nel resto del
+    // listino, è solo da correggere: la parte in più del corriere sta nella contestazione del carburante.
+    const assorbi = () => assorbiOGira(chiave, proposto)
+    const rigira = () => { const g = righeDaGirare(chiave); if (g) mandaSupplementi(chiave, g.nome, g.lista, g.spiega) }
+    const decidi = (o: typeof opz = opz) => {
+      const apri = (o.listini || []).map(n => <span key={'l' + n}>{apriListino(n)}</span>)
+      const corretto = tasto('Fatto: listino corretto', () => segnaStato(chiave, 'fatto'), true)
+      if (o.soloListino) return !st ? [...apri, corretto] : [verde(`Listino corretto il ${dataBreve(st.il)}`), annulla]
+      if (!st) return o.listini?.length
+        ? o.glsPiuAlto !== false
+          ? [tasto('Il mio listino è giusto: contesto', () => segnaStato(chiave, 'da_contestare'), true), tasto(`Ha ragione ${cr}: correggo il listino`, () => segnaStato(chiave, 'listino')), tasto('Assorbo io', assorbi)]
+          : [tasto('Correggo il listino', () => segnaStato(chiave, 'listino'), true), tasto('Va bene così', () => segnaStato(chiave, 'va_bene'))]
+        : [tasto('Contesto', () => segnaStato(chiave, 'da_contestare'), true), tasto('Assorbo io', assorbi)]
+      switch (st.stato) {
+        case 'da_contestare': return [giallo('Da contestare'), tasto('Prepara la contestazione', () => preparaContestazioneDi(chiave)), tasto('Segna contestata', () => segnaStato(chiave, 'contestato'), true), annulla]
+        case 'contestato': return [giallo(`Contestata il ${dataBreve(st.il)}`), tasto('Nota di credito ricevuta', () => notaDiCredito(chiave, proposto), true), tasto('Respinta', respinta), tasto('Rifai il testo', () => preparaContestazioneDi(chiave)), annulla]
+        case 'accreditato': return [verde(`Recuperata: nota di credito${st.numero ? ' ' + st.numero : ''} ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), annulla]
+        case 'respinto': return [<Pillola key="r" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Respinta il ${dataBreve(st.il)}${st.nota ? ': ' + st.nota : ''}`}</Pillola>, tasto('Assorbo io', assorbi, true), annulla]
+        case 'girato': return [verde(`Girata ai clienti il ${dataBreve(st.il)}${st.nota ? ' · ' + st.nota : ''}`), annulla]
+        case 'tentato': return nonCreata(rigira)
+        case 'assorbito': return [grigio(`Assorbita da te (${euro(st.importo ?? proposto)})`), annulla]
+        case 'listino': return [giallo('Da correggere nel listino'), ...apri, corretto, annulla]
+        case 'fatto': return [verde(`Listino corretto il ${dataBreve(st.il)}`), annulla]
+        case 'va_bene': return [grigio('Va bene così'), annulla]
+        default: return [grigio(String(st.stato)), annulla]
+      }
+    }
+    const listiniDelGruppo = contratti?.find(c => c.id === contrattoId)?.listini?.map(l => l.nome) || []
+    const parti = gruppo === 'allinea' ? decidi()
+      // Il carburante si confronta col listino (la percentuale delle fasce); le altre voci da contestare non hanno listino.
+      : gruppo === 'contestare' ? decidi({ listini: /carburante/.test(chiave) ? listiniDelGruppo : undefined, glsPiuAlto: true })
       : gruppo === 'chiarire'
         ? !st ? [tasto(`Chiesta a ${cr}`, () => segnaStato(chiave, 'chiesto'), true)]
           : st.stato === 'chiesto' ? [giallo(`Chiesta il ${dataBreve(st.il)}`), tasto(`Risposta di ${cr}`, risposta, true), annulla]
           : [verde(`${cr}: ${st.nota || 'ha risposto'} (${dataBreve(st.il)})`), annulla]
         : gruppo === 'listino'
-          ? eEntro12(chiave) ? (!st ? [tasto('Assorbo io', assorbo, true)] : [grigio(`Assorbita da te (${euro(st.importo ?? proposto)})`), annulla])
+          ? eEntro12(chiave) ? decidi({})
             : VOCI_DA_ALLINEARE.some(x => chiave === `listino|${x}`) ? []
             : !st ? [tasto('Fatto', () => segnaStato(chiave, 'fatto'))] : [verde(`Fatto il ${dataBreve(st.il)}`), annulla]
           : gruppo === 'fuori' ? partiFuori()
@@ -1068,6 +1149,33 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
         + righe.slice(0, 30).map(({ e, m }) => `- ${e.riga.segnacollo}: ${euro(m.importo)}, ${m.testo}`).join('\n')
         + (righe.length > 30 ? `\n…e le altre nell'elenco allegato.` : '')
         + `\nChiediamo una nota di credito di ${euro(v.euro)}.\n\nIn allegato l'elenco.\n\n${chiusura}`
+      foglio = righe.map(({ e, m }) => ({ ...base(e), [`Fatturato ${cr} (€)`]: e.brt, 'Contestato (€)': m.importo, 'Perché': m.testo }))
+    } else if (chiave.startsWith('allinea|')) {
+      // Una riga del listino: il contratto (il listino) dice una cifra, il corriere ne ha fatta pagare un'altra.
+      const a = (allineareGls || []).find(x => `allinea|${x.chiave}` === chiave)
+      const righe = (a?.righe || []).filter(x => x.euro > 0.005)
+      if (!a || !righe.length) return
+      const tot = r2(righe.reduce((t, x) => t + x.euro, 0))
+      const cosa = a.voce === 'nolo' ? 'Nolo' : a.voce === 'contrassegno' ? 'Diritto di contrassegno' : a.voce === 'carburante' ? 'Carburante' : 'Supplementi'
+      nome = `${a.voce} ${a.zona}`
+      oggetto = `Contestazione ${cosa.toLowerCase()} ${a.zona} – ${doc}`
+      testo = `${intestazione}\n\n${cosa.toUpperCase()} – ZONA ${a.zona.toUpperCase()}\n`
+        + (a.voce === 'altro' ? `Su ${righe.length === 1 ? '1 spedizione' : `${righe.length} spedizioni`} sono stati addebitati importi oltre il nostro contratto.\n`
+          : `Il nostro contratto prevede ${a.voce === 'carburante' ? pct(a.valListino) : euro(a.valListino)}; su ${righe.length === 1 ? '1 spedizione' : `${righe.length} spedizioni`} sono stati addebitati ${a.voce === 'carburante' ? pct(a.valGls) : euro(a.valGls)}.\n`)
+        + `Chiediamo una nota di credito di ${euro(tot)}, la differenza.\n\nIn allegato l'elenco, riga per riga.\n\n${chiusura}`
+      foglio = righe.map(x => ({ ...base(x.e), 'Peso (kg)': x.e.riga.pesoTassato, 'Contratto': a.voce === 'altro' ? '' : a.valListino, [`Addebitato ${cr}`]: a.voce === 'altro' ? '' : a.valGls, 'Differenza (€)': x.euro }))
+    } else if (chiave.startsWith('listino|')) {
+      // Una voce del gruppo «Sistemare in Moove» che si sceglie di contestare (Lorenzo, 27/11: anche «Entro ore 12»).
+      const k = chiave.slice('listino|'.length)
+      const righe = esiti.flatMap(e => e.motivi.filter(m => m.gruppo === 'listino' && (m.voce || `${m.tipo}:${m.gruppo}`) === k).map(m => ({ e, m })))
+      if (!righe.length) return
+      const tot = r2(righe.reduce((t, x) => t + x.m.importo, 0))
+      nome = righe[0].m.voce || k
+      oggetto = `Contestazione ${String(nome).toLowerCase()} – ${doc}`
+      testo = `${intestazione}\n\n${String(nome).toUpperCase()}\n`
+        + (eEntro12(k) ? `Sulle spedizioni in elenco è stato addebitato il servizio «Entro ore 12», attivato per errore da un codice trasmesso in creazione al posto della modalità di incasso del contrassegno: il servizio non era voluto. Chiediamo, se possibile, lo storno.\n`
+          : `${righe[0].m.testo}\n`)
+        + `${righe.length === 1 ? '1 spedizione' : `${righe.length} spedizioni`}, ${euro(tot)} in tutto. Chiediamo una nota di credito di ${euro(tot)}.\n\nIn allegato l'elenco.\n\n${chiusura}`
       foglio = righe.map(({ e, m }) => ({ ...base(e), [`Fatturato ${cr} (€)`]: e.brt, 'Contestato (€)': m.importo, 'Perché': m.testo }))
     } else return
     const { utils, writeFile } = await import('xlsx')
@@ -1572,8 +1680,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                                 <div style={{ color: C.testo, fontWeight: 600 }}>Da correggere oggi:</div>
                                 {dellaVoce.slice(0, 8).map(a => (
                                   <div key={a.chiave} style={{ marginTop: 3 }}>
-                                    <b>{a.listino}</b> · {a.zona}: {descriviAllinea(a)} <span style={{ color: C.attenuato }}>({a.n} sped.)</span>{' '}
-                                    {apriListino(a.listino)}
+                                    <b>{a.listino}</b> · {a.zona}: {descriviAllinea(a, carbContratto)} <span style={{ color: C.attenuato }}>({a.n} sped., {conSegno(euroAllinea(a))})</span>
+                                    {decisioneAllinea(a)}
                                   </div>
                                 ))}
                                 {dellaVoce.length > 8 && <div style={{ color: C.attenuato, marginTop: 3 }}>…e altre {dellaVoce.length - 8} in «Cosa allineare nel listino», più sotto.</div>}
@@ -1639,11 +1747,12 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                     <div key={a.chiave} style={{ borderTop: `1px solid ${C.filo}`, padding: '9px 0', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13 }}><b>{a.listino || 'Listino'}</b> <span style={{ color: C.attenuato }}>· {a.zona || 'zona ?'}</span></div>
-                        <div style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.4 }}>{descriviAllinea(a)} {apriListino(a.listino)}</div>
+                        <div style={{ fontSize: 12.5, marginTop: 2, lineHeight: 1.4 }}>{descriviAllinea(a, carbContratto)}</div>
+                        {decisioneAllinea(a)}
                         {a.luoghi.length > 0 && <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 2, overflowWrap: 'anywhere' }}>{a.n > a.luoghi.length ? 'Per esempio: ' : 'Dove: '}{a.luoghi.join(' · ')}</div>}
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: coloreImporto(a.euro), ...cifre }}>{conSegno(a.euro)}</div>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: coloreImporto(euroAllinea(a)), ...cifre }}>{conSegno(euroAllinea(a))}</div>
                         <div style={{ fontSize: 11.5, color: C.attenuato, ...cifre }}>{a.n} sped.</div>
                       </div>
                     </div>

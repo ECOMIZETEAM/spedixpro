@@ -202,7 +202,10 @@ export async function POST(req: NextRequest) {
     // Gli esiti finali: 'assorbito' (resta a te), 'girato' (girato ai clienti con la Rettifica), 'fatturato' (una
     // spedizione fuori da tutto, fatta pagare a qualcuno: importo e a chi).
     // 'tentato': mandata alla Rettifica ma non creata, col perché (e il listino da correggere, se è quello).
-    const STATI = ['contestato', 'accreditato', 'respinto', 'chiesto', 'risposto', 'fatto', 'girato', 'assorbito', 'fatturato', 'tentato']
+    // Le decisioni prima della contestazione (Lorenzo, 27/11: «devi capire se è un errore di Wave o di GLS... prima
+    // chiedi»): 'da_contestare' (il listino è giusto, si contesta: ancora da mandare), 'listino' (ha ragione il corriere,
+    // si corregge il listino), 'va_bene' (il corriere chiede meno del listino e va bene così).
+    const STATI = ['contestato', 'accreditato', 'respinto', 'chiesto', 'risposto', 'fatto', 'girato', 'assorbito', 'fatturato', 'tentato', 'da_contestare', 'listino', 'va_bene']
     if (!chiave) return NextResponse.json({ error: 'Voce mancante.' }, { status: 400 })
     if (sv.stato != null && !STATI.includes(sv.stato)) return NextResponse.json({ error: 'Stato non valido.' }, { status: 400 })
     const importo = sv.importo == null || (sv.importo as any) === '' ? null : Number(sv.importo)
