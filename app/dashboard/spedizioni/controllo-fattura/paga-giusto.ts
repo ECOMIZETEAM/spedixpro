@@ -1,9 +1,9 @@
-/* PAGA GIUSTO? Le regole con cui il controllo GLS dice se il corriere ha fatto pagare giusto una riga senza un costo
+/* PAGA GIUSTO? Le regole con cui il controllo (GLS e BRT) dice se il corriere ha fatto pagare giusto una riga senza un costo
  * in Moove con cui confrontarla: gli arrivi (contro le partenze dello stesso peso più il supplemento degli arrivi) e
  * le spedizioni fuori da tutto.
  * Niente grafica e niente database: la pagina le usa per la contestazione e per la singola spedizione, così l'«in
  * più» di una spedizione è la sua parte di quello che si contesta. */
-import { descriviVoce, type RigaFatturaBrt } from '@/lib/fattura-brt'
+import { descriviVoce, carburanteRigaBrt, type RigaFatturaBrt } from '@/lib/fattura-brt'
 import { eGls, type RigaFatturaGls } from '@/lib/fattura-gls'
 import type { ControlloFuori } from './FattaPagare'
 
@@ -11,8 +11,13 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 const euro = (n: number) => n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 const kg = (n: number) => n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) + ' kg'
 
-// Il servizio estero di GLS (Parcel): il suo nolo non si confronta con quello delle partenze italiane.
-export const eEstero = (r: object | null | undefined) => /parcel/i.test(String((r as { servizio?: unknown } | null | undefined)?.servizio || ''))
+// Il servizio estero di GLS (Parcel), o una riga BRT con la nazione di destinazione fuori dall'Italia: il suo nolo non si
+// confronta con quello delle partenze italiane.
+export const eEstero = (r: object | null | undefined) => {
+  const x = r as { servizio?: unknown; nazione?: unknown } | null | undefined
+  const nazione = String(x?.nazione || '').trim()
+  return /parcel/i.test(String(x?.servizio || '')) || (!!nazione && !/^(it|ita|italia)$/i.test(nazione))
+}
 
 // Il nolo che il corriere chiede in Italia a un dato peso, letto dalle partenze dello stesso documento (i noli con
 // almeno 5 partenze il cui intervallo di pesi comprende quel peso). Senza partenze di quel peso (l'arrivo da 303,9 kg
@@ -96,22 +101,25 @@ export function controllaFuori(r: RigaFatturaBrt, c: {
 }): ControlloFuori {
   const g = r as RigaFatturaGls
   const carbEuro = r2(r.voci.filter(v => descriviVoce(v.sigla, c.legenda).categoria === 'carburante').reduce((t, v) => t + v.importo, 0))
-  const perc = eGls(r) && g.percentualeCarburante > 0 ? g.percentualeCarburante : null
+  // La percentuale: GLS la stampa per contratto, BRT si ricava dalla riga (carburante sul nolo e sui supplementi).
+  const brt = eGls(r) ? null : carburanteRigaBrt(r, c.legenda)
+  const perc = eGls(r) ? (g.percentualeCarburante > 0 ? g.percentualeCarburante : null) : brt!.carburante > 0.0005 && brt!.base > 0 ? r2(brt!.quota * 10000) / 100 : null
+  const baseCarb = eGls(r) ? r.nolo : brt!.base
   const listinoPct = c.carburanteListino
   // Senza la percentuale della riga o quella del listino il carburante non si è controllato: non è «giusto».
   const carbControllato = perc != null && listinoPct != null
-  const carbInPiu = carbControllato && perc > listinoPct + 0.25 ? r2(r.nolo * (perc - listinoPct) / 100) : 0
+  const carbInPiu = carbControllato && perc > listinoPct + 0.25 ? r2(baseCarb * (perc - listinoPct) / 100) : 0
   // Un rientro (arrivo, reso) si confronta con la tariffa dei resi del contratto (o, senza, con la partenza dello stesso
   // peso più il supplemento dei rientri); una partenza con le partenze dello stesso peso.
   const rientro = r.andata ? null : c.rientri(r)
-  // Il nolo si confronta solo su GLS: per gli altri corrieri le regole di qui non valgono.
-  const rif = !eGls(r) || eEstero(r) || !(r.nolo > 0) ? null : r.andata ? c.noloPartenze(r.pesoTassato) : rientro ? rientro.riferimento : null
+  // GLS e BRT: il nolo contro le partenze dello stesso peso nello stesso documento (BRT: una sola tariffa a quel peso,
+  // se no non si confronta: sul conto 677742 a 2 kg ci sono 4,10 € e 5,00 € secondo la zona).
+  const rif = eEstero(r) || !(r.nolo > 0) ? null : r.andata ? c.noloPartenze(r.pesoTassato) : rientro ? rientro.riferimento : null
   const noloInPiu = rif != null && r.nolo > rif + 0.005 ? r2(r.nolo - rif) : 0
   const comeSi = rientro ? rientro.come : 'il nolo delle partenze dello stesso peso'
   const nolo = {
     euro: r.nolo, riferimento: rif, inPiu: noloInPiu,
-    perche: !eGls(r) ? `il nolo di ${c.corriere} qui non si confronta`
-      : eEstero(r) ? 'il nolo estero non si confronta con le partenze italiane'
+    perche: eEstero(r) ? 'il nolo estero non si confronta con le partenze italiane'
       : rif == null && !r.andata && c.noloPartenze(r.pesoTassato) != null ? 'nel documento ci sono troppo pochi rientri di questo tipo per sapere quanto costano più delle partenze'
       : rif == null ? `nel documento le partenze da ${kg(r.pesoTassato)} non hanno un prezzo solo (o sono troppo poche) per confrontarlo`
       : noloInPiu > 0 ? `${euro(r.nolo)} invece di ${euro(rif)} (${comeSi})` : '',
@@ -131,7 +139,7 @@ export function controllaFuori(r: RigaFatturaBrt, c: {
       : `${cosa}: ${s.stato}.`
   }
   const frasi: string[] = []
-  if (carbInPiu > 0) frasi.push(dove(`carburante-doc:${g.contratto || ''}`, 'Il carburante in più'))
+  if (carbInPiu > 0) frasi.push(dove(`carburante-doc:${eGls(r) ? g.contratto || '' : r.codiceCliente || 'BRT'}`, 'Il carburante in più'))
   if (noloInPiu > 0) frasi.push(r.andata ? `Il nolo chiedilo a ${c.corriere}, se non è una zona più cara.` : dove('arrivi-sopra', 'Il nolo in più del rientro'))
   const inPiu = r2(carbInPiu + noloInPiu)
   return {

@@ -5,7 +5,7 @@ import type { RigaFatturaBrt } from '@/lib/fattura-brt'
 import type { AllineaGls } from '@/lib/fattura-gls'
 
 export type MotivoPagina = { tipo: 'peso' | 'supplemento' | 'voce' | 'tariffa' | 'annullata' | 'non_calcolabile' | 'carburante' | 'storico'; importo: number; testo: string
-  voce?: string; gruppo?: 'contestare' | 'clienti' | 'chiarire' | 'listino' }
+  voce?: string; gruppo?: 'contestare' | 'clienti' | 'chiarire' | 'listino'; nota?: string }
 export type EsitoPagina = {
   riga: RigaFatturaBrt
   spedizione: { id: string; numero: string; stato: string; data: string; colli: number; peso: number; contrassegno: number; citta: string; chi: string } | null

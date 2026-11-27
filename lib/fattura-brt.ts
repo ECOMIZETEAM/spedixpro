@@ -227,6 +227,21 @@ export function confrontaLegenda(legenda: Record<string, string>) {
   return { nuove, cambiate }
 }
 
+// IL CARBURANTE DI UNA RIGA BRT. BRT non stampa la percentuale: la si ricava dalla riga, carburante diviso per
+// quello su cui BRT lo calcola (il nolo e i supplementi, mai il contrassegno, né le voci calcolate dopo il carburante
+// come la "b"). Nelle TIVAF di Wave esce sempre la stessa su tutte le righe di una fattura (12,5% a ottobre su 214
+// righe su 214, 9,5% sul conto 2802246). La stessa funzione per il controllo (server), il «paga giusto» delle
+// spedizioni fuori da Moove e la contestazione (pagina): così le tre parlano della stessa base.
+export function carburanteRigaBrt(r: Pick<RigaFatturaBrt, 'nolo' | 'voci'>, legenda?: Record<string, string> | null) {
+  let carburante = 0, base = r.nolo
+  for (const v of r.voci) {
+    const d = descriviVoce(v.sigla, legenda)
+    if (d.categoria === 'carburante') carburante += v.importo
+    else if (d.categoria !== 'contrassegno' && !d.sopraIlCarburante) base += v.importo
+  }
+  return { carburante, base, quota: base > 0 ? carburante / base : 0 }
+}
+
 // Le sigle della fattura che non sappiamo leggere (né conosciute né nella legenda del PDF).
 export const sigleSconosciute = (righe: RigaFatturaBrt[], legenda?: Record<string, string> | null) =>
   Array.from(new Set(righe.flatMap(r => r.voci.map(v => v.sigla)))).filter(s => (!SIGLE_BRT[s] || !SIGLE_BRT[s].certa) && !VOCI_GLS[s] && !legenda?.[s])

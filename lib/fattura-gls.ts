@@ -95,7 +95,11 @@ export const eGls = (r: any): r is RigaFatturaGls => r?.corriere === 'gls'
  * La somma delle parti di una riga è lo scarto col listino (più il carburante che il listino non ha). */
 // `zonaGls`: le altre zone dello stesso listino che a quel peso hanno proprio il nolo chiesto da GLS. Vuol dire
 // che GLS ha tassato il pacco come quella zona: va allargata la zona, non cambiato il prezzo.
-export type ParteAllinea = { voce: 'nolo' | 'contrassegno' | 'carburante' | 'altro'; listino: number; gls: number; euro: number; zonaGls?: string }
+// `gls` è la cifra del corriere (il nome è rimasto dal primo corriere controllato; per BRT è quella di BRT).
+// `nota`: come il corriere arriva alla sua cifra, quando non si legge da sola (BRT, listino col carburante dentro il
+// prezzo: «4,10 € + carburante 12,5%»). `regola`: il corriere non ha una cifra fissa ma una regola (il contrassegno BRT
+// all'1,5% dell'incasso): le righe si sommano per regola e non per importo, che cambia a ogni spedizione.
+export type ParteAllinea = { voce: 'nolo' | 'contrassegno' | 'carburante' | 'altro'; listino: number; gls: number; euro: number; zonaGls?: string; nota?: string; regola?: string }
 // Il luogo (città e CAP) serve quando il prezzo di GLS è quello di un'altra zona: sul borderò del 23/11 pacchi
 // da 18 kg "Italia" a cui GLS chiede 5,25 €, il prezzo della zona Napoli. Lì non va cambiato il prezzo, va
 // guardata la zona: senza la città sembrava che il listino Italia fosse troppo caro.

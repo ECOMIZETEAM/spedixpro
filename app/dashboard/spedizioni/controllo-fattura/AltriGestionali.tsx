@@ -88,8 +88,12 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
   }, [righe, nonAbbinate])
   // Un arrivo (una spedizione vera che parte da fuori e arriva a te, e che il corriere fa pagare a te: Lorenzo, 27/11)
   // non è in nessun export di spedizioni: dirlo, invece di far cercare il periodo che il file non copre.
+  // BRT: le righe che non sono andate sono rientri (il reso al mittente A2, le spese di giacenza F3, la riconsegna A3)
+  // di pacchi spediti fuori da Moove, non arrivi: l'export delle spedizioni non li contiene, e si dice chi li ha pagati.
   const perche = (r: RigaFatturaBrt) => !r.andata
-    ? `Arrivo${r.mittente ? ` da «${r.mittente}»` : ''}: una spedizione che parte da fuori e arriva a te, fatturata a te; nessun export la contiene. Chi l'ha pagata?`
+    ? corriere !== 'GLS'
+      ? `${r.tipoBolla === 'A2' ? 'Reso al mittente' : r.tipoBolla === 'F3' ? 'Spese di giacenza' : r.tipoBolla === 'A3' ? 'Riconsegna o dirottamento' : 'Rientro'} di un pacco spedito fuori da Moove: l'export delle spedizioni non lo contiene. Chi l'ha pagato?`
+      : `Arrivo${r.mittente ? ` da «${r.mittente}»` : ''}: una spedizione che parte da fuori e arriva a te, fatturata a te; nessun export la contiene. Chi l'ha pagata?`
     : mittenteSolito && (r.mittente || '') !== mittenteSolito && formaRif(r.rifAlfabetico) !== rifSolito
     ? `Mittente ${r.mittente ? `«${r.mittente}»` : 'vuoto'} e riferimento «${r.rifAlfabetico || '—'}» diversi da tutte le altre (${mittenteSolito}): non viene da questo gestionale, probabilmente creata sul sito del corriere. Chi l'ha fatta pagare?`
     : 'Non c\'è nell\'export: forse è partita in un periodo che il file non copre, o da un altro gestionale.'
@@ -257,7 +261,9 @@ export default function AltriGestionali({ righe, righeFattura, numeroFattura, in
             <Icona nome="avviso" size={16} />
             <span>{conExport
               ? <>{nonAbbinate.length === 1 ? '1 riga' : `${nonAbbinate.length} righe`} ({euro(totaleNonAbbinate)}) non trova{nonAbbinate.length === 1 ? '' : 'no'} la spedizione né in Moove né {esiti.length > 1 || Object.keys(salvati || {}).length > 1 ? 'negli export' : 'nell\'export'}: qui sotto cosa sono e com'è finita.</>
-              : <>{daMostrare.length === 1 ? '1 arrivo' : `${daMostrare.length} arrivi`} ({euro(r2(daMostrare.reduce((t, r) => t + r.totale, 0)))}): spedizioni che partono da fuori e arrivano a te, nessun export li contiene. Qui sotto chi li ha pagati. Le partenze si abbinano caricando l'export.</>}</span>
+              : corriere !== 'GLS'
+                ? <>{daMostrare.length === 1 ? '1 rientro' : `${daMostrare.length} rientri`} ({euro(r2(daMostrare.reduce((t, r) => t + r.totale, 0)))}): resi e giacenze di pacchi spediti fuori da Moove, nessun export li contiene. Qui sotto chi li ha pagati. Le andate si abbinano caricando l&apos;export.</>
+                : <>{daMostrare.length === 1 ? '1 arrivo' : `${daMostrare.length} arrivi`} ({euro(r2(daMostrare.reduce((t, r) => t + r.totale, 0)))}): spedizioni che partono da fuori e arrivano a te, nessun export li contiene. Qui sotto chi li ha pagati. Le partenze si abbinano caricando l'export.</>}</span>
           </div>
           <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
             {daMostrare.slice(0, MOSTRATE).map(r => (

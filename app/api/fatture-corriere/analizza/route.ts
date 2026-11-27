@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabase } from '@/lib/supabase-admin'
 import { contrattiDelDetentore, gruppiGls, utenteDetentore } from '@/lib/controllo-fattura-accesso'
-import { analizzaFatturaBrt } from '@/lib/controllo-fattura'
+import { analizzaFatturaBrt, carburanteDelListino } from '@/lib/controllo-fattura'
 import { analizzaFatturaGls } from '@/lib/controllo-fattura-gls'
 import { eGls, type RigaFatturaGls } from '@/lib/fattura-gls'
 import { costruisciCatena } from '@/lib/cascata'
@@ -48,7 +48,8 @@ export async function GET() {
   const u = await utenteDetentore(); if (u.errore) return u.errore
   const admin = createAdminSupabase()
   const contratti = await contrattiControllabili(admin, u.masterId)
-  const ids = contratti.filter(c => c.tipo === 'gls').flatMap(c => c.ids)
+  // BRT e GLS: i nomi (per aprire il listino da correggere) e la tariffa dei resi del contratto, se c'è.
+  const ids = contratti.flatMap(c => c.ids)
   const tariffe = new Map<string, any>()
   const nomi = new Map<string, string>()
   if (ids.length) {
@@ -56,12 +57,21 @@ export async function GET() {
     if (error) console.warn('[controllo-fattura] tariffa resi non letta', error.message)
     for (const c of data || []) { if ((c as any).tariffa) tariffe.set(c.id, (c as any).tariffa); nomi.set(c.id, String((c as any).nome_contratto || '')) }
   }
+  // Il carburante che il listino BRT dichiara (GLS lo legge la sua rotta, col PDF): la pagina lo confronta con quello
+  // di tutta la fattura. Non dichiarato = dentro il prezzo (il listino di Wave): si dice, non si contesta. Una lettura
+  // non riuscita lascia la pagina senza confronto, non senza contratti.
+  const carburante = new Map<string, number | null>()
+  for (const c of contratti.filter(c => c.tipo === 'brt')) {
+    try { carburante.set(c.id, await carburanteDelListino(admin, u.masterId, c.ids)) }
+    catch (e: any) { console.warn('[controllo-fattura] carburante del listino non letto', String(e?.message || e)) }
+  }
   // I listini dei contratti del gruppo (per GLS più contratti Moove sullo stesso contratto GLS): la pagina apre quello
   // da correggere col suo nome, come lo scrive «Cosa allineare nel listino».
   return NextResponse.json({ contratti: contratti.map(c => {
     const t = c.ids.map((id: string) => tariffaResiValida(tariffe.get(id))).find(Boolean) || null
     const listini = c.ids.filter((id: string) => nomi.has(id)).map((id: string) => ({ id, nome: nomi.get(id)! }))
-    return { id: c.id, nome: c.nome, attivo: c.attivo, tipo: c.tipo, ...(t ? { tariffaResi: t } : {}), ...(listini.length ? { listini } : {}) }
+    return { id: c.id, nome: c.nome, attivo: c.attivo, tipo: c.tipo, ...(t ? { tariffaResi: t } : {}), ...(listini.length ? { listini } : {}),
+      ...(carburante.has(c.id) ? { carburanteListino: carburante.get(c.id) ?? null, carburanteLetto: true } : {}) }
   }) })
 }
 

@@ -309,13 +309,17 @@ export async function analizzaFatturaGls(
     // andava in negativo dello stesso importo. NI665520237 di Wave, 27/11: dopo la rettifica di 22,66 € di peso e 15 €
     // di Oversize, «listino più alto del vero» per −37,67 €. La parte rettificata si toglie dal peso e dalle voci da
     // girare ai clienti, in quest'ordine; quello che resta rimane com'era.
-    let coperto = rettificato, copertoVoci = 0
+    // Ma la Rettifica porta anche in Moove il peso del corriere (peso_fatturato): quella parte è già nel listino al peso
+    // di Moove e non copre niente (stessa correzione di BRT, lib/controllo-fattura, 27/11: prima un supplemento mai girato
+    // poteva sparire coperto dal peso già rettificato). Copre solo quello che il listino al peso di Moove non spiega.
+    const giaNelPeso = Math.max(0, r2(totM - (moove - rettificato)))
+    let coperto = r2(rettificato - Math.min(rettificato, giaNelPeso)), copertoVoci = 0, copertoPeso = 0
     if (coperto > 0.005) {
       for (const m of [...motivi.filter(x => x.gruppo === 'clienti' && x.tipo === 'peso'), ...motivi.filter(x => x.gruppo === 'clienti' && x.tipo === 'voce')]) {
         if (coperto <= 0.005 || m.importo <= 0.005) continue
         const togli = r2(Math.min(m.importo, coperto))
         m.importo = r2(m.importo - togli); coperto = r2(coperto - togli)
-        if (m.tipo === 'peso') peso = r2(peso - togli); else { voci = r2(voci - togli); copertoVoci = r2(copertoVoci + togli) }
+        if (m.tipo === 'peso') { peso = r2(peso - togli); copertoPeso = r2(copertoPeso + togli) } else { voci = r2(voci - togli); copertoVoci = r2(copertoVoci + togli) }
         m.testo += ` Già girat${m.tipo === 'peso' ? 'o' : 'a'} con la Rettifica: ${euro(togli)}.`
       }
       for (let i = motivi.length - 1; i >= 0; i--) if (Math.abs(motivi[i].importo) < 0.01 && (motivi[i].tipo === 'peso' || motivi[i].tipo === 'voce')) motivi.splice(i, 1)
@@ -326,8 +330,10 @@ export async function analizzaFatturaGls(
     const mooveAlPeso = r2(moove + peso - copertoVoci)
     const glsTariffa = r2(mooveAlPeso + tariffa)           // quanto chiede GLS senza voci e carburante in più
     const scartoListino = r2(glsTariffa - totG)            // GLS contro il listino di oggi, stesso peso
-    // «Il listino è cambiato dopo» si guarda sul costo della spedizione, senza le rettifiche venute dopo.
-    const cambiato = Math.abs(totM - (moove - rettificato)) >= 0.01
+    // «Il listino è cambiato dopo» si guarda sul costo al peso di Moove, senza quello che la Rettifica ha coperto (il
+    // supplemento girato, e il peso se in Moove è rimasto quello di prima): col solo «meno le rettifiche», una spedizione
+    // rettificata diceva "il tuo listino è cambiato dopo" col listino mai toccato.
+    const cambiato = Math.abs(totM - (moove - copertoVoci - copertoPeso)) >= 0.01
     if (Math.abs(tariffa) >= 0.01) {
       const cosa = `nolo ${euro(r.nolo)} + carburante${isola && r.varie ? ', isola' : ''}${r.voci.some(v => v.sigla === 'gls:contrassegno') ? ', contrassegno' : ''}${accG > 0.005 ? ', servizi' : ''}`
       motivi.push({ tipo: 'tariffa', importo: tariffa, gruppo: 'listino', testo: `A parità di peso GLS chiede ${euro(glsTariffa)} (${cosa}), in Moove il costo registrato è ${euro(mooveAlPeso)}`
