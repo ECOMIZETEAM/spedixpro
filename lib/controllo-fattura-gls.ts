@@ -115,7 +115,10 @@ export async function analizzaFatturaGls(
     const mov = l.flatMap(s => movPerSped.get(s.id) || [])
     const nolo = movimentiDelNolo(mov.filter(m => m.tipo !== 'rimborso' && m.tipo !== 'accessorio'))
     const conta = [...nolo, ...mov.filter(m => m.tipo === 'rimborso' || m.tipo === 'accessorio')]
-    return { costo: r2(conta.reduce((t, m) => t - Number(m.importo || 0), 0)), movimenti: conta.length }
+    // La parte del costo che viene da una rettifica confermata (peso o supplemento del corriere, RIPFORN-…): è già
+    // stata girata a chi sta sotto (vedi «già girato» qui sotto).
+    const rettificato = r2(conta.filter(m => String(m.riferimento || '').startsWith('RIPFORN-')).reduce((t, m) => t - Number(m.importo || 0), 0))
+    return { costo: r2(conta.reduce((t, m) => t - Number(m.importo || 0), 0)), movimenti: conta.length, rettificato }
   }
 
   // QUANTO HA INCASSATO IL DETENTORE da chi sta sotto (Lorenzo, 25/11: per ogni spedizione "quanto ha pagato lui, il
@@ -199,7 +202,7 @@ export async function analizzaFatturaGls(
     if (!tutte) return { ...base, spedizione: null, moove: null, listino: null, differenza: null, motivi: [] }
 
     const s = principale(tutte)
-    const { costo: moove, movimenti: nMov } = costoDi(tutte)
+    const { costo: moove, movimenti: nMov, rettificato } = costoDi(tutte)
     const differenza = r2(gls - moove)
     const motivi: Motivo[] = []
     // La spedizione, col contratto (= il listino di costo) e quanto ha pagato chi sta sotto: valgono per ogni riga
@@ -300,11 +303,31 @@ export async function analizzaFatturaGls(
             : { tipo: 'voce', importo: residuo, voce: d.nome, gruppo: d.gruppo, testo: `${d.nome}: ${d.nota}` })
     }
 
+    // GIÀ GIRATO CON LA RETTIFICA. Una rettifica confermata mette nel costo del detentore il peso e il supplemento che
+    // GLS ha fatto pagare (movimenti RIPFORN-), e li fa pagare a chi sta sotto. Rifacendo il controllo dopo, quella
+    // parte della differenza non c'è più, ma peso e voce si calcolano dai pesi della spedizione e restavano: la tariffa
+    // andava in negativo dello stesso importo. NI665520237 di Wave, 27/11: dopo la rettifica di 22,66 € di peso e 15 €
+    // di Oversize, «listino più alto del vero» per −37,67 €. La parte rettificata si toglie dal peso e dalle voci da
+    // girare ai clienti, in quest'ordine; quello che resta rimane com'era.
+    let coperto = rettificato, copertoVoci = 0
+    if (coperto > 0.005) {
+      for (const m of [...motivi.filter(x => x.gruppo === 'clienti' && x.tipo === 'peso'), ...motivi.filter(x => x.gruppo === 'clienti' && x.tipo === 'voce')]) {
+        if (coperto <= 0.005 || m.importo <= 0.005) continue
+        const togli = r2(Math.min(m.importo, coperto))
+        m.importo = r2(m.importo - togli); coperto = r2(coperto - togli)
+        if (m.tipo === 'peso') peso = r2(peso - togli); else { voci = r2(voci - togli); copertoVoci = r2(copertoVoci + togli) }
+        m.testo += ` Già girat${m.tipo === 'peso' ? 'o' : 'a'} con la Rettifica: ${euro(togli)}.`
+      }
+      for (let i = motivi.length - 1; i >= 0; i--) if (Math.abs(motivi[i].importo) < 0.01 && (motivi[i].tipo === 'peso' || motivi[i].tipo === 'voce')) motivi.splice(i, 1)
+    }
+
     const tariffa = r2(differenza - peso - carburante - voci)
-    const mooveAlPeso = r2(moove + peso)                   // il costo registrato, portato al peso di GLS
+    // Il costo registrato portato al peso di GLS, senza i supplementi già girati (stanno nel costo ma non nel listino).
+    const mooveAlPeso = r2(moove + peso - copertoVoci)
     const glsTariffa = r2(mooveAlPeso + tariffa)           // quanto chiede GLS senza voci e carburante in più
     const scartoListino = r2(glsTariffa - totG)            // GLS contro il listino di oggi, stesso peso
-    const cambiato = Math.abs(totM - moove) >= 0.01
+    // «Il listino è cambiato dopo» si guarda sul costo della spedizione, senza le rettifiche venute dopo.
+    const cambiato = Math.abs(totM - (moove - rettificato)) >= 0.01
     if (Math.abs(tariffa) >= 0.01) {
       const cosa = `nolo ${euro(r.nolo)} + carburante${isola && r.varie ? ', isola' : ''}${r.voci.some(v => v.sigla === 'gls:contrassegno') ? ', contrassegno' : ''}${accG > 0.005 ? ', servizi' : ''}`
       motivi.push({ tipo: 'tariffa', importo: tariffa, gruppo: 'listino', testo: `A parità di peso GLS chiede ${euro(glsTariffa)} (${cosa}), in Moove il costo registrato è ${euro(mooveAlPeso)}`
