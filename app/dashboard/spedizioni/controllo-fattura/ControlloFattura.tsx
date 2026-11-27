@@ -857,8 +857,8 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     // arrivi pagati più delle partenze) non sono spedizioni da ripassare a qualcuno.
     const giroPossibile = chiave.startsWith('carburante-doc:') || chiave === 'contestare|carburante:contestare'
     const parti = gruppo === 'contestare'
-      ? !st ? [tasto('Segna contestata', () => segnaStato(chiave, 'contestato'), true)]
-        : st.stato === 'contestato' ? [giallo(`Contestata il ${dataBreve(st.il)}`), tasto('Nota di credito ricevuta', () => notaDiCredito(chiave, proposto), true), tasto('Respinta', respinta), annulla]
+      ? !st ? [tasto('Prepara la contestazione', () => preparaContestazioneDi(chiave)), tasto('Segna contestata', () => segnaStato(chiave, 'contestato'), true)]
+        : st.stato === 'contestato' ? [giallo(`Contestata il ${dataBreve(st.il)}`), tasto('Nota di credito ricevuta', () => notaDiCredito(chiave, proposto), true), tasto('Respinta', respinta), tasto('Rifai il testo', () => preparaContestazioneDi(chiave)), annulla]
         : st.stato === 'accreditato' ? [verde(`Recuperata: nota di credito${st.numero ? ' ' + st.numero : ''} ${euro(st.importo || 0)}, il ${dataBreve(st.il)}`), annulla]
         : st.stato === 'respinto' ? [<Pillola key="r" colore={C.rosso} fondo={C.rossoTenue} orlo={C.rossoOrlo}>{`Respinta il ${dataBreve(st.il)}${st.nota ? ': ' + st.nota : ''}`}</Pillola>,
             ...(giroPossibile ? [tasto('Giro ai clienti', () => carburanteAiClienti(chiave), true)] : []), tasto('Assorbo io', assorbo, !giroPossibile), annulla]
@@ -881,45 +881,75 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     return <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 7 }}>{parti}</div>
   }
 
-  // LA CONTESTAZIONE PRONTA DA MANDARE: il testo (copiato, da incollare nella mail al corriere) e l'Excel con le
-  // spedizioni contestate. Il carburante oltre il contratto si conta su tutto il documento, come lo conta GLS.
-  async function preparaContestazione() {
-    const docSopra = carburanteGls.some(c => c.sopra)
+  // UNA CONTESTAZIONE PER MOTIVO (Lorenzo, 27/11: "le contestazioni devono essere separate per motivo e non tutto
+  // assieme... ogni cosa deve essere capita e scritta per bene"). Prima un pulsante solo metteva carburante, arrivi e
+  // annullate nella stessa mail e nello stesso Excel. Ora ogni voce di «Da contestare» ha la sua: l'oggetto, il testo
+  // che spiega quel solo motivo (cosa dice il contratto, cosa ha messo il corriere, quanto si chiede) e l'Excel con le
+  // sole spedizioni di quel motivo, riga per riga. Il testo si copia per la mail ed è anche nel primo foglio.
+  async function preparaContestazioneDi(chiave: string) {
     const doc = infoGls?.titolo || `fattura ${esiti[0]?.riga.numeroFattura || ''}`
     const cliente = esiti[0]?.riga.codiceCliente
-    const punti: string[] = []
-    let totale = 0
-    for (const c of carburanteGls.filter(c => c.sopra)) {
-      punti.push(`Carburante applicato al ${pct(c.percentuale!)} invece del ${pct(c.listino!)} previsto dal contratto ${c.codice}: ${euro(c.carburante || 0)} su ${euro(c.nolo)} di nolo, al ${pct(c.listino!)} sarebbero ${euro(r2(c.nolo * c.listino! / 100))}. Da accreditare ${euro(c.inPiu)}.`)
-      totale += c.inPiu
-    }
-    if (arriviDaContestare) {
-      punti.push(`Arrivi e resi fatturati con un nolo più alto della loro tariffa: ${arriviDaContestare.righe.map(x => `${x.e.riga.segnacollo} ${euro(x.e.riga.nolo)} invece di ${euro(x.riferimento)} (${x.come})`).join('; ')}. Da accreditare ${euro(arriviDaContestare.euro)} di nolo.`)
-      totale += arriviDaContestare.euro
-    }
-    const righe = esiti.flatMap(e => e.motivi.filter(m => m.gruppo === 'contestare' && !(docSopra && m.tipo === 'carburante')).map(m => ({ e, m })))
-    const perTipo = new Map<string, { n: number; euro: number }>()
-    for (const { m } of righe) { const v = perTipo.get(m.tipo) || { n: 0, euro: 0 }; v.n++; v.euro = r2(v.euro + m.importo); perTipo.set(m.tipo, v) }
-    for (const [t, v] of perTipo) { punti.push(`${MOTIVI[t]?.nome || t}: ${v.n} spedizion${v.n === 1 ? 'e' : 'i'}, ${euro(v.euro)} (elenco allegato).`); totale += v.euro }
-    if (!punti.length) return
-    const testo = `Buongiorno,\ncontestiamo ${doc}${cliente ? ` (cliente ${cliente})` : ''}:\n` + punti.map((p, i) => `${i + 1}) ${p}`).join('\n')
-      + `\nTotale da accreditare: ${euro(r2(totale))}. In allegato l'elenco delle spedizioni.\nRestiamo in attesa della nota di credito.`
+    const intestazione = `Buongiorno,\ncontestiamo ${doc}${cliente ? ` (cliente ${cliente})` : ''}.`
+    const chiusura = `Restiamo in attesa della nota di credito. Grazie.`
+    let oggetto = '', testo = '', nome = ''
+    let foglio: Record<string, string | number>[] = []
+    const base = (e: EsitoControllo) => ({ [gls ? 'Tracking GLS' : 'Segnacollo']: e.riga.segnacollo, 'Data': e.riga.dataRitiro || '', 'Destinatario': e.riga.destinatario || e.riga.mittente || '', 'Località': e.riga.localita })
+    if (chiave.startsWith('carburante-doc:')) {
+      const c = carburanteGls.find(x => `carburante-doc:${x.codice}` === chiave)
+      if (!c || !c.sopra) return
+      nome = 'carburante'
+      oggetto = `Contestazione carburante – ${doc}`
+      testo = `${intestazione}\n\nCARBURANTE OLTRE IL CONTRATTO (contratto ${c.codice})\n`
+        + `Il contratto prevede il carburante al ${pct(c.listino!)} del nolo. Nel documento è applicato al ${pct(c.percentuale!)}: ${euro(c.carburante || 0)} su ${euro(c.nolo)} di nolo.\n`
+        + `Al ${pct(c.listino!)} il carburante sarebbe ${euro(r2(c.nolo * c.listino! / 100))}.\n`
+        + `Chiediamo una nota di credito di ${euro(c.inPiu)}, la differenza.\n\n`
+        + `In allegato l'elenco delle ${c.righe.toLocaleString('it-IT')} spedizioni del contratto ${c.codice}, con il carburante applicato e quello del contratto, riga per riga.\n\n${chiusura}`
+      // Il carburante del contratto riga per riga, ripartito al centesimo col resto più grande (come quello di GLS):
+      // arrotondando ogni riga, 3,50 € × 3% = 0,105 diventava 0,11 su 397 righe, e la colonna faceva 63,67 € invece di
+      // 61,83 €. Così le colonne sommano esatte ai numeri della mail.
+      const delContratto = esiti.filter(e => (e.riga as RigaFatturaGls).contratto === c.codice)
+      const centesimi = delContratto.map(e => e.riga.nolo * c.listino!)   // in centesimi: nolo × % / 100 × 100
+      const giu = centesimi.map(x => Math.floor(x + 1e-9))
+      let resto = Math.round(centesimi.reduce((t, x) => t + x, 0)) - giu.reduce((t, x) => t + x, 0)
+      for (const i of centesimi.map((x, i) => i).sort((a, b) => (centesimi[b] - giu[b]) - (centesimi[a] - giu[a]))) { if (resto <= 0) break; giu[i]++; resto-- }
+      foglio = delContratto.map((e, i) => {
+        const carb = r2(e.riga.voci.filter(v => descriviVoce(v.sigla, legenda).categoria === 'carburante').reduce((t, v) => t + v.importo, 0))
+        const dovuto = giu[i] / 100
+        return { ...base(e), 'Nolo (€)': e.riga.nolo, [`Carburante ${cr} (€)`]: carb, [`Carburante al ${pct(c.listino!)} (€)`]: dovuto, 'Differenza (€)': r2(carb - dovuto) }
+      })
+    } else if (chiave === 'arrivi-sopra') {
+      if (!arriviDaContestare) return
+      nome = 'arrivi'
+      oggetto = `Contestazione arrivi e resi – ${doc}`
+      testo = `${intestazione}\n\nARRIVI E RESI FATTURATI PIÙ DELLA LORO TARIFFA\n`
+        + arriviDaContestare.righe.map(x => `- ${x.e.riga.segnacollo} (${x.e.riga.tipoBolla}, ${kg(x.e.riga.pesoTassato)}): nolo ${euro(x.e.riga.nolo)} invece di ${euro(x.riferimento)}, ${x.come}.`).join('\n')
+        + `\nChiediamo una nota di credito di ${euro(arriviDaContestare.euro)} di nolo, più il carburante relativo.\n\nIn allegato l'elenco.\n\n${chiusura}`
+      foglio = arriviDaContestare.righe.map(x => ({ ...base(x.e), 'Tipo': x.e.riga.tipoBolla, 'Peso (kg)': x.e.riga.pesoTassato, 'Nolo (€)': x.e.riga.nolo, 'Tariffa (€)': x.riferimento, 'Differenza (€)': x.inPiu, 'Perché': x.come }))
+    } else if (chiave.startsWith('contestare|')) {
+      const k = chiave.slice('contestare|'.length)
+      const v = cosaFare?.get('contestare')?.get(k)
+      const righe = esiti.flatMap(e => e.motivi.filter(m => m.gruppo === 'contestare' && (m.voce || `${m.tipo}:${m.gruppo}`) === k).map(m => ({ e, m })))
+      if (!v || !righe.length) return
+      nome = v.nome
+      oggetto = `Contestazione ${v.nome.toLowerCase()} – ${doc}`
+      testo = `${intestazione}\n\n${v.nome.toUpperCase()}\n${v.nota ? v.nota + '\n' : ''}`
+        + `${righe.length === 1 ? '1 spedizione' : `${righe.length} spedizioni`}, ${euro(v.euro)} in tutto:\n`
+        + righe.slice(0, 30).map(({ e, m }) => `- ${e.riga.segnacollo}: ${euro(m.importo)}, ${m.testo}`).join('\n')
+        + (righe.length > 30 ? `\n…e le altre nell'elenco allegato.` : '')
+        + `\nChiediamo una nota di credito di ${euro(v.euro)}.\n\nIn allegato l'elenco.\n\n${chiusura}`
+      foglio = righe.map(({ e, m }) => ({ ...base(e), [`Fatturato ${cr} (€)`]: e.brt, 'Contestato (€)': m.importo, 'Perché': m.testo }))
+    } else return
     const { utils, writeFile } = await import('xlsx')
     const wb = utils.book_new()
-    utils.book_append_sheet(wb, utils.json_to_sheet(testo.split('\n').map(r => ({ Contestazione: r }))), 'Contestazione')
-    const foglio = [
-      ...righe.map(({ e, m }) => ({ e, importo: m.importo, motivo: m.testo })),
-      ...(arriviDaContestare?.righe || []).map(x => ({ e: x.e, importo: x.inPiu, motivo: `${x.e.riga.tipoBolla}: nolo ${euro(x.e.riga.nolo)}, tariffa ${euro(x.riferimento)} (${x.come})` })),
-    ]
-    if (foglio.length) utils.book_append_sheet(wb, utils.json_to_sheet(foglio.map(({ e, importo, motivo }) => ({
-      [gls ? 'Tracking GLS' : 'Segnacollo']: e.riga.segnacollo, 'Data': e.riga.dataRitiro || '', 'Destinatario': e.riga.destinatario, 'Località': e.riga.localita,
-      [`Fatturato ${cr} (€)`]: e.brt, 'Contestato (€)': importo, 'Motivo': motivo,
-    }))), 'Spedizioni')
-    writeFile(wb, `contestazione-${cr.toLowerCase()}-${(esiti[0]?.riga.numeroFattura || 'documento').replace(/[^\w-]+/g, '-')}.xlsx`)
+    utils.book_append_sheet(wb, utils.json_to_sheet([{ Contestazione: `Oggetto: ${oggetto}` }, ...testo.split('\n').map(r => ({ Contestazione: r }))]), 'Contestazione')
+    if (foglio.length) utils.book_append_sheet(wb, utils.json_to_sheet(foglio), 'Spedizioni')
+    const slug = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+    writeFile(wb, `contestazione-${cr.toLowerCase()}-${slug(esiti[0]?.riga.numeroFattura || 'documento')}-${slug(nome)}.xlsx`)
     let copiato = false
     try { await navigator.clipboard.writeText(testo); copiato = true } catch { /* il testo resta nel primo foglio dell'Excel */ }
-    await dialog.alert({ title: 'Contestazione pronta', message: (copiato ? 'Il testo è copiato: incollalo nella mail a ' + cr + ' e allega l\'Excel appena scaricato. ' : 'Il testo è nel primo foglio dell\'Excel appena scaricato. ')
-      + 'Quando l\'hai mandata, premi «Segna contestata» sulle voci: poi segni la nota di credito quando arriva.' })
+    await dialog.alert({ title: `Contestazione pronta: ${nome}`,
+      message: `Oggetto della mail: «${oggetto}». ` + (copiato ? `Il testo è copiato: incollalo nella mail a ${cr} e allega l'Excel appena scaricato. ` : 'Il testo è nel primo foglio dell\'Excel appena scaricato. ')
+        + 'Quando l\'hai mandata, premi «Segna contestata» su questa voce: poi segni la nota di credito quando arriva.' })
   }
 
   // L'EXCEL DELLA TABELLA, filtro compreso. Con un filtro (o una voce scelta in "Cosa fare") il file parla solo di
@@ -1407,12 +1437,6 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                         </div>
                       ))}
                       {!voci.length && !extra.length && !arrivi && <div style={{ fontSize: 12.5, color: C.attenuato }}>Niente.</div>}
-                      {gr.k === 'contestare' && (voci.length > 0 || extra.length > 0 || !!arrivi) && (
-                        <button onClick={preparaContestazione}
-                          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '8px 12px', borderRadius: 9, border: `1px solid ${gr.orlo}`, background: '#fff', color: gr.colore, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
-                          <Icona nome="scarica" size={15} /> Prepara la contestazione
-                        </button>
-                      )}
                     </div>
                   </div>
                 )
