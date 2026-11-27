@@ -104,6 +104,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
   const [filtro, setFiltro] = useState<Filtro>('perdita')
   const [cerca, setCerca] = useState('')
   const [pagina, setPagina] = useState(1)
+  const [perPagina, setPerPagina] = useState(PER_PAGINA)
   const [inviando, setInviando] = useState(false)
   const [trascina, setTrascina] = useState(false)
   // Da `iniziale` solo nelle pagine di prova: una fattura già aperta, con le rettifiche già mandate.
@@ -551,9 +552,16 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
     for (const x of Object.values(esterniSalvati)) if (x.rettifiche > 0 && st(`esterno:${x.nome}`) !== 'fatto') daFare.push({ testo: `Caricare nel gestionale le ${x.rettifiche} rettifiche di «${x.nome}»` })
     return { pagato, note, speso, moove, altro, aMano, incassato, guadagno: r2(incassato - speso), daFare, senzaExport: senzaExport && fuori.length > 0 }
   }, [gls, esiti, stati, infoGls, totali, esterniSalvati, carburanteGls, arriviSopra, cosaFare, daRettificare, rettificheInviate, nonGirate, girateAperta, cr])
-  const pagine = Math.max(1, Math.ceil(filtrate.length / PER_PAGINA))
+  const pagine = Math.max(1, Math.ceil(filtrate.length / perPagina))
   const pag = Math.min(pagina, pagine)
-  const visibili = filtrate.slice((pag - 1) * PER_PAGINA, pag * PER_PAGINA)
+  const visibili = filtrate.slice((pag - 1) * perPagina, pag * perPagina)
+  // CON UN FILTRO, LA RIGA PARLA SOLO DI QUELLO (Lorenzo, 27/11: "su carburante ci deve stare solo carburante e non
+  // anche la voce entro le 12"). Sotto "Carburante" la NI665518064 mostrava +42,31 € e il motivo "Entro ore 12" da
+  // 42 €: il carburante era 0,31. Si mostrano i motivi del filtro (o della voce scelta in "Cosa fare") e la loro
+  // somma; il resto della differenza resta scritto sotto, e la stessa spedizione si ritrova sotto l'altro filtro.
+  const TIPI_FILTRO = ['peso', 'supplemento', 'voce', 'tariffa', 'annullata', 'carburante', 'storico']
+  const motiviMostrati = (e: EsitoControllo) => voceScelta ? e.motivi.filter(m => (m.voce || `${m.tipo}:${m.gruppo}`) === voceScelta)
+    : TIPI_FILTRO.includes(filtro) ? e.motivi.filter(m => m.tipo === filtro) : e.motivi
 
   // L'INVIO ALLA RETTIFICA, comune a pesi e voci: lo stesso formato e lo stesso giro della pagina Rettifica (lettera
   // di vettura e peso, più `supplemento` e `voce` per le voci del corriere: lib/ripesature, file "solo pesi"), a
@@ -823,21 +831,39 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
       + 'Quando l\'hai mandata, premi «Segna contestata» sulle voci: poi segni la nota di credito quando arriva.' })
   }
 
+  // L'EXCEL DELLA TABELLA, filtro compreso. Con un filtro (o una voce scelta in "Cosa fare") il file parla solo di
+  // quella voce: Lorenzo, 27/11 "wave manda il file carburante solo con la voce carburante e non anche con la voce
+  // entro le 12". Fuori i motivi e le voci del corriere che non c'entrano, e al posto della differenza intera
+  // l'importo di quella voce. Senza filtro, tutto come prima.
   async function scaricaExcel() {
     const { utils, writeFile } = await import('xlsx')
-    const righe = filtrate.map(e => ({
-      [gls ? 'Tracking GLS' : 'Segnacollo BRT']: e.riga.segnacollo, 'Spedizione Moove': e.spedizione?.numero || '', 'Chi ha spedito': e.spedizione?.chi || '',
-      'Destinazione': gls ? e.riga.localita : `${e.riga.cap} ${e.riga.localita} (${e.riga.provincia})`, [gls ? 'Tipo' : 'Bolla']: e.riga.tipoBolla,
-      'Peso Moove (kg)': e.spedizione?.peso ?? '', [`Peso tassato ${cr} (kg)`]: r2(e.riga.pesoTassato),
-      [`${cr} (€)`]: e.brt, [`Nolo ${cr} (€)`]: e.riga.nolo,
-      [`Voci ${cr}`]: e.riga.voci.map(v => `${descriviVoce(v.sigla, legenda).nome} ${v.importo.toFixed(2)}`).join(' + '),
-      'Costo Moove (€)': e.moove ?? '', [`Listino al peso ${cr} (€)`]: e.listino ?? '', 'Differenza (€)': e.differenza ?? '',
-      ...(gls ? { 'Contratto': e.contratto || '', 'Ha pagato': e.incasso?.chi || '', 'Il cliente ti ha pagato (€)': e.incasso?.importo ?? '',
-        [`Ti resta dopo ${cr} (€)`]: e.incasso && e.riga.andata ? r2(e.incasso.importo - e.brt) : '' } : {}),
-      'Perché': e.spedizione ? e.motivi.map(m => m.testo).join(' | ') : 'Non trovata in Moove',
-    }))
-    const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), 'Controllo fattura')
-    writeFile(wb, `controllo-fattura-${cr.toLowerCase()}-${(esiti[0]?.riga.numeroFattura || 'export').replace(/[^\w-]+/g, '-')}.xlsx`)
+    const filtrato = !!voceScelta || TIPI_FILTRO.includes(filtro)
+    const nomeFiltro = voceScelta
+      ? ((cosaFare && Array.from(cosaFare.values()).flatMap(m => Array.from(m.entries())).find(([k]) => k === voceScelta)?.[1].nome) || voceScelta)
+      : MOTIVI[filtro]?.nome || filtro
+    // Le voci del corriere che c'entrano col filtro: per il carburante solo il carburante.
+    const vociDi = (e: EsitoControllo) => filtrato && filtro === 'carburante' && !voceScelta
+      ? e.riga.voci.filter(v => descriviVoce(v.sigla, legenda).categoria === 'carburante')
+      : e.riga.voci
+    const righe = filtrate.map(e => {
+      const mm = motiviMostrati(e)
+      return {
+        [gls ? 'Tracking GLS' : 'Segnacollo BRT']: e.riga.segnacollo, 'Spedizione Moove': e.spedizione?.numero || '', 'Chi ha spedito': e.spedizione?.chi || '',
+        'Destinazione': gls ? e.riga.localita : `${e.riga.cap} ${e.riga.localita} (${e.riga.provincia})`, [gls ? 'Tipo' : 'Bolla']: e.riga.tipoBolla,
+        'Peso Moove (kg)': e.spedizione?.peso ?? '', [`Peso tassato ${cr} (kg)`]: r2(e.riga.pesoTassato),
+        [`Nolo ${cr} (€)`]: e.riga.nolo,
+        [`Voci ${cr}`]: vociDi(e).map(v => `${descriviVoce(v.sigla, legenda).nome} ${v.importo.toFixed(2)}`).join(' + '),
+        ...(filtrato
+          ? { [`${nomeFiltro} (€)`]: r2(mm.reduce((t, m) => t + m.importo, 0)) }
+          : { [`${cr} (€)`]: e.brt, 'Costo Moove (€)': e.moove ?? '', [`Listino al peso ${cr} (€)`]: e.listino ?? '', 'Differenza (€)': e.differenza ?? '',
+              ...(gls ? { 'Contratto': e.contratto || '', 'Ha pagato': e.incasso?.chi || '', 'Il cliente ti ha pagato (€)': e.incasso?.importo ?? '',
+                [`Ti resta dopo ${cr} (€)`]: e.incasso && e.riga.andata ? r2(e.incasso.importo - e.brt) : '' } : {}) }),
+        'Perché': e.spedizione ? mm.map(m => m.testo).join(' | ') : 'Non trovata in Moove',
+      }
+    })
+    const wb = utils.book_new(); utils.book_append_sheet(wb, utils.json_to_sheet(righe), filtrato ? nomeFiltro.slice(0, 31) : 'Controllo fattura')
+    const nomeFile = (esiti[0]?.riga.numeroFattura || 'export') + (filtrato ? '-' + nomeFiltro : '')
+    writeFile(wb, `controllo-fattura-${cr.toLowerCase()}-${nomeFile.replace(/[^\w-]+/g, '-')}.xlsx`)
   }
 
   const scegliFile = () => { if (!avanz) fileRef.current?.click() }
@@ -1528,8 +1554,16 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                       <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', ...cifre }}>{e.moove != null ? euro(e.moove) : <span style={{ color: '#98a2b3' }}>—</span>}</td>
                       <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {e.differenza != null
-                          ? <span style={{ display: 'inline-block', padding: '3px 9px', borderRadius: 8, fontWeight: 700, fontSize: 13, ...cifre, color: coloreImporto(e.differenza),
-                              background: e.differenza > 0.005 ? C.rossoTenue : e.differenza < -0.005 ? C.verdeTenue : C.fondoTenue }}>{conSegno(e.differenza)}</span>
+                          ? (() => {
+                              // Col filtro, la differenza di quel motivo; quella intera resta scritta sotto.
+                              const mm = motiviMostrati(e), parziale = mm.length !== e.motivi.length
+                              const v = parziale ? r2(mm.reduce((t, m) => t + m.importo, 0)) : e.differenza
+                              return <>
+                                <span style={{ display: 'inline-block', padding: '3px 9px', borderRadius: 8, fontWeight: 700, fontSize: 13, ...cifre, color: coloreImporto(v),
+                                  background: v > 0.005 ? C.rossoTenue : v < -0.005 ? C.verdeTenue : C.fondoTenue }}>{conSegno(v)}</span>
+                                {parziale && <div style={{ fontSize: 11.5, color: C.attenuato, marginTop: 3, ...cifre }}>in tutto {conSegno(e.differenza)}</div>}
+                              </>
+                            })()
                           : <span style={{ color: '#98a2b3' }}>—</span>}
                       </td>
                       {gls && (<>
@@ -1549,7 +1583,7 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
                             ? `Nessuna spedizione dei tuoi contratti col tracking ${e.riga.segnacollo || '—'}${e.riga.rifAlfabetico && e.riga.rifAlfabetico !== '0' ? ` (riferimento ${e.riga.rifAlfabetico})` : ''}.`
                             : `Nessuna spedizione dei tuoi contratti con riferimento ${e.riga.rifNumerico || '—'} o segnacollo ${e.riga.segnacollo || '—'}.`}</span>
                           : !e.riga.andata ? <span style={{ color: C.attenuato, fontSize: 12.5 }}>{gls && e.riga.tipoBolla === 'Arrivo' ? 'Arrivo: pacco in entrata, non si confronta col nolo di un\'andata.' : 'Rientro: il reso si addebita col suo flusso.'}</span>
-                          : e.motivi.length ? e.motivi.map((m, j) => (
+                          : e.motivi.length ? motiviMostrati(e).map((m, j) => (
                             <div key={j} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: j ? 7 : 0 }}>
                               <span style={{ color: coloreImporto(m.importo), marginTop: 1 }}><Icona nome={MOTIVI[m.tipo]?.icona || 'avviso'} size={15} /></span>
                               <span style={{ fontSize: 12.5, lineHeight: 1.45, color: '#344054' }}>
@@ -1571,13 +1605,25 @@ export default function ControlloFattura({ iniziale }: { iniziale?: { contratti:
             </table>
           </div>
 
-          {pagine > 1 && (
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderTop: `1px solid ${C.filo}`, fontSize: 13, color: C.attenuato }}>
-              <span>{((pag - 1) * PER_PAGINA + 1).toLocaleString('it-IT')}–{Math.min(pag * PER_PAGINA, filtrate.length).toLocaleString('it-IT')} di {filtrate.length.toLocaleString('it-IT')}</span>
-              <div style={{ display: 'flex', gap: 8 }}>
+          {filtrate.length > 10 && (
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', padding: '12px 16px', borderTop: `1px solid ${C.filo}`, fontSize: 13, color: C.attenuato }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span>{((pag - 1) * perPagina + 1).toLocaleString('it-IT')}–{Math.min(pag * perPagina, filtrate.length).toLocaleString('it-IT')} di {filtrate.length.toLocaleString('it-IT')}</span>
+                {/* Righe per pagina (Lorenzo, 27/11): 10, 25, 50, 100. */}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  Righe per pagina
+                  <span style={{ display: 'inline-flex', background: C.fondoTenue, border: `1px solid ${C.filo}`, borderRadius: 9, padding: 2 }}>
+                    {[10, 25, 50, 100].map(n => (
+                      <button key={n} onClick={() => { setPerPagina(n); setPagina(1) }}
+                        style={{ padding: '4px 9px', borderRadius: 7, border: 'none', background: perPagina === n ? '#fff' : 'transparent', boxShadow: perPagina === n ? '0 1px 2px rgba(16,24,40,.1)' : 'none', fontSize: 12.5, fontWeight: perPagina === n ? 700 : 500, color: perPagina === n ? C.testo : C.attenuato, cursor: 'pointer', ...cifre }}>{n}</button>
+                    ))}
+                  </span>
+                </span>
+              </div>
+              {pagine > 1 && <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pag <= 1} style={{ padding: '7px 12px', border: `1px solid ${C.filo}`, borderRadius: 9, background: '#fff', fontWeight: 600, color: pag <= 1 ? '#98a2b3' : C.testo, cursor: pag <= 1 ? 'default' : 'pointer' }}>Precedente</button>
                 <button onClick={() => setPagina(p => Math.min(pagine, p + 1))} disabled={pag >= pagine} style={{ padding: '7px 12px', border: `1px solid ${C.filo}`, borderRadius: 9, background: '#fff', fontWeight: 600, color: pag >= pagine ? '#98a2b3' : C.testo, cursor: pag >= pagine ? 'default' : 'pointer' }}>Successiva</button>
-              </div>
+              </div>}
             </div>
           )}
         </div>
