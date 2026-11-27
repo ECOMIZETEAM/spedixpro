@@ -308,16 +308,25 @@ export async function POST(req: NextRequest) {
         const giaPagate = await fattureGiaPagate(adminRip, esiti.filter((e: any) => e.trovata && e.spedizioneId).map((e: any) => e.idOrdine))
         const costoProprio = (e: any): number => {
           if (Number(e.addebitoFornitore) > 0) return Math.round(Number(e.addebitoFornitore) * 100) / 100
-          // File di soli pesi: il costo e' un conto del portale. Se sul pacco quello del fornitore c'e' gia', niente
-          // secondo costo, e quindi niente riga "solo a carico" (la riga verso sotto, se c'e' da chiedere, nasce lo stesso).
-          if (costoGia.has(e.spedizioneId)) return 0
           const cat = e.catenaDalBasso || []
           const detentore = cat.length > 0 && cat[cat.length - 1] === myMaster
+          // IL SUPPLEMENTO DEL CORRIERE E' UN COSTO DI CHI CARICA. Nei file di soli pesi col supplemento (le voci del
+          // controllo fattura: l'Oversize di GLS) il corriere l'ha fatto pagare al detentore, e si somma al suo costo
+          // come i chili. Prima girava a chi sta sotto ma al detentore no: 27/11, NI665520237, Wave pagava a GLS 15 € di
+          // Oversize, il suo costo ne aveva solo i 22,66 del peso e il margine della rettifica usciva 28,54 invece di
+          // 13,54. Gli altri formati portano gia' l'importo del fornitore (sopra), supplementi compresi.
+          const rip = ripPerOrdine.get(e.idOrdine) as any
+          const supplemento = detentore && rip?.formato === 'pesi' ? Math.round(Number(rip?.supplementi || 0) * 100) / 100 : 0
+          // File di soli pesi: il costo e' un conto del portale. Se sul pacco quello del fornitore c'e' gia', niente
+          // secondo costo per i chili, e quindi niente riga "solo a carico" (la riga verso sotto, se c'e' da chiedere, nasce
+          // lo stesso). Il supplemento no: e' un addebito in piu', non lo stesso.
+          if (costoGia.has(e.spedizioneId)) return supplemento
           const cd = e.costoDetentore
           // SENZA "GIA' PAGATO" NON C'E' UNA DIFFERENZA: se sulla spedizione non risulta niente a carico del
           // detentore, prezzo - 0 sarebbe la spedizione intera, non la ripesatura. Meglio nessun costo che
           // un costo inventato.
-          return detentore && cd && cd.masterId === myMaster && cd.pagato > 0.005 && cd.differenza >= 0.01 ? Math.round(cd.differenza * 100) / 100 : 0
+          const chili = detentore && cd && cd.masterId === myMaster && cd.pagato > 0.005 && cd.differenza >= 0.01 ? Math.round(cd.differenza * 100) / 100 : 0
+          return Math.round((chili + supplemento) * 100) / 100
         }
         // SOLO A TUO CARICO: sotto non c'e' niente da chiedere (gia' rettificata da un'altra fonte, reso,
         // stesso scaglione per tutti), ma il fornitore ha fatto pagare chi carica. La riga e' intestata a
